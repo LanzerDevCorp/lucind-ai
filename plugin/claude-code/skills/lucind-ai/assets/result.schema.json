@@ -1,0 +1,135 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "lucind-ai packet result envelope",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["packet_id", "status", "summary", "hard_stops"],
+  "properties": {
+    "packet_id": {
+      "type": "string",
+      "description": "Echo of the packet id given in the task."
+    },
+    "status": {
+      "type": "string",
+      "enum": ["done", "blocked", "deviated", "failed"],
+      "description": "done = every done-criterion met AND every hard stop declared as not fired. blocked = a decision is needed that the packet does not authorize, or a hard stop fired; stop, do not guess. deviated = the work was completed but required departing from the stated approach or touching a path outside allowed_paths. failed = could not complete for a technical reason."
+    },
+    "summary": {
+      "type": "string",
+      "description": "What was actually done, in two or three sentences. No preamble."
+    },
+    "hard_stops": {
+      "type": "array",
+      "description": "MANDATORY. One entry for every hard stop listed in the packet, whether or not it fired. A result that omits a hard stop is invalid regardless of its criteria — this field exists because green criteria have twice hidden a violated hard stop.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["hard_stop", "fired"],
+        "properties": {
+          "hard_stop": {
+            "type": "string",
+            "description": "The hard stop as written in the packet."
+          },
+          "fired": {
+            "type": "boolean",
+            "description": "true means the condition was reached. If any is true, status must be blocked."
+          },
+          "note": {
+            "type": "string",
+            "description": "Required when fired is true: what was encountered, and what was NOT done as a result."
+          }
+        }
+      }
+    },
+    "files_changed": {
+      "type": "array",
+      "description": "Every path created, modified, or deleted, relative to the worktree root.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "change"],
+        "properties": {
+          "path": { "type": "string" },
+          "change": { "type": "string", "enum": ["created", "modified", "deleted"] },
+          "why": { "type": "string" }
+        }
+      }
+    },
+    "done_criteria": {
+      "type": "array",
+      "description": "One entry per done-criterion from the packet, with evidence.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["criterion", "met"],
+        "properties": {
+          "criterion": { "type": "string" },
+          "met": { "type": "boolean" },
+          "evidence": {
+            "type": "string",
+            "description": "Command output, file:line, or test result. Not an assertion that it works. For a criterion about something being consumed, the evidence must name the terminal consumer — the program or file that reads the value — not another mention of its name."
+          }
+        }
+      }
+    },
+    "commit": {
+      "type": "string",
+      "description": "The commit that carries this work. Uncommitted work is not deliverable: a branch pointing at its base has nothing to merge."
+    },
+    "questions": {
+      "type": "array",
+      "description": "Required when status is blocked. Each question must be answerable without reading the worktree.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["question", "why_blocking"],
+        "properties": {
+          "question": { "type": "string" },
+          "why_blocking": {
+            "type": "string",
+            "description": "What cannot proceed until this is answered."
+          },
+          "options": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Candidate answers, if the fork is closed-ended."
+          },
+          "recommendation": { "type": "string" }
+        }
+      }
+    },
+    "deviations": {
+      "type": "array",
+      "description": "Required when status is deviated. Anything done differently from the packet, or any path touched outside allowed_paths.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["expected", "actual", "reason"],
+        "properties": {
+          "expected": { "type": "string" },
+          "actual": { "type": "string" },
+          "reason": { "type": "string" },
+          "reversible": { "type": "boolean" }
+        }
+      }
+    },
+    "findings": {
+      "type": "array",
+      "description": "Things discovered that the packet did not ask about but that change other work. This is how a sweep pays for itself.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["finding", "evidence"],
+        "properties": {
+          "finding": { "type": "string" },
+          "evidence": { "type": "string", "description": "file:line or command output." },
+          "affects": { "type": "string" }
+        }
+      }
+    },
+    "session_id": {
+      "type": "string",
+      "description": "Conversation or session id needed to resume this packet."
+    }
+  }
+}

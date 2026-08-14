@@ -1,0 +1,17 @@
+{
+  "name": "lucind-ai",
+  "version": "2.0.0",
+  "description": "Multi-agent orchestration across execution, audit and human lanes, with a task ledger and a verifiable result envelope.",
+  "author": {
+    "name": "LanzerDevCorp"
+  },
+  "keywords": [
+    "orchestration",
+    "multi-agent",
+    "agy",
+    "antigravity",
+    "opencode",
+    "worktree",
+    "engram"
+  ]
+}

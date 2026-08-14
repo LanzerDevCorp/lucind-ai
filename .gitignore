@@ -1,0 +1,10 @@
+# lucind-ai working state, in whatever project this runs against
+.lucind/
+
+# local agent state
+.codegraph/
+.engram/
+
+# os
+Thumbs.db
+.DS_Store

@@ -1,0 +1,20 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "lucind-ai",
+  "description": "Multi-agent orchestration: route already-decided work across execution, audit and human lanes without stalling the conversation",
+  "owner": {
+    "name": "LanzerDevCorp"
+  },
+  "plugins": [
+    {
+      "name": "lucind-ai",
+      "description": "Supervisor pattern for CLI agents. Opus holds the ledger and dispatches surgical packets; agy executes in parallel, gpt-5.6-sol audits, the human runs whatever touches a secret.",
+      "version": "2.0.0",
+      "author": {
+        "name": "LanzerDevCorp"
+      },
+      "source": "./plugin/claude-code",
+      "category": "workflow"
+    }
+  ]
+}
