@@ -4,6 +4,8 @@
 # local agent state
 .codegraph/
 .engram/
+.atl/
+*skill-registry*
 
 # os
 Thumbs.db
