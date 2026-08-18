@@ -191,10 +191,15 @@ Go 1.24.2, module `github.com/LanzerDevCorp/lucind-ai`, one command: `lucind-ai`
 deterministic flow control. It owns worktrees, dispatch, envelope validation, the barrier, the
 merge, cleanup, and the ledger.
 
-### 8.2 The ledger — SQLite at `.lucind/`
+### 8.2 The ledger — SQLite in the primary repo's `.lucind/`
 
 Two concurrent lanes writing state make a lock-and-JSON-file arrangement fragile. SQLite gives
 atomic transactions and a pure-Go driver with no cgo.
+
+**There is exactly one ledger, and it lives in the primary repository's `.lucind/`** — never inside a
+worktree. It tracks every lane in the batch, so it cannot belong to any single lane. A worktree's own
+`.lucind/` holds only that lane's `result.json` (§6 step 4). Two directories, same name, different
+jobs.
 
 It replaces both `state.json` and `approvals.md`. It stays **small**: it is a ledger, not a record
 of what happened — the narrative goes to engram. A routing decision is stored together with the
