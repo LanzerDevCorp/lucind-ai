@@ -1,8 +1,20 @@
 // Package ledger is the SQLite-backed lane ledger: a durable,
 // concurrency-safe record of lane state and the routing decision behind it,
 // owned solely by the primary repository. It imports internal/lane for the
-// shared status vocabulary and modernc.org/sqlite as its pure-Go driver; it
-// never imports internal/barrier.
+// shared status vocabulary, internal/ledgerpath to derive the single ledger
+// location, and modernc.org/sqlite as its pure-Go driver; it never imports
+// internal/barrier.
+//
+// Open takes a primary repository root, never a database path, so the
+// "Single ledger location" requirement's first scenario — the database
+// exists under "<primary-repo>/.lucind/" — is closed by the API shape
+// itself: there is no parameter through which a caller could open the
+// ledger anywhere else. The requirement's second scenario — no lane-state
+// database is ever created inside a lane's worktree — needs distinguishing
+// a worktree from a repository root, which needs git awareness this slice
+// does not have. That remains explicitly deferred to the dispatch slice
+// (see internal/ledgerpath's package doc); Open does not attempt to detect
+// or reject a worktree path passed as primaryRoot.
 package ledger
 
 import (
@@ -17,6 +29,7 @@ import (
 	"modernc.org/sqlite" // registers the "sqlite" database/sql driver
 
 	"github.com/LanzerDevCorp/lucind-ai/internal/lane"
+	"github.com/LanzerDevCorp/lucind-ai/internal/ledgerpath"
 )
 
 // Sentinel errors returned by Ledger methods.
@@ -51,13 +64,26 @@ type Ledger struct {
 	db *sql.DB
 }
 
-// Open opens (creating if necessary) the SQLite ledger database at dbPath,
-// applies pragmas via the connection DSN so every pooled connection gets
-// them, asserts the pragmas actually took effect, sizes the connection pool
-// for real concurrency (never 1 — a pool of 1 would make the concurrency
+// Open opens (creating if necessary) the SQLite ledger database under
+// primaryRoot's .lucind directory. It derives the exact database path via
+// ledgerpath.Resolve(primaryRoot) — it does not accept a database path from
+// the caller, so pointing the ledger at a location outside
+// "<primaryRoot>/.lucind/" is not possible through this API. Open applies
+// pragmas via the connection DSN so every pooled connection gets them,
+// asserts the pragmas actually took effect, sizes the connection pool for
+// real concurrency (never 1 — a pool of 1 would make the concurrency
 // guarantee tautological), and migrates the schema. Open is idempotent: it
-// is safe to call again on an already-migrated database file.
-func Open(ctx context.Context, dbPath string) (*Ledger, error) {
+// is safe to call again with the same primaryRoot.
+func Open(ctx context.Context, primaryRoot string) (*Ledger, error) {
+	return openAtPath(ctx, ledgerpath.Resolve(primaryRoot))
+}
+
+// openAtPath does the actual work of opening a SQLite database at an
+// explicit path. It is unexported: the public Open never exposes a
+// caller-supplied path, only openAtPath (and this package's own tests, for
+// exercising failure paths such as ":memory:" that ledgerpath.Resolve could
+// never produce) can reach an arbitrary path.
+func openAtPath(ctx context.Context, dbPath string) (*Ledger, error) {
 	if dir := filepath.Dir(dbPath); dir != "" && dir != "." {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return nil, fmt.Errorf("ledger: create parent directory: %w", err)

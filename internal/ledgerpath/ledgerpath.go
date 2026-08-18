@@ -1,10 +1,17 @@
 // Package ledgerpath is pure path logic for locating the single lane ledger
 // database. It resolves and validates the ledger path against a primary
-// repository root, and never touches git, the filesystem, or a composition
-// root — the two "single ledger location" spec scenarios that need an
-// actual caller are proven, not this resolver's unit tests, are explicitly
-// deferred to the dispatch slice (see design-corrections #1714 §correction 2
-// and tasks #1715 task 4.3).
+// repository root, and never touches git or the filesystem.
+//
+// Resolve is wired into internal/ledger.Open, which closes the "Single
+// ledger location" requirement's first scenario: Open takes a primary
+// repository root, not a database path, so the database always lands under
+// "<primaryRoot>/.lucind/". Validate remains unwired: rejecting a candidate
+// that lives inside a lane's worktree instead of the primary repository
+// (the requirement's second scenario) needs distinguishing a worktree from
+// a repository root, which needs git awareness this slice does not have.
+// That is explicitly deferred to the dispatch slice (see design-corrections
+// #1714 §correction 2 and tasks #1715 task 4.3) — it is not silently
+// treated as closed here.
 package ledgerpath
 
 import (

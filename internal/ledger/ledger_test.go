@@ -12,14 +12,15 @@ import (
 
 	"github.com/LanzerDevCorp/lucind-ai/internal/barrier"
 	"github.com/LanzerDevCorp/lucind-ai/internal/lane"
+	"github.com/LanzerDevCorp/lucind-ai/internal/ledgerpath"
 )
 
-// openTestLedger opens a Ledger against a fresh temp-dir database file and
+// openTestLedger opens a Ledger against a fresh temp-dir primary root and
 // registers its cleanup. No test in this package touches a real .lucind/.
 func openTestLedger(t *testing.T) *Ledger {
 	t.Helper()
-	dbPath := filepath.Join(t.TempDir(), "lucind.db")
-	l, err := Open(context.Background(), dbPath)
+	root := t.TempDir()
+	l, err := Open(context.Background(), root)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -27,26 +28,50 @@ func openTestLedger(t *testing.T) *Ledger {
 	return l
 }
 
-func TestOpenCreatesParentDirAndSucceeds(t *testing.T) {
+// TestOpenPlacesDatabaseUnderPrimaryRootLucindDir proves the "Single ledger
+// location" requirement's first scenario with real code: Open derives the
+// database path from the primary repository root via ledgerpath.Resolve
+// instead of accepting a caller-supplied path, so the database file always
+// lands at "<primaryRoot>/.lucind/lucind.db". There is no parameter through
+// which a caller could point Open at any other location — pointing the
+// ledger at an arbitrary path is not a discipline question here, it is
+// structurally impossible through this API.
+func TestOpenPlacesDatabaseUnderPrimaryRootLucindDir(t *testing.T) {
 	ctx := context.Background()
-	dbPath := filepath.Join(t.TempDir(), "nested", "lucind.db")
+	root := t.TempDir()
 
-	l, err := Open(ctx, dbPath)
+	l, err := Open(ctx, root)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
 	defer l.Close()
 
-	if _, err := os.Stat(filepath.Dir(dbPath)); err != nil {
-		t.Fatalf("parent directory was not created: %v", err)
+	wantPath := ledgerpath.Resolve(root)
+	if _, err := os.Stat(wantPath); err != nil {
+		t.Fatalf("database file not found at ledgerpath.Resolve(root) = %s: %v", wantPath, err)
 	}
 }
 
-func TestOpenIsIdempotentOnSamePath(t *testing.T) {
+func TestOpenCreatesLucindDirAndSucceeds(t *testing.T) {
 	ctx := context.Background()
-	dbPath := filepath.Join(t.TempDir(), "lucind.db")
+	root := t.TempDir()
 
-	l1, err := Open(ctx, dbPath)
+	l, err := Open(ctx, root)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer l.Close()
+
+	if _, err := os.Stat(filepath.Join(root, ".lucind")); err != nil {
+		t.Fatalf(".lucind directory was not created under root: %v", err)
+	}
+}
+
+func TestOpenIsIdempotentOnSamePrimaryRoot(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+
+	l1, err := Open(ctx, root)
 	if err != nil {
 		t.Fatalf("first Open: %v", err)
 	}
@@ -54,9 +79,9 @@ func TestOpenIsIdempotentOnSamePath(t *testing.T) {
 		t.Fatalf("Close: %v", err)
 	}
 
-	l2, err := Open(ctx, dbPath)
+	l2, err := Open(ctx, root)
 	if err != nil {
-		t.Fatalf("second Open on the same path: %v", err)
+		t.Fatalf("second Open on the same primary root: %v", err)
 	}
 	defer l2.Close()
 }
@@ -66,10 +91,13 @@ func TestOpenFailsWhenPragmaCannotApply(t *testing.T) {
 
 	// An in-memory database can never honor journal_mode=WAL (SQLite keeps
 	// it as "memory"). This proves the pragma read-back actually asserts
-	// the applied value rather than trusting the DSN syntax alone.
-	_, err := Open(ctx, ":memory:")
+	// the applied value rather than trusting the DSN syntax alone. It
+	// exercises the unexported openAtPath directly since the public Open
+	// no longer accepts an arbitrary dbPath (it only accepts a primary
+	// repository root and derives the path itself).
+	_, err := openAtPath(ctx, ":memory:")
 	if !errors.Is(err, ErrPragmaNotApplied) {
-		t.Fatalf("Open(\":memory:\") error = %v, want ErrPragmaNotApplied", err)
+		t.Fatalf("openAtPath(\":memory:\") error = %v, want ErrPragmaNotApplied", err)
 	}
 }
 
