@@ -1,109 +1,108 @@
 # lucind-ai
 
-Multi-agent orchestration for CLI coding agents. Supervisor pattern, two levels, never three:
-one thread holds a task ledger and dispatches surgical packets; `agy` executes in parallel,
-`opencode` audits, and the human runs whatever touches a secret.
+The delegated-execution layer for work paid by subscription. A Go binary routes *execution* work to
+CLI agents already covered by a subscription, isolates each in its own worktree, runs them in
+parallel, and refuses to believe what comes back until it satisfies a schema.
 
-Born inside a marketplace project and extracted here so it can evolve on its own.
+It owns parallel execution and the integrity of what returns. Review, delivery and lifecycle belong
+to [`gentle-ai`](https://github.com/Gentleman-Programming/gentle-ai).
+
+**[`docs/prd.md`](docs/prd.md) is the source of truth.** This file is the short version.
 
 ## Why it exists
 
 Delegating to a CLI agent is easy. Trusting what comes back is not.
 
-The first real packet returned `done` with every criterion green and real command output
-attached — and still had a defect, because the defect lived just outside what the criteria
-asked. The next round did it again. Both times the packet had an explicit hard stop covering
-exactly that case, and the agent walked past it and reported success without contradicting
-itself.
+The first real packet returned `done` with every criterion green and real command output attached —
+and still had a defect, because the defect lived just outside what the criteria asked. The next round
+did it again. Both times the packet had an explicit hard stop covering exactly that case, and the
+agent walked past it and reported success without contradicting itself.
 
-Everything here is a consequence of that: hard stops that must be declared in the envelope,
-indirection that must be proven consumed by a *terminal consumer*, work that is not delivered
-until it is committed, and an audit lane run by a different model family.
+Both runs happened without review, and the failure was in *execution*. That is the seam this project
+lives in: `gentle-ai` asks whether a diff is any good, after the fact. This asks whether the executor
+did what it was asked and declared where it stopped, at the moment it returns.
 
-## Install
+The second reason is arithmetic. Several subscriptions are already paid for and only one of them ever
+works at a time. **The unit of parallelism is the subscription, not the CLI** — two CLIs drawing on
+one subscription add no capacity.
 
-### Claude Code
+## The roster
 
-```bash
-/plugin marketplace add <path-or-git-url-to-this-repo>
-/plugin install lucind-ai@lucind-ai
-```
+| Subscription | CLI | Role |
+|---|---|---|
+| Anthropic | Claude Code | orchestrator; bounded conflict resolution |
+| ChatGPT | `opencode` · `openai/gpt-5.6-sol` | reviewer — drives RDD |
+| Google Antigravity | `agy` | executor — sweeps and volume |
+| Cursor | `cursor-agent` | executor — single-piece precision |
 
-For local development, a directory junction keeps one copy on disk:
+Excluded on purpose: `codex` (would draw on the same ChatGPT subscription `opencode` already uses —
+a second door to the same room), `opencode-go` (metered per token), the `gemini` CLI (dead; `agy`
+succeeded it).
 
-```powershell
-cmd /c mklink /J "$env:USERPROFILE\.claude\skills\lucind-ai" "<repo>\plugin\claude-code\skills\lucind-ai"
-```
+Never a metered API key. That constraint is the whole reason this exists.
 
-### agy (Antigravity)
+## How it works
 
-The same plugin directory installs into `agy`, bringing skills, MCP servers and hooks across —
-agents do not cross:
+The orchestrator writes the packets and decides the lane split — that part is judgment, so it stays
+prose. Everything after it is the binary:
 
-```bash
-agy plugin install <repo>/plugin/claude-code
-```
+one worktree per lane → parallel headless dispatch → each executor writes its envelope to
+`.lucind/result.json` → schema validation → **barrier** → merge → cleanup → stop.
 
-`agy plugin import claude` does **not** work; it never looks in `~/.claude/plugins/`. Install
-by path.
+The barrier is the load-bearing piece. It releases only when **every** lane reaches a terminal state,
+not just `done` — otherwise one blocked lane hangs the run forever. And if any lane is not `done`,
+**nothing merges**: worktrees are preserved and the blocking question is relayed verbatim. Merging
+half of a parallel batch produces a repository state nobody designed.
 
-### The project it runs in
+The binary stops at cleanup. It does not trigger review; RDD is driven separately from an `opencode`
+session, so the reviewer is not the same model family that orchestrated the work.
 
-Paste `templates/project-routing.md` into the project's own `CLAUDE.md`. Project level, not
-global — a global file managed by another tool gets overwritten on update.
+Approvals live in a web UI the binary serves itself on localhost — no npm, no build step. It has no
+"approve all" button, it starts with nothing selected, it shows evidence inline, and it tracks your
+own rate of approvals that later went wrong.
 
-Create `.lucind/` in the project and gitignore it. That is where the ledger, the approval
-queue, the dispatched packets and the returned envelopes live.
+## Status
+
+Honest, because a plan that claims to be finished is the same failure this project exists to catch.
+
+| Piece | State |
+|---|---|
+| Requirements | fixed — see `docs/prd.md` |
+| The `lucind-ai` binary | **not one line written** |
+| SQLite ledger | not written |
+| Approvals web UI | not written |
+| Barrier / parallel dispatch | not written |
+| Execution lane (`agy`) | one packet, two rounds, merged — under the old prose design |
+| Execution lane (`cursor-agent`) | logged in 2026-08-17, has never executed |
+| Review via RDD | never run |
+| Human lane | one packet, closed — it found two defects in its own instructions |
+| Packet templates, envelope schema | written; nothing validates against the schema yet |
+| Claude Code plugin / marketplace | to be removed — distribution machinery for an audience of one |
+
+Nothing here is installable yet. [`docs/estado-real.html`](docs/estado-real.html) is the same picture,
+drawn, with the same distinction between what exists and what does not.
 
 ## What is in here
 
 ```
+docs/prd.md                            the source of truth
+docs/estado-real.html                  the design, drawn, with an honesty legend
+docs/research/meta-harness-landscape.md  what already exists in the field
+
 plugin/claude-code/skills/lucind-ai/
-├── SKILL.md                          the contract: hard rules, routing, fallback, ledger
-├── references/runtime.md             verified CLI surface, MCP wiring, verification traps
-├── references/state-files.md         ledger and approval queue formats
-├── assets/packet-template.md         agent packet
-├── assets/human-packet-template.md   human packet
-└── assets/result.schema.json         result envelope, with mandatory hard-stop declarations
+├── SKILL.md                           to shrink to: how to write a packet, how to drive the binary
+├── references/runtime.md              verified CLI surface and verification traps
+├── references/state-files.md          superseded by the SQLite ledger
+├── assets/packet-template.md          agent packet
+├── assets/human-packet-template.md    human packet
+└── assets/result.schema.json          result envelope, with mandatory hard-stop declarations
 
-templates/project-routing.md          the two-axis routing table to paste per project
-docs/estado-real.html                 diagram of what actually runs today
+templates/project-routing.md           superseded by the binary's routing
 ```
-
-## The four lanes
-
-| Lane | Who | For |
-|---|---|---|
-| Execute | `agy` · gemini-3.7-flash | Bounded work with checkable done-criteria, in its own worktree |
-| Audit | `opencode` · gpt-5.6-sol | Adversarial judgment on a diff, by a different model family |
-| Fallback audit | Two blind Claude judges | Only on a quota error. Degrades Tier B to human merge |
-| Human | You | Anything that needs a credential value or critical supervision |
-
-The human is a lane, not an interruption. A human packet contains **one command** — the one
-that requires the secret. Backups, merges, container restarts, verification and cleanup are
-boilerplate the orchestrator runs.
-
-## Status
-
-Honest, because a plan that claims to be finished is the same failure this project exists to
-catch.
-
-| Piece | State |
-|---|---|
-| Skill, templates, envelope schema | written |
-| Execution lane (`agy`) | one packet, two rounds, merged |
-| Human lane | one packet, closed — it found two defects in its own instructions |
-| Audit lane (`opencode`) | mandatory by rule, never run |
-| Fallback panel | never run |
-| Tier B auto-merge | never run |
-| Ledger in engram | still on disk; `agy` can read engram, no packet has used it as a context channel |
-| Turn-protocol hook | not implemented |
-
-Open the diagram in `docs/` for the same picture, drawn.
 
 ## Prior art
 
-The supervisor and Magentic task-ledger patterns, the three classes of agent error, and the
-circuit breaker come from Chapter 19 of the Gentleman Programming book on AI orchestration
-patterns. The second error class it describes — technically valid parameters, syntax fine,
-semantics wrong, *treacherous* — is exactly what the early packets produced.
+The supervisor and Magentic task-ledger patterns, the three classes of agent error, and the circuit
+breaker come from Chapter 19 of the Gentleman Programming book on AI orchestration patterns. The
+second error class it describes — technically valid parameters, syntax fine, semantics wrong,
+*treacherous* — is exactly what the early packets produced.
