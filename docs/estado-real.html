@@ -120,17 +120,19 @@
   <header class="page">
     <p class="eyebrow">Estado real · 18-ago-2026</p>
     <h1>lucind-ai</h1>
-    <p class="lede">Cinco paquetes en Go ya existen, pasan <span class="m">go test ./... -race</span> y
+    <p class="lede">Once paquetes en Go ya existen, pasan <span class="m">go test ./... -race</span> y
       están mergeados a <span class="m">main</span>: el vocabulario de estados, la barrera, el resolver
-      de rutas, el ledger en SQLite y el chequeo de build. Pero nada los conecta todavía: no hay
-      composition root, y el resto del diseño — despacho, worktrees, integración, la web — sigue
-      en cero líneas.</p>
+      de rutas, el ledger en SQLite, el chequeo de build, la gestión de worktrees, el parser de paquetes,
+      el validador de envelopes con schema embebido, el ejecutor de <span class="m">agy</span>, el composition
+      root en <span class="m">internal/run</span> y la CLI en <span class="m">cmd/lucind-ai</span>. El flujo
+      de despacho corre de punta a punta. Lo que sigue pendiente: integración, <span class="m">cursor-agent</span>
+      y la web de aprobaciones.</p>
   </header>
 
   <div class="fig-scroll">
     <figure>
       <svg viewBox="0 0 1080 700" role="img"
-           aria-label="Estado real de lucind-ai al 18 de agosto de 2026. Tres estados: existe y corrió, probado pero sin conectar, y diseñado pero inexistente. Cinco paquetes en Go existen y pasan go test con -race: internal/lane no tiene ningún import, ni siquiera de la librería estándar, lo que hace que la barrera nunca pueda importar el ledger un hecho de compilación. internal/barrier es la máquina de estados de join pura, sin time, sin context, sin I/O, que libera sólo cuando todos los carriles llegan a un estado terminal y sólo integra los que terminan en done. internal/ledgerpath resuelve la ruta del ledger pero no detecta identidad de worktree. internal/ledger persiste en SQLite puro Go con WAL, busy timeout releído y un pool de cuatro conexiones. internal/buildcheck prueba en un subproceso real que el build sin cgo compila limpio. Pero nada los conecta: cmd/lucind-ai/main.go compila, no tiene subcomandos, y no importa ni la barrera ni el ledger; no existe un composition root. Por debajo, todo el resto del diseño sigue en cero líneas: el despacho a agy y cursor-agent, la creación y limpieza de worktrees, el consumo del schema del envelope, la integración con árbol combinado y bisección, la web de aprobaciones y cualquier corrida de RDD. Lo único que corrió de verdad es un paquete de agy mergeado bajo el diseño viejo y no por este binario, y un paquete humano que cerró encontrando dos defectos. cursor-agent está logueado pero nunca ejecutó nada. Engram guarda la narrativa y sigue viva.">
+           aria-label="Estado real de lucind-ai al 18 de agosto de 2026. Tres estados: existe y corrió, probado pero sin conectar, y diseñado pero inexistente. Once paquetes en Go existen y pasan go test con -race: internal/lane no tiene ningún import, ni siquiera de la librería estándar, lo que hace que la barrera nunca pueda importar el ledger un hecho de compilación. internal/barrier es la máquina de estados de join pura, sin time, sin context, sin I/O, que libera sólo cuando todos los carriles llegan a un estado terminal y sólo integra los que terminan en done. internal/ledgerpath resuelve la ruta del ledger. internal/worktree crea y detecta worktrees vinculados. internal/ledger persiste en SQLite puro Go con WAL, busy timeout releído y un pool de cuatro conexiones. internal/buildcheck prueba en un subproceso real que el build sin cgo compila limpio. internal/packet parsea paquetes desde frontmatter. internal/result valida envelopes contra el schema embebido en internal/result/result.schema.json. internal/executor despacha agy de forma headless. El composition root en internal/run y la CLI en cmd/lucind-ai conectan todo el flujo de despacho de punta a punta. Por debajo, sigue pendiente: el ejecutor cursor-agent, la integración con árbol combinado y bisección, la web de aprobaciones y cualquier corrida de RDD. Un despacho real de agy ya corrió de punta a punta a través de este binario. Engram guarda la narrativa y sigue viva.">
         <defs>
           <marker id="a" viewBox="0 0 10 10" refX="9" refY="5"
                   markerWidth="7" markerHeight="7" orient="auto-start-reverse">
@@ -161,9 +163,9 @@
           <text x="918" y="30" fill="var(--ghost)">diseñado · no existe</text>
         </g>
 
-        <!-- banda 1: los cinco paquetes probados -->
+        <!-- banda 1: paquetes del núcleo probados -->
         <text x="20" y="52" font-family="ui-monospace, Menlo, Consolas, monospace"
-              font-size="11" letter-spacing="0.06em" fill="var(--accent)">PROBADO — go test ./... -race verde en las 5 · gofmt y vet limpios</text>
+              font-size="11" letter-spacing="0.06em" fill="var(--accent)">PROBADO — go test ./... -race verde en todos los paquetes · gofmt y vet limpios</text>
 
         <!-- internal/lane -->
         <rect x="20" y="64" width="140" height="176" rx="3" fill="none"
@@ -256,63 +258,63 @@
           <text x="733" y="177">verifica en verde</text>
         </g>
 
-        <!-- cmd/lucind-ai/main.go -->
+        <!-- cmd/lucind-ai -->
         <rect x="875" y="64" width="185" height="176" rx="3" fill="none"
-              stroke="var(--accent)" stroke-width="1.6"/>
+              stroke="currentColor" stroke-width="1.6"/>
         <text x="889" y="88" font-family="system-ui, sans-serif" font-size="13"
-              fill="var(--accent)">cmd/lucind-ai/main.go</text>
+              fill="currentColor">cmd/lucind-ai</text>
         <text x="889" y="110" font-family="ui-monospace, Menlo, Consolas, monospace"
               font-size="9.5" fill="var(--accent)">compila limpio</text>
         <g font-family="ui-monospace, Menlo, Consolas, monospace" font-size="9.5"
            fill="currentColor" opacity="0.85">
-          <text x="889" y="127">0 subcomandos</text>
-          <text x="889" y="149">no importa barrier</text>
-          <text x="889" y="164">no importa ledger</text>
+          <text x="889" y="127">subcomando run</text>
+          <text x="889" y="149">conecta ledger</text>
+          <text x="889" y="164">y internal/run</text>
         </g>
         <text x="889" y="184" font-family="ui-monospace, Menlo, Consolas, monospace"
-              font-size="9.5" fill="var(--warn)">sin composition</text>
+              font-size="9.5" fill="var(--accent)">composition root</text>
         <text x="889" y="199" font-family="ui-monospace, Menlo, Consolas, monospace"
-              font-size="9.5" fill="var(--warn)">root ↓</text>
+              font-size="9.5" fill="var(--accent)">cableado a run ↓</text>
 
-        <!-- GAP: sin composition root -->
-        <line x1="256" y1="240" x2="256" y2="258" stroke="var(--warn)"
-              stroke-width="1.4" stroke-dasharray="4 3"/>
-        <line x1="616" y1="240" x2="616" y2="258" stroke="var(--warn)"
-              stroke-width="1.4" stroke-dasharray="4 3"/>
-        <line x1="256" y1="258" x2="380" y2="258" stroke="var(--warn)"
-              stroke-width="1.4" stroke-dasharray="4 3"/>
-        <line x1="490" y1="258" x2="616" y2="258" stroke="var(--warn)"
-              stroke-width="1.4" stroke-dasharray="4 3"/>
+        <!-- CONECTADO: composition root -->
+        <line x1="256" y1="240" x2="256" y2="258" stroke="var(--accent)"
+              stroke-width="1.4"/>
+        <line x1="616" y1="240" x2="616" y2="258" stroke="var(--accent)"
+              stroke-width="1.4"/>
+        <line x1="256" y1="258" x2="380" y2="258" stroke="var(--accent)"
+              stroke-width="1.4"/>
+        <line x1="490" y1="258" x2="616" y2="258" stroke="var(--accent)"
+              stroke-width="1.4"/>
         <text x="435" y="263" text-anchor="middle" font-family="ui-monospace, Menlo, Consolas, monospace"
-              font-size="14" fill="var(--warn)">✕</text>
+              font-size="14" fill="var(--accent)">✓</text>
         <text x="436" y="284" text-anchor="middle" font-family="ui-monospace, Menlo, Consolas, monospace"
-              font-size="11.5" letter-spacing="0.1em" fill="var(--warn)">SIN COMPOSITION ROOT</text>
+              font-size="11.5" letter-spacing="0.1em" fill="var(--accent)">COMPOSITION ROOT (RUN)</text>
         <text x="436" y="300" text-anchor="middle" font-family="ui-monospace, Menlo, Consolas, monospace"
-              font-size="9.5" fill="var(--warn)" opacity="0.9">nada llama ledger.Open() · nada conecta barrier↔ledger</text>
+              font-size="9.5" fill="var(--accent)" opacity="0.9">internal/run llama ledger.Open() y conecta barrier↔ledger</text>
 
-        <line x1="968" y1="240" x2="968" y2="258" stroke="var(--warn)"
-              stroke-width="1.4" stroke-dasharray="4 3"/>
-        <circle cx="968" cy="262" r="3" fill="var(--warn)"/>
+        <line x1="968" y1="240" x2="968" y2="258" stroke="var(--accent)"
+              stroke-width="1.4"/>
+        <circle cx="968" cy="262" r="3" fill="var(--accent)"/>
         <text x="978" y="252" font-family="ui-monospace, Menlo, Consolas, monospace"
-              font-size="9" fill="var(--warn)" opacity="0.9">no importa</text>
+              font-size="9" fill="var(--accent)" opacity="0.9">conecta con</text>
         <text x="978" y="265" font-family="ui-monospace, Menlo, Consolas, monospace"
-              font-size="9" fill="var(--warn)" opacity="0.9">nada de esto</text>
+              font-size="9" fill="var(--accent)" opacity="0.9">internal/run</text>
 
-        <!-- banda 2: todo lo que sigue sin existir -->
+        <!-- banda 2: lo que sigue sin existir -->
         <text x="20" y="326" font-family="ui-monospace, Menlo, Consolas, monospace"
-              font-size="11" letter-spacing="0.06em" fill="var(--ghost)">SIGUE SIN EXISTIR — despacho, worktrees, integración, RDD, la web</text>
+              font-size="11" letter-spacing="0.06em" fill="var(--ghost)">SIGUE SIN EXISTIR — cursor-agent, integración, RDD, la web</text>
 
         <!-- despacho -->
         <rect x="20" y="340" width="390" height="118" rx="3" fill="none"
-              stroke="var(--ghost)" stroke-width="1.6" stroke-dasharray="5 4"/>
+              stroke="currentColor" stroke-width="1.6"/>
         <text x="34" y="364" font-family="system-ui, sans-serif" font-size="13"
-              fill="var(--ghost)">lucind-ai · despacho</text>
+              fill="currentColor">lucind-ai · despacho</text>
         <g font-family="ui-monospace, Menlo, Consolas, monospace" font-size="10"
-           fill="var(--ghost)">
+           fill="currentColor">
           <text x="34" y="386">1 · crea worktree por carril</text>
-          <text x="34" y="403">2 · spawn agy / cursor-agent -p</text>
+          <text x="34" y="403">2 · spawn agy headlessly (-p)</text>
           <text x="34" y="420">3 · valida envelope contra</text>
-          <text x="48" y="437">result.schema.json (sin usar)</text>
+          <text x="48" y="437">internal/result/result.schema.json</text>
         </g>
 
         <!-- carril agy -->
@@ -325,9 +327,9 @@
         <text x="444" y="403" font-family="ui-monospace, Menlo, Consolas, monospace"
               font-size="10" fill="currentColor" opacity="0.8">barrido y volumen</text>
         <text x="444" y="420" font-family="ui-monospace, Menlo, Consolas, monospace"
-              font-size="9.5" fill="currentColor" opacity="0.6">bajo el diseño viejo —</text>
+              font-size="9.5" fill="currentColor" opacity="0.8">despachado de punta a punta —</text>
         <text x="444" y="435" font-family="ui-monospace, Menlo, Consolas, monospace"
-              font-size="9.5" fill="currentColor" opacity="0.6">no por este binario</text>
+              font-size="9.5" fill="currentColor" opacity="0.8">ejecutado por este binario</text>
 
         <!-- carril cursor -->
         <rect x="750" y="340" width="310" height="118" rx="3" fill="none"
@@ -391,19 +393,19 @@
         <text x="44" y="667" font-family="ui-monospace, Menlo, Consolas, monospace"
               font-size="9.5" letter-spacing="0.14em" fill="var(--accent)">ENGRAM · la narrativa y las decisiones · vive hoy</text>
       </svg>
-      <figcaption>Arriba, cinco piezas probadas. <span class="m">internal/lane</span> no importa
+      <figcaption>Arriba, las piezas del núcleo probadas. <span class="m">internal/lane</span> no importa
         nada — ni siquiera la librería estándar — así que "la barrera nunca importa el ledger" es
         un hecho de compilación, no una convención de review. <span class="m">internal/barrier</span>
         es la máquina de join pura: libera sólo cuando todos los carriles llegan a un estado terminal.
         <span class="m">internal/ledger</span> ya persiste en SQLite con WAL y un pool de cuatro
-        conexiones. Pero <span class="m">cmd/lucind-ai/main.go</span> compila sin importar ni la
-        barrera ni el ledger: no existe el composition root que los una. Abajo, el resto sigue en
-        cero líneas — nada crea un worktree, nada despacha a <span class="m">agy</span> ni a
-        <span class="m">cursor-agent</span>, nada integra ni corre RDD. Lo único ejercitado de
-        verdad sigue siendo un paquete de <span class="m">agy</span> — mergeado bajo el diseño
-        viejo, no por este binario — y un paquete humano que cerró encontrando dos defectos.
-        <span class="m">cursor-agent</span> se logueó hoy y todavía no ejecutó nada. Engram
-        sigue viva.</figcaption>
+        conexiones. El composition root ya existe en <span class="m">internal/run</span> y se conecta
+        desde <span class="m">cmd/lucind-ai</span>, gestionando worktrees vinculados, registrando en el
+        ledger, despachando a <span class="m">agy</span> y validando el envelope contra
+        <span class="m">internal/result/result.schema.json</span> embebido en el binario. Abajo, lo que
+        sigue pendiente: el soporte de <span class="m">cursor-agent</span>, la integración con árbol
+        combinado y bisección, la web de aprobaciones y cualquier corrida de RDD. Un despacho real de
+        <span class="m">agy</span> ya corrió de punta a punta a través de este binario. Engram sigue
+        viva.</figcaption>
     </figure>
   </div>
 

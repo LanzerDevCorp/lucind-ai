@@ -1,6 +1,6 @@
 # lucind-ai — PRD
 
-**Status:** requirements fixed, nothing built. **Date:** 2026-08-17. **Audience:** the author only.
+**Status:** core binary and dispatch built, integration and web UI pending. **Date:** 2026-08-17. **Audience:** the author only.
 
 This document supersedes `handoff-2026-08-13.md` (deleted) and the orchestration model described in
 the pre-2026-08-14 README. Where it disagrees with anything older, it wins.
@@ -110,7 +110,7 @@ Still corrected when envelope data says otherwise.
    never a temp dir. Each worktree needs its own `.codegraph` index; never copy or share one.
 3. **The binary dispatches both lanes in parallel**, headless (`-p`).
 4. **Each executor writes its envelope to `.lucind/result.json` inside its own worktree.** The
-   binary reads it from disk and validates it against `result.schema.json`.
+   binary reads it from disk and validates it against `internal/result/result.schema.json`, embedded into the binary.
    This is deliberate: `agy` has `--json-schema` (real enforcement) but `cursor-agent` has only
    `--output-format json`, which is its own agent wrapper, not our schema. Writing to a known path
    normalizes the asymmetry — validation happens once, in one place, identically for every lane, and
