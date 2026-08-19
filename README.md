@@ -96,7 +96,6 @@ internal/result/result.schema.json     result envelope schema, embedded into the
 plugin/claude-code/skills/lucind-ai/
 ├── SKILL.md                           to shrink to: how to write a packet, how to drive the binary
 ├── references/runtime.md              verified CLI surface and verification traps
-├── references/state-files.md          superseded by the SQLite ledger
 ├── assets/packet-template.md          agent packet
 └── assets/human-packet-template.md    human packet
 
