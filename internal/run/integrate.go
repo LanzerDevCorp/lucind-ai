@@ -24,9 +24,9 @@ type IntegrateReport struct {
 // verification checks against it, and promotes clean results into the
 // primary repository.
 //
-// Governing rule: green integrates everything and removes only the worktrees
-// that integrated; red integrates nothing and every offered lane returns to
-// lane.Blocked with its worktree preserved.
+// When the full batch fails (merge conflict or failing checks), it isolates
+// the clean subset via bisection, promotes that subset, and reverts only
+// the remaining lanes.
 func Integrate(ctx context.Context, deps Deps, batch BatchReport) (IntegrateReport, error) {
 	if !batch.Released || len(batch.Outcome.Integrate) == 0 {
 		return IntegrateReport{
@@ -43,33 +43,19 @@ func Integrate(ctx context.Context, deps Deps, batch BatchReport) (IntegrateRepo
 
 	worktreePath, branchName, err := deps.CombineTree(ctx, deps.PrimaryRoot, deps.RunID, branches)
 	if err != nil {
-		revertLanes(ctx, deps, batch.Outcome.Integrate, err.Error(), now)
-		return IntegrateReport{
-			RunID:     deps.RunID,
-			Attempted: true,
-			Passed:    false,
-			Reverted:  batch.Outcome.Integrate,
-			Reason:    err.Error(),
-		}, nil
+		return handleRedBatch(ctx, deps, batch, err.Error(), now)
 	}
 
 	passed, output, checkErr := deps.RunChecks(ctx, worktreePath)
 	if checkErr != nil || !passed {
-		// Best-effort: discard the combined worktree before reverting lanes.
+		// Best-effort: discard the combined worktree before bisecting.
 		_ = deps.DiscardCombined(ctx, deps.PrimaryRoot, worktreePath, branchName)
 
 		reason := output
 		if checkErr != nil {
 			reason = checkErr.Error()
 		}
-		revertLanes(ctx, deps, batch.Outcome.Integrate, reason, now)
-		return IntegrateReport{
-			RunID:     deps.RunID,
-			Attempted: true,
-			Passed:    false,
-			Reverted:  batch.Outcome.Integrate,
-			Reason:    reason,
-		}, nil
+		return handleRedBatch(ctx, deps, batch, reason, now)
 	}
 
 	if err := deps.PromoteTarget(ctx, deps.PrimaryRoot, branchName); err != nil {
@@ -90,24 +76,97 @@ func Integrate(ctx context.Context, deps Deps, batch BatchReport) (IntegrateRepo
 	// primaryRoot has the same tip.
 	_ = deps.DiscardCombined(ctx, deps.PrimaryRoot, worktreePath, branchName)
 
+	return completeIntegration(ctx, deps, batch, batch.Outcome.Integrate, nil, now)
+}
+
+func handleRedBatch(ctx context.Context, deps Deps, batch BatchReport, triggerReason string, now time.Time) (IntegrateReport, error) {
+	integrateIDs, revertIDs := bisect(ctx, deps, batch.Outcome.Integrate)
+	if len(integrateIDs) == 0 {
+		revertReason := "bisection found no viable subset"
+		if triggerReason != "" {
+			revertReason = fmt.Sprintf("bisection found no viable subset: %s", triggerReason)
+		}
+		revertLanes(ctx, deps, batch.Outcome.Integrate, revertReason, now)
+		return IntegrateReport{
+			RunID:     deps.RunID,
+			Attempted: true,
+			Passed:    false,
+			Reverted:  batch.Outcome.Integrate,
+			Reason:    revertReason,
+		}, nil
+	}
+
+	branches := make([]string, len(integrateIDs))
+	for i, id := range integrateIDs {
+		branches[i] = worktree.BranchFor(id)
+	}
+
+	worktreePath, branchName, err := deps.CombineTree(ctx, deps.PrimaryRoot, deps.RunID, branches)
+	if err != nil {
+		revertLanes(ctx, deps, batch.Outcome.Integrate, err.Error(), now)
+		return IntegrateReport{
+			RunID:     deps.RunID,
+			Attempted: true,
+			Passed:    false,
+			Reverted:  batch.Outcome.Integrate,
+			Reason:    err.Error(),
+		}, nil
+	}
+
+	passed, output, checkErr := deps.RunChecks(ctx, worktreePath)
+	if checkErr != nil || !passed {
+		_ = deps.DiscardCombined(ctx, deps.PrimaryRoot, worktreePath, branchName)
+		reason := output
+		if checkErr != nil {
+			reason = checkErr.Error()
+		}
+		revertLanes(ctx, deps, batch.Outcome.Integrate, reason, now)
+		return IntegrateReport{
+			RunID:     deps.RunID,
+			Attempted: true,
+			Passed:    false,
+			Reverted:  batch.Outcome.Integrate,
+			Reason:    reason,
+		}, nil
+	}
+
+	if err := deps.PromoteTarget(ctx, deps.PrimaryRoot, branchName); err != nil {
+		_ = deps.DiscardCombined(ctx, deps.PrimaryRoot, worktreePath, branchName)
+		revertLanes(ctx, deps, batch.Outcome.Integrate, err.Error(), now)
+		return IntegrateReport{
+			RunID:     deps.RunID,
+			Attempted: true,
+			Passed:    false,
+			Reverted:  batch.Outcome.Integrate,
+			Reason:    err.Error(),
+		}, nil
+	}
+
+	_ = deps.DiscardCombined(ctx, deps.PrimaryRoot, worktreePath, branchName)
+
+	return completeIntegration(ctx, deps, batch, integrateIDs, revertIDs, now)
+}
+
+func completeIntegration(ctx context.Context, deps Deps, batch BatchReport, integrateIDs, revertIDs []string, now time.Time) (IntegrateReport, error) {
 	laneWorktrees := make(map[string]string, len(batch.Lanes))
 	for _, l := range batch.Lanes {
 		laneWorktrees[l.LaneID] = l.Worktree
 	}
 
-	for _, id := range batch.Outcome.Integrate {
+	for _, id := range integrateIDs {
 		wtPath := laneWorktrees[id]
-		// Best-effort: clean up the integrated lane's worktree and branch, and
-		// update worktree_preserved in the ledger.
 		_ = deps.RemoveLaneWorktree(ctx, deps.PrimaryRoot, wtPath, worktree.BranchFor(id))
 		_ = deps.Ledger.SetWorktreePreserved(ctx, deps.RunID, id, false)
 	}
 
-	// Best-effort: append one run-scoped summary event.
+	if len(revertIDs) > 0 {
+		revertLanes(ctx, deps, revertIDs, "bisected out of batch", now)
+	}
+
 	_ = deps.Ledger.AppendEvent(ctx, ledger.Event{
 		RunID:  deps.RunID,
 		Type:   ledger.EventLaneNote,
-		Detail: fmt.Sprintf("batch integrated: %d lane(s) integrated", len(batch.Outcome.Integrate)),
+		Detail: fmt.Sprintf("batch integrated: %d lane(s) integrated", len(integrateIDs)),
 		At:     now,
 	})
 
@@ -115,8 +174,101 @@ func Integrate(ctx context.Context, deps Deps, batch BatchReport) (IntegrateRepo
 		RunID:      deps.RunID,
 		Attempted:  true,
 		Passed:     true,
-		Integrated: batch.Outcome.Integrate,
+		Integrated: integrateIDs,
+		Reverted:   revertIDs,
 	}, nil
+}
+
+// bisect recursively partitions lanes to find the subset that cleanly combines and passes checks.
+func bisect(ctx context.Context, deps Deps, lanes []string) (integrate, revert []string) {
+	if len(lanes) == 1 {
+		return nil, lanes
+	}
+
+	mid := len(lanes) / 2
+	left := lanes[:mid]
+	right := lanes[mid:]
+
+	leftGreen := tryCombine(ctx, deps, left)
+	rightGreen := tryCombine(ctx, deps, right)
+
+	if leftGreen && rightGreen {
+		return nil, lanes
+	}
+
+	if leftGreen && !rightGreen {
+		rInt, rRev := bisect(ctx, deps, right)
+		if len(rInt) == 0 {
+			return left, rRev
+		}
+		candidate := make([]string, 0, len(left)+len(rInt))
+		candidate = append(candidate, left...)
+		candidate = append(candidate, rInt...)
+		if tryCombine(ctx, deps, candidate) {
+			return candidate, rRev
+		}
+		return nil, lanes
+	}
+
+	if !leftGreen && rightGreen {
+		lInt, lRev := bisect(ctx, deps, left)
+		if len(lInt) == 0 {
+			return right, lRev
+		}
+		candidate := make([]string, 0, len(lInt)+len(right))
+		candidate = append(candidate, lInt...)
+		candidate = append(candidate, right...)
+		if tryCombine(ctx, deps, candidate) {
+			return candidate, lRev
+		}
+		return nil, lanes
+	}
+
+	// Both red
+	lInt, lRev := bisect(ctx, deps, left)
+	rInt, rRev := bisect(ctx, deps, right)
+
+	revert = make([]string, 0, len(lRev)+len(rRev))
+	revert = append(revert, lRev...)
+	revert = append(revert, rRev...)
+
+	if len(lInt) == 0 || len(rInt) == 0 {
+		integrate = make([]string, 0, len(lInt)+len(rInt))
+		integrate = append(integrate, lInt...)
+		integrate = append(integrate, rInt...)
+		return integrate, revert
+	}
+
+	candidate := make([]string, 0, len(lInt)+len(rInt))
+	candidate = append(candidate, lInt...)
+	candidate = append(candidate, rInt...)
+	if tryCombine(ctx, deps, candidate) {
+		return candidate, revert
+	}
+	return nil, lanes
+}
+
+// tryCombine tests whether a subset of lane IDs can combine cleanly and pass checks.
+// It always cleans up the combined worktree on completion.
+func tryCombine(ctx context.Context, deps Deps, laneIDs []string) bool {
+	branches := make([]string, len(laneIDs))
+	for i, id := range laneIDs {
+		branches[i] = worktree.BranchFor(id)
+	}
+
+	worktreePath, branchName, err := deps.CombineTree(ctx, deps.PrimaryRoot, deps.RunID, branches)
+	if err != nil {
+		return false
+	}
+	defer func() {
+		_ = deps.DiscardCombined(ctx, deps.PrimaryRoot, worktreePath, branchName)
+	}()
+
+	passed, _, checkErr := deps.RunChecks(ctx, worktreePath)
+	if checkErr != nil || !passed {
+		return false
+	}
+	return true
 }
 
 // revertLanes demotes every lane in laneIDs to lane.Blocked, marks its worktree
