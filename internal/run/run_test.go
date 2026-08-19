@@ -81,7 +81,9 @@ func newTestDeps(t *testing.T, wtPath string, fsys func(string) fs.FS, exec exec
 		RunID:       "run-1",
 		PrimaryRoot: "/primary",
 		Ledger:      l,
-		Executor:    exec,
+		LookupExecutor: func(string) (executor.Executor, error) {
+			return exec, nil
+		},
 		CreateWorktree: func(_ context.Context, primaryRoot, laneID string) (worktree.Worktree, error) {
 			return worktree.Worktree{Path: wtPath, Branch: "lucind/" + laneID}, nil
 		},
@@ -401,6 +403,52 @@ func TestExecuteDispatchErrorLeavesLaneFailedInLedger(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("no ledger event recorded the dispatch failure reason %q; events = %+v", wantErr.Error(), events)
+	}
+}
+
+// TestExecuteLookupExecutorErrorLeavesLaneFailedInLedger proves that when
+// LookupExecutor returns an error (e.g. unknown executor name), Execute
+// records that lane as lane.Failed in the ledger with a diagnostic note and
+// does not panic or leave the lane unregistered or stuck in running.
+func TestExecuteLookupExecutorErrorLeavesLaneFailedInLedger(t *testing.T) {
+	wtPath := t.TempDir()
+	wantErr := errors.New("unsupported executor: bogus")
+	deps := newTestDeps(t, wtPath, func(string) fs.FS {
+		return fstest.MapFS{}
+	}, &fakeExecutor{})
+	deps.LookupExecutor = func(name string) (executor.Executor, error) {
+		return nil, wantErr
+	}
+
+	_, err := run.Execute(context.Background(), deps, testPacket())
+	if err == nil {
+		t.Fatal("Execute() error = nil, want non-nil when LookupExecutor returns an error")
+	}
+	if !errors.Is(err, wantErr) {
+		t.Errorf("Execute() error = %v, want it to wrap %v", err, wantErr)
+	}
+
+	states, statesErr := deps.Ledger.LaneStates(context.Background(), "run-1")
+	if statesErr != nil {
+		t.Fatalf("LaneStates() error = %v", statesErr)
+	}
+	if len(states) != 1 || states[0].LaneID != "lane-a" || states[0].Status != lane.Failed {
+		t.Fatalf("LaneStates() = %+v, want one lane-a=failed", states)
+	}
+
+	events, eventsErr := deps.Ledger.Events(context.Background(), "run-1")
+	if eventsErr != nil {
+		t.Fatalf("Events() error = %v", eventsErr)
+	}
+	found := false
+	for _, e := range events {
+		if e.Type == ledger.EventLaneNote && strings.Contains(e.Detail, wantErr.Error()) {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("Events() = %+v, want a lane_note containing %q", events, wantErr.Error())
 	}
 }
 
