@@ -10,7 +10,17 @@ phases:
     engram_topic: sdd/approvals-web-ui/explore
     engram_id: 1793
   proposal:
-    status: pending
+    status: done
+    engram_topic: sdd/approvals-web-ui/proposal
+    engram_id: 1797
+    drafts:
+      - openspec/changes/approvals-web-ui/proposal-agy.md
+      - openspec/changes/approvals-web-ui/proposal-cursor-agent.md
+    note: |
+      Both dual-executor lanes came back status=blocked from a stale packet-template.md Return
+      section (missing the .lucind/result.json instruction, fixed in ecc0811) -- verified by
+      reading each preserved worktree directly, work itself was correct and cleanly committed.
+      Recovered by merging both branches to main by hand (user-authorized).
   spec:
     status: pending
   design:
