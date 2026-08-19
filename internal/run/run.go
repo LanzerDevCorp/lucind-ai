@@ -166,6 +166,12 @@ type Deps struct {
 	// package already relies on and what a plain context.Context without a
 	// deadline continues to mean.
 	LaneTimeout time.Duration
+
+	CombineTree        func(ctx context.Context, primaryRoot, runID string, branches []string) (worktreePath, branchName string, err error)
+	RunChecks          func(ctx context.Context, worktreePath string) (passed bool, output string, err error)
+	PromoteTarget      func(ctx context.Context, primaryRoot, integrationBranch string) error
+	DiscardCombined    func(ctx context.Context, primaryRoot, worktreePath, branchName string) error
+	RemoveLaneWorktree func(ctx context.Context, primaryRoot, worktreePath, branch string) error
 }
 
 // Report is the outcome of running exactly one lane through Execute.

@@ -15,6 +15,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/LanzerDevCorp/lucind-ai/internal/executor"
+	"github.com/LanzerDevCorp/lucind-ai/internal/integrate"
 	"github.com/LanzerDevCorp/lucind-ai/internal/lane"
 	"github.com/LanzerDevCorp/lucind-ai/internal/ledger"
 	"github.com/LanzerDevCorp/lucind-ai/internal/packet"
@@ -176,6 +177,21 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 		WorktreeFS:     os.DirFS,
 		Now:            time.Now,
 		LaneTimeout:    *timeout,
+		CombineTree:    integrate.Combine,
+		RunChecks:      integrate.Check,
+		PromoteTarget:  integrate.Promote,
+		DiscardCombined: func(ctx context.Context, primaryRoot, path, branch string) error {
+			if err := worktree.Remove(ctx, primaryRoot, path); err != nil {
+				return err
+			}
+			return worktree.DeleteBranch(ctx, primaryRoot, branch)
+		},
+		RemoveLaneWorktree: func(ctx context.Context, primaryRoot, path, branch string) error {
+			if err := worktree.Remove(ctx, primaryRoot, path); err != nil {
+				return err
+			}
+			return worktree.DeleteBranch(ctx, primaryRoot, branch)
+		},
 	}
 
 	// N lanes is N simultaneous subscription quota burns. The forecast
@@ -197,17 +213,36 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 		return 1
 	}
 
+	integrateReport, err := lucindrun.Integrate(ctx, deps, batch)
+	if err != nil {
+		fmt.Fprintf(stderr, "lucind-ai: %v\n", err)
+		return 1
+	}
+
 	for _, r := range batch.Lanes {
 		printReport(stdout, r)
 	}
 	fmt.Fprintf(stdout, "released:  %t\n", batch.Released)
 
-	// Exit 0 requires every lane to have actually reached lane.Done. A
-	// blocked/deviated/failed lane is a real, non-crashing outcome (see
-	// printReport), but it must never be mistaken for success by anything
-	// reading the exit code.
+	if integrateReport.Reason != "" {
+		fmt.Fprintf(stdout, "integrate: attempted=%t passed=%t integrated=%d reverted=%d reason=%s\n",
+			integrateReport.Attempted, integrateReport.Passed, len(integrateReport.Integrated), len(integrateReport.Reverted), integrateReport.Reason)
+	} else {
+		fmt.Fprintf(stdout, "integrate: attempted=%t passed=%t integrated=%d reverted=%d\n",
+			integrateReport.Attempted, integrateReport.Passed, len(integrateReport.Integrated), len(integrateReport.Reverted))
+	}
+
+	reverted := make(map[string]bool, len(integrateReport.Reverted))
+	for _, id := range integrateReport.Reverted {
+		reverted[id] = true
+	}
+
+	// Exit 0 requires every lane to have actually reached lane.Done and not
+	// have been reverted by integration. A blocked/deviated/failed/reverted lane
+	// is a real, non-crashing outcome (see printReport), but it must never be
+	// mistaken for success by anything reading the exit code.
 	for _, r := range batch.Lanes {
-		if r.Status != lane.Done {
+		if r.Status != lane.Done || reverted[r.LaneID] {
 			return 1
 		}
 	}
