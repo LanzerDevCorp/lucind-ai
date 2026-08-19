@@ -198,3 +198,167 @@ func TestCreateHonoursCancelledContext(t *testing.T) {
 		t.Errorf("worktree path %q was created despite a cancelled context", target)
 	}
 }
+
+func TestBranchFor(t *testing.T) {
+	got := worktree.BranchFor("fix-auth")
+	want := "lucind/fix-auth"
+	if got != want {
+		t.Errorf("BranchFor(%q) = %q, want %q", "fix-auth", got, want)
+	}
+}
+
+func TestRemoveRemovesLinkedWorktree(t *testing.T) {
+	if testing.Short() {
+		t.Skip("shells out to real git")
+	}
+
+	primaryRoot := initRepo(t)
+
+	wt, err := worktree.Create(context.Background(), primaryRoot, "fix-auth")
+	if err != nil {
+		t.Fatalf("Create() error = %v, want nil", err)
+	}
+
+	if !worktree.IsLinkedWorktree(wt.Path) {
+		t.Fatalf("IsLinkedWorktree(%q) = false, want true before removal", wt.Path)
+	}
+
+	if err := worktree.Remove(context.Background(), primaryRoot, wt.Path); err != nil {
+		t.Fatalf("Remove() error = %v, want nil", err)
+	}
+
+	if worktree.IsLinkedWorktree(wt.Path) {
+		t.Errorf("IsLinkedWorktree(%q) = true, want false after removal", wt.Path)
+	}
+
+	if _, err := os.Stat(wt.Path); !os.IsNotExist(err) {
+		t.Errorf("os.Stat(%q) err = %v, want os.IsNotExist", wt.Path, err)
+	}
+}
+
+func TestRemoveWrapsGitFailureWithStderr(t *testing.T) {
+	if testing.Short() {
+		t.Skip("shells out to real git")
+	}
+
+	primaryRoot := t.TempDir()
+
+	err := worktree.Remove(context.Background(), primaryRoot, filepath.Join(primaryRoot, "non-existent"))
+	if err == nil {
+		t.Fatalf("Remove() error = nil, want non-nil")
+	}
+	if !strings.Contains(strings.ToLower(err.Error()), "not a git repository") && !strings.Contains(strings.ToLower(err.Error()), "fatal") {
+		t.Errorf("Remove() error = %q, want it to contain git's stderr", err.Error())
+	}
+}
+
+func TestRemoveHonoursCancelledContext(t *testing.T) {
+	if testing.Short() {
+		t.Skip("shells out to real git")
+	}
+
+	primaryRoot := initRepo(t)
+
+	wt, err := worktree.Create(context.Background(), primaryRoot, "fix-auth")
+	if err != nil {
+		t.Fatalf("Create() error = %v, want nil", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err = worktree.Remove(ctx, primaryRoot, wt.Path)
+	if err == nil {
+		t.Fatalf("Remove() error = nil, want non-nil for an already-cancelled context")
+	}
+
+	if !worktree.IsLinkedWorktree(wt.Path) {
+		t.Errorf("worktree path %q was removed despite a cancelled context", wt.Path)
+	}
+}
+
+func TestDeleteBranch(t *testing.T) {
+	if testing.Short() {
+		t.Skip("shells out to real git")
+	}
+
+	primaryRoot := initRepo(t)
+
+	wt, err := worktree.Create(context.Background(), primaryRoot, "fix-auth")
+	if err != nil {
+		t.Fatalf("Create() error = %v, want nil", err)
+	}
+
+	if err := worktree.Remove(context.Background(), primaryRoot, wt.Path); err != nil {
+		t.Fatalf("Remove() error = %v, want nil", err)
+	}
+
+	if err := worktree.DeleteBranch(context.Background(), primaryRoot, wt.Branch); err != nil {
+		t.Fatalf("DeleteBranch() error = %v, want nil", err)
+	}
+
+	var branchListOut bytes.Buffer
+	cmd := exec.Command("git", "branch", "--list", wt.Branch)
+	cmd.Dir = primaryRoot
+	cmd.Stdout = &branchListOut
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("git branch --list error = %v", err)
+	}
+
+	if strings.TrimSpace(branchListOut.String()) != "" {
+		t.Errorf("git branch --list %q = %q, want empty", wt.Branch, branchListOut.String())
+	}
+}
+
+func TestDeleteBranchWrapsGitFailureWithStderr(t *testing.T) {
+	if testing.Short() {
+		t.Skip("shells out to real git")
+	}
+
+	primaryRoot := t.TempDir()
+
+	err := worktree.DeleteBranch(context.Background(), primaryRoot, "lucind/non-existent")
+	if err == nil {
+		t.Fatalf("DeleteBranch() error = nil, want non-nil")
+	}
+	if !strings.Contains(strings.ToLower(err.Error()), "not a git repository") && !strings.Contains(strings.ToLower(err.Error()), "fatal") && !strings.Contains(strings.ToLower(err.Error()), "error") {
+		t.Errorf("DeleteBranch() error = %q, want it to contain git's stderr", err.Error())
+	}
+}
+
+func TestDeleteBranchHonoursCancelledContext(t *testing.T) {
+	if testing.Short() {
+		t.Skip("shells out to real git")
+	}
+
+	primaryRoot := initRepo(t)
+
+	wt, err := worktree.Create(context.Background(), primaryRoot, "fix-auth")
+	if err != nil {
+		t.Fatalf("Create() error = %v, want nil", err)
+	}
+
+	if err := worktree.Remove(context.Background(), primaryRoot, wt.Path); err != nil {
+		t.Fatalf("Remove() error = %v, want nil", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err = worktree.DeleteBranch(ctx, primaryRoot, wt.Branch)
+	if err == nil {
+		t.Fatalf("DeleteBranch() error = nil, want non-nil for an already-cancelled context")
+	}
+
+	var branchListOut bytes.Buffer
+	cmd := exec.Command("git", "branch", "--list", wt.Branch)
+	cmd.Dir = primaryRoot
+	cmd.Stdout = &branchListOut
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("git branch --list error = %v", err)
+	}
+
+	if strings.TrimSpace(branchListOut.String()) == "" {
+		t.Errorf("branch %q was deleted despite a cancelled context", wt.Branch)
+	}
+}

@@ -36,6 +36,11 @@ var ErrWorktreeExists = errors.New("worktree: target worktree path already exist
 // linked worktree for a given primary repository.
 const worktreesDirSuffix = "-worktrees"
 
+// BranchFor returns the branch name for a lane: "lucind/" + laneID.
+func BranchFor(laneID string) string {
+	return "lucind/" + laneID
+}
+
 // pathFor returns the target worktree path for laneID off primaryRoot:
 // "<parent-of-primaryRoot>/<basename-of-primaryRoot>-worktrees/<laneID>".
 // This is a hard project rule, never a temp directory, because each
@@ -64,7 +69,7 @@ func Create(ctx context.Context, primaryRoot, laneID string) (Worktree, error) {
 		return Worktree{}, ErrWorktreeExists
 	}
 
-	branch := "lucind/" + laneID
+	branch := BranchFor(laneID)
 
 	cmd := exec.CommandContext(ctx, "git", "worktree", "add", "-b", branch, path)
 	cmd.Dir = primaryRoot
@@ -75,6 +80,32 @@ func Create(ctx context.Context, primaryRoot, laneID string) (Worktree, error) {
 	}
 
 	return Worktree{Path: path, Branch: branch}, nil
+}
+
+// Remove removes a linked git worktree at path off primaryRoot.
+func Remove(ctx context.Context, primaryRoot, path string) error {
+	cmd := exec.CommandContext(ctx, "git", "worktree", "remove", "--force", path)
+	cmd.Dir = primaryRoot
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("worktree: git worktree remove failed: %w: %s", err, strings.TrimSpace(stderr.String()))
+	}
+
+	return nil
+}
+
+// DeleteBranch forces deletion of branch in primaryRoot.
+func DeleteBranch(ctx context.Context, primaryRoot, branch string) error {
+	cmd := exec.CommandContext(ctx, "git", "branch", "-D", branch)
+	cmd.Dir = primaryRoot
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("worktree: git branch -D failed: %w: %s", err, strings.TrimSpace(stderr.String()))
+	}
+
+	return nil
 }
 
 // IsLinkedWorktree reports whether path is the root of a linked git
