@@ -354,14 +354,12 @@ type Event struct {
 	At     time.Time
 }
 
-// Event types this slice actually produces. No column or type exists here
-// for a producer that doesn't exist yet (worker removal, call duration) —
-// see design decision "Event types are exactly the five this slice can
-// emit".
+// Event types this package produces.
 const (
 	EventRunStarted        = "run_started"
 	EventLaneRegistered    = "lane_registered"
 	EventLaneStatusChanged = "lane_status_changed"
+	EventLaneNote          = "lane_note"
 	EventBarrierReleased   = "barrier_released"
 	EventRunEnded          = "run_ended"
 )

@@ -2,6 +2,7 @@ package ledger
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"os"
@@ -427,5 +428,257 @@ func TestLaneStatesFeedsBarrierEvaluate(t *testing.T) {
 	}
 	if len(outcome.Preserve) != 1 || outcome.Preserve[0] != "c" {
 		t.Fatalf("Preserve = %v, want [c]", outcome.Preserve)
+	}
+}
+
+const v1TestSchemaDDL = `
+CREATE TABLE IF NOT EXISTS schema_migrations (
+  version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL) STRICT;
+
+CREATE TABLE IF NOT EXISTS lanes (
+  run_id             TEXT    NOT NULL,
+  lane_id            TEXT    NOT NULL,
+  packet_id          TEXT    NOT NULL,
+  executor           TEXT    NOT NULL CHECK (executor IN ('agy','cursor-agent','human')),
+  routing_condition  TEXT    NOT NULL CHECK (length(trim(routing_condition)) > 0),
+  status             TEXT    NOT NULL CHECK (status IN
+                       ('pending','running','done','blocked','deviated','failed')),
+  worktree_path      TEXT    NOT NULL DEFAULT '',
+  worktree_preserved INTEGER NOT NULL DEFAULT 0 CHECK (worktree_preserved IN (0,1)),
+  attempt            INTEGER NOT NULL DEFAULT 1 CHECK (attempt >= 1),
+  started_at         TEXT,
+  ended_at           TEXT,
+  PRIMARY KEY (run_id, lane_id)
+) STRICT;
+
+CREATE TABLE IF NOT EXISTS events (
+  id      INTEGER PRIMARY KEY AUTOINCREMENT,
+  run_id  TEXT NOT NULL,
+  lane_id TEXT,
+  type    TEXT NOT NULL CHECK (type IN ('run_started','lane_registered',
+            'lane_status_changed','barrier_released','run_ended')),
+  detail  TEXT NOT NULL DEFAULT '',
+  at      TEXT NOT NULL
+) STRICT;
+CREATE INDEX IF NOT EXISTS idx_events_run ON events(run_id, id);
+`
+
+func TestMigrateV1DatabaseAcceptsLaneNoteAndPreservesRows(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	dbPath := ledgerpath.Resolve(root)
+
+	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
+		t.Fatalf("create .lucind dir: %v", err)
+	}
+
+	dsn := "file:" + dbPath + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)"
+	rawDB, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		t.Fatalf("raw open: %v", err)
+	}
+
+	if _, err := rawDB.ExecContext(ctx, v1TestSchemaDDL); err != nil {
+		rawDB.Close()
+		t.Fatalf("apply v1 schema DDL: %v", err)
+	}
+
+	v1AppliedAt := "2026-08-19T10:00:00Z"
+	if _, err := rawDB.ExecContext(ctx,
+		`INSERT INTO schema_migrations (version, applied_at) VALUES (1, ?)`,
+		v1AppliedAt,
+	); err != nil {
+		rawDB.Close()
+		t.Fatalf("record v1 migration: %v", err)
+	}
+
+	// Insert lanes under v1.
+	if _, err := rawDB.ExecContext(ctx, `
+		INSERT INTO lanes (run_id, lane_id, packet_id, executor, routing_condition, status, worktree_path, worktree_preserved, attempt)
+		VALUES ('run-1', 'lane-a', 'p-a', 'agy', 'cond-a', 'running', '/path/a', 0, 1),
+		       ('run-1', 'lane-b', 'p-b', 'human', 'cond-b', 'done', '/path/b', 1, 2)
+	`); err != nil {
+		rawDB.Close()
+		t.Fatalf("insert v1 lanes: %v", err)
+	}
+
+	// Insert events under v1 exercising each of the 5 original event types.
+	t1 := "2026-08-19T10:01:00Z"
+	t2 := "2026-08-19T10:02:00Z"
+	t3 := "2026-08-19T10:03:00Z"
+	t4 := "2026-08-19T10:04:00Z"
+	t5 := "2026-08-19T10:05:00Z"
+	if _, err := rawDB.ExecContext(ctx, `
+		INSERT INTO events (id, run_id, lane_id, type, detail, at) VALUES
+		(1, 'run-1', NULL, 'run_started', 'batch started', ?),
+		(2, 'run-1', 'lane-a', 'lane_registered', 'cond-a', ?),
+		(3, 'run-1', 'lane-a', 'lane_status_changed', 'running', ?),
+		(4, 'run-1', 'lane-a', 'barrier_released', 'done', ?),
+		(5, 'run-1', NULL, 'run_ended', 'batch ended', ?)
+	`, t1, t2, t3, t4, t5); err != nil {
+		rawDB.Close()
+		t.Fatalf("insert v1 events: %v", err)
+	}
+
+	// Verify that inserting a lane_note into this v1 database before migration fails.
+	if _, err := rawDB.ExecContext(ctx,
+		`INSERT INTO events (run_id, lane_id, type, detail, at) VALUES ('run-1', 'lane-a', 'lane_note', 'note', ?)`,
+		t1,
+	); err == nil {
+		rawDB.Close()
+		t.Fatal("v1 events table accepted lane_note event before migration, want CHECK constraint violation")
+	}
+
+	if err := rawDB.Close(); err != nil {
+		t.Fatalf("close raw DB: %v", err)
+	}
+
+	// Open the v1 database through the normal path, triggering migration to v2.
+	l, err := Open(ctx, root)
+	if err != nil {
+		t.Fatalf("Open normal path on v1 database: %v", err)
+	}
+	defer l.Close()
+
+	// Assert no existing lane row is lost or altered.
+	lanes, err := l.Lanes(ctx, "run-1")
+	if err != nil {
+		t.Fatalf("Lanes(run-1): %v", err)
+	}
+	if len(lanes) != 2 {
+		t.Fatalf("Lanes returned %d rows, want 2", len(lanes))
+	}
+	if lanes[0].LaneID != "lane-a" || lanes[0].Status != lane.Running || lanes[0].WorktreePath != "/path/a" || lanes[0].WorktreePreserved != false || lanes[0].Attempt != 1 {
+		t.Fatalf("lane-a altered by migration: %+v", lanes[0])
+	}
+	if lanes[1].LaneID != "lane-b" || lanes[1].Status != lane.Done || lanes[1].WorktreePath != "/path/b" || lanes[1].WorktreePreserved != true || lanes[1].Attempt != 2 {
+		t.Fatalf("lane-b altered by migration: %+v", lanes[1])
+	}
+
+	// Assert no existing event row is lost, altered, or reordered.
+	events, err := l.Events(ctx, "run-1")
+	if err != nil {
+		t.Fatalf("Events(run-1): %v", err)
+	}
+	if len(events) != 5 {
+		t.Fatalf("Events returned %d rows, want 5", len(events))
+	}
+	wantTypes := []string{"run_started", "lane_registered", "lane_status_changed", "barrier_released", "run_ended"}
+	wantDetails := []string{"batch started", "cond-a", "running", "done", "batch ended"}
+	wantLaneIDs := []string{"", "lane-a", "lane-a", "lane-a", ""}
+	for i, e := range events {
+		if e.ID != int64(i+1) {
+			t.Errorf("event[%d].ID = %d, want %d", i, e.ID, i+1)
+		}
+		if e.Type != wantTypes[i] {
+			t.Errorf("event[%d].Type = %q, want %q", i, e.Type, wantTypes[i])
+		}
+		if e.Detail != wantDetails[i] {
+			t.Errorf("event[%d].Detail = %q, want %q", i, e.Detail, wantDetails[i])
+		}
+		if e.LaneID != wantLaneIDs[i] {
+			t.Errorf("event[%d].LaneID = %q, want %q", i, e.LaneID, wantLaneIDs[i])
+		}
+	}
+
+	// Now insert a lane_note event into the migrated database.
+	t6 := time.Date(2026, 8, 19, 10, 6, 0, 0, time.UTC)
+	noteEvent := Event{
+		RunID:  "run-1",
+		LaneID: "lane-a",
+		Type:   EventLaneNote,
+		Detail: "lane diagnostic note after migration",
+		At:     t6,
+	}
+	if err := l.AppendEvent(ctx, noteEvent); err != nil {
+		t.Fatalf("AppendEvent(lane_note) after migration failed: %v", err)
+	}
+
+	// Read back all events and verify lane_note is present and ID sequence continues.
+	eventsAfter, err := l.Events(ctx, "run-1")
+	if err != nil {
+		t.Fatalf("Events after append: %v", err)
+	}
+	if len(eventsAfter) != 6 {
+		t.Fatalf("Events after append returned %d rows, want 6", len(eventsAfter))
+	}
+	gotNote := eventsAfter[5]
+	if gotNote.ID != 6 {
+		t.Errorf("gotNote.ID = %d, want 6", gotNote.ID)
+	}
+	if gotNote.Type != EventLaneNote {
+		t.Errorf("gotNote.Type = %q, want %q", gotNote.Type, EventLaneNote)
+	}
+	if gotNote.Detail != noteEvent.Detail {
+		t.Errorf("gotNote.Detail = %q, want %q", gotNote.Detail, noteEvent.Detail)
+	}
+	if gotNote.LaneID != "lane-a" {
+		t.Errorf("gotNote.LaneID = %q, want lane-a", gotNote.LaneID)
+	}
+}
+
+func TestMigrateIsIdempotent(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+
+	l1, err := Open(ctx, root)
+	if err != nil {
+		t.Fatalf("first Open: %v", err)
+	}
+
+	t1 := time.Date(2026, 8, 19, 11, 0, 0, 0, time.UTC)
+	if err := l1.AppendEvent(ctx, Event{RunID: "run-1", LaneID: "lane-a", Type: EventLaneNote, Detail: "note 1", At: t1}); err != nil {
+		t.Fatalf("l1 AppendEvent: %v", err)
+	}
+
+	var appliedAtV2 string
+	if err := l1.db.QueryRowContext(ctx, `SELECT applied_at FROM schema_migrations WHERE version = 2`).Scan(&appliedAtV2); err != nil {
+		t.Fatalf("query version 2 applied_at: %v", err)
+	}
+
+	if err := l1.Close(); err != nil {
+		t.Fatalf("first Close: %v", err)
+	}
+
+	// Reopen second time.
+	l2, err := Open(ctx, root)
+	if err != nil {
+		t.Fatalf("second Open on already-migrated database: %v", err)
+	}
+
+	var appliedAtV2Second string
+	if err := l2.db.QueryRowContext(ctx, `SELECT applied_at FROM schema_migrations WHERE version = 2`).Scan(&appliedAtV2Second); err != nil {
+		t.Fatalf("query version 2 applied_at second time: %v", err)
+	}
+	if appliedAtV2Second != appliedAtV2 {
+		t.Errorf("applied_at for version 2 changed on second Open: got %q, want %q", appliedAtV2Second, appliedAtV2)
+	}
+
+	// Append another event.
+	t2 := time.Date(2026, 8, 19, 11, 5, 0, 0, time.UTC)
+	if err := l2.AppendEvent(ctx, Event{RunID: "run-1", LaneID: "lane-a", Type: EventLaneNote, Detail: "note 2", At: t2}); err != nil {
+		t.Fatalf("l2 AppendEvent: %v", err)
+	}
+
+	if err := l2.Close(); err != nil {
+		t.Fatalf("second Close: %v", err)
+	}
+
+	// Reopen third time.
+	l3, err := Open(ctx, root)
+	if err != nil {
+		t.Fatalf("third Open on already-migrated database: %v", err)
+	}
+	defer l3.Close()
+
+	events, err := l3.Events(ctx, "run-1")
+	if err != nil {
+		t.Fatalf("l3 Events: %v", err)
+	}
+	if len(events) != 2 {
+		t.Fatalf("Events returned %d rows, want 2", len(events))
+	}
+	if events[0].Detail != "note 1" || events[1].Detail != "note 2" {
+		t.Errorf("Events details = [%q, %q], want [note 1, note 2]", events[0].Detail, events[1].Detail)
 	}
 }

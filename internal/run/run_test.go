@@ -250,7 +250,7 @@ func TestExecuteExitZeroMissingEnvelopeIsBlockedNotDone(t *testing.T) {
 	}
 	found := false
 	for _, e := range events {
-		if e.Type == ledger.EventLaneStatusChanged && strings.Contains(e.Detail, "result envelope could not be read") {
+		if e.Type == ledger.EventLaneNote && strings.Contains(e.Detail, "result envelope could not be read") {
 			found = true
 		}
 	}
@@ -413,7 +413,7 @@ func TestExecuteDispatchErrorLeavesLaneFailedInLedger(t *testing.T) {
 	}
 	found := false
 	for _, e := range events {
-		if e.Type == ledger.EventLaneStatusChanged && strings.Contains(e.Detail, wantErr.Error()) {
+		if e.Type == ledger.EventLaneNote && strings.Contains(e.Detail, wantErr.Error()) {
 			found = true
 		}
 	}
@@ -617,7 +617,7 @@ func TestExecuteTruncatedOutcomeAppendsLedgerEvent(t *testing.T) {
 	}
 	found := false
 	for _, e := range events {
-		if strings.Contains(e.Detail, outputTruncatedDetailSubstring) {
+		if e.Type == ledger.EventLaneNote && strings.Contains(e.Detail, outputTruncatedDetailSubstring) {
 			found = true
 		}
 	}

@@ -198,7 +198,7 @@ func Execute(ctx context.Context, deps Deps, p packet.Packet) (Report, error) {
 		if err := deps.Ledger.AppendEvent(ctx, ledger.Event{
 			RunID:  deps.RunID,
 			LaneID: p.ID,
-			Type:   ledger.EventLaneStatusChanged,
+			Type:   ledger.EventLaneNote,
 			Detail: reason,
 			At:     now,
 		}); err != nil {
@@ -214,20 +214,12 @@ func Execute(ctx context.Context, deps Deps, p packet.Packet) (Report, error) {
 
 	// A truncated capture is recorded as its own ledger event so the
 	// fact survives the run, not only the one process that printed it.
-	// It is deliberately appended under ledger.EventLaneStatusChanged --
-	// the closest of the five fixed event types this schema allows (see
-	// the CHECK constraint on events.type in internal/ledger/schema.go)
-	// and already the type this function uses to attach freeform
-	// explanatory detail alongside a lane's terminal status (see the
-	// "reason" event above), rather than strictly a literal status
-	// *value* change. It is not a perfect fit: the lane's status did not
-	// change because of truncation. See this package's task report for
-	// why no better-fitting constant exists among the five.
+	// It is appended under ledger.EventLaneNote as a diagnostic annotation.
 	if outcome.OutputTruncated {
 		if err := deps.Ledger.AppendEvent(ctx, ledger.Event{
 			RunID:  deps.RunID,
 			LaneID: p.ID,
-			Type:   ledger.EventLaneStatusChanged,
+			Type:   ledger.EventLaneNote,
 			Detail: outputTruncatedDetail,
 			At:     now,
 		}); err != nil {
@@ -276,8 +268,8 @@ func Execute(ctx context.Context, deps Deps, p packet.Packet) (Report, error) {
 // has succeeded for a lane, every later error path in Execute must route
 // through this function before returning, so the ledger never lies about a
 // lane still being in flight when Execute itself has already given up on
-// it. cause is the error that aborted Execute; it is recorded as the
-// lane_status_changed event's reason and the lane is set to lane.Failed --
+// it. cause is the error that aborted Execute; it is recorded as a
+// lane_note event's reason and the lane is set to lane.Failed --
 // distinct from lane.Blocked, which means a decision is needed, because
 // this is a technical failure in our own binary, not something the
 // dispatched work produced. See internal/lane/status.go.
@@ -290,7 +282,7 @@ func recordLaneFailure(ctx context.Context, deps Deps, laneID string, now time.T
 	if err := deps.Ledger.AppendEvent(ctx, ledger.Event{
 		RunID:  deps.RunID,
 		LaneID: laneID,
-		Type:   ledger.EventLaneStatusChanged,
+		Type:   ledger.EventLaneNote,
 		Detail: cause.Error(),
 		At:     now,
 	}); err != nil {
