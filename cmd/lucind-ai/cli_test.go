@@ -122,6 +122,88 @@ func TestRunUnsupportedExecutorNamesIt(t *testing.T) {
 	}
 }
 
+// TestRunRepeatablePacketFlagPreservesOrderAndProcessesEachOne proves
+// --packet is genuinely repeatable, not a last-value-wins flag: the FIRST
+// packet given is malformed, so its parse error must surface (naming its
+// own path), never the second (well-formed) packet's path. If --packet
+// only kept the last occurrence -- a common bug for a naively hand-rolled
+// flag.Value -- the malformed first packet would be silently dropped, the
+// well-formed second packet would parse fine, and this test would instead
+// fail all the way down at unsupported-executor or beyond.
+func TestRunRepeatablePacketFlagPreservesOrderAndProcessesEachOne(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+
+	dir := t.TempDir()
+	firstPath := filepath.Join(dir, "packet-a.md")
+	if err := os.WriteFile(firstPath, []byte("no frontmatter here, just text\n"), 0o644); err != nil {
+		t.Fatalf("write packet fixture: %v", err)
+	}
+	secondPath := filepath.Join(dir, "packet-b.md")
+	secondContent := "---\n" +
+		"id: lane-b\n" +
+		"executor: agy\n" +
+		"routed_by: single-piece precision\n" +
+		"---\n" +
+		"Do the thing.\n"
+	if err := os.WriteFile(secondPath, []byte(secondContent), 0o644); err != nil {
+		t.Fatalf("write packet fixture: %v", err)
+	}
+
+	code := run(context.Background(), []string{"run", "--packet", firstPath, "--packet", secondPath}, &stdout, &stderr)
+
+	if code == 0 {
+		t.Fatalf("run with a malformed first packet exit code = 0, want non-zero")
+	}
+	if !strings.Contains(stderr.String(), "frontmatter") {
+		t.Fatalf("stderr = %q, want the first packet's parse error to surface", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), firstPath) {
+		t.Fatalf("stderr = %q, want it to name the first packet's path %q -- if it names the second packet instead, --packet is not actually repeatable", stderr.String(), firstPath)
+	}
+}
+
+// TestRunMultiplePacketsSecondUnsupportedExecutorIsCaught proves every
+// packet in a batch is checked for a supported executor, not just the
+// first: a valid first packet must not mask an unsupported executor named
+// by a later one.
+func TestRunMultiplePacketsSecondUnsupportedExecutorIsCaught(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+
+	dir := t.TempDir()
+	firstPath := filepath.Join(dir, "packet-a.md")
+	firstContent := "---\n" +
+		"id: lane-a\n" +
+		"executor: agy\n" +
+		"routed_by: single-piece precision\n" +
+		"---\n" +
+		"Do the thing.\n"
+	if err := os.WriteFile(firstPath, []byte(firstContent), 0o644); err != nil {
+		t.Fatalf("write packet fixture: %v", err)
+	}
+	secondPath := filepath.Join(dir, "packet-b.md")
+	secondContent := "---\n" +
+		"id: lane-b\n" +
+		"executor: cursor-agent\n" +
+		"routed_by: single-piece precision\n" +
+		"---\n" +
+		"Do another thing.\n"
+	if err := os.WriteFile(secondPath, []byte(secondContent), 0o644); err != nil {
+		t.Fatalf("write packet fixture: %v", err)
+	}
+
+	code := run(context.Background(), []string{"run", "--packet", firstPath, "--packet", secondPath}, &stdout, &stderr)
+
+	if code == 0 {
+		t.Fatalf("run with a batch whose second packet names an unsupported executor exit code = 0, want non-zero")
+	}
+	if !strings.Contains(stderr.String(), "cursor-agent") {
+		t.Fatalf("stderr = %q, want it to name the unsupported executor %q", stderr.String(), "cursor-agent")
+	}
+	if !strings.Contains(stderr.String(), secondPath) {
+		t.Fatalf("stderr = %q, want it to name the offending packet path %q", stderr.String(), secondPath)
+	}
+}
+
 // TestPrintReportNotesIncompleteOutputCaptureWhenTruncated proves a report
 // carrying OutputCaptureIncomplete gets a diagnostic note, printed after
 // the status line (subordinate to it, never a headline), and that the note

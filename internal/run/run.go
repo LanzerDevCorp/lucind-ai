@@ -18,7 +18,6 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/LanzerDevCorp/lucind-ai/internal/barrier"
 	"github.com/LanzerDevCorp/lucind-ai/internal/executor"
 	"github.com/LanzerDevCorp/lucind-ai/internal/lane"
 	"github.com/LanzerDevCorp/lucind-ai/internal/ledger"
@@ -84,16 +83,27 @@ type Deps struct {
 	CreateWorktree func(ctx context.Context, primaryRoot, laneID string) (worktree.Worktree, error)
 	WorktreeFS     func(path string) fs.FS // opens a worktree for reading its result envelope
 	Now            func() time.Time        // injected clock; tests pin it
+	// LaneTimeout is the wall-clock budget ExecuteBatch grants each lane,
+	// independently -- see ExecuteBatch's doc comment. It has no effect on
+	// a direct Execute call: Execute always runs within whatever ctx its
+	// caller hands it, exactly as before. Zero means "no per-lane deadline
+	// applied by ExecuteBatch," which is what every Execute test in this
+	// package already relies on and what a plain context.Context without a
+	// deadline continues to mean.
+	LaneTimeout time.Duration
 }
 
 // Report is the outcome of running exactly one lane through Execute.
+// Execute itself does not own a barrier -- see ExecuteBatch, which is the
+// sole owner of the barrier for every lane in a batch and carries the
+// release/outcome result on BatchReport instead. A Report with a terminal
+// Status is not, by itself, evidence of anything about the batch it may be
+// part of.
 type Report struct {
 	LaneID   string
 	Status   lane.Status
 	Worktree string
 	Envelope *result.Envelope // nil when the lane produced no readable envelope
-	Released bool
-	Outcome  barrier.Outcome
 	// OutputCaptureIncomplete is true when the dispatch's captured
 	// stdout/stderr may be missing trailing output -- see
 	// executor.Outcome.OutputTruncated for the mechanism (a grandchild
@@ -110,8 +120,10 @@ type Report struct {
 
 // Execute runs one packet end to end: create its worktree, register it in
 // the ledger, dispatch it through Executor, decide its terminal status from
-// what actually happened, persist that status, and fold it through a
-// single-lane barrier.
+// what actually happened, and persist that status. It does not touch a
+// barrier at all -- that is ExecuteBatch's job, since a barrier is a join
+// over every lane in a batch, not a concept a single lane can own by
+// itself.
 //
 // Execute returns a non-nil error only when the flow itself could not
 // complete — worktree creation failed, a ledger write failed, or the
@@ -180,6 +192,21 @@ func Execute(ctx context.Context, deps Deps, p packet.Packet) (Report, error) {
 		Model:        model,
 		SchemaPath:   schemaPath,
 	})
+
+	// persistCtx carries ctx's values onward without its deadline or
+	// cancellation, for every ledger write from here on. A caller-owned
+	// per-lane deadline (see ExecuteBatch's Deps.LaneTimeout) is meant to
+	// bound the dispatch itself -- "a lane killed on its ceiling returns
+	// blocked with the worktree preserved" (see docs/prd.md section 7) --
+	// not the bookkeeping that records that outcome. Using the
+	// already-expired ctx here would make persisting a timed-out lane's
+	// own lane.Blocked status fail with context.DeadlineExceeded, turning
+	// a graceful timeout into a spurious lane.Failed. See
+	// executor.Agy.Run's own doc comment: a dispatch that hit ctx's
+	// deadline returns Outcome{TimedOut: true} with a nil error
+	// precisely so the caller can still finish recording it normally.
+	persistCtx := context.WithoutCancel(ctx)
+
 	if err != nil {
 		// executor.Executor.Run returns a non-nil error only for the
 		// genuine never-ran case (see executor.Agy.Run's doc comment) --
@@ -189,13 +216,13 @@ func Execute(ctx context.Context, deps Deps, p packet.Packet) (Report, error) {
 		// leaving it there would report a lane as running forever when
 		// nothing is running; recordLaneFailure closes that gap.
 		cause := fmt.Errorf("run: dispatch lane %q: %w", p.ID, err)
-		return Report{}, recordLaneFailure(ctx, deps, p.ID, now, cause)
+		return Report{}, recordLaneFailure(persistCtx, deps, p.ID, now, cause)
 	}
 
 	status, envelope, reason := decideStatus(deps, wt.Path, outcome)
 
 	if reason != "" {
-		if err := deps.Ledger.AppendEvent(ctx, ledger.Event{
+		if err := deps.Ledger.AppendEvent(persistCtx, ledger.Event{
 			RunID:  deps.RunID,
 			LaneID: p.ID,
 			Type:   ledger.EventLaneNote,
@@ -203,20 +230,20 @@ func Execute(ctx context.Context, deps Deps, p packet.Packet) (Report, error) {
 			At:     now,
 		}); err != nil {
 			cause := fmt.Errorf("run: append reason event for %q: %w", p.ID, err)
-			return Report{}, recordLaneFailure(ctx, deps, p.ID, now, cause)
+			return Report{}, recordLaneFailure(persistCtx, deps, p.ID, now, cause)
 		}
 	}
 
-	if err := deps.Ledger.SetStatus(ctx, deps.RunID, p.ID, status, now); err != nil {
+	if err := deps.Ledger.SetStatus(persistCtx, deps.RunID, p.ID, status, now); err != nil {
 		cause := fmt.Errorf("run: set lane %q terminal status: %w", p.ID, err)
-		return Report{}, recordLaneFailure(ctx, deps, p.ID, now, cause)
+		return Report{}, recordLaneFailure(persistCtx, deps, p.ID, now, cause)
 	}
 
 	// A truncated capture is recorded as its own ledger event so the
 	// fact survives the run, not only the one process that printed it.
 	// It is appended under ledger.EventLaneNote as a diagnostic annotation.
 	if outcome.OutputTruncated {
-		if err := deps.Ledger.AppendEvent(ctx, ledger.Event{
+		if err := deps.Ledger.AppendEvent(persistCtx, ledger.Event{
 			RunID:  deps.RunID,
 			LaneID: p.ID,
 			Type:   ledger.EventLaneNote,
@@ -224,31 +251,7 @@ func Execute(ctx context.Context, deps Deps, p packet.Packet) (Report, error) {
 			At:     now,
 		}); err != nil {
 			cause := fmt.Errorf("run: append output-truncated event for %q: %w", p.ID, err)
-			return Report{}, recordLaneFailure(ctx, deps, p.ID, now, cause)
-		}
-	}
-
-	b, err := barrier.New([]string{p.ID})
-	if err != nil {
-		cause := fmt.Errorf("run: build barrier for lane %q: %w", p.ID, err)
-		return Report{}, recordLaneFailure(ctx, deps, p.ID, now, cause)
-	}
-	if err := b.Observe(lane.State{LaneID: p.ID, Status: status}); err != nil {
-		cause := fmt.Errorf("run: observe lane %q into barrier: %w", p.ID, err)
-		return Report{}, recordLaneFailure(ctx, deps, p.ID, now, cause)
-	}
-	bOutcome := b.Outcome()
-
-	if bOutcome.Released {
-		if err := deps.Ledger.AppendEvent(ctx, ledger.Event{
-			RunID:  deps.RunID,
-			LaneID: p.ID,
-			Type:   ledger.EventBarrierReleased,
-			Detail: string(status),
-			At:     now,
-		}); err != nil {
-			cause := fmt.Errorf("run: append barrier_released event for %q: %w", p.ID, err)
-			return Report{}, recordLaneFailure(ctx, deps, p.ID, now, cause)
+			return Report{}, recordLaneFailure(persistCtx, deps, p.ID, now, cause)
 		}
 	}
 
@@ -257,8 +260,6 @@ func Execute(ctx context.Context, deps Deps, p packet.Packet) (Report, error) {
 		Status:                  status,
 		Worktree:                wt.Path,
 		Envelope:                envelope,
-		Released:                bOutcome.Released,
-		Outcome:                 bOutcome,
 		OutputCaptureIncomplete: outcome.OutputTruncated,
 	}, nil
 }

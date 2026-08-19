@@ -22,16 +22,20 @@ import (
 	"github.com/LanzerDevCorp/lucind-ai/internal/worktree"
 )
 
-// defaultTimeout is the wall clock the binary owns for one dispatch, absent
-// an explicit --timeout. It matches the invocation documented in
+// defaultTimeout is the wall clock the binary grants each lane, absent an
+// explicit --timeout. It matches the invocation documented in
 // plugin/claude-code/skills/lucind-ai/references/runtime.md, which is the
-// authoritative source for a headless agy dispatch's shape.
+// authoritative source for a headless agy dispatch's shape. It is applied
+// per lane (via run.Deps.LaneTimeout, which run.ExecuteBatch derives each
+// lane's own deadline from independently), never once for the whole batch
+// -- see run.ExecuteBatch's doc comment for why.
 const defaultTimeout = 20 * time.Minute
 
 // usage is printed on stderr for a missing/unknown subcommand or a usage
 // error, so a person driving the binary from a terminal always sees the one
-// invocation that works rather than a stack trace.
-const usage = "usage: lucind-ai run --packet <path> [--timeout <duration>]"
+// invocation that works rather than a stack trace. --packet is repeatable:
+// each occurrence adds one more lane to the batch.
+const usage = "usage: lucind-ai run --packet <path> [--packet <path> ...] [--timeout <duration>]"
 
 // supportedExecutors names every packet.Executor value this binary knows
 // how to dispatch. Unlisted values are a routing error, never a silent
@@ -40,10 +44,34 @@ var supportedExecutors = map[string]func() executor.Executor{
 	"agy": func() executor.Executor { return executor.Agy{} },
 }
 
-// run parses args, wires internal/run.Deps from the real world, executes
-// exactly one packet, and reports the outcome to stdout/stderr. It returns
-// a process exit code rather than calling os.Exit itself so it is testable
-// in-process.
+// packetPaths collects every --packet flag value, in the order given, so a
+// single invocation can name a batch of lanes rather than just one. A
+// single --packet keeps working exactly as before: len(packetPaths) == 1
+// is simply the one-lane case of the same flow.
+type packetPaths []string
+
+// String satisfies flag.Value. It is never used to reconstruct a working
+// command line (flag.Value's String is mainly for printing defaults), so a
+// simple comma join is enough.
+func (p *packetPaths) String() string {
+	if p == nil {
+		return ""
+	}
+	return strings.Join(*p, ",")
+}
+
+// Set satisfies flag.Value and is what makes --packet repeatable: the flag
+// package calls Set once per occurrence instead of overwriting a single
+// value.
+func (p *packetPaths) Set(v string) error {
+	*p = append(*p, v)
+	return nil
+}
+
+// run parses args, wires internal/run.Deps from the real world, dispatches
+// every named packet as its own lane through internal/run.ExecuteBatch, and
+// reports the outcome to stdout/stderr. It returns a process exit code
+// rather than calling os.Exit itself so it is testable in-process.
 func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
 		fmt.Fprintln(stderr, usage)
@@ -59,8 +87,9 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	}
 }
 
-// runDispatch implements the "run" subcommand: one packet, dispatched
-// end-to-end through internal/run.Execute.
+// runDispatch implements the "run" subcommand: every --packet becomes one
+// lane, and every lane in the batch is dispatched end to end through
+// internal/run.ExecuteBatch.
 func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -69,8 +98,9 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 		fs.PrintDefaults()
 	}
 
-	packetPath := fs.String("packet", "", "path to the dispatch packet (required)")
-	timeout := fs.Duration("timeout", defaultTimeout, "wall clock budget for this dispatch")
+	var packetFlags packetPaths
+	fs.Var(&packetFlags, "packet", "path to a dispatch packet (repeatable: one lane per occurrence)")
+	timeout := fs.Duration("timeout", defaultTimeout, "wall clock budget granted to each lane")
 
 	if err := fs.Parse(args); err != nil {
 		// flag.ContinueOnError already invoked fs.Usage() on a parse
@@ -78,30 +108,39 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 		return 1
 	}
 
-	if *packetPath == "" {
+	if len(packetFlags) == 0 {
 		fmt.Fprintln(stderr, "lucind-ai: --packet is required")
 		fs.Usage()
 		return 1
 	}
 
-	f, err := os.Open(*packetPath)
-	if err != nil {
-		fmt.Fprintf(stderr, "lucind-ai: open packet %q: %v\n", *packetPath, err)
-		return 1
+	ps := make([]packet.Packet, 0, len(packetFlags))
+	for _, path := range packetFlags {
+		f, err := os.Open(path)
+		if err != nil {
+			fmt.Fprintf(stderr, "lucind-ai: open packet %q: %v\n", path, err)
+			return 1
+		}
+		p, err := packet.Parse(f)
+		f.Close()
+		if err != nil {
+			fmt.Fprintf(stderr, "lucind-ai: parse packet %q: %v\n", path, err)
+			return 1
+		}
+		ps = append(ps, p)
 	}
-	defer f.Close()
 
-	p, err := packet.Parse(f)
-	if err != nil {
-		fmt.Fprintf(stderr, "lucind-ai: parse packet %q: %v\n", *packetPath, err)
-		return 1
+	// Every lane in a batch shares one run.Deps.Executor instance (see
+	// run.ExecuteBatch's signature), so every packet in this batch must
+	// name a supported executor -- checked for every packet before any of
+	// them dispatches.
+	for i, p := range ps {
+		if _, ok := supportedExecutors[p.Executor]; !ok {
+			fmt.Fprintf(stderr, "lucind-ai: unsupported executor %q in packet %q (supported: agy)\n", p.Executor, packetFlags[i])
+			return 1
+		}
 	}
-
-	newExecutor, ok := supportedExecutors[p.Executor]
-	if !ok {
-		fmt.Fprintf(stderr, "lucind-ai: unsupported executor %q in packet %q (supported: agy)\n", p.Executor, *packetPath)
-		return 1
-	}
+	newExecutor := supportedExecutors[ps[0].Executor]
 
 	primaryRoot, err := resolvePrimaryRoot(ctx)
 	if err != nil {
@@ -136,40 +175,55 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 		CreateWorktree: worktree.Create,
 		WorktreeFS:     os.DirFS,
 		Now:            time.Now,
+		LaneTimeout:    *timeout,
 	}
 
-	dispatchCtx, cancel := context.WithTimeout(ctx, *timeout)
-	defer cancel()
+	// N lanes is N simultaneous subscription quota burns. The forecast
+	// only prints for an actual batch (more than one lane): a single
+	// packet is not a quota-multiplying decision worth flagging.
+	if len(ps) > 1 {
+		fmt.Fprintf(stdout, "about to dispatch %d lanes concurrently -- each lane burns subscription quota concurrently (%d simultaneous quota burns)\n", len(ps), len(ps))
+	}
 
-	report, err := lucindrun.Execute(dispatchCtx, deps, p)
+	// ctx itself carries no deadline here: run.ExecuteBatch derives each
+	// lane's own deadline independently from deps.LaneTimeout, so a slow
+	// lane never consumes another lane's clock.
+	batch, err := lucindrun.ExecuteBatch(ctx, deps, ps)
 	if err != nil {
-		// internal/run.Execute's own errors already start with "run: ",
-		// so no second "run: " prefix is added here -- otherwise a user
-		// sees a doubled "lucind-ai: run: run: ..." on stderr.
+		// internal/run.ExecuteBatch's own errors already start with
+		// "run: ", so no second "run: " prefix is added here -- otherwise
+		// a user sees a doubled "lucind-ai: run: run: ..." on stderr.
 		fmt.Fprintf(stderr, "lucind-ai: %v\n", err)
 		return 1
 	}
 
-	printReport(stdout, report)
+	for _, r := range batch.Lanes {
+		printReport(stdout, r)
+	}
+	fmt.Fprintf(stdout, "released:  %t\n", batch.Released)
 
-	// Exit 0 requires both a clean Execute call and a lane that actually
-	// reached lane.Done. A blocked/deviated/failed lane is a real,
-	// non-crashing outcome (see printReport), but it must never be
-	// mistaken for success by anything reading the exit code.
-	if report.Status != lane.Done {
-		return 1
+	// Exit 0 requires every lane to have actually reached lane.Done. A
+	// blocked/deviated/failed lane is a real, non-crashing outcome (see
+	// printReport), but it must never be mistaken for success by anything
+	// reading the exit code.
+	for _, r := range batch.Lanes {
+		if r.Status != lane.Done {
+			return 1
+		}
 	}
 	return 0
 }
 
 // printReport prints a short, human-readable summary of one lane's run.
 // A lane that did not reach lane.Done gets a visually unmissable banner so
-// a person skimming a terminal cannot mistake it for a successful run.
+// a person skimming a terminal cannot mistake it for a successful run. It
+// does not print the batch's barrier release: that is a property of the
+// whole batch, not of any one lane, so runDispatch prints it once, after
+// every lane's report.
 func printReport(w io.Writer, r lucindrun.Report) {
 	fmt.Fprintf(w, "lane:      %s\n", r.LaneID)
 	fmt.Fprintf(w, "status:    %s\n", r.Status)
 	fmt.Fprintf(w, "worktree:  %s\n", r.Worktree)
-	fmt.Fprintf(w, "released:  %t\n", r.Released)
 	if r.Envelope != nil {
 		fmt.Fprintf(w, "summary:   %s\n", r.Envelope.Summary)
 	}

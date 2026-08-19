@@ -90,7 +90,7 @@ func newTestDeps(t *testing.T, wtPath string, fsys func(string) fs.FS, exec exec
 	}
 }
 
-func TestExecuteHappyPathEnvelopeDoneReleasesBarrierAndIntegrates(t *testing.T) {
+func TestExecuteHappyPathEnvelopeDoneReachesLaneDone(t *testing.T) {
 	wtPath := t.TempDir()
 	fe := &fakeExecutor{outcome: executor.Outcome{ExitCode: 0}}
 	deps := newTestDeps(t, wtPath, func(string) fs.FS {
@@ -105,17 +105,8 @@ func TestExecuteHappyPathEnvelopeDoneReleasesBarrierAndIntegrates(t *testing.T) 
 	if report.Status != lane.Done {
 		t.Errorf("report.Status = %v, want %v", report.Status, lane.Done)
 	}
-	if !report.Released {
-		t.Errorf("report.Released = false, want true")
-	}
 	if report.Envelope == nil {
 		t.Fatal("report.Envelope = nil, want a populated envelope")
-	}
-	if got := len(report.Outcome.Integrate); got != 1 || report.Outcome.Integrate[0] != "lane-a" {
-		t.Errorf("report.Outcome.Integrate = %v, want [lane-a]", report.Outcome.Integrate)
-	}
-	if len(report.Outcome.Preserve) != 0 {
-		t.Errorf("report.Outcome.Preserve = %v, want empty", report.Outcome.Preserve)
 	}
 
 	// The ledger, not the Report, is the source of truth: query it back
@@ -138,7 +129,7 @@ const blockedEnvelopeJSON = `{
 	"hard_stops": [{"hard_stop": "do not touch internal/barrier", "fired": true, "note": "would have had to edit it"}]
 }`
 
-func TestExecuteEnvelopeBlockedIsPreservedNotIntegrated(t *testing.T) {
+func TestExecuteEnvelopeBlockedReachesLaneBlocked(t *testing.T) {
 	wtPath := t.TempDir()
 	fe := &fakeExecutor{outcome: executor.Outcome{ExitCode: 0}}
 	deps := newTestDeps(t, wtPath, func(string) fs.FS {
@@ -152,15 +143,6 @@ func TestExecuteEnvelopeBlockedIsPreservedNotIntegrated(t *testing.T) {
 
 	if report.Status != lane.Blocked {
 		t.Errorf("report.Status = %v, want %v", report.Status, lane.Blocked)
-	}
-	if !report.Released {
-		t.Errorf("report.Released = false, want true")
-	}
-	if len(report.Outcome.Integrate) != 0 {
-		t.Errorf("report.Outcome.Integrate = %v, want empty", report.Outcome.Integrate)
-	}
-	if got := len(report.Outcome.Preserve); got != 1 || report.Outcome.Preserve[0] != "lane-a" {
-		t.Errorf("report.Outcome.Preserve = %v, want [lane-a]", report.Outcome.Preserve)
 	}
 
 	states, err := deps.Ledger.LaneStates(context.Background(), "run-1")
@@ -335,6 +317,11 @@ func TestExecuteRequestCarriesPacketBodyAndWorktreeAndSchemaPaths(t *testing.T) 
 	}
 }
 
+// TestExecuteAppendsLifecycleLedgerEvents proves Execute's own lifecycle
+// events land in the ledger. It does not check for a barrier_released
+// event: Execute does not own a barrier at all (see ExecuteBatch, in
+// batch.go) -- that event is ExecuteBatch's responsibility now, not
+// Execute's.
 func TestExecuteAppendsLifecycleLedgerEvents(t *testing.T) {
 	wtPath := t.TempDir()
 	fe := &fakeExecutor{outcome: executor.Outcome{ExitCode: 0}}
@@ -351,7 +338,7 @@ func TestExecuteAppendsLifecycleLedgerEvents(t *testing.T) {
 		t.Fatalf("Events() error = %v", err)
 	}
 
-	var sawRegistered, sawStatusChanged, sawBarrierReleased bool
+	var sawRegistered, sawStatusChanged bool
 	for _, e := range events {
 		if e.LaneID != "lane-a" {
 			t.Errorf("event %+v carries LaneID %q, want lane-a for every event this run produces", e, e.LaneID)
@@ -361,8 +348,6 @@ func TestExecuteAppendsLifecycleLedgerEvents(t *testing.T) {
 			sawRegistered = true
 		case ledger.EventLaneStatusChanged:
 			sawStatusChanged = true
-		case ledger.EventBarrierReleased:
-			sawBarrierReleased = true
 		}
 	}
 	if !sawRegistered {
@@ -370,9 +355,6 @@ func TestExecuteAppendsLifecycleLedgerEvents(t *testing.T) {
 	}
 	if !sawStatusChanged {
 		t.Errorf("no %s event recorded; events = %+v", ledger.EventLaneStatusChanged, events)
-	}
-	if !sawBarrierReleased {
-		t.Errorf("no %s event recorded; events = %+v", ledger.EventBarrierReleased, events)
 	}
 }
 

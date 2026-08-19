@@ -1,0 +1,636 @@
+package run_test
+
+import (
+	"context"
+	"fmt"
+	"io/fs"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"testing/fstest"
+	"time"
+
+	"github.com/LanzerDevCorp/lucind-ai/internal/executor"
+	"github.com/LanzerDevCorp/lucind-ai/internal/lane"
+	"github.com/LanzerDevCorp/lucind-ai/internal/ledger"
+	"github.com/LanzerDevCorp/lucind-ai/internal/packet"
+	"github.com/LanzerDevCorp/lucind-ai/internal/run"
+	"github.com/LanzerDevCorp/lucind-ai/internal/worktree"
+)
+
+// batchPacket builds a valid packet for the given lane ID, matching
+// testPacket's shape (executor "agy", a non-empty routed_by, matching the
+// ledger schema's CHECK constraint and packet.Parse's own requirements).
+func batchPacket(id string) packet.Packet {
+	return packet.Packet{ID: id, Executor: "agy", RoutedBy: "touches config, Tier A audit mandatory", Body: "do the thing"}
+}
+
+// laneEnvelopeJSON returns a minimal envelope satisfying result.schema.json
+// for the given lane ID and status ("done" or "blocked").
+func laneEnvelopeJSON(id, status string) string {
+	if status == "blocked" {
+		return fmt.Sprintf(`{
+			"packet_id": %q,
+			"status": "blocked",
+			"summary": "hit a hard stop",
+			"hard_stops": [{"hard_stop": "do not touch internal/barrier", "fired": true, "note": "would have had to edit it"}]
+		}`, id)
+	}
+	return fmt.Sprintf(`{
+		"packet_id": %q,
+		"status": "done",
+		"summary": "did the thing",
+		"hard_stops": [{"hard_stop": "do not touch internal/barrier", "fired": false}]
+	}`, id)
+}
+
+// batchFakeExecutor is a per-lane-aware test double: it looks up the
+// programmed outcome by worktree path (each lane gets a distinct worktree
+// path in these tests) so different lanes can return different outcomes,
+// and it records observable start/end ordering so concurrency can be
+// proven without relying on wall-clock timing.
+type batchFakeExecutor struct {
+	mu sync.Mutex
+
+	// outcomeFor maps a worktree path to the outcome/err that lane's Run
+	// call should return.
+	outcomeFor map[string]executor.Outcome
+	errFor     map[string]error
+
+	// delay, if set for a worktree path, is how long Run sleeps before
+	// returning for that lane -- used only to create a genuine ordering
+	// (slow lane started, then fast lane both started and finished) that
+	// the trace below then verifies by recorded events, not by asserting
+	// on wall-clock durations.
+	delayFor map[string]time.Duration
+
+	// blockOn, if set for a worktree path, makes Run wait on that channel
+	// (in addition to any delay above) before returning -- used to prove
+	// concurrency deterministically via synchronization rather than
+	// timing: see TestExecuteBatchRunsLanesConcurrentlyNotSequentially.
+	blockOn map[string]<-chan struct{}
+
+	// closeOnReturn, if set for a worktree path, is closed right before
+	// Run returns for that lane -- the counterpart to blockOn above.
+	closeOnReturn map[string]chan struct{}
+
+	trace []string // "start:<path>" / "end:<path>", in actual call order
+}
+
+func newBatchFakeExecutor() *batchFakeExecutor {
+	return &batchFakeExecutor{
+		outcomeFor:    map[string]executor.Outcome{},
+		errFor:        map[string]error{},
+		delayFor:      map[string]time.Duration{},
+		blockOn:       map[string]<-chan struct{}{},
+		closeOnReturn: map[string]chan struct{}{},
+	}
+}
+
+func (f *batchFakeExecutor) Run(ctx context.Context, req executor.Request) (executor.Outcome, error) {
+	f.mu.Lock()
+	f.trace = append(f.trace, "start:"+req.WorktreePath)
+	delay := f.delayFor[req.WorktreePath]
+	blockOn := f.blockOn[req.WorktreePath]
+	f.mu.Unlock()
+
+	if delay > 0 {
+		select {
+		case <-time.After(delay):
+		case <-ctx.Done():
+		}
+	}
+	if blockOn != nil {
+		select {
+		case <-blockOn:
+		case <-ctx.Done():
+		}
+	}
+
+	f.mu.Lock()
+	f.trace = append(f.trace, "end:"+req.WorktreePath)
+	closeCh := f.closeOnReturn[req.WorktreePath]
+	outcome := f.outcomeFor[req.WorktreePath]
+	errv, hasErr := f.errFor[req.WorktreePath]
+	f.mu.Unlock()
+
+	if closeCh != nil {
+		close(closeCh)
+	}
+
+	// Mirror executor.Agy.Run's own real contract (see agy.go): a
+	// dispatch whose context hit its deadline is reported as a graceful
+	// TimedOut outcome with a nil error, never as a Go error.
+	if ctx.Err() == context.DeadlineExceeded {
+		return executor.Outcome{TimedOut: true}, nil
+	}
+
+	if hasErr {
+		return executor.Outcome{}, errv
+	}
+	return outcome, nil
+}
+
+// newBatchTestDeps builds run.Deps wired to a real on-disk ledger, one
+// distinct stub worktree per lane (keyed by lane ID, so tests can control
+// each lane's fake executor outcome and result envelope independently), and
+// a pinned clock. failWorktreeFor, if non-nil, names lane IDs whose
+// CreateWorktree call should fail instead of succeeding.
+func newBatchTestDeps(t *testing.T, worktreeRoot func(laneID string) string, envelopeFor func(laneID string) []byte, exec executor.Executor, failWorktreeFor map[string]bool) run.Deps {
+	t.Helper()
+
+	l, err := ledger.Open(context.Background(), t.TempDir())
+	if err != nil {
+		t.Fatalf("ledger.Open() error = %v", err)
+	}
+	t.Cleanup(func() { l.Close() })
+
+	now := time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC)
+
+	return run.Deps{
+		RunID:    "run-1",
+		Ledger:   l,
+		Executor: exec,
+		CreateWorktree: func(_ context.Context, _, laneID string) (worktree.Worktree, error) {
+			if failWorktreeFor[laneID] {
+				return worktree.Worktree{}, fmt.Errorf("git worktree add: boom for %s", laneID)
+			}
+			return worktree.Worktree{Path: worktreeRoot(laneID), Branch: "lucind/" + laneID}, nil
+		},
+		WorktreeFS: func(path string) fs.FS {
+			// Derive the lane ID from the worktree path suffix, which
+			// worktreeRoot always sets to the lane ID itself in these
+			// tests.
+			laneID := path[strings.LastIndex(path, "/")+1:]
+			data := envelopeFor(laneID)
+			if data == nil {
+				return fstest.MapFS{}
+			}
+			return fstest.MapFS{".lucind/result.json": {Data: data}}
+		},
+		Now: func() time.Time { return now },
+	}
+}
+
+func TestExecuteBatchAllDoneReleasesAndIntegratesAll(t *testing.T) {
+	root := t.TempDir()
+	ids := []string{"lane-a", "lane-b", "lane-c"}
+	fe := newBatchFakeExecutor()
+	for _, id := range ids {
+		fe.outcomeFor[root+"/"+id] = executor.Outcome{ExitCode: 0}
+	}
+	deps := newBatchTestDeps(t, func(id string) string { return root + "/" + id }, func(id string) []byte {
+		return []byte(laneEnvelopeJSON(id, "done"))
+	}, fe, nil)
+
+	var ps []packet.Packet
+	for _, id := range ids {
+		ps = append(ps, batchPacket(id))
+	}
+
+	report, err := run.ExecuteBatch(context.Background(), deps, ps)
+	if err != nil {
+		t.Fatalf("ExecuteBatch() error = %v, want nil", err)
+	}
+
+	if !report.Released {
+		t.Errorf("report.Released = false, want true")
+	}
+	if len(report.Lanes) != 3 {
+		t.Fatalf("len(report.Lanes) = %d, want 3", len(report.Lanes))
+	}
+	if got := len(report.Outcome.Integrate); got != 3 {
+		t.Errorf("len(report.Outcome.Integrate) = %d, want 3; Integrate = %v", got, report.Outcome.Integrate)
+	}
+	if len(report.Outcome.Preserve) != 0 {
+		t.Errorf("report.Outcome.Preserve = %v, want empty", report.Outcome.Preserve)
+	}
+
+	// The ledger, not the Report, is the source of truth.
+	states, err := deps.Ledger.LaneStates(context.Background(), "run-1")
+	if err != nil {
+		t.Fatalf("LaneStates() error = %v", err)
+	}
+	if len(states) != 3 {
+		t.Fatalf("LaneStates() = %+v, want 3 lanes", states)
+	}
+	for _, s := range states {
+		if s.Status != lane.Done {
+			t.Errorf("lane %s status = %v, want done", s.LaneID, s.Status)
+		}
+	}
+}
+
+// TestExecuteBatchOneBlockedStillCompletesAndPreservesOnlyThatLane proves
+// the governing rule: a lane that ends badly lets the batch finish, and
+// everything is preserved -- the blocked lane must neither cancel nor skip
+// the two done lanes.
+func TestExecuteBatchOneBlockedStillCompletesAndPreservesOnlyThatLane(t *testing.T) {
+	root := t.TempDir()
+	fe := newBatchFakeExecutor()
+	fe.outcomeFor[root+"/lane-blocked"] = executor.Outcome{ExitCode: 0}
+	fe.outcomeFor[root+"/lane-b"] = executor.Outcome{ExitCode: 0}
+	fe.outcomeFor[root+"/lane-c"] = executor.Outcome{ExitCode: 0}
+
+	deps := newBatchTestDeps(t, func(id string) string { return root + "/" + id }, func(id string) []byte {
+		if id == "lane-blocked" {
+			return []byte(laneEnvelopeJSON(id, "blocked"))
+		}
+		return []byte(laneEnvelopeJSON(id, "done"))
+	}, fe, nil)
+
+	ps := []packet.Packet{batchPacket("lane-blocked"), batchPacket("lane-b"), batchPacket("lane-c")}
+
+	report, err := run.ExecuteBatch(context.Background(), deps, ps)
+	if err != nil {
+		t.Fatalf("ExecuteBatch() error = %v, want nil", err)
+	}
+
+	if !report.Released {
+		t.Errorf("report.Released = false, want true")
+	}
+	if got := len(report.Outcome.Preserve); got != 1 || report.Outcome.Preserve[0] != "lane-blocked" {
+		t.Errorf("report.Outcome.Preserve = %v, want [lane-blocked]", report.Outcome.Preserve)
+	}
+	if got := len(report.Outcome.Integrate); got != 2 {
+		t.Errorf("len(report.Outcome.Integrate) = %d, want 2; got %v", got, report.Outcome.Integrate)
+	}
+
+	states, err := deps.Ledger.LaneStates(context.Background(), "run-1")
+	if err != nil {
+		t.Fatalf("LaneStates() error = %v", err)
+	}
+	byID := map[string]lane.Status{}
+	for _, s := range states {
+		byID[s.LaneID] = s.Status
+	}
+	if byID["lane-blocked"] != lane.Blocked {
+		t.Errorf("lane-blocked status = %v, want blocked", byID["lane-blocked"])
+	}
+	if byID["lane-b"] != lane.Done {
+		t.Errorf("lane-b status = %v, want done -- must not have been cancelled or skipped by lane-blocked", byID["lane-b"])
+	}
+	if byID["lane-c"] != lane.Done {
+		t.Errorf("lane-c status = %v, want done -- must not have been cancelled or skipped by lane-blocked", byID["lane-c"])
+	}
+}
+
+// TestExecuteBatchWorktreeCreationFailureStillRegistersLaneAsFailed proves
+// requirement 3: a lane that never starts (its CreateWorktree call fails)
+// is still registered in the ledger and driven to lane.Failed, so the
+// batch's barrier still has a complete expected set and the batch itself
+// still completes with the other lanes still running.
+func TestExecuteBatchWorktreeCreationFailureStillRegistersLaneAsFailed(t *testing.T) {
+	root := t.TempDir()
+	fe := newBatchFakeExecutor()
+	fe.outcomeFor[root+"/lane-b"] = executor.Outcome{ExitCode: 0}
+
+	deps := newBatchTestDeps(t, func(id string) string { return root + "/" + id }, func(id string) []byte {
+		return []byte(laneEnvelopeJSON(id, "done"))
+	}, fe, map[string]bool{"lane-fails-to-start": true})
+
+	ps := []packet.Packet{batchPacket("lane-fails-to-start"), batchPacket("lane-b")}
+
+	report, err := run.ExecuteBatch(context.Background(), deps, ps)
+	if err != nil {
+		t.Fatalf("ExecuteBatch() error = %v, want nil (a lane failing to start must not fail the whole batch)", err)
+	}
+	if !report.Released {
+		t.Errorf("report.Released = false, want true")
+	}
+	if len(report.Lanes) != 2 {
+		t.Fatalf("len(report.Lanes) = %d, want 2", len(report.Lanes))
+	}
+
+	states, err := deps.Ledger.LaneStates(context.Background(), "run-1")
+	if err != nil {
+		t.Fatalf("LaneStates() error = %v", err)
+	}
+	if len(states) != 2 {
+		t.Fatalf("LaneStates() = %+v, want 2 lanes (the never-started lane must still be registered)", states)
+	}
+	byID := map[string]lane.Status{}
+	for _, s := range states {
+		byID[s.LaneID] = s.Status
+	}
+	if byID["lane-fails-to-start"] != lane.Failed {
+		t.Errorf("lane-fails-to-start status = %v, want failed", byID["lane-fails-to-start"])
+	}
+	if byID["lane-b"] != lane.Done {
+		t.Errorf("lane-b status = %v, want done -- must still have run", byID["lane-b"])
+	}
+
+	if got := len(report.Outcome.Preserve); got != 1 || report.Outcome.Preserve[0] != "lane-fails-to-start" {
+		t.Errorf("report.Outcome.Preserve = %v, want [lane-fails-to-start]", report.Outcome.Preserve)
+	}
+}
+
+// TestExecuteBatchRunsLanesConcurrentlyNotSequentially proves lanes run
+// concurrently by deterministic synchronization, never by wall-clock timing
+// (sleeping and hoping the scheduler interleaves the way you expect is
+// exactly the flakiness the task warns against). lane-slow's dispatch is
+// made to block until lane-fast's dispatch has fully returned. If
+// ExecuteBatch ran lanes sequentially -- fully executing lane-slow (the
+// first packet) before even starting lane-fast -- lane-fast's Run would
+// never be called, the channel lane-slow is blocked on would never close,
+// and the whole call would hang forever. The only way this test can
+// complete is if lane-fast's goroutine actually got to run (and finish)
+// while lane-slow's own dispatch was still in flight, which is only
+// possible if the two lanes run in separate, unserialized goroutines.
+func TestExecuteBatchRunsLanesConcurrentlyNotSequentially(t *testing.T) {
+	root := t.TempDir()
+	fe := newBatchFakeExecutor()
+	slowPath := root + "/lane-slow"
+	fastPath := root + "/lane-fast"
+	fe.outcomeFor[slowPath] = executor.Outcome{ExitCode: 0}
+	fe.outcomeFor[fastPath] = executor.Outcome{ExitCode: 0}
+
+	fastDone := make(chan struct{})
+	fe.blockOn[slowPath] = fastDone
+	fe.closeOnReturn[fastPath] = fastDone
+
+	deps := newBatchTestDeps(t, func(id string) string { return root + "/" + id }, func(id string) []byte {
+		return []byte(laneEnvelopeJSON(id, "done"))
+	}, fe, nil)
+
+	ps := []packet.Packet{batchPacket("lane-slow"), batchPacket("lane-fast")}
+
+	type outcome struct {
+		report run.BatchReport
+		err    error
+	}
+	resultCh := make(chan outcome, 1)
+	go func() {
+		r, err := run.ExecuteBatch(context.Background(), deps, ps)
+		resultCh <- outcome{report: r, err: err}
+	}()
+
+	select {
+	case res := <-resultCh:
+		if res.err != nil {
+			t.Fatalf("ExecuteBatch() error = %v, want nil", res.err)
+		}
+		byID := map[string]lane.Status{}
+		for _, r := range res.report.Lanes {
+			byID[r.LaneID] = r.Status
+		}
+		if byID["lane-slow"] != lane.Done || byID["lane-fast"] != lane.Done {
+			t.Errorf("report.Lanes = %+v, want both lane-slow and lane-fast done", res.report.Lanes)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("ExecuteBatch did not complete within 3s: lane-slow's dispatch was blocked waiting for lane-fast's dispatch to finish, which only happens if the two lanes run concurrently -- this hang means they ran sequentially instead")
+	}
+}
+
+// TestExecuteBatchLanesComeBackInInputOrder proves Lanes preserves input
+// order regardless of completion order -- the slow lane is listed first in
+// the input even though the fast lane finishes first.
+func TestExecuteBatchLanesComeBackInInputOrder(t *testing.T) {
+	root := t.TempDir()
+	fe := newBatchFakeExecutor()
+	slowPath := root + "/lane-slow"
+	fastPath := root + "/lane-fast"
+	fe.outcomeFor[slowPath] = executor.Outcome{ExitCode: 0}
+	fe.outcomeFor[fastPath] = executor.Outcome{ExitCode: 0}
+	fe.delayFor[slowPath] = 100 * time.Millisecond
+
+	deps := newBatchTestDeps(t, func(id string) string { return root + "/" + id }, func(id string) []byte {
+		return []byte(laneEnvelopeJSON(id, "done"))
+	}, fe, nil)
+
+	ps := []packet.Packet{batchPacket("lane-slow"), batchPacket("lane-fast")}
+
+	report, err := run.ExecuteBatch(context.Background(), deps, ps)
+	if err != nil {
+		t.Fatalf("ExecuteBatch() error = %v, want nil", err)
+	}
+
+	if len(report.Lanes) != 2 {
+		t.Fatalf("len(report.Lanes) = %d, want 2", len(report.Lanes))
+	}
+	if report.Lanes[0].LaneID != "lane-slow" || report.Lanes[1].LaneID != "lane-fast" {
+		t.Errorf("report.Lanes = [%s, %s], want [lane-slow, lane-fast] (input order)", report.Lanes[0].LaneID, report.Lanes[1].LaneID)
+	}
+}
+
+// TestExecuteBatchConcurrentLedgerWritesDoNotErrorOrLoseData proves the
+// real ledger (WAL + busy_timeout + a >1 connection pool) tolerates N lanes
+// writing concurrently: every lane's registration and terminal status
+// arrives intact.
+func TestExecuteBatchConcurrentLedgerWritesDoNotErrorOrLoseData(t *testing.T) {
+	root := t.TempDir()
+	const n = 8
+	var ids []string
+	for i := 0; i < n; i++ {
+		ids = append(ids, fmt.Sprintf("lane-%02d", i))
+	}
+
+	fe := newBatchFakeExecutor()
+	for _, id := range ids {
+		fe.outcomeFor[root+"/"+id] = executor.Outcome{ExitCode: 0}
+	}
+
+	deps := newBatchTestDeps(t, func(id string) string { return root + "/" + id }, func(id string) []byte {
+		return []byte(laneEnvelopeJSON(id, "done"))
+	}, fe, nil)
+
+	var ps []packet.Packet
+	for _, id := range ids {
+		ps = append(ps, batchPacket(id))
+	}
+
+	report, err := run.ExecuteBatch(context.Background(), deps, ps)
+	if err != nil {
+		t.Fatalf("ExecuteBatch() error = %v, want nil", err)
+	}
+	if len(report.Lanes) != n {
+		t.Fatalf("len(report.Lanes) = %d, want %d", len(report.Lanes), n)
+	}
+
+	states, err := deps.Ledger.LaneStates(context.Background(), "run-1")
+	if err != nil {
+		t.Fatalf("LaneStates() error = %v", err)
+	}
+	if len(states) != n {
+		t.Fatalf("LaneStates() = %+v, want %d lanes", states, n)
+	}
+	for _, s := range states {
+		if s.Status != lane.Done {
+			t.Errorf("lane %s status = %v, want done", s.LaneID, s.Status)
+		}
+	}
+}
+
+// TestExecuteBatchRejectsEmptyBatchBeforeAnySideEffect proves an empty
+// packet slice is rejected before any worktree or ledger write.
+func TestExecuteBatchRejectsEmptyBatchBeforeAnySideEffect(t *testing.T) {
+	var createCalls int32
+	l, err := ledger.Open(context.Background(), t.TempDir())
+	if err != nil {
+		t.Fatalf("ledger.Open() error = %v", err)
+	}
+	t.Cleanup(func() { l.Close() })
+
+	deps := run.Deps{
+		RunID:    "run-1",
+		Ledger:   l,
+		Executor: newBatchFakeExecutor(),
+		CreateWorktree: func(context.Context, string, string) (worktree.Worktree, error) {
+			atomic.AddInt32(&createCalls, 1)
+			return worktree.Worktree{}, nil
+		},
+		WorktreeFS: func(string) fs.FS { return fstest.MapFS{} },
+		Now:        func() time.Time { return time.Now() },
+	}
+
+	_, err = run.ExecuteBatch(context.Background(), deps, nil)
+	if err == nil {
+		t.Fatal("ExecuteBatch(nil) error = nil, want non-nil for an empty batch")
+	}
+	if atomic.LoadInt32(&createCalls) != 0 {
+		t.Errorf("CreateWorktree was called %d time(s), want 0 for an empty batch", createCalls)
+	}
+
+	states, statesErr := deps.Ledger.LaneStates(context.Background(), "run-1")
+	if statesErr != nil {
+		t.Fatalf("LaneStates() error = %v", statesErr)
+	}
+	if len(states) != 0 {
+		t.Errorf("LaneStates() = %+v, want none", states)
+	}
+}
+
+// TestExecuteBatchRejectsDuplicateLaneIDsBeforeAnySideEffect proves
+// duplicate lane IDs are rejected up front, via barrier.New acting as the
+// sole authority on that check, before any worktree or ledger write.
+func TestExecuteBatchRejectsDuplicateLaneIDsBeforeAnySideEffect(t *testing.T) {
+	var createCalls int32
+	l, err := ledger.Open(context.Background(), t.TempDir())
+	if err != nil {
+		t.Fatalf("ledger.Open() error = %v", err)
+	}
+	t.Cleanup(func() { l.Close() })
+
+	deps := run.Deps{
+		RunID:    "run-1",
+		Ledger:   l,
+		Executor: newBatchFakeExecutor(),
+		CreateWorktree: func(context.Context, string, string) (worktree.Worktree, error) {
+			atomic.AddInt32(&createCalls, 1)
+			return worktree.Worktree{}, nil
+		},
+		WorktreeFS: func(string) fs.FS { return fstest.MapFS{} },
+		Now:        func() time.Time { return time.Now() },
+	}
+
+	ps := []packet.Packet{batchPacket("lane-dup"), batchPacket("lane-dup")}
+
+	_, err = run.ExecuteBatch(context.Background(), deps, ps)
+	if err == nil {
+		t.Fatal("ExecuteBatch() error = nil, want non-nil for duplicate lane IDs")
+	}
+	if atomic.LoadInt32(&createCalls) != 0 {
+		t.Errorf("CreateWorktree was called %d time(s), want 0 when duplicate lane IDs are rejected", createCalls)
+	}
+
+	states, statesErr := deps.Ledger.LaneStates(context.Background(), "run-1")
+	if statesErr != nil {
+		t.Fatalf("LaneStates() error = %v", statesErr)
+	}
+	if len(states) != 0 {
+		t.Errorf("LaneStates() = %+v, want none", states)
+	}
+}
+
+// TestExecuteBatchAppliesPerLaneDeadlineIndependently proves a slow lane's
+// dispatch, bounded by Deps.LaneTimeout, does not consume another lane's
+// clock. lane-slow's fake dispatch never returns on its own -- it blocks on
+// a channel that is never closed, so the only thing that can ever end it is
+// its own per-lane deadline firing -- while lane-fast has no delay or block
+// of any kind and so is never at risk of being slowed by lane-slow's
+// deadline. The only wall-clock dependency left is that
+// Deps.LaneTimeout must actually elapse for lane-slow to end at all, which
+// is inherent to testing a real time.Duration-based deadline; there is no
+// timing race between the two lanes for a scheduler hiccup to flip.
+func TestExecuteBatchAppliesPerLaneDeadlineIndependently(t *testing.T) {
+	root := t.TempDir()
+	fe := newBatchFakeExecutor()
+	slowPath := root + "/lane-slow"
+	fastPath := root + "/lane-fast"
+	fe.outcomeFor[fastPath] = executor.Outcome{ExitCode: 0}
+	fe.outcomeFor[slowPath] = executor.Outcome{ExitCode: 0}
+	// never is a channel that is never closed, so lane-slow's fake Run
+	// call can only return via its ctx.Done() branch -- i.e. only once
+	// its own per-lane deadline fires.
+	never := make(chan struct{})
+	fe.blockOn[slowPath] = never
+
+	deps := newBatchTestDeps(t, func(id string) string { return root + "/" + id }, func(id string) []byte {
+		return []byte(laneEnvelopeJSON(id, "done"))
+	}, fe, nil)
+	deps.LaneTimeout = 200 * time.Millisecond
+
+	ps := []packet.Packet{batchPacket("lane-slow"), batchPacket("lane-fast")}
+
+	report, err := run.ExecuteBatch(context.Background(), deps, ps)
+	if err != nil {
+		t.Fatalf("ExecuteBatch() error = %v, want nil", err)
+	}
+
+	byID := map[string]lane.Status{}
+	for _, r := range report.Lanes {
+		byID[r.LaneID] = r.Status
+	}
+	if byID["lane-fast"] != lane.Done {
+		t.Errorf("lane-fast status = %v, want done -- must not be affected by lane-slow's deadline", byID["lane-fast"])
+	}
+	if byID["lane-slow"] != lane.Blocked {
+		t.Errorf("lane-slow status = %v, want blocked (timed out on its own per-lane deadline)", byID["lane-slow"])
+	}
+}
+
+// TestExecuteBatchPreservesEveryWorktreeIncludingDone proves requirement 4:
+// nothing in ExecuteBatch removes a worktree, even for lanes that reached
+// lane.Done. Since worktree removal would be an actual filesystem
+// operation this test would need to observe, and CreateWorktree here is a
+// pure stub returning an in-memory path, the strongest available proof at
+// this seam is behavioral: the report and the ledger both still carry each
+// done lane's worktree path afterward, i.e. nothing scrubbed it.
+func TestExecuteBatchPreservesEveryWorktreeIncludingDone(t *testing.T) {
+	root := t.TempDir()
+	ids := []string{"lane-a", "lane-b"}
+	fe := newBatchFakeExecutor()
+	for _, id := range ids {
+		fe.outcomeFor[root+"/"+id] = executor.Outcome{ExitCode: 0}
+	}
+	deps := newBatchTestDeps(t, func(id string) string { return root + "/" + id }, func(id string) []byte {
+		return []byte(laneEnvelopeJSON(id, "done"))
+	}, fe, nil)
+
+	var ps []packet.Packet
+	for _, id := range ids {
+		ps = append(ps, batchPacket(id))
+	}
+
+	report, err := run.ExecuteBatch(context.Background(), deps, ps)
+	if err != nil {
+		t.Fatalf("ExecuteBatch() error = %v, want nil", err)
+	}
+
+	for _, r := range report.Lanes {
+		if r.Worktree == "" {
+			t.Errorf("lane %s report carries an empty Worktree path, want it preserved", r.LaneID)
+		}
+	}
+
+	lanes, err := deps.Ledger.Lanes(context.Background(), "run-1")
+	if err != nil {
+		t.Fatalf("Lanes() error = %v", err)
+	}
+	for _, ln := range lanes {
+		if ln.WorktreePath == "" {
+			t.Errorf("ledger lane %s carries an empty worktree_path, want it preserved", ln.LaneID)
+		}
+	}
+}
