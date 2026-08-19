@@ -12,6 +12,7 @@ func TestParseSeparatesFrontmatterFromBody(t *testing.T) {
 	src := "---\n" +
 		"id: fix-auth\n" +
 		"executor: agy\n" +
+		"routed_by: touches auth, Tier A verification required\n" +
 		"---\n" +
 		"\n" +
 		"## Goal\n" +
@@ -29,10 +30,55 @@ func TestParseSeparatesFrontmatterFromBody(t *testing.T) {
 	if p.Executor != "agy" {
 		t.Errorf("Executor = %q, want %q", p.Executor, "agy")
 	}
+	if p.RoutedBy != "touches auth, Tier A verification required" {
+		t.Errorf("RoutedBy = %q, want %q", p.RoutedBy, "touches auth, Tier A verification required")
+	}
 
 	wantBody := "## Goal\n\nSession cookies must survive a restart.\n"
 	if p.Body != wantBody {
 		t.Errorf("Body = %q, want %q", p.Body, wantBody)
+	}
+}
+
+func TestParseModelPresentIsParsed(t *testing.T) {
+	src := "---\n" +
+		"id: fix-auth\n" +
+		"executor: agy\n" +
+		"routed_by: touches auth, Tier A verification required\n" +
+		"model: gemini-3.7-flash-high\n" +
+		"---\n" +
+		"\n" +
+		"## Goal\n"
+
+	p, err := packet.Parse(strings.NewReader(src))
+	if err != nil {
+		t.Fatalf("Parse() error = %v, want nil", err)
+	}
+	if p.Model != "gemini-3.7-flash-high" {
+		t.Errorf("Model = %q, want %q", p.Model, "gemini-3.7-flash-high")
+	}
+}
+
+// TestParseModelAbsentLeavesFieldEmpty documents the chosen split of
+// responsibility: packet.Parse reflects frontmatter literally and applies
+// no runtime policy, so an absent model key leaves Packet.Model at its
+// zero value. Filling in the project default is internal/run's job, done
+// once at the composition root — see run.DefaultModel.
+func TestParseModelAbsentLeavesFieldEmpty(t *testing.T) {
+	src := "---\n" +
+		"id: fix-auth\n" +
+		"executor: agy\n" +
+		"routed_by: touches auth, Tier A verification required\n" +
+		"---\n" +
+		"\n" +
+		"## Goal\n"
+
+	p, err := packet.Parse(strings.NewReader(src))
+	if err != nil {
+		t.Fatalf("Parse() error = %v, want nil", err)
+	}
+	if p.Model != "" {
+		t.Errorf("Model = %q, want empty", p.Model)
 	}
 }
 
@@ -68,8 +114,18 @@ func TestParseRejectsIncompletePackets(t *testing.T) {
 			want: packet.ErrMissingExecutor,
 		},
 		{
+			name: "routed_by is missing",
+			src:  "---\nid: fix-auth\nexecutor: agy\n---\n\n## Goal\n",
+			want: packet.ErrMissingRoutedBy,
+		},
+		{
+			name: "routed_by is present but blank",
+			src:  "---\nid: fix-auth\nexecutor: agy\nrouted_by:\n---\n\n## Goal\n",
+			want: packet.ErrMissingRoutedBy,
+		},
+		{
 			name: "body is empty",
-			src:  "---\nid: fix-auth\nexecutor: agy\n---\n\n\n",
+			src:  "---\nid: fix-auth\nexecutor: agy\nrouted_by: touches auth, Tier A verification required\n---\n\n\n",
 			want: packet.ErrEmptyBody,
 		},
 	}

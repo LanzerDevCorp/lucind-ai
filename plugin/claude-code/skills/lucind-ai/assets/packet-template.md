@@ -1,9 +1,14 @@
+---
+id: <id>
+executor: agy
+routed_by: <the condition that selected this lane and this verification level — never the executor's name; that is the outcome of routing, not its reason>
+model: <model, e.g. gemini-3.7-flash-high>
+---
+
 # Packet <id>
 
 **Tier:** A (human merge) | B (auto-merge after audit)
 **Worktree:** ../<repo>-worktrees/<id>  ·  **Branch:** lucind/<id>
-**Runtime:** agy · <model>
-**Routed by:** the condition that selected this lane and this verification level
 
 ## Goal
 

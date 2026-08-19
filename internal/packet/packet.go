@@ -21,6 +21,7 @@ var (
 	ErrNoFrontmatter   = errors.New("packet: document has no closed --- frontmatter block")
 	ErrMissingID       = errors.New("packet: frontmatter is missing a non-empty id")
 	ErrMissingExecutor = errors.New("packet: frontmatter is missing a non-empty executor")
+	ErrMissingRoutedBy = errors.New("packet: frontmatter is missing a non-empty routed_by")
 	ErrEmptyBody       = errors.New("packet: body is empty, there is no prompt to dispatch")
 )
 
@@ -30,6 +31,17 @@ type Packet struct {
 	ID string
 	// Executor selects the runtime that carries out the work.
 	Executor string
+	// RoutedBy is the condition that caused this packet to be routed to
+	// Executor — never the executor's own name. The executor is the
+	// outcome of a routing decision, not its reason: recording it as the
+	// condition would be implicit routing, which the skill forbids. See
+	// plugin/claude-code/skills/lucind-ai/references/state-files.md.
+	RoutedBy string
+	// Model selects which model the executor dispatches with. It is
+	// optional: an absent model key leaves this at its zero value. The
+	// project default is filled in by internal/run, not here — see
+	// run.DefaultModel for why the default lives there instead.
+	Model string
 	// Body is the Markdown prompt, passed to the executor unchanged.
 	Body string
 }
@@ -56,6 +68,10 @@ func Parse(r io.Reader) (Packet, error) {
 			p.ID = strings.TrimSpace(value)
 		case "executor":
 			p.Executor = strings.TrimSpace(value)
+		case "routed_by":
+			p.RoutedBy = strings.TrimSpace(value)
+		case "model":
+			p.Model = strings.TrimSpace(value)
 		}
 	}
 
@@ -78,6 +94,8 @@ func Parse(r io.Reader) (Packet, error) {
 		return Packet{}, ErrMissingID
 	case p.Executor == "":
 		return Packet{}, ErrMissingExecutor
+	case p.RoutedBy == "":
+		return Packet{}, ErrMissingRoutedBy
 	case strings.TrimSpace(p.Body) == "":
 		return Packet{}, ErrEmptyBody
 	}
