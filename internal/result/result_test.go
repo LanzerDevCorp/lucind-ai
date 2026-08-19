@@ -127,6 +127,64 @@ func TestReadFullyPopulatedEnvelopeRoundTrips(t *testing.T) {
 	}
 }
 
+func TestReadExternalChangesRoundTrips(t *testing.T) {
+	src := `{
+		"packet_id": "fix-mcp-config",
+		"status": "done",
+		"summary": "Updated the antigravity MCP config outside the worktree.",
+		"hard_stops": [],
+		"external_changes": [
+			{
+				"path": "~/.gemini/antigravity-cli/mcp_config.json",
+				"change": "modified",
+				"why": "add the lucind-ai MCP server entry",
+				"revert": "backup at ~/.gemini/antigravity-cli/mcp_config.json.bak"
+			}
+		]
+	}`
+	fsys := fstest.MapFS{
+		"result.json": {Data: []byte(src)},
+	}
+
+	e, err := result.Read(fsys, "result.json")
+	if err != nil {
+		t.Fatalf("Read() error = %v, want nil", err)
+	}
+
+	if len(e.ExternalChanges) != 1 {
+		t.Fatalf("len(ExternalChanges) = %d, want 1", len(e.ExternalChanges))
+	}
+	want := result.ExternalChange{
+		Path:   "~/.gemini/antigravity-cli/mcp_config.json",
+		Change: "modified",
+		Why:    "add the lucind-ai MCP server entry",
+		Revert: "backup at ~/.gemini/antigravity-cli/mcp_config.json.bak",
+	}
+	if got := e.ExternalChanges[0]; got != want {
+		t.Errorf("ExternalChanges[0] = %+v, want %+v", got, want)
+	}
+}
+
+func TestReadEnvelopeWithoutExternalChangesStillParses(t *testing.T) {
+	src := `{
+		"packet_id": "fix-auth",
+		"status": "done",
+		"summary": "Did the thing.",
+		"hard_stops": []
+	}`
+	fsys := fstest.MapFS{
+		"result.json": {Data: []byte(src)},
+	}
+
+	e, err := result.Read(fsys, "result.json")
+	if err != nil {
+		t.Fatalf("Read() error = %v, want nil", err)
+	}
+	if len(e.ExternalChanges) != 0 {
+		t.Errorf("ExternalChanges = %v, want empty", e.ExternalChanges)
+	}
+}
+
 func TestReadMissingFileReturnsClearError(t *testing.T) {
 	fsys := fstest.MapFS{}
 
@@ -183,6 +241,65 @@ func TestReadSchemaViolations(t *testing.T) {
 				"status": "in_progress",
 				"summary": "Still working.",
 				"hard_stops": []
+			}`,
+		},
+		{
+			name: "external_changes entry missing revert",
+			src: `{
+				"packet_id": "fix-auth",
+				"status": "done",
+				"summary": "Did the thing.",
+				"hard_stops": [],
+				"external_changes": [
+					{"path": "~/.gemini/antigravity-cli/mcp_config.json", "change": "modified", "why": "add server entry"}
+				]
+			}`,
+		},
+		{
+			name: "external_changes entry missing why",
+			src: `{
+				"packet_id": "fix-auth",
+				"status": "done",
+				"summary": "Did the thing.",
+				"hard_stops": [],
+				"external_changes": [
+					{"path": "~/.gemini/antigravity-cli/mcp_config.json", "change": "modified", "revert": "backup at ~/.gemini/antigravity-cli/mcp_config.json.bak"}
+				]
+			}`,
+		},
+		{
+			name: "external_changes entry has unknown property",
+			src: `{
+				"packet_id": "fix-auth",
+				"status": "done",
+				"summary": "Did the thing.",
+				"hard_stops": [],
+				"external_changes": [
+					{
+						"path": "~/.gemini/antigravity-cli/mcp_config.json",
+						"change": "modified",
+						"why": "add server entry",
+						"revert": "backup at ~/.gemini/antigravity-cli/mcp_config.json.bak",
+						"unexpected_field": "should not be here"
+					}
+				]
+			}`,
+		},
+		{
+			name: "external_changes entry has invalid change value",
+			src: `{
+				"packet_id": "fix-auth",
+				"status": "done",
+				"summary": "Did the thing.",
+				"hard_stops": [],
+				"external_changes": [
+					{
+						"path": "~/.gemini/antigravity-cli/mcp_config.json",
+						"change": "renamed",
+						"why": "add server entry",
+						"revert": "backup at ~/.gemini/antigravity-cli/mcp_config.json.bak"
+					}
+				]
 			}`,
 		},
 	}

@@ -43,7 +43,7 @@
     },
     "files_changed": {
       "type": "array",
-      "description": "Every path created, modified, or deleted, relative to the worktree root.",
+      "description": "Every path created, modified, or deleted INSIDE the worktree, relative to the worktree root. For a path outside the worktree, use external_changes instead — it has no representation here.",
       "items": {
         "type": "object",
         "additionalProperties": false,
@@ -52,6 +52,30 @@
           "path": { "type": "string" },
           "change": { "type": "string", "enum": ["created", "modified", "deleted"] },
           "why": { "type": "string" }
+        }
+      }
+    },
+    "external_changes": {
+      "type": "array",
+      "description": "Every path created, modified, or deleted OUTSIDE the worktree — configuration files, dotfiles, machine-level setup. Git never saw this work, so there is no diff, no branch, and no undo except what this entry records.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "change", "why", "revert"],
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Absolute, or ~-prefixed. NOT worktree-relative — never a path files_changed could also hold."
+          },
+          "change": { "type": "string", "enum": ["created", "modified", "deleted"] },
+          "why": {
+            "type": "string",
+            "description": "Required: a change outside the repository always needs its reason stated; unlike files_changed, there is no diff to infer it from."
+          },
+          "revert": {
+            "type": "string",
+            "description": "Required: the backup path or exact command that restores the previous state. Mandatory because git cannot undo this — the envelope is the only record of how."
+          }
         }
       }
     },

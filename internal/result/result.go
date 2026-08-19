@@ -33,12 +33,35 @@ type HardStop struct {
 	Note     string `json:"note,omitempty"`
 }
 
-// FileChange is one path created, modified, or deleted, relative to the
-// worktree root.
+// FileChange is one path created, modified, or deleted inside the
+// worktree, relative to the worktree root. For a path outside the
+// worktree, see ExternalChange — that boundary is why the two types are
+// kept separate rather than one field with an ambiguous path.
 type FileChange struct {
 	Path   string `json:"path"`
 	Change string `json:"change"`
 	Why    string `json:"why,omitempty"`
+}
+
+// ExternalChange is one path created, modified, or deleted outside the
+// worktree — a config file, a dotfile, machine-level setup. Path is
+// absolute or "~"-prefixed, never worktree-relative, so it can never be
+// confused with a FileChange.Path.
+//
+// Work inside the worktree lives on a branch: it can be diffed, merged, or
+// thrown away, and Git is the undo. Work outside the worktree has none of
+// that — Git never saw it, so there is no diff to review and no branch to
+// discard. That is why Why and Revert are both required here even though
+// Why is optional on FileChange: there is no diff to infer intent from,
+// and no version control to fall back on for reversal. Revert must name
+// the backup path or the exact command that restores the previous state —
+// without it, an external change is a fact discovered later, not
+// something that was audited.
+type ExternalChange struct {
+	Path   string `json:"path"`
+	Change string `json:"change"`
+	Why    string `json:"why"`
+	Revert string `json:"revert"`
 }
 
 // DoneCriterion is one done-criterion from the packet, with evidence that
@@ -77,17 +100,18 @@ type Finding struct {
 
 // Envelope mirrors result.schema.json.
 type Envelope struct {
-	PacketID     string          `json:"packet_id"`
-	Status       string          `json:"status"`
-	Summary      string          `json:"summary"`
-	HardStops    []HardStop      `json:"hard_stops"`
-	FilesChanged []FileChange    `json:"files_changed,omitempty"`
-	DoneCriteria []DoneCriterion `json:"done_criteria,omitempty"`
-	Commit       string          `json:"commit,omitempty"`
-	Questions    []Question      `json:"questions,omitempty"`
-	Deviations   []Deviation     `json:"deviations,omitempty"`
-	Findings     []Finding       `json:"findings,omitempty"`
-	SessionID    string          `json:"session_id,omitempty"`
+	PacketID        string           `json:"packet_id"`
+	Status          string           `json:"status"`
+	Summary         string           `json:"summary"`
+	HardStops       []HardStop       `json:"hard_stops"`
+	FilesChanged    []FileChange     `json:"files_changed,omitempty"`
+	ExternalChanges []ExternalChange `json:"external_changes,omitempty"`
+	DoneCriteria    []DoneCriterion  `json:"done_criteria,omitempty"`
+	Commit          string           `json:"commit,omitempty"`
+	Questions       []Question       `json:"questions,omitempty"`
+	Deviations      []Deviation      `json:"deviations,omitempty"`
+	Findings        []Finding        `json:"findings,omitempty"`
+	SessionID       string           `json:"session_id,omitempty"`
 }
 
 // LaneStatus maps the envelope's status field to the project's lane

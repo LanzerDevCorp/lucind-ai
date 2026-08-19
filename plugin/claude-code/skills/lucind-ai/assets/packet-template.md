@@ -53,6 +53,17 @@ nothing further, report it, and stop.
 - `path/one`
 - `path/two`
 
+## Allowed paths outside the repository
+
+By default this packet may touch **nothing** outside the repository. Anything that must be
+touched — configuration files, dotfiles, machine-level setup — must be named explicitly here.
+
+- `~/path/outside`
+
+Every path listed here must be reported in the result envelope's `external_changes`, with a
+`revert` — git cannot undo work outside the repository, so the envelope is the only record of
+how.
+
 ## Out of scope
 
 Name the adjacent work you must NOT do, especially anything the conversation has not decided.
