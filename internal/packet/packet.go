@@ -37,9 +37,10 @@ type Packet struct {
 	// condition would be implicit routing, which the skill forbids.
 	RoutedBy string
 	// Model selects which model the executor dispatches with. It is
-	// optional: an absent model key leaves this at its zero value. The
-	// project default is filled in by internal/run, not here — see
-	// run.DefaultModel for why the default lives there instead.
+	// optional: an absent model key leaves this at its zero value. Each
+	// executor owns its own default (see executor.Executor.DefaultModel),
+	// applied by internal/run when this field is empty — not filled in
+	// here, so Parse keeps reflecting frontmatter literally.
 	Model string
 	// Body is the Markdown prompt, passed to the executor unchanged.
 	Body string
