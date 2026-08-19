@@ -88,5 +88,11 @@ engram and the worktree — the agent may investigate, but may not widen the sco
 
 ## Return
 
-Reply with the result envelope only — the JSON schema is enforced. No prose outside it.
+Write the result envelope to **`.lucind/result.json` in this worktree**. That file is what the
+dispatching binary reads. Printed output alone will be read as a lane that produced nothing.
+
+The schema is at `.lucind/result.schema.json` in this worktree. Validate against it before
+writing — an envelope that fails schema validation makes the lane `blocked` regardless of how
+well the work went.
+
 Report `done` only when every done-criterion carries evidence and every hard stop is declared.
