@@ -40,6 +40,17 @@ type Outcome struct {
 	// captured stdout is undiagnosable. This is not speculative --
 	// it is the minimum needed to debug the first real invocation.
 	Stdout string
+	// OutputTruncated is true when the child process itself ran to
+	// completion but its stdout/stderr pipes did not finish draining
+	// within the executor's WaitDelay afterward -- typically because a
+	// grandchild process it spawned (e.g. an MCP server subprocess agy
+	// starts) inherited those pipes and kept them open past the parent's
+	// own exit. This is a warning about the completeness of Stdout/Stderr
+	// capture only. It says nothing about whether the dispatched work
+	// succeeded: ExitCode still reflects the process's real, observed
+	// exit status, and a truncated capture must never be treated as a
+	// failed or discarded run.
+	OutputTruncated bool
 }
 
 // Executor runs one Request, bounded by ctx.

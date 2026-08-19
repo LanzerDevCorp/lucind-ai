@@ -137,10 +137,12 @@ func Execute(ctx context.Context, deps Deps, p packet.Packet) (Report, error) {
 		Detail: routingCondition,
 		At:     now,
 	}); err != nil {
-		return Report{}, fmt.Errorf("run: append lane_registered event for %q: %w", p.ID, err)
+		cause := fmt.Errorf("run: append lane_registered event for %q: %w", p.ID, err)
+		return Report{}, recordLaneFailure(ctx, deps, p.ID, now, cause)
 	}
 	if err := deps.Ledger.SetStatus(ctx, deps.RunID, p.ID, lane.Running, now); err != nil {
-		return Report{}, fmt.Errorf("run: set lane %q running: %w", p.ID, err)
+		cause := fmt.Errorf("run: set lane %q running: %w", p.ID, err)
+		return Report{}, recordLaneFailure(ctx, deps, p.ID, now, cause)
 	}
 
 	// model falls back to DefaultModel when the packet names none — see
@@ -158,7 +160,15 @@ func Execute(ctx context.Context, deps Deps, p packet.Packet) (Report, error) {
 		SchemaPath:   schemaPath,
 	})
 	if err != nil {
-		return Report{}, fmt.Errorf("run: dispatch lane %q: %w", p.ID, err)
+		// executor.Executor.Run returns a non-nil error only for the
+		// genuine never-ran case (see executor.Agy.Run's doc comment) --
+		// a real infrastructure failure in our own binary, distinct from
+		// a dispatch that ran and produced a bad outcome. The lane has
+		// already been registered and marked running at this point, so
+		// leaving it there would report a lane as running forever when
+		// nothing is running; recordLaneFailure closes that gap.
+		cause := fmt.Errorf("run: dispatch lane %q: %w", p.ID, err)
+		return Report{}, recordLaneFailure(ctx, deps, p.ID, now, cause)
 	}
 
 	status, envelope, reason := decideStatus(deps, wt.Path, outcome)
@@ -171,20 +181,24 @@ func Execute(ctx context.Context, deps Deps, p packet.Packet) (Report, error) {
 			Detail: reason,
 			At:     now,
 		}); err != nil {
-			return Report{}, fmt.Errorf("run: append reason event for %q: %w", p.ID, err)
+			cause := fmt.Errorf("run: append reason event for %q: %w", p.ID, err)
+			return Report{}, recordLaneFailure(ctx, deps, p.ID, now, cause)
 		}
 	}
 
 	if err := deps.Ledger.SetStatus(ctx, deps.RunID, p.ID, status, now); err != nil {
-		return Report{}, fmt.Errorf("run: set lane %q terminal status: %w", p.ID, err)
+		cause := fmt.Errorf("run: set lane %q terminal status: %w", p.ID, err)
+		return Report{}, recordLaneFailure(ctx, deps, p.ID, now, cause)
 	}
 
 	b, err := barrier.New([]string{p.ID})
 	if err != nil {
-		return Report{}, fmt.Errorf("run: build barrier for lane %q: %w", p.ID, err)
+		cause := fmt.Errorf("run: build barrier for lane %q: %w", p.ID, err)
+		return Report{}, recordLaneFailure(ctx, deps, p.ID, now, cause)
 	}
 	if err := b.Observe(lane.State{LaneID: p.ID, Status: status}); err != nil {
-		return Report{}, fmt.Errorf("run: observe lane %q into barrier: %w", p.ID, err)
+		cause := fmt.Errorf("run: observe lane %q into barrier: %w", p.ID, err)
+		return Report{}, recordLaneFailure(ctx, deps, p.ID, now, cause)
 	}
 	bOutcome := b.Outcome()
 
@@ -196,7 +210,8 @@ func Execute(ctx context.Context, deps Deps, p packet.Packet) (Report, error) {
 			Detail: string(status),
 			At:     now,
 		}); err != nil {
-			return Report{}, fmt.Errorf("run: append barrier_released event for %q: %w", p.ID, err)
+			cause := fmt.Errorf("run: append barrier_released event for %q: %w", p.ID, err)
+			return Report{}, recordLaneFailure(ctx, deps, p.ID, now, cause)
 		}
 	}
 
@@ -208,6 +223,39 @@ func Execute(ctx context.Context, deps Deps, p packet.Packet) (Report, error) {
 		Released: bOutcome.Released,
 		Outcome:  bOutcome,
 	}, nil
+}
+
+// recordLaneFailure is the last line of defense against a lane row that
+// silently stays lane.Running (or lane.Pending) forever. Once RegisterLane
+// has succeeded for a lane, every later error path in Execute must route
+// through this function before returning, so the ledger never lies about a
+// lane still being in flight when Execute itself has already given up on
+// it. cause is the error that aborted Execute; it is recorded as the
+// lane_status_changed event's reason and the lane is set to lane.Failed --
+// distinct from lane.Blocked, which means a decision is needed, because
+// this is a technical failure in our own binary, not something the
+// dispatched work produced. See internal/lane/status.go.
+//
+// If persisting that failure itself fails, cause is not discarded: it is
+// still returned, wrapped together with the write failure, so a caller
+// never sees a ledger-write error in place of the real reason Execute
+// aborted.
+func recordLaneFailure(ctx context.Context, deps Deps, laneID string, now time.Time, cause error) error {
+	if err := deps.Ledger.AppendEvent(ctx, ledger.Event{
+		RunID:  deps.RunID,
+		LaneID: laneID,
+		Type:   ledger.EventLaneStatusChanged,
+		Detail: cause.Error(),
+		At:     now,
+	}); err != nil {
+		return fmt.Errorf("%w (additionally, failed to record the failure reason in the ledger: %v)", cause, err)
+	}
+
+	if err := deps.Ledger.SetStatus(ctx, deps.RunID, laneID, lane.Failed, now); err != nil {
+		return fmt.Errorf("%w (additionally, failed to persist lane.Failed status in the ledger: %v)", cause, err)
+	}
+
+	return cause
 }
 
 // decideStatus implements step 5 of the flow: a timed-out or non-zero-exit

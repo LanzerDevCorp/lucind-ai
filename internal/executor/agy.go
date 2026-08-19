@@ -12,13 +12,31 @@ import (
 // on PATH lookup, matching how the CLI is normally invoked.
 const defaultBinary = "agy"
 
-// waitDelay bounds how long Run waits for the child's stdio pipes to drain
-// after the context deadline kills the direct child process. Without this,
-// a grandchild process the child spawned (e.g. a shell script's own "sleep"
-// or similar) can keep holding the inherited stderr pipe open and Wait
-// would block until that grandchild exits on its own, defeating the whole
-// point of the context deadline. See os/exec.Cmd.WaitDelay.
-const waitDelay = 250 * time.Millisecond
+// defaultWaitDelay is the production value applied when Agy.WaitDelay is
+// left zero. It bounds how long Run waits for the child's stdio pipes to
+// drain after the direct child process has exited (or the context deadline
+// killed it), before force-closing them. Without a non-zero WaitDelay, a
+// grandchild process the child spawned -- real agy dispatches spawn MCP
+// server subprocesses that inherit stdout/stderr this way -- can keep
+// holding those pipes open indefinitely, and Wait would block until that
+// grandchild exits on its own, defeating the whole point of the caller's
+// context deadline. See os/exec.Cmd.WaitDelay.
+//
+// 5 seconds is a tradeoff, not a measured constant: long enough that a
+// well-behaved grandchild's own shutdown (flushing output, closing its
+// pipes) has a realistic chance to finish before Run gives up on capturing
+// it, short enough that a grandchild which never exits on its own does not
+// meaningfully delay how quickly a lane's result becomes available. Getting
+// this exactly right is inherently a guess about real-world MCP server
+// shutdown latency; the failure mode on either side is bounded and
+// asymmetric with what it protects: too short only costs a truncated
+// capture (see Outcome.OutputTruncated) with the exit code still correct,
+// never a lost or misreported result, while too long only delays surfacing
+// a dispatch whose grandchild is stuck. Tests must set Agy.WaitDelay
+// explicitly to something small rather than inheriting this value, so a
+// stub that intentionally leaves a grandchild alive doesn't slow the suite
+// down.
+const defaultWaitDelay = 5 * time.Second
 
 // printTimeoutMargin is added on top of the context's remaining time so
 // that the value passed as --print-timeout is always strictly greater than
@@ -52,6 +70,15 @@ type Agy struct {
 	// tests override it to point at a stub script instead of spending
 	// real quota against the real CLI.
 	Binary string
+
+	// WaitDelay bounds how long Run waits for the child's stdio pipes to
+	// drain once the direct child process has exited. Zero (the field's
+	// natural default) is replaced with defaultWaitDelay in Run, so
+	// production always dispatches with a non-zero value -- see
+	// defaultWaitDelay's doc comment for why that value must never be
+	// left at exec's own zero-value behavior (wait forever). Tests set
+	// this explicitly to something small.
+	WaitDelay time.Duration
 }
 
 // Run execs agy with req.Prompt, in req.WorktreePath, bounded by ctx.
@@ -105,6 +132,11 @@ func (a Agy) Run(ctx context.Context, req Request) (Outcome, error) {
 		args = append(args, "--print-timeout", pt.String())
 	}
 
+	waitDelay := a.WaitDelay
+	if waitDelay == 0 {
+		waitDelay = defaultWaitDelay
+	}
+
 	cmd := exec.CommandContext(ctx, binary, args...)
 	cmd.Dir = req.WorktreePath
 	cmd.WaitDelay = waitDelay
@@ -122,14 +154,32 @@ func (a Agy) Run(ctx context.Context, req Request) (Outcome, error) {
 		return outcome, nil
 	}
 
+	if errors.Is(err, exec.ErrWaitDelay) {
+		// The process itself ran and exited with a successful status --
+		// os/exec.Cmd.WaitDelay's doc comment is explicit that
+		// ErrWaitDelay replaces a nil Wait error only when "the command
+		// has otherwise exited with a successful status". Only its
+		// stdio pipes stayed open past waitDelay afterward (typically
+		// because a grandchild process, such as an MCP server agy
+		// spawned, inherited them). cmd.ProcessState is populated once
+		// the process itself has exited, so it is the reliable source
+		// for the real exit code here, not a guess.
+		if cmd.ProcessState != nil {
+			outcome.ExitCode = cmd.ProcessState.ExitCode()
+		}
+		outcome.OutputTruncated = true
+		return outcome, nil
+	}
+
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) {
 		outcome.ExitCode = exitErr.ExitCode()
 		return outcome, nil
 	}
 	if err != nil {
-		// Not an ExitError: the process never ran at all (binary missing,
-		// permission denied, etc). This is a real error, not an Outcome.
+		// Not an ExitError and not ErrWaitDelay: the process never ran
+		// at all (binary missing, permission denied, etc). This is a
+		// real error, not an Outcome.
 		return Outcome{}, err
 	}
 

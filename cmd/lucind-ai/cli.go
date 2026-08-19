@@ -143,7 +143,10 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 
 	report, err := lucindrun.Execute(dispatchCtx, deps, p)
 	if err != nil {
-		fmt.Fprintf(stderr, "lucind-ai: run: %v\n", err)
+		// internal/run.Execute's own errors already start with "run: ",
+		// so no second "run: " prefix is added here -- otherwise a user
+		// sees a doubled "lucind-ai: run: run: ..." on stderr.
+		fmt.Fprintf(stderr, "lucind-ai: %v\n", err)
 		return 1
 	}
 

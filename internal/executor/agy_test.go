@@ -155,6 +155,68 @@ func TestRunTimesOutWhenDeadlineIsShorterThanStub(t *testing.T) {
 	}
 }
 
+// TestRunGrandchildHoldingPipesExitZeroReportsOutputTruncated is the test
+// that would have caught the run-time defect where a successful dispatch
+// was discarded as an error: the direct child exits immediately and
+// cleanly with status 0, but backgrounds a grandchild that keeps the
+// inherited stdout/stderr pipes open well past WaitDelay -- exactly the
+// shape of a real agy dispatch spawning an MCP server subprocess. Run must
+// report the real exit code and a truncation warning, never an error and
+// never a discarded outcome.
+func TestRunGrandchildHoldingPipesExitZeroReportsOutputTruncated(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping subprocess test in -short mode")
+	}
+
+	stub := writeStub(t, "#!/bin/sh\n( sleep 5 ) &\nexit 0\n")
+	worktree := t.TempDir()
+
+	a := executor.Agy{Binary: stub, WaitDelay: 50 * time.Millisecond}
+	outcome, err := a.Run(context.Background(), executor.Request{
+		Prompt:       "do the thing",
+		WorktreePath: worktree,
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v, want nil", err)
+	}
+	if outcome.ExitCode != 0 {
+		t.Errorf("ExitCode = %d, want 0", outcome.ExitCode)
+	}
+	if outcome.TimedOut {
+		t.Errorf("TimedOut = true, want false")
+	}
+	if !outcome.OutputTruncated {
+		t.Errorf("OutputTruncated = false, want true")
+	}
+}
+
+// TestRunGrandchildHoldingPipesNonZeroExitStillReportsRealExitCode proves
+// the same grandchild-holds-the-pipes shape still surfaces the real,
+// non-zero exit code rather than being swallowed into an error.
+func TestRunGrandchildHoldingPipesNonZeroExitStillReportsRealExitCode(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping subprocess test in -short mode")
+	}
+
+	stub := writeStub(t, "#!/bin/sh\n( sleep 5 ) &\nexit 17\n")
+	worktree := t.TempDir()
+
+	a := executor.Agy{Binary: stub, WaitDelay: 50 * time.Millisecond}
+	outcome, err := a.Run(context.Background(), executor.Request{
+		Prompt:       "do the thing",
+		WorktreePath: worktree,
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v, want nil", err)
+	}
+	if outcome.ExitCode != 17 {
+		t.Errorf("ExitCode = %d, want 17", outcome.ExitCode)
+	}
+	if outcome.TimedOut {
+		t.Errorf("TimedOut = true, want false")
+	}
+}
+
 func TestRunBinaryDoesNotExist(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping subprocess test in -short mode")

@@ -29,10 +29,19 @@ type fakeExecutor struct {
 	outcome executor.Outcome
 	err     error
 	gotReq  executor.Request
+	// beforeReturn, when set, runs just before Run returns. Tests use it
+	// to inject a side effect (e.g. closing the ledger) at the exact
+	// point in Execute's flow where the dispatch would normally succeed,
+	// to reach failure paths that only exist after RegisterLane and the
+	// dispatch have both already gone through.
+	beforeReturn func()
 }
 
 func (f *fakeExecutor) Run(_ context.Context, req executor.Request) (executor.Outcome, error) {
 	f.gotReq = req
+	if f.beforeReturn != nil {
+		f.beforeReturn()
+	}
 	return f.outcome, f.err
 }
 
@@ -364,6 +373,84 @@ func TestExecuteAppendsLifecycleLedgerEvents(t *testing.T) {
 	}
 	if !sawBarrierReleased {
 		t.Errorf("no %s event recorded; events = %+v", ledger.EventBarrierReleased, events)
+	}
+}
+
+// TestExecuteDispatchErrorLeavesLaneFailedInLedger proves the defect found
+// by the binary's first real end-to-end dispatch: once RegisterLane has
+// succeeded, an error from the executor (a real infrastructure failure --
+// the process never ran at all, per executor.Agy.Run's contract) must not
+// leave the lane stuck at lane.Running forever. It must be persisted as
+// lane.Failed in the real ledger before Execute returns its error, checked
+// here by reading the ledger back rather than trusting the returned error.
+func TestExecuteDispatchErrorLeavesLaneFailedInLedger(t *testing.T) {
+	wtPath := t.TempDir()
+	wantErr := errors.New("exec: \"agy-stub\": executable file not found in $PATH")
+	fe := &fakeExecutor{err: wantErr}
+	deps := newTestDeps(t, wtPath, func(string) fs.FS {
+		return fstest.MapFS{".lucind/result.json": {Data: []byte(doneEnvelopeJSON)}}
+	}, fe)
+
+	_, err := run.Execute(context.Background(), deps, testPacket())
+	if err == nil {
+		t.Fatal("Execute() error = nil, want non-nil when the executor fails to dispatch")
+	}
+	if !errors.Is(err, wantErr) {
+		t.Errorf("Execute() error = %v, want it to wrap %v", err, wantErr)
+	}
+
+	states, statesErr := deps.Ledger.LaneStates(context.Background(), "run-1")
+	if statesErr != nil {
+		t.Fatalf("LaneStates() error = %v", statesErr)
+	}
+	if len(states) != 1 || states[0].LaneID != "lane-a" || states[0].Status != lane.Failed {
+		t.Fatalf("LaneStates() = %+v, want one lane-a=failed", states)
+	}
+
+	events, eventsErr := deps.Ledger.Events(context.Background(), "run-1")
+	if eventsErr != nil {
+		t.Fatalf("Events() error = %v", eventsErr)
+	}
+	found := false
+	for _, e := range events {
+		if e.Type == ledger.EventLaneStatusChanged && strings.Contains(e.Detail, wantErr.Error()) {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("no ledger event recorded the dispatch failure reason %q; events = %+v", wantErr.Error(), events)
+	}
+}
+
+// TestExecuteTerminalStatusWriteFailureStillReturnsOriginalCause covers a
+// failure at a different point after registration than the dispatch error
+// above: here the dispatch itself succeeds and decideStatus picks a real
+// terminal status (lane.Done), but the ledger is closed (simulating a
+// broken connection) at the exact moment Execute is about to persist that
+// status. recordLaneFailure's own fallback SetStatus call fails too, since
+// the ledger is still closed -- proving the original cause survives rather
+// than being replaced by the secondary write failure, per the hard
+// constraint that the original error must never be lost.
+func TestExecuteTerminalStatusWriteFailureStillReturnsOriginalCause(t *testing.T) {
+	wtPath := t.TempDir()
+	fe := &fakeExecutor{outcome: executor.Outcome{ExitCode: 0}}
+	deps := newTestDeps(t, wtPath, func(string) fs.FS {
+		return fstest.MapFS{".lucind/result.json": {Data: []byte(doneEnvelopeJSON)}}
+	}, fe)
+	// Close the ledger as a side effect of the dispatch succeeding, so
+	// RegisterLane and the running-status write have already gone
+	// through, but the terminal SetStatus call that follows decideStatus
+	// hits a closed database -- a failure point strictly after
+	// registration and strictly different from the executor returning an
+	// error.
+	fe.beforeReturn = func() { deps.Ledger.Close() }
+
+	_, err := run.Execute(context.Background(), deps, testPacket())
+	if err == nil {
+		t.Fatal("Execute() error = nil, want non-nil when persisting the terminal status fails")
+	}
+	if !strings.Contains(err.Error(), "terminal status") {
+		t.Errorf("Execute() error = %v, want it to mention the terminal-status write that actually failed", err)
 	}
 }
 
