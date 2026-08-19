@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/LanzerDevCorp/lucind-ai/internal/resolve"
@@ -68,38 +69,33 @@ func combine(ctx context.Context, primaryRoot, runID string, branches []string, 
 	return wt.Path, wt.Branch, nil
 }
 
-// Check runs the project's verification suite against worktreePath.
-// It first runs "CGO_ENABLED=0 go build ./...". If that fails, it returns
-// passed=false, output=combined build output, and err=nil.
-// If the build succeeds, it runs "go test ./... -race -count=1".
-// If the test fails, it returns passed=false, output=combined test output, and err=nil.
-// If both succeed, it returns passed=true, output=combined test output, and err=nil.
-// Non-nil err is reserved for command execution failures (e.g. executable not found).
+// Check runs the project's verification suite against worktreePath by
+// executing lucind-checks.sh at the root of worktreePath via sh.
+// If lucind-checks.sh does not exist, Check returns passed=false, an
+// explanatory message, and err=nil.
+// If the script exits non-zero, Check returns passed=false, the combined output, and err=nil.
+// If the script exits zero, Check returns passed=true, the combined output, and err=nil.
+// Non-nil err is reserved for command execution failures (e.g. cancelled context or command cannot be started).
 func Check(ctx context.Context, worktreePath string) (passed bool, output string, err error) {
-	buildCmd := exec.CommandContext(ctx, "go", "build", "./...")
-	buildCmd.Dir = worktreePath
-	buildCmd.Env = append(os.Environ(), "CGO_ENABLED=0")
-	buildOut, buildErr := buildCmd.CombinedOutput()
-	if buildErr != nil {
-		var exitErr *exec.ExitError
-		if errors.As(buildErr, &exitErr) {
-			return false, string(buildOut), nil
-		}
-		return false, string(buildOut), fmt.Errorf("integrate: go build failed to execute: %w", buildErr)
+	scriptPath := filepath.Join(worktreePath, "lucind-checks.sh")
+	if _, statErr := os.Stat(scriptPath); errors.Is(statErr, os.ErrNotExist) || os.IsNotExist(statErr) {
+		return false, "no lucind-checks.sh found at the project root; this project has not defined its verification checks yet", nil
+	} else if statErr != nil {
+		return false, "", fmt.Errorf("integrate: stat checks script: %w", statErr)
 	}
 
-	testCmd := exec.CommandContext(ctx, "go", "test", "./...", "-race", "-count=1")
-	testCmd.Dir = worktreePath
-	testOut, testErr := testCmd.CombinedOutput()
-	if testErr != nil {
+	cmd := exec.CommandContext(ctx, "sh", scriptPath)
+	cmd.Dir = worktreePath
+	out, cmdErr := cmd.CombinedOutput()
+	if cmdErr != nil {
 		var exitErr *exec.ExitError
-		if errors.As(testErr, &exitErr) {
-			return false, string(testOut), nil
+		if errors.As(cmdErr, &exitErr) {
+			return false, string(out), nil
 		}
-		return false, string(testOut), fmt.Errorf("integrate: go test failed to execute: %w", testErr)
+		return false, string(out), fmt.Errorf("integrate: run checks script failed to execute: %w", cmdErr)
 	}
 
-	return true, string(testOut), nil
+	return true, string(out), nil
 }
 
 // Promote fast-forwards primaryRoot to integrationBranch if primaryRoot

@@ -358,27 +358,29 @@ func TestCombineWorktreeCreateError(t *testing.T) {
 	}
 }
 
-func TestCheckPassingModule(t *testing.T) {
+func TestCheckAbsentScript(t *testing.T) {
+	dir := t.TempDir()
+	passed, out, err := integrate.Check(context.Background(), dir)
+	if err != nil {
+		t.Fatalf("Check() error = %v, want nil", err)
+	}
+	if passed {
+		t.Fatalf("Check() passed = true, want false")
+	}
+	if !strings.Contains(out, "no lucind-checks.sh found") {
+		t.Errorf("Check() output = %q, want explanatory message about missing lucind-checks.sh", out)
+	}
+}
+
+func TestCheckScriptPasses(t *testing.T) {
 	if testing.Short() {
-		t.Skip("shells out to go build/test")
+		t.Skip("shells out to sh")
 	}
 
 	dir := t.TempDir()
-	goModContent := "module passingmodule\n\ngo 1.22\n"
-	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte(goModContent), 0o644); err != nil {
-		t.Fatalf("WriteFile(go.mod) error = %v", err)
-	}
-
-	pkgTestContent := `package passingmodule
-
-import "testing"
-
-func TestPass(t *testing.T) {
-	// passing test
-}
-`
-	if err := os.WriteFile(filepath.Join(dir, "pass_test.go"), []byte(pkgTestContent), 0o644); err != nil {
-		t.Fatalf("WriteFile(pass_test.go) error = %v", err)
+	scriptContent := "#!/bin/sh\nset -e\necho \"CHECKS_PASSED_OK\"\n"
+	if err := os.WriteFile(filepath.Join(dir, "lucind-checks.sh"), []byte(scriptContent), 0o755); err != nil {
+		t.Fatalf("WriteFile(lucind-checks.sh) error = %v", err)
 	}
 
 	passed, out, err := integrate.Check(context.Background(), dir)
@@ -388,32 +390,20 @@ func TestPass(t *testing.T) {
 	if !passed {
 		t.Fatalf("Check() passed = false, want true; output = %s", out)
 	}
-	if !strings.Contains(out, "PASS") && !strings.Contains(out, "ok") {
-		t.Errorf("Check() output = %q, want PASS/ok", out)
+	if !strings.Contains(out, "CHECKS_PASSED_OK") {
+		t.Errorf("Check() output = %q, want %q", out, "CHECKS_PASSED_OK")
 	}
 }
 
-func TestCheckFailingTest(t *testing.T) {
+func TestCheckScriptFails(t *testing.T) {
 	if testing.Short() {
-		t.Skip("shells out to go build/test")
+		t.Skip("shells out to sh")
 	}
 
 	dir := t.TempDir()
-	goModContent := "module failingtestmodule\n\ngo 1.22\n"
-	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte(goModContent), 0o644); err != nil {
-		t.Fatalf("WriteFile(go.mod) error = %v", err)
-	}
-
-	pkgTestContent := `package failingtestmodule
-
-import "testing"
-
-func TestFail(t *testing.T) {
-	t.Fatal("intentional test failure output marker")
-}
-`
-	if err := os.WriteFile(filepath.Join(dir, "fail_test.go"), []byte(pkgTestContent), 0o644); err != nil {
-		t.Fatalf("WriteFile(fail_test.go) error = %v", err)
+	scriptContent := "#!/bin/sh\necho \"intentional check failure marker\"\nexit 1\n"
+	if err := os.WriteFile(filepath.Join(dir, "lucind-checks.sh"), []byte(scriptContent), 0o755); err != nil {
+		t.Fatalf("WriteFile(lucind-checks.sh) error = %v", err)
 	}
 
 	passed, out, err := integrate.Check(context.Background(), dir)
@@ -423,62 +413,21 @@ func TestFail(t *testing.T) {
 	if passed {
 		t.Fatalf("Check() passed = true, want false; output = %s", out)
 	}
-	if !strings.Contains(out, "intentional test failure output marker") {
-		t.Errorf("Check() output = %q, want to contain test failure message", out)
-	}
-}
-
-func TestCheckBuildFailure(t *testing.T) {
-	if testing.Short() {
-		t.Skip("shells out to go build/test")
-	}
-
-	dir := t.TempDir()
-	goModContent := "module brokenbuildmodule\n\ngo 1.22\n"
-	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte(goModContent), 0o644); err != nil {
-		t.Fatalf("WriteFile(go.mod) error = %v", err)
-	}
-
-	brokenGoContent := `package brokenbuildmodule
-
-func invalid syntax here !!!
-`
-	if err := os.WriteFile(filepath.Join(dir, "broken.go"), []byte(brokenGoContent), 0o644); err != nil {
-		t.Fatalf("WriteFile(broken.go) error = %v", err)
-	}
-
-	brokenTestContent := `package brokenbuildmodule
-
-import "testing"
-
-func TestShouldNeverRun(t *testing.T) {
-	panic("test should not be executed when build fails")
-}
-`
-	if err := os.WriteFile(filepath.Join(dir, "broken_test.go"), []byte(brokenTestContent), 0o644); err != nil {
-		t.Fatalf("WriteFile(broken_test.go) error = %v", err)
-	}
-
-	passed, out, err := integrate.Check(context.Background(), dir)
-	if err != nil {
-		t.Fatalf("Check() error = %v, want nil", err)
-	}
-	if passed {
-		t.Fatalf("Check() passed = true, want false; output = %s", out)
-	}
-	if strings.Contains(out, "test should not be executed") || strings.Contains(out, "=== RUN") {
-		t.Errorf("Check() ran go test despite build failure; output = %s", out)
-	}
-	if !strings.Contains(out, "syntax error") && !strings.Contains(out, "expected") {
-		t.Errorf("Check() output = %q, want build error details", out)
+	if !strings.Contains(out, "intentional check failure marker") {
+		t.Errorf("Check() output = %q, want to contain failure marker", out)
 	}
 }
 
 func TestCheckExecutionError(t *testing.T) {
+	dir := t.TempDir()
+	scriptContent := "#!/bin/sh\necho OK\n"
+	if err := os.WriteFile(filepath.Join(dir, "lucind-checks.sh"), []byte(scriptContent), 0o755); err != nil {
+		t.Fatalf("WriteFile(lucind-checks.sh) error = %v", err)
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	dir := t.TempDir()
 	_, _, err := integrate.Check(ctx, dir)
 	if err == nil {
 		t.Fatal("Check() error = nil, want execution error for cancelled context")
