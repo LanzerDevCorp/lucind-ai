@@ -129,7 +129,7 @@
   <div class="fig-scroll">
     <figure>
       <svg viewBox="0 0 980 975" role="img"
-           aria-label="Cómo lucind-ai convierte un packet en el estado de un carril. Un archivo packet.md con frontmatter y prompt entra por packet.Parse al composition root internal/run.Execute, que registra cada transición en el ledger SQLite. Execute crea un worktree vinculado en la carpeta hermana de worktrees, con su propia rama, y escribe ahí dentro el schema del envelope embebido en el binario. Despacha agy headless con el directorio de trabajo puesto en el worktree y un print-timeout mayor que el reloj del propio binario. agy escribe su envelope en punto lucind barra result.json. A partir de ahí se decide el estado. Por la izquierda, dos caminos en los que el envelope no se lee nunca: que expire el reloj del binario, o que el proceso salga con código distinto de cero; ambos dan bloqueado. Por la derecha, salida cero es el único caso en que el envelope se lee: si falta o no valida contra el schema el carril queda bloqueado igual, y sólo si valida el carril toma el estado que el envelope declara, done, blocked, deviated o failed. Salida cero nunca alcanza por sí sola para done. El estado resultante va a internal/barrier, que libera cuando todos los carriles llegan a un estado terminal, integra los done y preserva el resto. Todavía no existen el ejecutor cursor-agent, la integración con árbol combinado y bisección, ni la web de aprobaciones.">
+           aria-label="Cómo lucind-ai convierte un packet en el estado de un carril. Un archivo packet.md con frontmatter y prompt entra por packet.Parse al composition root internal/run.Execute, que registra cada transición en el ledger SQLite. Execute crea un worktree vinculado en la carpeta hermana de worktrees, con su propia rama, y escribe ahí dentro el schema del envelope embebido en el binario. Despacha agy headless con el directorio de trabajo puesto en el worktree y un print-timeout mayor que el reloj del propio binario. agy escribe su envelope en punto lucind barra result.json. A partir de ahí se decide el estado. Por la izquierda, dos caminos en los que el envelope no se lee nunca: que expire el reloj del binario, o que el proceso salga con código distinto de cero; ambos dan bloqueado. Por la derecha, salida cero es el único caso en que el envelope se lee: si falta o no valida contra el schema el carril queda bloqueado igual, y sólo si valida el carril toma el estado que el envelope declara, done, blocked, deviated o failed. Salida cero nunca alcanza por sí sola para done. Los eventos que sólo explican, y no cambian el estado, se registran como lane_note. El estado resultante va a internal/barrier, que libera cuando todos los carriles llegan a un estado terminal, integra los done y preserva el resto. Todavía no existen el ejecutor cursor-agent, la integración con árbol combinado y bisección, ni la web de aprobaciones.">
 
         <defs>
           <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5"
@@ -177,15 +177,17 @@
 
         <rect x="700" y="146" width="220" height="160" rx="3" fill="none"
               stroke="currentColor" stroke-width="1.5"/>
-        <text x="718" y="199" font-family="system-ui, sans-serif" font-size="13"
+        <text x="718" y="176" font-family="system-ui, sans-serif" font-size="13"
               fill="currentColor">internal/ledger</text>
-        <text x="718" y="218" font-family="ui-monospace, Menlo, Consolas, monospace"
+        <text x="718" y="194" font-family="ui-monospace, Menlo, Consolas, monospace"
               font-size="9.5" fill="currentColor" opacity="0.75">SQLite · WAL · pool de 4</text>
-        <text x="718" y="248" font-family="ui-monospace, Menlo, Consolas, monospace"
+        <text x="718" y="224" font-family="ui-monospace, Menlo, Consolas, monospace"
               font-size="9.5" fill="currentColor">lane_registered</text>
-        <text x="718" y="266" font-family="ui-monospace, Menlo, Consolas, monospace"
+        <text x="718" y="242" font-family="ui-monospace, Menlo, Consolas, monospace"
               font-size="9.5" fill="currentColor">lane_status_changed</text>
-        <text x="718" y="284" font-family="ui-monospace, Menlo, Consolas, monospace"
+        <text x="718" y="260" font-family="ui-monospace, Menlo, Consolas, monospace"
+              font-size="9.5" fill="currentColor">lane_note</text>
+        <text x="718" y="278" font-family="ui-monospace, Menlo, Consolas, monospace"
               font-size="9.5" fill="currentColor">barrier_released</text>
 
         <line x1="230" y1="204" x2="230" y2="232" stroke="currentColor"
