@@ -22,11 +22,22 @@ Every packet must open with a YAML frontmatter block enclosed by `---`:
 | Key | Required | Description |
 |---|---|---|
 | `id` | Yes | Unique identifier for the lane. Names the branch (`lucind/<id>`) and worktree directory. |
-| `executor` | Yes | Execution runtime to dispatch (currently `agy`). |
+| `executor` | Yes | Execution runtime to dispatch (currently `agy` or `cursor-agent`). |
 | `routed_by` | Yes | The explicit condition that triggered this routing decision — never the executor name. |
 | `model` | No | Model name passed to executor. Defaults to `gemini-3.7-flash-high` when omitted. |
 
 The document body following the closing `---` is the prompt passed to the executor and must not be empty.
+
+### Executor preference by SDD phase
+
+Prefer this `executor:` value by SDD lifecycle phase when writing a packet. It is a preference the author applies by hand, not a rule enforced by any code — `executor` stays a value a human writes by hand (`docs/prd.md` section 6 step 1), and there is and will remain no code-level routing. It is a second, complementary lens to the aptitude map in `docs/prd.md` section 5 (sweeps-vs-precision); a packet author may weigh both when they point in different directions.
+
+| SDD phase | Preferred executor | Why |
+|---|---|---|
+| design, proposal, specs, tasks | `cursor-agent` | Editorial/planning judgment on a bounded artifact -- matches its "single-piece precision" strength. |
+| apply (implementation) | `agy` | Broad, mechanical, multi-file execution -- matches its "sweeps and volume" strength. |
+
+`validate` deliberately has no entry here. It is not a phase `lucind-ai` dispatches at all. Reviewing/validating a diff is `gentle-ai`'s RDD, run by a human from an `opencode` session with `gpt-5.6-sol` (`docs/prd.md` section 9) — outside this binary's dispatch model entirely, not a third executor choice.
 
 ### Packet Structure
 
