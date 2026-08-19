@@ -1,0 +1,31 @@
+change: approvals-web-ui
+created: 2026-08-19
+artifact_store: hybrid
+execution_mode: auto
+delivery_strategy: single-pr
+review_budget_lines: 2000
+phases:
+  explore:
+    status: done
+    engram_topic: sdd/approvals-web-ui/explore
+    engram_id: 1793
+  proposal:
+    status: pending
+  spec:
+    status: pending
+  design:
+    status: pending
+  tasks:
+    status: pending
+  apply:
+    status: pending
+  verify:
+    status: pending
+  archive:
+    status: pending
+notes: |
+  Dual-executor SDD phase experiment (session request): design/proposal/specs/tasks phases author
+  their content via lucind-ai packets dispatched to agy AND cursor-agent in parallel where the
+  phase allows, per plugin/claude-code/skills/lucind-ai/SKILL.md's routing preference table.
+  Apply phase dispatches to agy. The orchestrator (this Claude Code session) synthesizes/selects
+  from parallel outputs and owns the canonical artifact in openspec/ + engram.

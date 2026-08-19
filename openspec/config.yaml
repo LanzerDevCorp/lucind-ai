@@ -1,0 +1,37 @@
+schema: spec-driven
+
+context: |
+  Tech stack: Go 1.24.2, module github.com/LanzerDevCorp/lucind-ai
+  Architecture: single-binary CLI (cmd/lucind-ai) dispatching to executor CLIs (agy, cursor-agent)
+    in isolated git worktrees; SQLite ledger (internal/ledger) for lane/run/event state; batch
+    barrier (internal/barrier) joins lanes at a shared release point.
+  Testing: stdlib `testing` only (no testify); internal/ledger uses real on-disk SQLite via
+    t.TempDir(); internal/run uses a hand-written fakeExecutor test double against a real ledger.
+  Style: table-driven and one-scenario-per-function tests; doc comments tie test names to the
+    requirement they prove; internal/integrate.Check runs lucind-checks.sh at the worktree root
+    (this repo's own lucind-checks.sh wraps `go build ./...` + `go test ./... -race -count=1`).
+
+rules:
+  proposal:
+    - Include rollback plan for risky changes
+    - State explicitly which existing lane-lifecycle call site the change hooks into
+  specs:
+    - Use Given/When/Then for scenarios
+    - Use RFC 2119 keywords (MUST, SHALL, SHOULD, MAY)
+  design:
+    - Document architecture decisions with rationale
+    - Name the exact schema migration (version, table/columns) and the exact call sites touched
+  tasks:
+    - Group by phase, use hierarchical numbering
+    - Keep tasks completable in one session
+  apply:
+    guidelines:
+      - Follow existing code patterns (see internal/ledger, internal/run test conventions)
+    tdd: true
+    test_command: "go test ./... -race -count=1"
+  verify:
+    test_command: "go test ./... -race -count=1"
+    build_command: "go build ./..."
+    coverage_threshold: 0
+  archive:
+    - Warn before merging destructive deltas
