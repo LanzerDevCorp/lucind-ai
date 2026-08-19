@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/LanzerDevCorp/lucind-ai/internal/resolve"
 	"github.com/LanzerDevCorp/lucind-ai/internal/worktree"
 )
 
@@ -30,6 +31,10 @@ var ErrPrimaryRootDirty = errors.New("integrate: primary root has uncommitted ch
 // wrapped with the failing branch name and git's output.
 // The caller never has to clean up after a failed Combine call.
 func Combine(ctx context.Context, primaryRoot, runID string, branches []string) (worktreePath, branchName string, err error) {
+	return combine(ctx, primaryRoot, runID, branches, resolve.RealInvoker)
+}
+
+func combine(ctx context.Context, primaryRoot, runID string, branches []string, invoke resolve.Invoker) (worktreePath, branchName string, err error) {
 	wt, err := worktree.Create(ctx, primaryRoot, "integrate-"+runID)
 	if err != nil {
 		return "", "", fmt.Errorf("integrate: combine create worktree: %w", err)
@@ -40,6 +45,11 @@ func Combine(ctx context.Context, primaryRoot, runID string, branches []string) 
 		cmd.Dir = wt.Path
 		out, mergeErr := cmd.CombinedOutput()
 		if mergeErr != nil {
+			resolved, _, resolveErr := resolve.Resolve(ctx, wt.Path, invoke)
+			if resolveErr == nil && resolved {
+				continue
+			}
+
 			abortCmd := exec.CommandContext(ctx, "git", "merge", "--abort")
 			abortCmd.Dir = wt.Path
 			_ = abortCmd.Run()
