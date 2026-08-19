@@ -306,12 +306,16 @@ is the point, it runs in v1.
 
 These were live before this PRD and are not resolved by it:
 
-1. **The orchestration skill is still installed in `agy`.** An executor holding a document that
-   explains how to dispatch, route, and merge can be triggered by description and widen its own
-   scope — the exact failure the rest of the design fights. Under this PRD the plugin goes away, so
-   the action is to uninstall it, not to split it.
-2. **`codegraph` and `context7` are not in `agy`'s `mcp_config.json`** — only engram is. They are
-   copied by hand, not installed as plugins. Executors need them.
+1. ~~**The orchestration skill is still installed in `agy`.**~~ **Resolved 2026-08-19**, and it was
+   already true before anyone acted: `agy plugin list` reports only `context-mode`. The concern the
+   item described — an executor holding a document that explains how to dispatch, route and merge
+   can be triggered by description and widen its own scope — still governs what may be installed
+   there. Nothing needed uninstalling.
+2. ~~**`codegraph` and `context7` are not in `agy`'s `mcp_config.json`.**~~ **Resolved 2026-08-19.**
+   Half of this was already stale: `context7` was present, as a remote `serverUrl` rather than the
+   local `npx` command `~/.claude.json` uses. Only `codegraph` was genuinely missing, and it was
+   added as a `stdio` server by a dispatched lane (run `5de2a555`). These are still copied by hand,
+   not installed as plugins.
 3. **"Which skill for which task" was never worked through.** Untouched.
 
 ## 14. What the research settled
