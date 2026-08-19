@@ -21,11 +21,13 @@ type integrateRecorder struct {
 		RunID       string
 		Branches    []string
 	}
+	combineFunc      func(primaryRoot, runID string, branches []string) (string, string, error)
 	combineRetPath   string
 	combineRetBranch string
 	combineErr       error
 
 	checkCalls     []string
+	checkFunc      func(worktreePath string) (bool, string, error)
 	checkRetPassed bool
 	checkRetOutput string
 	checkErr       error
@@ -34,21 +36,24 @@ type integrateRecorder struct {
 		PrimaryRoot       string
 		IntegrationBranch string
 	}
-	promoteErr error
+	promoteFunc func(primaryRoot, integrationBranch string) error
+	promoteErr  error
 
 	discardCalls []struct {
 		PrimaryRoot  string
 		WorktreePath string
 		BranchName   string
 	}
-	discardErr error
+	discardFunc func(primaryRoot, worktreePath, branchName string) error
+	discardErr  error
 
 	removeCalls []struct {
 		PrimaryRoot  string
 		WorktreePath string
 		Branch       string
 	}
-	removeErr error
+	removeFunc func(primaryRoot, worktreePath, branch string) error
+	removeErr  error
 }
 
 func newIntegrateTestDeps(t *testing.T, rec *integrateRecorder) (run.Deps, *ledger.Ledger) {
@@ -74,6 +79,11 @@ func newIntegrateTestDeps(t *testing.T, rec *integrateRecorder) (run.Deps, *ledg
 				RunID       string
 				Branches    []string
 			}{PrimaryRoot: primaryRoot, RunID: runID, Branches: branches})
+			if rec.combineFunc != nil {
+				fn := rec.combineFunc
+				rec.mu.Unlock()
+				return fn(primaryRoot, runID, branches)
+			}
 			path := rec.combineRetPath
 			branch := rec.combineRetBranch
 			err := rec.combineErr
@@ -83,6 +93,11 @@ func newIntegrateTestDeps(t *testing.T, rec *integrateRecorder) (run.Deps, *ledg
 		RunChecks: func(_ context.Context, worktreePath string) (bool, string, error) {
 			rec.mu.Lock()
 			rec.checkCalls = append(rec.checkCalls, worktreePath)
+			if rec.checkFunc != nil {
+				fn := rec.checkFunc
+				rec.mu.Unlock()
+				return fn(worktreePath)
+			}
 			passed := rec.checkRetPassed
 			out := rec.checkRetOutput
 			err := rec.checkErr
@@ -95,6 +110,11 @@ func newIntegrateTestDeps(t *testing.T, rec *integrateRecorder) (run.Deps, *ledg
 				PrimaryRoot       string
 				IntegrationBranch string
 			}{PrimaryRoot: primaryRoot, IntegrationBranch: integrationBranch})
+			if rec.promoteFunc != nil {
+				fn := rec.promoteFunc
+				rec.mu.Unlock()
+				return fn(primaryRoot, integrationBranch)
+			}
 			err := rec.promoteErr
 			rec.mu.Unlock()
 			return err
@@ -106,6 +126,11 @@ func newIntegrateTestDeps(t *testing.T, rec *integrateRecorder) (run.Deps, *ledg
 				WorktreePath string
 				BranchName   string
 			}{PrimaryRoot: primaryRoot, WorktreePath: worktreePath, BranchName: branchName})
+			if rec.discardFunc != nil {
+				fn := rec.discardFunc
+				rec.mu.Unlock()
+				return fn(primaryRoot, worktreePath, branchName)
+			}
 			err := rec.discardErr
 			rec.mu.Unlock()
 			return err
@@ -117,6 +142,11 @@ func newIntegrateTestDeps(t *testing.T, rec *integrateRecorder) (run.Deps, *ledg
 				WorktreePath string
 				Branch       string
 			}{PrimaryRoot: primaryRoot, WorktreePath: worktreePath, Branch: branch})
+			if rec.removeFunc != nil {
+				fn := rec.removeFunc
+				rec.mu.Unlock()
+				return fn(primaryRoot, worktreePath, branch)
+			}
 			err := rec.removeErr
 			rec.mu.Unlock()
 			return err
@@ -381,8 +411,9 @@ func TestIntegrateMergeConflictRedPath(t *testing.T) {
 	if len(report.Reverted) != 2 || report.Reverted[0] != "lane-a" || report.Reverted[1] != "lane-b" {
 		t.Errorf("report.Reverted = %v, want [lane-a, lane-b]", report.Reverted)
 	}
-	if report.Reason != rec.combineErr.Error() {
-		t.Errorf("report.Reason = %q, want %q", report.Reason, rec.combineErr.Error())
+	wantErr := "bisection found no viable subset: " + rec.combineErr.Error()
+	if report.Reason != wantErr {
+		t.Errorf("report.Reason = %q, want %q", report.Reason, wantErr)
 	}
 
 	// Assert RunChecks and PromoteTarget are never called
@@ -426,11 +457,11 @@ func TestIntegrateMergeConflictRedPath(t *testing.T) {
 			}
 		}
 	}
-	if laneNotes["lane-a"] != rec.combineErr.Error() {
-		t.Errorf("lane-a note = %q, want %q", laneNotes["lane-a"], rec.combineErr.Error())
+	if laneNotes["lane-a"] != wantErr {
+		t.Errorf("lane-a note = %q, want %q", laneNotes["lane-a"], wantErr)
 	}
-	if laneNotes["lane-b"] != rec.combineErr.Error() {
-		t.Errorf("lane-b note = %q, want %q", laneNotes["lane-b"], rec.combineErr.Error())
+	if laneNotes["lane-b"] != wantErr {
+		t.Errorf("lane-b note = %q, want %q", laneNotes["lane-b"], wantErr)
 	}
 	if runSummary == "" {
 		t.Errorf("run-scoped summary event missing from events: %+v", events)
@@ -479,13 +510,14 @@ func TestIntegrateFailingChecksRedPath(t *testing.T) {
 	if len(report.Reverted) != 2 || report.Reverted[0] != "lane-a" || report.Reverted[1] != "lane-b" {
 		t.Errorf("report.Reverted = %v, want [lane-a, lane-b]", report.Reverted)
 	}
-	if report.Reason != rec.checkRetOutput {
-		t.Errorf("report.Reason = %q, want %q", report.Reason, rec.checkRetOutput)
+	wantErr := "bisection found no viable subset: " + rec.checkRetOutput
+	if report.Reason != wantErr {
+		t.Errorf("report.Reason = %q, want %q", report.Reason, wantErr)
 	}
 
-	// Assert DiscardCombined was called with CombineTree's returned path/branch
-	if len(rec.discardCalls) != 1 || rec.discardCalls[0].WorktreePath != "/wt/integrate-run-1" || rec.discardCalls[0].BranchName != "lucind/integrate-run-1" {
-		t.Errorf("DiscardCombined calls = %+v, want [/wt/integrate-run-1, lucind/integrate-run-1]", rec.discardCalls)
+	// Assert DiscardCombined was called for the full batch and each bisection attempt (3 total)
+	if len(rec.discardCalls) != 3 || rec.discardCalls[0].WorktreePath != "/wt/integrate-run-1" || rec.discardCalls[0].BranchName != "lucind/integrate-run-1" {
+		t.Errorf("DiscardCombined calls = %+v, want 3 calls with [/wt/integrate-run-1, lucind/integrate-run-1]", rec.discardCalls)
 	}
 
 	// Assert PromoteTarget and RemoveLaneWorktree are never called
@@ -541,8 +573,9 @@ func TestIntegrateChecksExecutionErrorRedPath(t *testing.T) {
 	if report.Passed {
 		t.Errorf("report.Passed = true, want false")
 	}
-	if report.Reason != rec.checkErr.Error() {
-		t.Errorf("report.Reason = %q, want %q", report.Reason, rec.checkErr.Error())
+	wantErr := "bisection found no viable subset: " + rec.checkErr.Error()
+	if report.Reason != wantErr {
+		t.Errorf("report.Reason = %q, want %q", report.Reason, wantErr)
 	}
 	if len(rec.discardCalls) != 1 {
 		t.Errorf("DiscardCombined called %d times, want 1", len(rec.discardCalls))
@@ -695,4 +728,433 @@ func TestIntegratePartialBatchNeverTouchesPreservedLanes(t *testing.T) {
 	if byID["lane-done"].WorktreePreserved {
 		t.Errorf("lane-done worktree_preserved = true, want false (cleaned up)")
 	}
+}
+
+func TestBisectPureInteractionFallback(t *testing.T) {
+	rec := &integrateRecorder{
+		combineRetPath:   "/wt/test",
+		combineRetBranch: "lucind/test",
+		checkRetPassed:   true,
+		checkRetOutput:   "PASS",
+	}
+	deps, _ := newIntegrateTestDeps(t, rec)
+
+	intLanes, revLanes := run.Bisect(context.Background(), deps, []string{"lane-a", "lane-b"})
+	if len(intLanes) != 0 {
+		t.Errorf("integrate lanes = %v, want nil", intLanes)
+	}
+	if len(revLanes) != 2 || revLanes[0] != "lane-a" || revLanes[1] != "lane-b" {
+		t.Errorf("revert lanes = %v, want [lane-a, lane-b]", revLanes)
+	}
+}
+
+func TestBisectSingleCulpritIsolation(t *testing.T) {
+	rec := &integrateRecorder{
+		combineRetPath:   "/wt/test",
+		combineRetBranch: "lucind/test",
+	}
+	rec.checkFunc = func(worktreePath string) (bool, string, error) {
+		lastCall := rec.combineCalls[len(rec.combineCalls)-1]
+		for _, b := range lastCall.Branches {
+			if b == "lucind/lane-b" {
+				return false, "FAIL: lane-b broken", nil
+			}
+		}
+		return true, "PASS", nil
+	}
+	deps, _ := newIntegrateTestDeps(t, rec)
+
+	intLanes, revLanes := run.Bisect(context.Background(), deps, []string{"lane-a", "lane-b", "lane-c"})
+	if len(intLanes) != 2 || intLanes[0] != "lane-a" || intLanes[1] != "lane-c" {
+		t.Errorf("integrate lanes = %v, want [lane-a, lane-c]", intLanes)
+	}
+	if len(revLanes) != 1 || revLanes[0] != "lane-b" {
+		t.Errorf("revert lanes = %v, want [lane-b]", revLanes)
+	}
+}
+
+func TestBisectRightGreenLeftRed(t *testing.T) {
+	rec := &integrateRecorder{
+		combineRetPath:   "/wt/test",
+		combineRetBranch: "lucind/test",
+	}
+	rec.checkFunc = func(worktreePath string) (bool, string, error) {
+		lastCall := rec.combineCalls[len(rec.combineCalls)-1]
+		for _, b := range lastCall.Branches {
+			if b == "lucind/lane-a" {
+				return false, "FAIL: lane-a broken", nil
+			}
+		}
+		return true, "PASS", nil
+	}
+	deps, _ := newIntegrateTestDeps(t, rec)
+
+	intLanes, revLanes := run.Bisect(context.Background(), deps, []string{"lane-a", "lane-b", "lane-c"})
+	if len(intLanes) != 2 || intLanes[0] != "lane-b" || intLanes[1] != "lane-c" {
+		t.Errorf("integrate lanes = %v, want [lane-b, lane-c]", intLanes)
+	}
+	if len(revLanes) != 1 || revLanes[0] != "lane-a" {
+		t.Errorf("revert lanes = %v, want [lane-a]", revLanes)
+	}
+}
+
+func TestBisectBothHalvesRedUnionGreen(t *testing.T) {
+	rec := &integrateRecorder{
+		combineRetPath:   "/wt/test",
+		combineRetBranch: "lucind/test",
+	}
+	rec.checkFunc = func(worktreePath string) (bool, string, error) {
+		lastCall := rec.combineCalls[len(rec.combineCalls)-1]
+		for _, b := range lastCall.Branches {
+			if b == "lucind/lane-b" || b == "lucind/lane-c" {
+				return false, "FAIL", nil
+			}
+		}
+		return true, "PASS", nil
+	}
+	deps, _ := newIntegrateTestDeps(t, rec)
+
+	intLanes, revLanes := run.Bisect(context.Background(), deps, []string{"lane-a", "lane-b", "lane-c", "lane-d"})
+	if len(intLanes) != 2 || intLanes[0] != "lane-a" || intLanes[1] != "lane-d" {
+		t.Errorf("integrate lanes = %v, want [lane-a, lane-d]", intLanes)
+	}
+	if len(revLanes) != 2 || revLanes[0] != "lane-b" || revLanes[1] != "lane-c" {
+		t.Errorf("revert lanes = %v, want [lane-b, lane-c]", revLanes)
+	}
+}
+
+func TestBisectBothHalvesRedUnionRed(t *testing.T) {
+	rec := &integrateRecorder{
+		combineRetPath:   "/wt/test",
+		combineRetBranch: "lucind/test",
+	}
+	rec.checkFunc = func(worktreePath string) (bool, string, error) {
+		lastCall := rec.combineCalls[len(rec.combineCalls)-1]
+		hasA := false
+		hasD := false
+		for _, b := range lastCall.Branches {
+			if b == "lucind/lane-b" || b == "lucind/lane-c" {
+				return false, "FAIL: bad single lane", nil
+			}
+			if b == "lucind/lane-a" {
+				hasA = true
+			}
+			if b == "lucind/lane-d" {
+				hasD = true
+			}
+		}
+		if hasA && hasD {
+			return false, "FAIL: lane-a and lane-d interaction", nil
+		}
+		return true, "PASS", nil
+	}
+	deps, _ := newIntegrateTestDeps(t, rec)
+
+	intLanes, revLanes := run.Bisect(context.Background(), deps, []string{"lane-a", "lane-b", "lane-c", "lane-d"})
+	if len(intLanes) != 0 {
+		t.Errorf("integrate lanes = %v, want nil", intLanes)
+	}
+	if len(revLanes) != 4 {
+		t.Errorf("revert lanes = %v, want 4 lanes", revLanes)
+	}
+}
+
+func TestIntegratePromotesBisectedSubsetAndRevertsRest(t *testing.T) {
+	rec := &integrateRecorder{
+		combineRetPath:   "/wt/integrate-run-1",
+		combineRetBranch: "lucind/integrate-run-1",
+	}
+	rec.checkFunc = func(worktreePath string) (bool, string, error) {
+		lastCall := rec.combineCalls[len(rec.combineCalls)-1]
+		for _, b := range lastCall.Branches {
+			if b == "lucind/lane-b" {
+				return false, "FAIL: lane-b fails", nil
+			}
+		}
+		return true, "PASS", nil
+	}
+	deps, l := newIntegrateTestDeps(t, rec)
+
+	registerTestLane(t, l, "run-1", "lane-a", lane.Done, "/wt/lane-a", true)
+	registerTestLane(t, l, "run-1", "lane-b", lane.Done, "/wt/lane-b", true)
+	registerTestLane(t, l, "run-1", "lane-c", lane.Done, "/wt/lane-c", true)
+
+	batch := run.BatchReport{
+		RunID:    "run-1",
+		Released: true,
+		Outcome: barrier.Outcome{
+			Released:  true,
+			Integrate: []string{"lane-a", "lane-b", "lane-c"},
+		},
+		Lanes: []run.Report{
+			{LaneID: "lane-a", Status: lane.Done, Worktree: "/wt/lane-a"},
+			{LaneID: "lane-b", Status: lane.Done, Worktree: "/wt/lane-b"},
+			{LaneID: "lane-c", Status: lane.Done, Worktree: "/wt/lane-c"},
+		},
+	}
+
+	report, err := run.Integrate(context.Background(), deps, batch)
+	if err != nil {
+		t.Fatalf("Integrate() error = %v", err)
+	}
+
+	if !report.Attempted {
+		t.Errorf("report.Attempted = false, want true")
+	}
+	if !report.Passed {
+		t.Errorf("report.Passed = false, want true")
+	}
+
+	// Assert partition
+	if len(report.Integrated) != 2 || report.Integrated[0] != "lane-a" || report.Integrated[1] != "lane-c" {
+		t.Errorf("report.Integrated = %v, want [lane-a, lane-c]", report.Integrated)
+	}
+	if len(report.Reverted) != 1 || report.Reverted[0] != "lane-b" {
+		t.Errorf("report.Reverted = %v, want [lane-b]", report.Reverted)
+	}
+
+	// Assert only integrated lanes had their worktrees removed
+	if len(rec.removeCalls) != 2 {
+		t.Fatalf("RemoveLaneWorktree calls = %d, want 2", len(rec.removeCalls))
+	}
+	if rec.removeCalls[0].WorktreePath != "/wt/lane-a" || rec.removeCalls[0].Branch != "lucind/lane-a" {
+		t.Errorf("removeCalls[0] = %+v, want /wt/lane-a, lucind/lane-a", rec.removeCalls[0])
+	}
+	if rec.removeCalls[1].WorktreePath != "/wt/lane-c" || rec.removeCalls[1].Branch != "lucind/lane-c" {
+		t.Errorf("removeCalls[1] = %+v, want /wt/lane-c, lucind/lane-c", rec.removeCalls[1])
+	}
+
+	// Assert ledger states
+	lanes, err := l.Lanes(context.Background(), "run-1")
+	if err != nil {
+		t.Fatalf("Lanes() error = %v", err)
+	}
+	byID := map[string]ledger.Lane{}
+	for _, ln := range lanes {
+		byID[ln.LaneID] = ln
+	}
+
+	if byID["lane-a"].Status != lane.Done || byID["lane-a"].WorktreePreserved {
+		t.Errorf("lane-a = %+v, want Done and WorktreePreserved=false", byID["lane-a"])
+	}
+	if byID["lane-c"].Status != lane.Done || byID["lane-c"].WorktreePreserved {
+		t.Errorf("lane-c = %+v, want Done and WorktreePreserved=false", byID["lane-c"])
+	}
+	if byID["lane-b"].Status != lane.Blocked || !byID["lane-b"].WorktreePreserved {
+		t.Errorf("lane-b = %+v, want Blocked and WorktreePreserved=true", byID["lane-b"])
+	}
+}
+
+func TestIntegrateBisectionFindsNothingFullyReverts(t *testing.T) {
+	rec := &integrateRecorder{
+		combineRetPath:   "/wt/integrate-run-1",
+		combineRetBranch: "lucind/integrate-run-1",
+		checkRetPassed:   false,
+		checkRetOutput:   "FAIL: everything fails",
+	}
+	deps, l := newIntegrateTestDeps(t, rec)
+
+	registerTestLane(t, l, "run-1", "lane-a", lane.Done, "/wt/lane-a", false)
+	registerTestLane(t, l, "run-1", "lane-b", lane.Done, "/wt/lane-b", false)
+
+	batch := run.BatchReport{
+		RunID:    "run-1",
+		Released: true,
+		Outcome: barrier.Outcome{
+			Released:  true,
+			Integrate: []string{"lane-a", "lane-b"},
+		},
+		Lanes: []run.Report{
+			{LaneID: "lane-a", Status: lane.Done, Worktree: "/wt/lane-a"},
+			{LaneID: "lane-b", Status: lane.Done, Worktree: "/wt/lane-b"},
+		},
+	}
+
+	report, err := run.Integrate(context.Background(), deps, batch)
+	if err != nil {
+		t.Fatalf("Integrate() error = %v", err)
+	}
+
+	if report.Passed {
+		t.Errorf("report.Passed = true, want false")
+	}
+	if len(report.Integrated) != 0 {
+		t.Errorf("report.Integrated = %v, want empty", report.Integrated)
+	}
+	if len(report.Reverted) != 2 || report.Reverted[0] != "lane-a" || report.Reverted[1] != "lane-b" {
+		t.Errorf("report.Reverted = %v, want [lane-a, lane-b]", report.Reverted)
+	}
+
+	lanes, err := l.Lanes(context.Background(), "run-1")
+	if err != nil {
+		t.Fatalf("Lanes() error = %v", err)
+	}
+	for _, ln := range lanes {
+		if ln.Status != lane.Blocked {
+			t.Errorf("lane %s status = %v, want Blocked", ln.LaneID, ln.Status)
+		}
+		if !ln.WorktreePreserved {
+			t.Errorf("lane %s WorktreePreserved = false, want true", ln.LaneID)
+		}
+	}
+}
+
+func TestIntegratePromoteFailureDoesNotTriggerBisection(t *testing.T) {
+	rec := &integrateRecorder{
+		combineRetPath:   "/wt/integrate-run-1",
+		combineRetBranch: "lucind/integrate-run-1",
+		checkRetPassed:   true,
+		checkRetOutput:   "PASS",
+		promoteErr:       errors.New("promote failed: dirty tree"),
+	}
+	deps, l := newIntegrateTestDeps(t, rec)
+
+	registerTestLane(t, l, "run-1", "lane-a", lane.Done, "/wt/lane-a", false)
+	registerTestLane(t, l, "run-1", "lane-b", lane.Done, "/wt/lane-b", false)
+
+	batch := run.BatchReport{
+		RunID:    "run-1",
+		Released: true,
+		Outcome: barrier.Outcome{
+			Released:  true,
+			Integrate: []string{"lane-a", "lane-b"},
+		},
+		Lanes: []run.Report{
+			{LaneID: "lane-a", Status: lane.Done, Worktree: "/wt/lane-a"},
+			{LaneID: "lane-b", Status: lane.Done, Worktree: "/wt/lane-b"},
+		},
+	}
+
+	report, err := run.Integrate(context.Background(), deps, batch)
+	if err != nil {
+		t.Fatalf("Integrate() error = %v", err)
+	}
+
+	if report.Passed {
+		t.Errorf("report.Passed = true, want false")
+	}
+	if len(rec.combineCalls) != 1 {
+		t.Errorf("CombineTree calls = %d, want 1 (bisection must not be triggered)", len(rec.combineCalls))
+	}
+	if len(report.Integrated) != 0 {
+		t.Errorf("report.Integrated = %v, want empty", report.Integrated)
+	}
+	if len(report.Reverted) != 2 || report.Reverted[0] != "lane-a" || report.Reverted[1] != "lane-b" {
+		t.Errorf("report.Reverted = %v, want [lane-a, lane-b]", report.Reverted)
+	}
+}
+
+func TestIntegrateFinalReverifyFallback(t *testing.T) {
+	rec := &integrateRecorder{
+		combineRetPath:   "/wt/integrate-run-1",
+		combineRetBranch: "lucind/integrate-run-1",
+		promoteFunc: func(primaryRoot, integrationBranch string) error {
+			return errors.New("promote failed on reverify")
+		},
+	}
+	rec.checkFunc = func(worktreePath string) (bool, string, error) {
+		lastCall := rec.combineCalls[len(rec.combineCalls)-1]
+		for _, b := range lastCall.Branches {
+			if b == "lucind/lane-b" {
+				return false, "FAIL: lane-b fails", nil
+			}
+		}
+		return true, "PASS", nil
+	}
+	deps, l := newIntegrateTestDeps(t, rec)
+
+	registerTestLane(t, l, "run-1", "lane-a", lane.Done, "/wt/lane-a", false)
+	registerTestLane(t, l, "run-1", "lane-b", lane.Done, "/wt/lane-b", false)
+	registerTestLane(t, l, "run-1", "lane-c", lane.Done, "/wt/lane-c", false)
+
+	batch := run.BatchReport{
+		RunID:    "run-1",
+		Released: true,
+		Outcome: barrier.Outcome{
+			Released:  true,
+			Integrate: []string{"lane-a", "lane-b", "lane-c"},
+		},
+		Lanes: []run.Report{
+			{LaneID: "lane-a", Status: lane.Done, Worktree: "/wt/lane-a"},
+			{LaneID: "lane-b", Status: lane.Done, Worktree: "/wt/lane-b"},
+			{LaneID: "lane-c", Status: lane.Done, Worktree: "/wt/lane-c"},
+		},
+	}
+
+	report, err := run.Integrate(context.Background(), deps, batch)
+	if err != nil {
+		t.Fatalf("Integrate() error = %v", err)
+	}
+
+	if report.Passed {
+		t.Errorf("report.Passed = true, want false")
+	}
+	if len(report.Integrated) != 0 {
+		t.Errorf("report.Integrated = %v, want empty", report.Integrated)
+	}
+	// All original lanes in batch.Outcome.Integrate must be reverted
+	if len(report.Reverted) != 3 || report.Reverted[0] != "lane-a" || report.Reverted[1] != "lane-b" || report.Reverted[2] != "lane-c" {
+		t.Errorf("report.Reverted = %v, want [lane-a, lane-b, lane-c]", report.Reverted)
+	}
+
+	lanes, err := l.Lanes(context.Background(), "run-1")
+	if err != nil {
+		t.Fatalf("Lanes() error = %v", err)
+	}
+	for _, ln := range lanes {
+		if ln.Status != lane.Blocked {
+			t.Errorf("lane %s status = %v, want Blocked", ln.LaneID, ln.Status)
+		}
+		if !ln.WorktreePreserved {
+			t.Errorf("lane %s WorktreePreserved = false, want true", ln.LaneID)
+		}
+	}
+}
+
+func TestTryCombineDiscardsWorktree(t *testing.T) {
+	t.Run("on success", func(t *testing.T) {
+		rec := &integrateRecorder{
+			combineRetPath:   "/wt/try-combine-1",
+			combineRetBranch: "lucind/try-combine-1",
+			checkRetPassed:   true,
+		}
+		deps, _ := newIntegrateTestDeps(t, rec)
+		ok := run.TryCombine(context.Background(), deps, []string{"lane-a"})
+		if !ok {
+			t.Errorf("TryCombine() = false, want true")
+		}
+		if len(rec.discardCalls) != 1 || rec.discardCalls[0].WorktreePath != "/wt/try-combine-1" {
+			t.Errorf("DiscardCombined calls = %+v, want 1 call for /wt/try-combine-1", rec.discardCalls)
+		}
+	})
+
+	t.Run("on check failure", func(t *testing.T) {
+		rec := &integrateRecorder{
+			combineRetPath:   "/wt/try-combine-2",
+			combineRetBranch: "lucind/try-combine-2",
+			checkRetPassed:   false,
+		}
+		deps, _ := newIntegrateTestDeps(t, rec)
+		ok := run.TryCombine(context.Background(), deps, []string{"lane-a"})
+		if ok {
+			t.Errorf("TryCombine() = true, want false")
+		}
+		if len(rec.discardCalls) != 1 || rec.discardCalls[0].WorktreePath != "/wt/try-combine-2" {
+			t.Errorf("DiscardCombined calls = %+v, want 1 call for /wt/try-combine-2", rec.discardCalls)
+		}
+	})
+
+	t.Run("on combine failure", func(t *testing.T) {
+		rec := &integrateRecorder{
+			combineErr: errors.New("combine error"),
+		}
+		deps, _ := newIntegrateTestDeps(t, rec)
+		ok := run.TryCombine(context.Background(), deps, []string{"lane-a"})
+		if ok {
+			t.Errorf("TryCombine() = true, want false")
+		}
+		if len(rec.discardCalls) != 0 {
+			t.Errorf("DiscardCombined calls = %+v, want 0 calls on combine error", rec.discardCalls)
+		}
+	})
 }
