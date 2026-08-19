@@ -1,6 +1,6 @@
 ---
 name: lucind-ai
-description: "Trigger: parallel work, multi-agent, delegate to agy, antigravity, opencode, work packet, worktree, task ledger, approval queue, human packet. Route already-decided work across execution, audit and human lanes without stalling the conversation."
+description: "Author dispatch packets and drive the lucind-ai delegated execution binary."
 license: Apache-2.0
 metadata:
   author: "LanzerDevCorp"
@@ -9,150 +9,75 @@ metadata:
 
 # lucind-ai
 
-Supervisor pattern, two levels, never three. Opus holds the ledger and dispatches surgical
-tasks; `agy` executes in parallel, `opencode` audits, the human runs whatever touches a
-secret. Context lives in engram and in the worktree — the prompt says where to start.
+Authoring dispatch packets and driving the `lucind-ai` execution binary.
 
-## Activation Contract
+## 1. Writing a Packet
 
-Load when the conversation is still deciding and some work has become required regardless of
-what gets decided next. Also load when the user asks to delegate, parallelize, or drive
-`agy` / `opencode`.
+A packet defines a bounded, surgical unit of work executed in an isolated git worktree.
 
-Do NOT load to run work whose decision is still open, or for a single edit the main thread
-can make faster inline.
+### Frontmatter
 
-## Hard Rules
+Every packet must open with a YAML frontmatter block enclosed by `---`:
 
-1. Dispatch only work that stays correct no matter how the open questions resolve. If a
-   pending answer could change it, do not dispatch.
-2. Every packet runs in its own git worktree. Never dispatch an agent into the main tree.
-3. **No agent ever generates, enters, or writes a credential value.** A packet may prepare a
-   rotation — env indirection, `.env.example`, runbook — and must stop before the secret.
-   That work is the human's lane.
-4. `blocked` is a terminal result, not a prompt. A one-shot CLI cannot ask mid-run, so the
-   agent stops and returns the question. Never let it guess.
-5. **Every hard stop must be declared in the result envelope** — for each one, either it did
-   not fire, or it fired and the agent stopped. An undeclared hard stop makes the result
-   invalid regardless of the criteria.
-6. Resume blocked packets with `agy --conversation <id>` or `opencode run -s <id>`. Never
-   restart from scratch — the context is the asset.
-7. A packet whose precondition is satisfied by one of its own later steps is misordered.
-   Return `blocked`; do not work around it.
-8. Route packet execution to a non-Claude model. A same-family model echoes the caller's
-   reasoning instead of checking it. What buys independence is ignorance of the caller's
-   context, not the vendor — see **Fallback** for what that permits.
-9. The routing decision goes into the ledger together with the condition that triggered it.
-   There is no implicit routing.
+| Key | Required | Description |
+|---|---|---|
+| `id` | Yes | Unique identifier for the lane. Names the branch (`lucind/<id>`) and worktree directory. |
+| `executor` | Yes | Execution runtime to dispatch (currently `agy`). |
+| `routed_by` | Yes | The explicit condition that triggered this routing decision — never the executor name. |
+| `model` | No | Model name passed to executor. Defaults to `gemini-3.7-flash-high` when omitted. |
 
-## Routing
+The document body following the closing `---` is the prompt passed to the executor and must not be empty.
 
-Two independent axes. Decide them separately — mixing them is what makes a trivial task drag
-the whole machine behind it. A project may extend this table in its own `CLAUDE.md`; the
-project table wins.
+### Packet Structure
 
-### Axis 1 — who executes
+1. **Goal**: One concise statement of what must be true upon completion (not how to do it).
+2. **Why this is safe to dispatch now**: Why unresolved conversation questions cannot alter this work.
+3. **Preconditions**: Verified environment state before step one. If a precondition depends on a later step in the same packet, the packet is misordered and must return `blocked`.
+4. **Allowed paths**: Explicit list of files/directories permitted to change in the repository.
+5. **Allowed paths outside the repository**: Paths outside the repo (e.g. `~/.config/...`) with exact revert commands.
+6. **Out of scope**: Adjacent work explicitly forbidden.
+7. **Context**: Ground-truth facts with `file:line` references; avoid forcing agents to re-derive context.
 
-By the nature of the work, never by its size.
+### Done Criteria & Hard Stops
 
-| Situation | Executor |
-|---|---|
-| Verify or decide by reading 1–3 files | Opus, inline |
-| Map or explore 4+ files | `agy`, sweep, no writes |
-| Bounded execution with checkable done-criteria | `agy`, own worktree |
-| Write 2+ non-trivial files | `agy`, one writer per worktree |
-| Adversarial judgment on a diff or a decision | `opencode -m openai/gpt-5.6-sol` |
-| Needs a credential value, or critical supervision | **the human** |
+- **Done criteria**: Verifiable, objective assertions checkable by someone who did not do the work. Each criterion requires concrete evidence (command output or `file:line`), not assertions of success.
+  - *Mandatory criterion 1*: Every indirection introduced is demonstrably consumed by a terminal consumer (name the consumer and provide proof).
+  - *Mandatory criterion 2*: The work is committed with a conventional commit and no AI attribution (`git status --porcelain` empty and `git log --oneline -1`).
+- **Hard stops**: Explicit failure/boundary conditions that require stopping immediately with `status: blocked` rather than guessing. Every declared hard stop must be explicitly evaluated and reported in the result envelope whether or not it fired.
 
-Parallelise only when the tasks share no files. One worktree per packet.
+### Judging Returned Evidence
 
-### Axis 2 — what verification it warrants
+Reviewing returned evidence is a human/orchestrator judgment task:
+- Green criteria are not proof of complete work; verify evidence independently against the codebase.
+- On `blocked`: inspect the returned question and recommendation, answer the decision point, and resume the context.
 
-Default is zero. A control fires only through the condition that names it. If the condition
-cannot be named, the control does not fire.
+## 2. Driving the Binary
 
-| Named condition | Control |
-|---|---|
-| Always | Every hard stop declared in the envelope |
-| Touches config, secrets, security posture, schema, or CI | `gpt-5.6-sol` audit, mandatory before merge |
-| Two hard-stop violations by the same runtime on one packet | Circuit breaker — the lane closes, escalate to the human, no retry |
-| The audit ran on a same-family fallback | Tier B degrades to human merge |
-| Substantial ambiguity a durable contract would reduce | SDD, and only on explicit request or accepted proposal |
+The `lucind-ai` CLI orchestrates worktrees, dispatches runners, records state, and evaluates batch barriers.
 
-Size, file count, and perceived risk never select SDD on their own.
+### Invocation
 
-## Fallback
+Run from the primary repository root (the binary refuses to run from inside a linked worktree):
 
-Quotas are finite and the audit is mandatory for a whole class of change. Without a written
-alternative, an exhausted quota blocks that class entirely.
+```bash
+lucind-ai run --packet <path> [--packet <path> ...] [--timeout <duration>]
+```
 
-**Only a quota or rate-limit error triggers a fallback.** Any other failure is an execution
-error: retry with backoff, three attempts, then the circuit breaker. Treating a network
-timeout as an exhausted quota makes the system hop providers for no reason.
+| Flag | Type | Default | Description |
+|---|---|---|---|
+| `--packet <path>` | String (repeatable) | *(required)* | Path to a packet file. Each instance adds one concurrent lane. |
+| `--timeout <duration>` | Duration | `20m` | Wall-clock budget granted to each lane independently. |
 
-**Execution lane** — stay inside the provider before leaving it:
-`gemini-3.7-flash-high` → `3.6` → `3.5`. Changing family to *execute* buys nothing.
+### Concurrency & Barrier
 
-**Audit lane** — `openai/gpt-5.6-sol`, then a blind Claude panel:
+- **Parallel lanes**: Passing multiple `--packet` flags executes lanes concurrently in isolated worktrees (`../<repo>-worktrees/<id>`).
+- **Independent clocks**: Each lane gets an independent deadline derived from `--timeout`; slow lanes never consume a sibling lane's budget.
+- **Failure isolation**: Lanes never cancel sibling lanes. If one lane blocks, fails, or times out, all other lanes run to completion.
 
-Independence comes from ignorance of the caller's context, not from the vendor. A frontier
-Claude model that never saw the conversation is not echoing anything — it does not know what
-to echo. So the fallback auditor is **two blind judges** (`jd-judge-a`, `jd-judge-b`,
-`model: opus`), given the frozen diff and the packet and nothing else. Never the orchestrator
-itself, and never an agent carrying conversation context.
+### Reports & Preserved Worktrees
 
-**A same-family verdict is recorded as such** — `audit.family: "same"` in the ledger — and it
-**degrades Tier B to human merge**. The whole justification for auto-merge is that an
-independent family checked the work; when independence is what is missing, the human is what
-compensates. A same-family verdict still blocks, still raises objections, still counts as an
-audit having run. It just cannot approve a merge on its own.
+- **Ledger**: SQLite database at `.lucind/lucind.db` records lane registrations, status transitions, and barrier events.
+- **Envelope**: Dispatched runners write structured envelopes to `.lucind/result.json`, validated against `.lucind/result.schema.json`.
+- **Preservation**: All lane worktrees are preserved on completion or failure.
+- **Exit code**: Returns `0` only when every lane in the batch achieves `done`. Returns `1` if any lane blocked, deviated, or failed.
 
-## The Task Ledger
-
-The orchestrator holds no context — it holds a ledger. One entry per task: id, state,
-dependency, executor, the condition that routed it, and where the result landed. Everything
-else is read from engram when needed.
-
-The ledger is the answer to "what is happening". If a question cannot be answered from the
-ledger plus one engram lookup, the thread is carrying context it should not.
-
-## Prompt Contract
-
-Every dispatch, to any lane, carries the same four parts:
-
-1. **A surgical task** — one outcome, not a project.
-2. **Scope and starting files** — where to begin. The agent may investigate further; it may
-   not widen the scope.
-3. **A response contract** — the envelope, enforced by schema where the runtime supports it.
-4. **Die** — the run ends when the task ends. No open-ended sessions.
-
-Context is not pasted into the prompt. It lives in engram and in the worktree.
-
-## Execution Steps
-
-1. Read the ledger and `.lucind/approvals.md`. Surface pending approvals before anything else.
-2. Write the packet from `assets/packet-template.md`, or `assets/human-packet-template.md`
-   when the human is the executor.
-3. Create the worktree per `references/runtime.md` — a sibling of the repo, never a temp dir.
-4. Dispatch with the envelope enforced (`.lucind/result.schema.json`).
-5. On `done`: verify the evidence independently. Green criteria are not proof of correct work
-   — the defect usually lives just outside what the criteria asked.
-6. Run the audit lane when Axis 2 names it. The verdict is advisory; Opus arbitrates.
-7. Tier A → human merge. Tier B → merge, then report.
-8. On `blocked` or `deviated`: append to `.lucind/approvals.md`, surface it verbatim, resume
-   with the session id once answered.
-9. Update the ledger after every transition.
-
-## Output Contract
-
-Per packet: id, tier, status, worktree, files changed, hard-stop declarations, audit verdict,
-and either the merge result or the exact question awaiting an answer. Never report a packet
-done before its evidence was checked independently. Never summarize away a `blocked` question
-— relay it verbatim.
-
-## References
-
-- `references/runtime.md` — verified CLI surface, models, MCP wiring, worktree mechanics.
-- `references/state-files.md` — ledger, approval queue, and what stays on disk.
-- `assets/packet-template.md` — agent packet.
-- `assets/human-packet-template.md` — human packet.
