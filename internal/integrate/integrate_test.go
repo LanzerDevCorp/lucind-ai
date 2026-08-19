@@ -143,7 +143,11 @@ func TestCombineErrMergeConflictSentinel(t *testing.T) {
 	// Return to main
 	runGit(t, primaryRoot, "checkout", "main")
 
-	_, _, err := integrate.Combine(context.Background(), primaryRoot, "run-sentinel", []string{"lucind/lane-c1", "lucind/lane-c2"})
+	neverResolves := func(ctx context.Context, worktreePath, prompt string) (string, error) {
+		return "", errors.New("cannot resolve")
+	}
+
+	_, _, err := integrate.CombineWithInvoker(context.Background(), primaryRoot, "run-sentinel", []string{"lucind/lane-c1", "lucind/lane-c2"}, neverResolves)
 	if err == nil {
 		t.Fatal("Combine() error = nil, want non-nil ErrMergeConflict")
 	}
@@ -190,7 +194,11 @@ func TestCombineConflictCleansUp(t *testing.T) {
 	expectedWorktreePath := filepath.Join(filepath.Dir(primaryRoot), filepath.Base(primaryRoot)+"-worktrees", "integrate-"+runID)
 	expectedBranchName := "lucind/integrate-" + runID
 
-	_, _, err := integrate.Combine(context.Background(), primaryRoot, runID, []string{"lucind/lane-ca", "lucind/lane-cb"})
+	neverResolves := func(ctx context.Context, worktreePath, prompt string) (string, error) {
+		return "", errors.New("cannot resolve")
+	}
+
+	_, _, err := integrate.CombineWithInvoker(context.Background(), primaryRoot, runID, []string{"lucind/lane-ca", "lucind/lane-cb"}, neverResolves)
 	if err == nil {
 		t.Fatal("Combine() error = nil, want ErrMergeConflict")
 	}
@@ -207,6 +215,133 @@ func TestCombineConflictCleansUp(t *testing.T) {
 	branchListOut := runGit(t, primaryRoot, "branch", "--list", expectedBranchName)
 	if strings.TrimSpace(branchListOut) != "" {
 		t.Errorf("git branch --list %q = %q, want empty after failed Combine", expectedBranchName, branchListOut)
+	}
+}
+
+func TestCombineConflictResolved(t *testing.T) {
+	if testing.Short() {
+		t.Skip("shells out to real git")
+	}
+
+	primaryRoot := initRepo(t)
+
+	// Base file
+	if err := os.WriteFile(filepath.Join(primaryRoot, "conflict.txt"), []byte("base line\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(conflict.txt) error = %v", err)
+	}
+	runGit(t, primaryRoot, "add", "conflict.txt")
+	runGit(t, primaryRoot, "commit", "-m", "add conflict.txt")
+
+	// Branch A
+	runGit(t, primaryRoot, "checkout", "-b", "lucind/lane-res-a")
+	if err := os.WriteFile(filepath.Join(primaryRoot, "conflict.txt"), []byte("change A\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(conflict.txt) error = %v", err)
+	}
+	runGit(t, primaryRoot, "add", "conflict.txt")
+	runGit(t, primaryRoot, "commit", "-m", "lane res a commit")
+
+	// Branch B
+	runGit(t, primaryRoot, "checkout", "main")
+	runGit(t, primaryRoot, "checkout", "-b", "lucind/lane-res-b")
+	if err := os.WriteFile(filepath.Join(primaryRoot, "conflict.txt"), []byte("change B\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(conflict.txt) error = %v", err)
+	}
+	runGit(t, primaryRoot, "add", "conflict.txt")
+	runGit(t, primaryRoot, "commit", "-m", "lane res b commit")
+
+	// Return to main
+	runGit(t, primaryRoot, "checkout", "main")
+
+	runID := "run-resolve-success"
+	fakeInvoker := func(ctx context.Context, worktreePath, prompt string) (string, error) {
+		if err := os.WriteFile(filepath.Join(worktreePath, "conflict.txt"), []byte("merged A and B content\n"), 0o644); err != nil {
+			return "", err
+		}
+		return "resolved", nil
+	}
+
+	wtPath, branchName, err := integrate.CombineWithInvoker(context.Background(), primaryRoot, runID, []string{"lucind/lane-res-a", "lucind/lane-res-b"}, fakeInvoker)
+	if err != nil {
+		t.Fatalf("CombineWithInvoker() error = %v, want nil", err)
+	}
+	defer func() {
+		_ = worktree.Remove(context.Background(), primaryRoot, wtPath)
+		_ = worktree.DeleteBranch(context.Background(), primaryRoot, branchName)
+	}()
+
+	resolvedData, err := os.ReadFile(filepath.Join(wtPath, "conflict.txt"))
+	if err != nil {
+		t.Fatalf("ReadFile(conflict.txt) error = %v", err)
+	}
+	if string(resolvedData) != "merged A and B content\n" {
+		t.Errorf("conflict.txt content = %q, want %q", string(resolvedData), "merged A and B content\n")
+	}
+}
+
+func TestCombineConflictResolutionFailsCleansUp(t *testing.T) {
+	if testing.Short() {
+		t.Skip("shells out to real git")
+	}
+
+	primaryRoot := initRepo(t)
+
+	// Base file
+	if err := os.WriteFile(filepath.Join(primaryRoot, "conflict.txt"), []byte("base line\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(conflict.txt) error = %v", err)
+	}
+	runGit(t, primaryRoot, "add", "conflict.txt")
+	runGit(t, primaryRoot, "commit", "-m", "add conflict.txt")
+
+	// Branch A
+	runGit(t, primaryRoot, "checkout", "-b", "lucind/lane-fail-a")
+	if err := os.WriteFile(filepath.Join(primaryRoot, "conflict.txt"), []byte("change A\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(conflict.txt) error = %v", err)
+	}
+	runGit(t, primaryRoot, "add", "conflict.txt")
+	runGit(t, primaryRoot, "commit", "-m", "lane fail a commit")
+
+	// Branch B
+	runGit(t, primaryRoot, "checkout", "main")
+	runGit(t, primaryRoot, "checkout", "-b", "lucind/lane-fail-b")
+	if err := os.WriteFile(filepath.Join(primaryRoot, "conflict.txt"), []byte("change B\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(conflict.txt) error = %v", err)
+	}
+	runGit(t, primaryRoot, "add", "conflict.txt")
+	runGit(t, primaryRoot, "commit", "-m", "lane fail b commit")
+
+	// Return to main
+	runGit(t, primaryRoot, "checkout", "main")
+
+	runID := "run-fail-cleanup"
+	expectedWorktreePath := filepath.Join(filepath.Dir(primaryRoot), filepath.Base(primaryRoot)+"-worktrees", "integrate-"+runID)
+	expectedBranchName := "lucind/integrate-" + runID
+
+	invokerCalled := false
+	fakeInvoker := func(ctx context.Context, worktreePath, prompt string) (string, error) {
+		invokerCalled = true
+		return "failed to resolve", errors.New("resolution error")
+	}
+
+	_, _, err := integrate.CombineWithInvoker(context.Background(), primaryRoot, runID, []string{"lucind/lane-fail-a", "lucind/lane-fail-b"}, fakeInvoker)
+	if err == nil {
+		t.Fatal("CombineWithInvoker() error = nil, want ErrMergeConflict")
+	}
+	if !invokerCalled {
+		t.Errorf("fake invoker was not called")
+	}
+	if !errors.Is(err, integrate.ErrMergeConflict) {
+		t.Errorf("CombineWithInvoker() error = %v, want errors.Is(..., integrate.ErrMergeConflict)", err)
+	}
+
+	// Verify worktree is no longer linked and cleaned up
+	if worktree.IsLinkedWorktree(expectedWorktreePath) {
+		t.Errorf("IsLinkedWorktree(%q) = true, want false after failed combine", expectedWorktreePath)
+	}
+
+	// Verify branch was deleted
+	branchListOut := runGit(t, primaryRoot, "branch", "--list", expectedBranchName)
+	if strings.TrimSpace(branchListOut) != "" {
+		t.Errorf("git branch --list %q = %q, want empty after failed combine", expectedBranchName, branchListOut)
 	}
 }
 
