@@ -51,18 +51,6 @@ const resultSchemaFileName = "result.schema.json"
 // io/fs), so this is a string literal, not a filepath.Join.
 const resultEnvelopePath = lucindDir + "/result.json"
 
-// DefaultModel is the model a dispatch runs on when its packet names none.
-// packet.Model is optional, and packet.Parse deliberately leaves it empty
-// rather than filling in this default itself: Parse's job is to reflect
-// frontmatter literally, not to inject runtime policy that can change
-// independently of the packet format. Execute is the composition root
-// where that policy is applied, so the default lives here — in exactly
-// one place — rather than duplicated between packet and run, which is how
-// the two would drift. See docs/prd.md and
-// plugin/claude-code/skills/lucind-ai/references/runtime.md, both of which
-// name this as the project default.
-const DefaultModel = "gemini-3.7-flash-high"
-
 // outputTruncatedDetail is the ledger event detail recorded when a
 // dispatch's stdout/stderr capture was truncated (see
 // executor.Outcome.OutputTruncated). It is deliberately phrased as a
@@ -282,12 +270,13 @@ func Execute(ctx context.Context, deps Deps, p packet.Packet) (Report, error) {
 		return Report{}, recordLaneFailure(ctx, deps, p.ID, now, cause)
 	}
 
-	// model falls back to DefaultModel when the packet names none — see
-	// DefaultModel's doc comment for why that fallback lives here rather
-	// than in packet.Parse.
+	// packet.Model stays authoritative when named. When the packet omits
+	// it, the already-resolved executor supplies its own default —
+	// packet.Parse never injects one, because Parse's job is to reflect
+	// frontmatter literally, not to inject runtime policy.
 	model := p.Model
 	if model == "" {
-		model = DefaultModel
+		model = exec.DefaultModel()
 	}
 
 	outcome, err := exec.Run(ctx, executor.Request{

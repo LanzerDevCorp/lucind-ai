@@ -29,6 +29,11 @@ type CursorAgent struct {
 	WaitDelay time.Duration
 }
 
+// DefaultModel returns the model CursorAgent runs on when a packet names none.
+func (c CursorAgent) DefaultModel() string {
+	return "cursor-grok-4.6-high"
+}
+
 // Run execs cursor-agent with req.Prompt, in req.WorktreePath, bounded by ctx.
 //
 // The flag set this method always sends -- --print, --output-format json,
