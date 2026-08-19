@@ -149,9 +149,11 @@ func newBatchTestDeps(t *testing.T, worktreeRoot func(laneID string) string, env
 	now := time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC)
 
 	return run.Deps{
-		RunID:    "run-1",
-		Ledger:   l,
-		Executor: exec,
+		RunID:  "run-1",
+		Ledger: l,
+		LookupExecutor: func(name string) (executor.Executor, error) {
+			return exec, nil
+		},
 		CreateWorktree: func(_ context.Context, _, laneID string) (worktree.Worktree, error) {
 			if failWorktreeFor[laneID] {
 				return worktree.Worktree{}, fmt.Errorf("git worktree add: boom for %s", laneID)
@@ -473,9 +475,11 @@ func TestExecuteBatchRejectsEmptyBatchBeforeAnySideEffect(t *testing.T) {
 	t.Cleanup(func() { l.Close() })
 
 	deps := run.Deps{
-		RunID:    "run-1",
-		Ledger:   l,
-		Executor: newBatchFakeExecutor(),
+		RunID:  "run-1",
+		Ledger: l,
+		LookupExecutor: func(string) (executor.Executor, error) {
+			return newBatchFakeExecutor(), nil
+		},
 		CreateWorktree: func(context.Context, string, string) (worktree.Worktree, error) {
 			atomic.AddInt32(&createCalls, 1)
 			return worktree.Worktree{}, nil
@@ -513,9 +517,11 @@ func TestExecuteBatchRejectsDuplicateLaneIDsBeforeAnySideEffect(t *testing.T) {
 	t.Cleanup(func() { l.Close() })
 
 	deps := run.Deps{
-		RunID:    "run-1",
-		Ledger:   l,
-		Executor: newBatchFakeExecutor(),
+		RunID:  "run-1",
+		Ledger: l,
+		LookupExecutor: func(string) (executor.Executor, error) {
+			return newBatchFakeExecutor(), nil
+		},
 		CreateWorktree: func(context.Context, string, string) (worktree.Worktree, error) {
 			atomic.AddInt32(&createCalls, 1)
 			return worktree.Worktree{}, nil
@@ -632,5 +638,94 @@ func TestExecuteBatchPreservesEveryWorktreeIncludingDone(t *testing.T) {
 		if ln.WorktreePath == "" {
 			t.Errorf("ledger lane %s carries an empty worktree_path, want it preserved", ln.LaneID)
 		}
+	}
+}
+
+type recordingFakeExecutor struct {
+	mu       sync.Mutex
+	requests []executor.Request
+}
+
+func (r *recordingFakeExecutor) Run(_ context.Context, req executor.Request) (executor.Outcome, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.requests = append(r.requests, req)
+	return executor.Outcome{ExitCode: 0}, nil
+}
+
+// TestExecuteBatchDispatchesDifferentExecutorsPerPacket proves that a batch
+// containing packets with different executor names dispatches each lane through
+// the specific executor resolved for that lane, without cross-lane pollution.
+func TestExecuteBatchDispatchesDifferentExecutorsPerPacket(t *testing.T) {
+	root := t.TempDir()
+	agyExec := &recordingFakeExecutor{}
+	cursorExec := &recordingFakeExecutor{}
+
+	p1 := packet.Packet{
+		ID:       "lane-agy",
+		Executor: "agy",
+		RoutedBy: "rule agy",
+		Body:     "prompt for agy",
+	}
+	p2 := packet.Packet{
+		ID:       "lane-cursor",
+		Executor: "cursor-agent",
+		RoutedBy: "rule cursor",
+		Body:     "prompt for cursor",
+	}
+
+	deps := newBatchTestDeps(t, func(id string) string {
+		return root + "/" + id
+	}, func(id string) []byte {
+		return []byte(laneEnvelopeJSON(id, "done"))
+	}, nil, nil)
+
+	deps.LookupExecutor = func(name string) (executor.Executor, error) {
+		switch name {
+		case "agy":
+			return agyExec, nil
+		case "cursor-agent":
+			return cursorExec, nil
+		default:
+			return nil, fmt.Errorf("unexpected executor name %q", name)
+		}
+	}
+
+	report, err := run.ExecuteBatch(context.Background(), deps, []packet.Packet{p1, p2})
+	if err != nil {
+		t.Fatalf("ExecuteBatch() error = %v, want nil", err)
+	}
+	if !report.Released {
+		t.Errorf("report.Released = false, want true")
+	}
+
+	// Verify agy executor saw only lane-agy's prompt and worktree
+	agyExec.mu.Lock()
+	agyReqs := append([]executor.Request(nil), agyExec.requests...)
+	agyExec.mu.Unlock()
+
+	if len(agyReqs) != 1 {
+		t.Fatalf("agyExec saw %d requests, want 1", len(agyReqs))
+	}
+	if agyReqs[0].Prompt != "prompt for agy" {
+		t.Errorf("agyExec prompt = %q, want %q", agyReqs[0].Prompt, "prompt for agy")
+	}
+	if wantPath := root + "/lane-agy"; agyReqs[0].WorktreePath != wantPath {
+		t.Errorf("agyExec worktree = %q, want %q", agyReqs[0].WorktreePath, wantPath)
+	}
+
+	// Verify cursor executor saw only lane-cursor's prompt and worktree
+	cursorExec.mu.Lock()
+	cursorReqs := append([]executor.Request(nil), cursorExec.requests...)
+	cursorExec.mu.Unlock()
+
+	if len(cursorReqs) != 1 {
+		t.Fatalf("cursorExec saw %d requests, want 1", len(cursorReqs))
+	}
+	if cursorReqs[0].Prompt != "prompt for cursor" {
+		t.Errorf("cursorExec prompt = %q, want %q", cursorReqs[0].Prompt, "prompt for cursor")
+	}
+	if wantPath := root + "/lane-cursor"; cursorReqs[0].WorktreePath != wantPath {
+		t.Errorf("cursorExec worktree = %q, want %q", cursorReqs[0].WorktreePath, wantPath)
 	}
 }

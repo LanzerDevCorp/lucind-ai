@@ -151,10 +151,12 @@ func formatStreamDetail(stream string) string {
 // injected so the whole flow is testable without git, without a real agent
 // and without the network.
 type Deps struct {
-	RunID          string // supplied by the caller, never generated here, so tests are deterministic
-	PrimaryRoot    string // the primary repository root
-	Ledger         *ledger.Ledger
-	Executor       executor.Executor
+	RunID       string // supplied by the caller, never generated here, so tests are deterministic
+	PrimaryRoot string // the primary repository root
+	Ledger      *ledger.Ledger
+	// LookupExecutor resolves an executor by the packet's own Executor name
+	// at dispatch time, one call per lane -- not once per batch.
+	LookupExecutor func(name string) (executor.Executor, error)
 	CreateWorktree func(ctx context.Context, primaryRoot, laneID string) (worktree.Worktree, error)
 	WorktreeFS     func(path string) fs.FS // opens a worktree for reading its result envelope
 	Now            func() time.Time        // injected clock; tests pin it
@@ -274,6 +276,12 @@ func Execute(ctx context.Context, deps Deps, p packet.Packet) (Report, error) {
 		return Report{}, recordLaneFailure(ctx, deps, p.ID, now, cause)
 	}
 
+	exec, err := deps.LookupExecutor(p.Executor)
+	if err != nil {
+		cause := fmt.Errorf("run: resolve executor %q for lane %q: %w", p.Executor, p.ID, err)
+		return Report{}, recordLaneFailure(ctx, deps, p.ID, now, cause)
+	}
+
 	// model falls back to DefaultModel when the packet names none — see
 	// DefaultModel's doc comment for why that fallback lives here rather
 	// than in packet.Parse.
@@ -282,7 +290,7 @@ func Execute(ctx context.Context, deps Deps, p packet.Packet) (Report, error) {
 		model = DefaultModel
 	}
 
-	outcome, err := deps.Executor.Run(ctx, executor.Request{
+	outcome, err := exec.Run(ctx, executor.Request{
 		Prompt:       p.Body,
 		WorktreePath: wt.Path,
 		Model:        model,

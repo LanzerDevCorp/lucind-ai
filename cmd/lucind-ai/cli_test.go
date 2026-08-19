@@ -104,7 +104,7 @@ func TestRunUnsupportedExecutorNamesIt(t *testing.T) {
 	path := filepath.Join(dir, "packet.md")
 	content := "---\n" +
 		"id: lane-1\n" +
-		"executor: cursor-agent\n" +
+		"executor: bogus-executor\n" +
 		"routed_by: single-piece precision\n" +
 		"---\n" +
 		"Do the thing.\n"
@@ -117,8 +117,35 @@ func TestRunUnsupportedExecutorNamesIt(t *testing.T) {
 	if code == 0 {
 		t.Fatalf("run with unsupported executor exit code = 0, want non-zero")
 	}
-	if !strings.Contains(stderr.String(), "cursor-agent") {
-		t.Fatalf("stderr = %q, want it to name the unsupported executor %q", stderr.String(), "cursor-agent")
+	if !strings.Contains(stderr.String(), "bogus-executor") {
+		t.Fatalf("stderr = %q, want it to name the unsupported executor %q", stderr.String(), "bogus-executor")
+	}
+	if !strings.Contains(stderr.String(), "(supported: agy, cursor-agent)") {
+		t.Fatalf("stderr = %q, want it to list supported executors (supported: agy, cursor-agent)", stderr.String())
+	}
+}
+
+// TestRunAcceptsCursorAgentExecutor proves that a packet specifying
+// "executor: cursor-agent" passes the pre-dispatch unsupported executor check.
+func TestRunAcceptsCursorAgentExecutor(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "packet.md")
+	content := "---\n" +
+		"id: lane-1\n" +
+		"executor: cursor-agent\n" +
+		"routed_by: single-piece precision\n" +
+		"---\n" +
+		"Do the thing.\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write packet fixture: %v", err)
+	}
+
+	run(context.Background(), []string{"run", "--packet", path}, &stdout, &stderr)
+
+	if strings.Contains(stderr.String(), "unsupported executor") {
+		t.Fatalf("stderr = %q, want cursor-agent to be accepted as a supported executor", stderr.String())
 	}
 }
 
@@ -183,7 +210,7 @@ func TestRunMultiplePacketsSecondUnsupportedExecutorIsCaught(t *testing.T) {
 	secondPath := filepath.Join(dir, "packet-b.md")
 	secondContent := "---\n" +
 		"id: lane-b\n" +
-		"executor: cursor-agent\n" +
+		"executor: bogus-executor\n" +
 		"routed_by: single-piece precision\n" +
 		"---\n" +
 		"Do another thing.\n"
@@ -196,8 +223,8 @@ func TestRunMultiplePacketsSecondUnsupportedExecutorIsCaught(t *testing.T) {
 	if code == 0 {
 		t.Fatalf("run with a batch whose second packet names an unsupported executor exit code = 0, want non-zero")
 	}
-	if !strings.Contains(stderr.String(), "cursor-agent") {
-		t.Fatalf("stderr = %q, want it to name the unsupported executor %q", stderr.String(), "cursor-agent")
+	if !strings.Contains(stderr.String(), "bogus-executor") {
+		t.Fatalf("stderr = %q, want it to name the unsupported executor %q", stderr.String(), "bogus-executor")
 	}
 	if !strings.Contains(stderr.String(), secondPath) {
 		t.Fatalf("stderr = %q, want it to name the offending packet path %q", stderr.String(), secondPath)

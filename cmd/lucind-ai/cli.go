@@ -40,9 +40,10 @@ const usage = "usage: lucind-ai run --packet <path> [--packet <path> ...] [--tim
 
 // supportedExecutors names every packet.Executor value this binary knows
 // how to dispatch. Unlisted values are a routing error, never a silent
-// fallback to agy — see internal/run's Deps.Executor field.
+// fallback to agy — see internal/run's Deps.LookupExecutor field.
 var supportedExecutors = map[string]func() executor.Executor{
-	"agy": func() executor.Executor { return executor.Agy{} },
+	"agy":          func() executor.Executor { return executor.Agy{} },
+	"cursor-agent": func() executor.Executor { return executor.CursorAgent{} },
 }
 
 // packetPaths collects every --packet flag value, in the order given, so a
@@ -131,17 +132,14 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 		ps = append(ps, p)
 	}
 
-	// Every lane in a batch shares one run.Deps.Executor instance (see
-	// run.ExecuteBatch's signature), so every packet in this batch must
-	// name a supported executor -- checked for every packet before any of
-	// them dispatches.
+	// Every packet in this batch must name a supported executor --
+	// checked for every packet before any of them dispatches.
 	for i, p := range ps {
 		if _, ok := supportedExecutors[p.Executor]; !ok {
-			fmt.Fprintf(stderr, "lucind-ai: unsupported executor %q in packet %q (supported: agy)\n", p.Executor, packetFlags[i])
+			fmt.Fprintf(stderr, "lucind-ai: unsupported executor %q in packet %q (supported: agy, cursor-agent)\n", p.Executor, packetFlags[i])
 			return 1
 		}
 	}
-	newExecutor := supportedExecutors[ps[0].Executor]
 
 	primaryRoot, err := resolvePrimaryRoot(ctx)
 	if err != nil {
@@ -169,10 +167,16 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 	defer ledg.Close()
 
 	deps := lucindrun.Deps{
-		RunID:          runID,
-		PrimaryRoot:    primaryRoot,
-		Ledger:         ledg,
-		Executor:       newExecutor(),
+		RunID:       runID,
+		PrimaryRoot: primaryRoot,
+		Ledger:      ledg,
+		LookupExecutor: func(name string) (executor.Executor, error) {
+			factory, ok := supportedExecutors[name]
+			if !ok {
+				return nil, fmt.Errorf("unsupported executor %q", name)
+			}
+			return factory(), nil
+		},
 		CreateWorktree: worktree.Create,
 		WorktreeFS:     os.DirFS,
 		Now:            time.Now,
