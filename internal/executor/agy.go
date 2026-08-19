@@ -103,10 +103,22 @@ type Agy struct {
 // it shares the filesystem, the credentials and the network with the primary
 // repository. With this flag the dispatched agent auto-approves every tool
 // call it makes, including calls that reach outside its own worktree. Making
-// it opt-in per packet was considered and rejected in favour of dispatch that
-// never stalls. If that tradeoff is ever revisited, the natural home for the
-// switch is the packet frontmatter, so the authorization travels with the
-// work it authorizes.
+// it opt-in per packet was considered and rejected twice in favour of
+// dispatch that never stalls. If that tradeoff is ever revisited, the natural
+// home for the switch is the packet frontmatter, so the authorization travels
+// with the work it authorizes.
+//
+// Neither cmd.Dir nor --add-dir bounds that authorization. This is observed,
+// not inferred: on 2026-08-19 a dispatch whose working directory was an empty
+// scratch directory, with --add-dir pointing at that same directory, followed
+// the paths written in its packet instead. It created a git worktree in the
+// real repository, checked out a branch, edited a file and committed. It kept
+// faithfully to the allowed_paths its packet named -- the packet's prose was
+// obeyed exactly -- but the process-level boundary was not a boundary at all.
+//
+// So the scope of a dispatched lane is bounded by the text of its packet and
+// by nothing else. Write allowed_paths as the only fence there is, because it
+// is.
 func (a Agy) Run(ctx context.Context, req Request) (Outcome, error) {
 	binary := a.Binary
 	if binary == "" {
