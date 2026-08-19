@@ -34,8 +34,7 @@ type Packet struct {
 	// RoutedBy is the condition that caused this packet to be routed to
 	// Executor — never the executor's own name. The executor is the
 	// outcome of a routing decision, not its reason: recording it as the
-	// condition would be implicit routing, which the skill forbids. See
-	// plugin/claude-code/skills/lucind-ai/references/state-files.md.
+	// condition would be implicit routing, which the skill forbids.
 	RoutedBy string
 	// Model selects which model the executor dispatches with. It is
 	// optional: an absent model key leaves this at its zero value. The
