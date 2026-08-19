@@ -173,6 +173,9 @@ func printReport(w io.Writer, r lucindrun.Report) {
 	if r.Envelope != nil {
 		fmt.Fprintf(w, "summary:   %s\n", r.Envelope.Summary)
 	}
+	if r.OutputCaptureIncomplete {
+		fmt.Fprintln(w, "note:      captured output may be incomplete (dispatch pipes did not fully drain); this does not by itself mean the lane failed")
+	}
 
 	if r.Status != lane.Done {
 		fmt.Fprintln(w)

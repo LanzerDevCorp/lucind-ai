@@ -64,6 +64,15 @@ const resultEnvelopePath = lucindDir + "/result.json"
 // name this as the project default.
 const DefaultModel = "gemini-3.7-flash-high"
 
+// outputTruncatedDetail is the ledger event detail recorded when a
+// dispatch's stdout/stderr capture was truncated (see
+// executor.Outcome.OutputTruncated). It is deliberately phrased as a
+// diagnosis note, not a failure: truncation says nothing about whether the
+// lane's work succeeded -- the result envelope on disk decides that,
+// independently -- only that a person debugging this lane from the ledger
+// should know the captured output they are looking at may be incomplete.
+const outputTruncatedDetail = "dispatch output capture truncated: captured stdout/stderr may be incomplete for diagnosis (lane status is unaffected)"
+
 // Deps is everything Execute needs from the outside world. Every field is
 // injected so the whole flow is testable without git, without a real agent
 // and without the network.
@@ -85,6 +94,18 @@ type Report struct {
 	Envelope *result.Envelope // nil when the lane produced no readable envelope
 	Released bool
 	Outcome  barrier.Outcome
+	// OutputCaptureIncomplete is true when the dispatch's captured
+	// stdout/stderr may be missing trailing output -- see
+	// executor.Outcome.OutputTruncated for the mechanism (a grandchild
+	// process holding the pipes open past the executor's own wait
+	// delay). It carries no judgment about whether the lane's work
+	// succeeded: Status is decided from the on-disk result envelope
+	// alone (see decideStatus), never from captured stdout/stderr, and
+	// this flag is independent of it. Its only purpose is to warn
+	// whoever reads this report that if they go looking at the
+	// dispatch's captured output to diagnose something, they may not be
+	// looking at the whole picture.
+	OutputCaptureIncomplete bool
 }
 
 // Execute runs one packet end to end: create its worktree, register it in
@@ -191,6 +212,30 @@ func Execute(ctx context.Context, deps Deps, p packet.Packet) (Report, error) {
 		return Report{}, recordLaneFailure(ctx, deps, p.ID, now, cause)
 	}
 
+	// A truncated capture is recorded as its own ledger event so the
+	// fact survives the run, not only the one process that printed it.
+	// It is deliberately appended under ledger.EventLaneStatusChanged --
+	// the closest of the five fixed event types this schema allows (see
+	// the CHECK constraint on events.type in internal/ledger/schema.go)
+	// and already the type this function uses to attach freeform
+	// explanatory detail alongside a lane's terminal status (see the
+	// "reason" event above), rather than strictly a literal status
+	// *value* change. It is not a perfect fit: the lane's status did not
+	// change because of truncation. See this package's task report for
+	// why no better-fitting constant exists among the five.
+	if outcome.OutputTruncated {
+		if err := deps.Ledger.AppendEvent(ctx, ledger.Event{
+			RunID:  deps.RunID,
+			LaneID: p.ID,
+			Type:   ledger.EventLaneStatusChanged,
+			Detail: outputTruncatedDetail,
+			At:     now,
+		}); err != nil {
+			cause := fmt.Errorf("run: append output-truncated event for %q: %w", p.ID, err)
+			return Report{}, recordLaneFailure(ctx, deps, p.ID, now, cause)
+		}
+	}
+
 	b, err := barrier.New([]string{p.ID})
 	if err != nil {
 		cause := fmt.Errorf("run: build barrier for lane %q: %w", p.ID, err)
@@ -216,12 +261,13 @@ func Execute(ctx context.Context, deps Deps, p packet.Packet) (Report, error) {
 	}
 
 	return Report{
-		LaneID:   p.ID,
-		Status:   status,
-		Worktree: wt.Path,
-		Envelope: envelope,
-		Released: bOutcome.Released,
-		Outcome:  bOutcome,
+		LaneID:                  p.ID,
+		Status:                  status,
+		Worktree:                wt.Path,
+		Envelope:                envelope,
+		Released:                bOutcome.Released,
+		Outcome:                 bOutcome,
+		OutputCaptureIncomplete: outcome.OutputTruncated,
 	}, nil
 }
 

@@ -561,3 +561,96 @@ func TestExecuteRequestFallsBackToDefaultModelWhenPacketOmitsIt(t *testing.T) {
 		t.Errorf("gotReq.Model = %q, want run.DefaultModel = %q", fe.gotReq.Model, run.DefaultModel)
 	}
 }
+
+// outputTruncatedDetailSubstring matches on the ledger event detail text
+// run.go records for a truncated outcome, without depending on the
+// unexported constant that holds it (this is an external run_test
+// package). It is deliberately a fragment of the sentence, not the whole
+// thing, so the test does not become a brittle exact-string match on
+// wording.
+const outputTruncatedDetailSubstring = "captured stdout/stderr may be incomplete"
+
+// TestExecuteTruncatedOutcomeStillYieldsDoneAndReportsCapture proves
+// truncation is purely a diagnosis concern: a dispatch outcome with
+// executor.Outcome.OutputTruncated set, paired with a valid "done"
+// envelope, still reaches lane.Done -- truncation never changes the
+// lane's status -- and the Report carries the truncation flag through so
+// a caller downstream of Execute can act on it.
+func TestExecuteTruncatedOutcomeStillYieldsDoneAndReportsCapture(t *testing.T) {
+	wtPath := t.TempDir()
+	fe := &fakeExecutor{outcome: executor.Outcome{ExitCode: 0, OutputTruncated: true}}
+	deps := newTestDeps(t, wtPath, func(string) fs.FS {
+		return fstest.MapFS{".lucind/result.json": {Data: []byte(doneEnvelopeJSON)}}
+	}, fe)
+
+	report, err := run.Execute(context.Background(), deps, testPacket())
+	if err != nil {
+		t.Fatalf("Execute() error = %v, want nil", err)
+	}
+
+	if report.Status != lane.Done {
+		t.Errorf("report.Status = %v, want %v (truncation must not change lane status)", report.Status, lane.Done)
+	}
+	if !report.OutputCaptureIncomplete {
+		t.Errorf("report.OutputCaptureIncomplete = false, want true")
+	}
+}
+
+// TestExecuteTruncatedOutcomeAppendsLedgerEvent proves the truncation fact
+// survives in the ledger's own record, not only in the Report the caller
+// happened to receive once. It reads the events back from the real ledger
+// rather than trusting Report.
+func TestExecuteTruncatedOutcomeAppendsLedgerEvent(t *testing.T) {
+	wtPath := t.TempDir()
+	fe := &fakeExecutor{outcome: executor.Outcome{ExitCode: 0, OutputTruncated: true}}
+	deps := newTestDeps(t, wtPath, func(string) fs.FS {
+		return fstest.MapFS{".lucind/result.json": {Data: []byte(doneEnvelopeJSON)}}
+	}, fe)
+
+	if _, err := run.Execute(context.Background(), deps, testPacket()); err != nil {
+		t.Fatalf("Execute() error = %v, want nil", err)
+	}
+
+	events, err := deps.Ledger.Events(context.Background(), "run-1")
+	if err != nil {
+		t.Fatalf("Events() error = %v", err)
+	}
+	found := false
+	for _, e := range events {
+		if strings.Contains(e.Detail, outputTruncatedDetailSubstring) {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("no ledger event recorded the output-truncated fact; events = %+v", events)
+	}
+}
+
+// TestExecuteNonTruncatedOutcomeAppendsNoTruncationEvent proves the
+// truncation event is conditional: an ordinary, fully-drained outcome must
+// not leave a stray truncation note in the ledger.
+func TestExecuteNonTruncatedOutcomeAppendsNoTruncationEvent(t *testing.T) {
+	wtPath := t.TempDir()
+	fe := &fakeExecutor{outcome: executor.Outcome{ExitCode: 0, OutputTruncated: false}}
+	deps := newTestDeps(t, wtPath, func(string) fs.FS {
+		return fstest.MapFS{".lucind/result.json": {Data: []byte(doneEnvelopeJSON)}}
+	}, fe)
+
+	report, err := run.Execute(context.Background(), deps, testPacket())
+	if err != nil {
+		t.Fatalf("Execute() error = %v, want nil", err)
+	}
+	if report.OutputCaptureIncomplete {
+		t.Errorf("report.OutputCaptureIncomplete = true, want false")
+	}
+
+	events, err := deps.Ledger.Events(context.Background(), "run-1")
+	if err != nil {
+		t.Fatalf("Events() error = %v", err)
+	}
+	for _, e := range events {
+		if strings.Contains(e.Detail, outputTruncatedDetailSubstring) {
+			t.Errorf("unexpected output-truncated event for a non-truncated outcome; events = %+v", events)
+		}
+	}
+}
