@@ -45,7 +45,7 @@ Non-interactive invocation:
 agy -p "$(cat packet.md)" \
     --model gemini-3.7-flash-high \
     --output-format json \
-    --json-schema result.schema.json \
+    --json-schema .lucind/result.schema.json \
     --add-dir <worktree> \
     --mode accept-edits \
     --dangerously-skip-permissions \

@@ -94,8 +94,7 @@ plugin/claude-code/skills/lucind-ai/
 ├── references/runtime.md              verified CLI surface and verification traps
 ├── references/state-files.md          superseded by the SQLite ledger
 ├── assets/packet-template.md          agent packet
-├── assets/human-packet-template.md    human packet
-└── assets/result.schema.json          result envelope, with mandatory hard-stop declarations
+└── assets/human-packet-template.md    human packet
 
 templates/project-routing.md           superseded by the binary's routing
 ```

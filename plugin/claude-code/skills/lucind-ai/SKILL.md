@@ -134,7 +134,7 @@ Context is not pasted into the prompt. It lives in engram and in the worktree.
 2. Write the packet from `assets/packet-template.md`, or `assets/human-packet-template.md`
    when the human is the executor.
 3. Create the worktree per `references/runtime.md` — a sibling of the repo, never a temp dir.
-4. Dispatch with the envelope enforced (`assets/result.schema.json`).
+4. Dispatch with the envelope enforced (`.lucind/result.schema.json`).
 5. On `done`: verify the evidence independently. Green criteria are not proof of correct work
    — the defect usually lives just outside what the criteria asked.
 6. Run the audit lane when Axis 2 names it. The verdict is advisory; Opus arbitrates.
@@ -156,4 +156,3 @@ done before its evidence was checked independently. Never summarize away a `bloc
 - `references/state-files.md` — ledger, approval queue, and what stays on disk.
 - `assets/packet-template.md` — agent packet.
 - `assets/human-packet-template.md` — human packet.
-- `assets/result.schema.json` — result envelope schema.
