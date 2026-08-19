@@ -24,7 +24,14 @@ phases:
   spec:
     status: pending
   design:
-    status: pending
+    status: done
+    engram_topic: sdd/approvals-web-ui/design
+    executor: cursor-agent
+    note: |
+      Same stale-template blocked/recovered pattern as proposal (packet predated the
+      packet-template.md fix in ecc0811). design.md verified correct by execution, merged by
+      hand. Package name reconciled: proposal.md updated internal/server -> internal/serve to
+      match design.md's more specific choice.
   tasks:
     status: pending
   apply:

@@ -43,7 +43,7 @@ people route around without it.
 
 ## Approach
 
-Add a new `internal/server` package (stdlib `net/http` + `embed`) exposing the approval UI and API,
+Add a new `internal/serve` package (stdlib `net/http` + `embed`) exposing the approval UI and API,
 reading the existing ledger. Keep the 6-value `lane.Status` enum untouched; add an additive schema
 v3 `approvals` table (approver, decision, timestamp, later-defect flag) instead — lower blast
 radius than touching every exhaustive switch on `lane.Status`. The approver identity must not reuse
@@ -58,7 +58,7 @@ gets linked back to its approval record (event type vs. foreign key vs. manual f
 | Area | Impact | Description |
 |------|--------|--------------|
 | `cmd/lucind-ai` | New | Registers `serve` subcommand. |
-| `internal/server` | New | Localhost HTTP handlers + embedded UI assets. |
+| `internal/serve` | New | Localhost HTTP handlers + embedded UI assets. |
 | `internal/run/run.go` | Modified | Approval-wait gate between `decideStatus` and `SetStatus`. |
 | `internal/run/batch.go` | Modified | `Observe` only fires after the wait resolves. |
 | `internal/ledger/schema.go` | Modified | Additive schema v3, `approvals` table. |
