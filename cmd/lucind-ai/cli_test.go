@@ -253,3 +253,86 @@ func TestPrintReportOmitsCaptureNoteWhenNotTruncated(t *testing.T) {
 		t.Errorf("printReport output = %q, want no capture note for a non-truncated report", out)
 	}
 }
+
+// TestPrintReportShowsDiagnosisUnderBannerForFailedLane proves the gap
+// this change closes: a lane that did not complete must have its captured
+// diagnosis printed to the terminal, under the "LANE DID NOT COMPLETE"
+// banner, so a person reading the run's output can see why without
+// opening the ledger's SQLite file themselves. The Diagnosis text here
+// deliberately mirrors the real incident that motivated this change:
+// stderr empty, the actual failure reported as JSON on stdout (agy was
+// observed reporting errors that way, not on stderr) -- printReport must
+// surface stdout's content just as readily as stderr's.
+func TestPrintReportShowsDiagnosisUnderBannerForFailedLane(t *testing.T) {
+	var stdout bytes.Buffer
+	r := lucindrun.Report{
+		LaneID:   "lane-a",
+		Status:   lane.Blocked,
+		Worktree: "/tmp/worktree",
+		Diagnosis: "dispatch exited 1\n" +
+			"stderr: (none captured)\n" +
+			`stdout: {"status":"ERROR","error":"timeout waiting for response","duration_seconds":84.5}`,
+	}
+
+	printReport(&stdout, r)
+
+	out := stdout.String()
+	if !strings.Contains(out, "timeout waiting for response") {
+		t.Errorf("printReport output = %q, want it to contain the captured diagnosis from stdout", out)
+	}
+	if !strings.Contains(out, "stderr: (none captured)") {
+		t.Errorf("printReport output = %q, want it to also show the (empty) stderr label", out)
+	}
+
+	bannerIdx := strings.Index(out, "LANE DID NOT COMPLETE")
+	diagnosisIdx := strings.Index(out, "timeout waiting for response")
+	if bannerIdx == -1 || diagnosisIdx == -1 || diagnosisIdx < bannerIdx {
+		t.Errorf("printReport output = %q, want the diagnosis to appear after (subordinate to) the banner", out)
+	}
+}
+
+// TestPrintReportOmitsDiagnosisBlockWhenNoneCaptured proves the block is
+// conditional: a failed lane whose Diagnosis is empty (e.g. a
+// lane.Blocked reported cleanly by the envelope itself, which explains
+// itself through Envelope, not Diagnosis) must print no empty diagnosis
+// block at all.
+func TestPrintReportOmitsDiagnosisBlockWhenNoneCaptured(t *testing.T) {
+	var stdout bytes.Buffer
+	r := lucindrun.Report{
+		LaneID:   "lane-a",
+		Status:   lane.Blocked,
+		Worktree: "/tmp/worktree",
+	}
+
+	printReport(&stdout, r)
+
+	out := stdout.String()
+	if strings.Contains(out, "captured diagnosis") {
+		t.Errorf("printReport output = %q, want no diagnosis block when Diagnosis is empty", out)
+	}
+}
+
+// TestPrintReportOmitsDiagnosisBlockForDoneLane proves a lane that
+// reached lane.Done never prints a diagnosis block, even in the
+// (currently impossible) case its Diagnosis field were somehow set --
+// the block lives strictly under the "did not complete" banner, which a
+// done lane never prints.
+func TestPrintReportOmitsDiagnosisBlockForDoneLane(t *testing.T) {
+	var stdout bytes.Buffer
+	r := lucindrun.Report{
+		LaneID:    "lane-a",
+		Status:    lane.Done,
+		Worktree:  "/tmp/worktree",
+		Diagnosis: "should never print for a done lane",
+	}
+
+	printReport(&stdout, r)
+
+	out := stdout.String()
+	if strings.Contains(out, "should never print for a done lane") {
+		t.Errorf("printReport output = %q, want no diagnosis printed for a lane.Done report", out)
+	}
+	if strings.Contains(out, "captured diagnosis") {
+		t.Errorf("printReport output = %q, want no diagnosis block for a lane.Done report", out)
+	}
+}

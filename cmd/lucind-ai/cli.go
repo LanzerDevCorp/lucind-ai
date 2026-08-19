@@ -234,6 +234,19 @@ func printReport(w io.Writer, r lucindrun.Report) {
 	if r.Status != lane.Done {
 		fmt.Fprintln(w)
 		fmt.Fprintf(w, "!!! LANE DID NOT COMPLETE (status=%s) — worktree preserved at %s !!!\n", r.Status, r.Worktree)
+
+		// r.Diagnosis is empty for a lane whose terminal status came from
+		// a readable envelope (see run.Report.Diagnosis's doc comment),
+		// so nothing is printed here in that case -- only the three
+		// non-success dispatch paths (non-zero exit, timeout, unreadable
+		// envelope) ever populate it. Printed under the banner, never
+		// above it: the banner is the headline, this is the detail a
+		// person reaches for next.
+		if r.Diagnosis != "" {
+			fmt.Fprintln(w, "--- captured diagnosis ---")
+			fmt.Fprintln(w, r.Diagnosis)
+			fmt.Fprintln(w, "---------------------------")
+		}
 	}
 }
 

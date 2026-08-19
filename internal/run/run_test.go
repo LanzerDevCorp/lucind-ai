@@ -636,3 +636,403 @@ func TestExecuteNonTruncatedOutcomeAppendsNoTruncationEvent(t *testing.T) {
 		}
 	}
 }
+
+// laneNoteDetails returns the Detail of every EventLaneNote event recorded
+// for runID, in the real ledger -- the tests below assert against the
+// ledger's own record, never against Report, per this package's
+// established style of never trusting the in-memory struct on its own.
+func laneNoteDetails(t *testing.T, l *ledger.Ledger, runID string) []string {
+	t.Helper()
+
+	events, err := l.Events(context.Background(), runID)
+	if err != nil {
+		t.Fatalf("Events() error = %v", err)
+	}
+
+	var details []string
+	for _, e := range events {
+		if e.Type == ledger.EventLaneNote {
+			details = append(details, e.Detail)
+		}
+	}
+	return details
+}
+
+// anyContains reports whether any of details contains substr.
+func anyContains(details []string, substr string) bool {
+	for _, d := range details {
+		if strings.Contains(d, substr) {
+			return true
+		}
+	}
+	return false
+}
+
+// TestExecuteNonZeroExitLedgerNoteCarriesExitCodeAndStderr proves the
+// long-standing undiagnosable-failure gap is closed: a lane that exits
+// non-zero must have its captured stderr land in the same ledger note as
+// the exit code, not just "dispatch exited %d" on its own -- the exit
+// code alone was exactly the gap that made run a7f7b87f-96af-454f-9e68-
+// 5ce8f0932fc8's readme-stale lane failure undiagnosable.
+func TestExecuteNonZeroExitLedgerNoteCarriesExitCodeAndStderr(t *testing.T) {
+	wtPath := t.TempDir()
+	fe := &fakeExecutor{outcome: executor.Outcome{ExitCode: 1, Stderr: "panic: something went wrong at the very end"}}
+	deps := newTestDeps(t, wtPath, func(string) fs.FS {
+		return fstest.MapFS{".lucind/result.json": {Data: []byte(doneEnvelopeJSON)}}
+	}, fe)
+
+	report, err := run.Execute(context.Background(), deps, testPacket())
+	if err != nil {
+		t.Fatalf("Execute() error = %v, want nil", err)
+	}
+	if report.Status != lane.Blocked {
+		t.Fatalf("report.Status = %v, want %v", report.Status, lane.Blocked)
+	}
+
+	details := laneNoteDetails(t, deps.Ledger, "run-1")
+	if !anyContains(details, "dispatch exited 1") {
+		t.Errorf("ledger notes = %+v, want one containing %q", details, "dispatch exited 1")
+	}
+	if !anyContains(details, "panic: something went wrong at the very end") {
+		t.Errorf("ledger notes = %+v, want one containing the captured stderr", details)
+	}
+}
+
+// TestExecuteTimedOutLedgerNoteCarriesStderr mirrors the non-zero-exit
+// case above for the timeout path: a dispatch killed on its ceiling still
+// has whatever it managed to write to stderr before it was killed, and
+// that must reach the ledger note too, not just "dispatch timed out" on
+// its own.
+func TestExecuteTimedOutLedgerNoteCarriesStderr(t *testing.T) {
+	wtPath := t.TempDir()
+	fe := &fakeExecutor{outcome: executor.Outcome{TimedOut: true, Stderr: "still working on step 3 of 9 when killed"}}
+	deps := newTestDeps(t, wtPath, func(string) fs.FS {
+		return fstest.MapFS{".lucind/result.json": {Data: []byte(doneEnvelopeJSON)}}
+	}, fe)
+
+	report, err := run.Execute(context.Background(), deps, testPacket())
+	if err != nil {
+		t.Fatalf("Execute() error = %v, want nil", err)
+	}
+	if report.Status != lane.Blocked {
+		t.Fatalf("report.Status = %v, want %v", report.Status, lane.Blocked)
+	}
+
+	details := laneNoteDetails(t, deps.Ledger, "run-1")
+	if !anyContains(details, "dispatch timed out") {
+		t.Errorf("ledger notes = %+v, want one containing %q", details, "dispatch timed out")
+	}
+	if !anyContains(details, "still working on step 3 of 9 when killed") {
+		t.Errorf("ledger notes = %+v, want one containing the captured stderr", details)
+	}
+}
+
+// TestExecuteUnreadableEnvelopeLedgerNoteCarriesStderr covers the third
+// failing path: exit 0, but the envelope could not be read at all. The
+// dispatch still ran a real process that may have written useful stderr
+// before giving up on writing a valid envelope, so that stderr must reach
+// the ledger note alongside the ErrEnvelopeUnreadable reason.
+func TestExecuteUnreadableEnvelopeLedgerNoteCarriesStderr(t *testing.T) {
+	wtPath := t.TempDir()
+	fe := &fakeExecutor{outcome: executor.Outcome{ExitCode: 0, Stderr: "error: refused to write result.json, disk full"}}
+	deps := newTestDeps(t, wtPath, func(string) fs.FS {
+		return fstest.MapFS{} // no .lucind/result.json at all
+	}, fe)
+
+	report, err := run.Execute(context.Background(), deps, testPacket())
+	if err != nil {
+		t.Fatalf("Execute() error = %v, want nil", err)
+	}
+	if report.Status != lane.Blocked {
+		t.Fatalf("report.Status = %v, want %v", report.Status, lane.Blocked)
+	}
+
+	details := laneNoteDetails(t, deps.Ledger, "run-1")
+	if !anyContains(details, "result envelope could not be read") {
+		t.Errorf("ledger notes = %+v, want one containing the envelope-unreadable reason", details)
+	}
+	if !anyContains(details, "error: refused to write result.json, disk full") {
+		t.Errorf("ledger notes = %+v, want one containing the captured stderr", details)
+	}
+}
+
+// TestExecuteOversizedStderrLedgerNoteIsBoundedAndKeepsTail proves the
+// cap: a dispatch that wrote megabytes to stderr must not blow up the
+// ledger row, and what survives must be the TAIL of the capture, not the
+// head -- a process explains why it died in its last output, not its
+// first. headMarker sits at the very start of the fake stderr and must be
+// dropped; tailMarker sits at the very end and must survive, alongside a
+// visible truncation notice.
+func TestExecuteOversizedStderrLedgerNoteIsBoundedAndKeepsTail(t *testing.T) {
+	const headMarker = "HEAD-MARKER-MUST-BE-DROPPED"
+	const tailMarker = "TAIL-MARKER-MUST-SURVIVE"
+
+	filler := strings.Repeat("x", 8192)
+	stderr := headMarker + filler + tailMarker
+
+	wtPath := t.TempDir()
+	fe := &fakeExecutor{outcome: executor.Outcome{ExitCode: 1, Stderr: stderr}}
+	deps := newTestDeps(t, wtPath, func(string) fs.FS {
+		return fstest.MapFS{".lucind/result.json": {Data: []byte(doneEnvelopeJSON)}}
+	}, fe)
+
+	if _, err := run.Execute(context.Background(), deps, testPacket()); err != nil {
+		t.Fatalf("Execute() error = %v, want nil", err)
+	}
+
+	details := laneNoteDetails(t, deps.Ledger, "run-1")
+	var note string
+	for _, d := range details {
+		if strings.Contains(d, "dispatch exited 1") {
+			note = d
+		}
+	}
+	if note == "" {
+		t.Fatalf("ledger notes = %+v, want one containing %q", details, "dispatch exited 1")
+	}
+
+	if len(note) >= len(stderr) {
+		t.Errorf("recorded note length = %d, want it bounded well below the raw stderr length %d", len(note), len(stderr))
+	}
+	if strings.Contains(note, headMarker) {
+		t.Errorf("recorded note = %q, want the head of stderr dropped, not kept", note)
+	}
+	if !strings.Contains(note, tailMarker) {
+		t.Errorf("recorded note = %q, want the tail of stderr kept", note)
+	}
+	if !strings.Contains(strings.ToLower(note), "truncat") {
+		t.Errorf("recorded note = %q, want it visibly marked as truncated", note)
+	}
+}
+
+// TestExecuteBothStreamsEmptyLedgerNoteSaysSoNotTruncated proves an empty
+// capture on BOTH streams is reported plainly, per stream, rather than
+// accidentally matching the truncation wording -- a reader must never
+// mistake "nothing was captured" for "something was captured and then
+// clipped." This is exactly the shape a caller cannot distinguish from a
+// truncation bug unless the two are worded unambiguously differently.
+func TestExecuteBothStreamsEmptyLedgerNoteSaysSoNotTruncated(t *testing.T) {
+	wtPath := t.TempDir()
+	fe := &fakeExecutor{outcome: executor.Outcome{ExitCode: 1, Stderr: "", Stdout: ""}}
+	deps := newTestDeps(t, wtPath, func(string) fs.FS {
+		return fstest.MapFS{".lucind/result.json": {Data: []byte(doneEnvelopeJSON)}}
+	}, fe)
+
+	if _, err := run.Execute(context.Background(), deps, testPacket()); err != nil {
+		t.Fatalf("Execute() error = %v, want nil", err)
+	}
+
+	details := laneNoteDetails(t, deps.Ledger, "run-1")
+	var note string
+	for _, d := range details {
+		if strings.Contains(d, "dispatch exited 1") {
+			note = d
+		}
+	}
+	if note == "" {
+		t.Fatalf("ledger notes = %+v, want one containing %q", details, "dispatch exited 1")
+	}
+	if !strings.Contains(note, "stderr: ") || !strings.Contains(note, "stdout: ") {
+		t.Errorf("recorded note = %q, want both streams labelled distinctly", note)
+	}
+	if strings.Contains(strings.ToLower(note), "truncat") {
+		t.Errorf("recorded note = %q, want an empty capture on both streams never mistaken for a truncated one", note)
+	}
+}
+
+// TestExecuteStderrEmptyStdoutCarriesFailureJSON is THE real case: it
+// reproduces the incident that motivated this whole change. Running two
+// real agy processes concurrently with the production flag set showed
+// stderr at 0 bytes on both, while the failure was reported as complete
+// JSON on stdout (e.g. {"status":"ERROR","error":"timeout waiting for
+// response",...}). A diagnosis that only ever looked at stderr would have
+// recorded nothing at all for this exact incident -- this test is the one
+// that proves the gap is actually closed, not just stderr's plumbing.
+func TestExecuteStderrEmptyStdoutCarriesFailureJSON(t *testing.T) {
+	const failureJSON = `{"status":"ERROR","error":"timeout waiting for response","response":"","duration_seconds":84.5}`
+
+	wtPath := t.TempDir()
+	fe := &fakeExecutor{outcome: executor.Outcome{ExitCode: 1, Stderr: "", Stdout: failureJSON}}
+	deps := newTestDeps(t, wtPath, func(string) fs.FS {
+		return fstest.MapFS{".lucind/result.json": {Data: []byte(doneEnvelopeJSON)}}
+	}, fe)
+
+	report, err := run.Execute(context.Background(), deps, testPacket())
+	if err != nil {
+		t.Fatalf("Execute() error = %v, want nil", err)
+	}
+
+	details := laneNoteDetails(t, deps.Ledger, "run-1")
+	if !anyContains(details, "timeout waiting for response") {
+		t.Errorf("ledger notes = %+v, want one containing the failure JSON captured on stdout", details)
+	}
+	if !strings.Contains(report.Diagnosis, "timeout waiting for response") {
+		t.Errorf("report.Diagnosis = %q, want it to contain the failure JSON captured on stdout", report.Diagnosis)
+	}
+}
+
+// TestExecuteBothStreamsPopulatedAreDistinctlyLabelled proves that when
+// both stderr and stdout carry content, both survive into the ledger
+// note, each under its own label, rather than one silently overwriting or
+// being concatenated indistinguishably with the other.
+func TestExecuteBothStreamsPopulatedAreDistinctlyLabelled(t *testing.T) {
+	wtPath := t.TempDir()
+	fe := &fakeExecutor{outcome: executor.Outcome{
+		ExitCode: 1,
+		Stderr:   "STDERR-ONLY-CONTENT",
+		Stdout:   "STDOUT-ONLY-CONTENT",
+	}}
+	deps := newTestDeps(t, wtPath, func(string) fs.FS {
+		return fstest.MapFS{".lucind/result.json": {Data: []byte(doneEnvelopeJSON)}}
+	}, fe)
+
+	if _, err := run.Execute(context.Background(), deps, testPacket()); err != nil {
+		t.Fatalf("Execute() error = %v, want nil", err)
+	}
+
+	details := laneNoteDetails(t, deps.Ledger, "run-1")
+	var note string
+	for _, d := range details {
+		if strings.Contains(d, "dispatch exited 1") {
+			note = d
+		}
+	}
+	if note == "" {
+		t.Fatalf("ledger notes = %+v, want one containing %q", details, "dispatch exited 1")
+	}
+	if !strings.Contains(note, "STDERR-ONLY-CONTENT") {
+		t.Errorf("recorded note = %q, want it to contain the stderr content", note)
+	}
+	if !strings.Contains(note, "STDOUT-ONLY-CONTENT") {
+		t.Errorf("recorded note = %q, want it to contain the stdout content", note)
+	}
+	stderrLabelIdx := strings.Index(note, "stderr: STDERR-ONLY-CONTENT")
+	stdoutLabelIdx := strings.Index(note, "stdout: STDOUT-ONLY-CONTENT")
+	if stderrLabelIdx == -1 || stdoutLabelIdx == -1 {
+		t.Errorf("recorded note = %q, want each stream's content directly attached to its own label", note)
+	}
+}
+
+// TestExecuteOversizedStdoutLedgerNoteIsBoundedAndKeepsTail mirrors
+// TestExecuteOversizedStderrLedgerNoteIsBoundedAndKeepsTail for stdout,
+// since agy is the observed case where the diagnosis lives on stdout, not
+// stderr -- the cap and tail-keeping rule must apply to it too, not only
+// to stderr.
+func TestExecuteOversizedStdoutLedgerNoteIsBoundedAndKeepsTail(t *testing.T) {
+	const headMarker = "STDOUT-HEAD-MARKER-MUST-BE-DROPPED"
+	const tailMarker = "STDOUT-TAIL-MARKER-MUST-SURVIVE"
+
+	filler := strings.Repeat("y", 8192)
+	stdout := headMarker + filler + tailMarker
+
+	wtPath := t.TempDir()
+	fe := &fakeExecutor{outcome: executor.Outcome{ExitCode: 1, Stdout: stdout}}
+	deps := newTestDeps(t, wtPath, func(string) fs.FS {
+		return fstest.MapFS{".lucind/result.json": {Data: []byte(doneEnvelopeJSON)}}
+	}, fe)
+
+	if _, err := run.Execute(context.Background(), deps, testPacket()); err != nil {
+		t.Fatalf("Execute() error = %v, want nil", err)
+	}
+
+	details := laneNoteDetails(t, deps.Ledger, "run-1")
+	var note string
+	for _, d := range details {
+		if strings.Contains(d, "dispatch exited 1") {
+			note = d
+		}
+	}
+	if note == "" {
+		t.Fatalf("ledger notes = %+v, want one containing %q", details, "dispatch exited 1")
+	}
+
+	if len(note) >= len(stdout) {
+		t.Errorf("recorded note length = %d, want it bounded well below the raw stdout length %d", len(note), len(stdout))
+	}
+	if strings.Contains(note, headMarker) {
+		t.Errorf("recorded note = %q, want the head of stdout dropped, not kept", note)
+	}
+	if !strings.Contains(note, tailMarker) {
+		t.Errorf("recorded note = %q, want the tail of stdout kept", note)
+	}
+	if !strings.Contains(strings.ToLower(note), "truncat") {
+		t.Errorf("recorded note = %q, want it visibly marked as truncated", note)
+	}
+}
+
+// TestExecuteReportCarriesDiagnosisForEachFailingPath proves Report.
+// Diagnosis is populated for all three non-success dispatch paths, so a
+// caller that never touches the ledger (e.g. cmd/lucind-ai's printReport)
+// can still see why a lane failed.
+func TestExecuteReportCarriesDiagnosisForEachFailingPath(t *testing.T) {
+	tests := []struct {
+		name    string
+		outcome executor.Outcome
+		fsys    func(string) fs.FS
+		want    string
+	}{
+		{
+			name:    "non-zero exit",
+			outcome: executor.Outcome{ExitCode: 7, Stderr: "boom-nonzero"},
+			fsys:    func(string) fs.FS { return fstest.MapFS{".lucind/result.json": {Data: []byte(doneEnvelopeJSON)}} },
+			want:    "boom-nonzero",
+		},
+		{
+			name:    "timed out",
+			outcome: executor.Outcome{TimedOut: true, Stderr: "boom-timeout"},
+			fsys:    func(string) fs.FS { return fstest.MapFS{".lucind/result.json": {Data: []byte(doneEnvelopeJSON)}} },
+			want:    "boom-timeout",
+		},
+		{
+			name:    "unreadable envelope",
+			outcome: executor.Outcome{ExitCode: 0, Stderr: "boom-envelope"},
+			fsys:    func(string) fs.FS { return fstest.MapFS{} },
+			want:    "boom-envelope",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			wtPath := t.TempDir()
+			fe := &fakeExecutor{outcome: tt.outcome}
+			deps := newTestDeps(t, wtPath, tt.fsys, fe)
+
+			report, err := run.Execute(context.Background(), deps, testPacket())
+			if err != nil {
+				t.Fatalf("Execute() error = %v, want nil", err)
+			}
+			if !strings.Contains(report.Diagnosis, tt.want) {
+				t.Errorf("report.Diagnosis = %q, want it to contain %q", report.Diagnosis, tt.want)
+			}
+		})
+	}
+}
+
+// TestExecuteSuccessfulLaneReportsNoDiagnosisOrLedgerNote proves the
+// opposite side of the contract: a lane that reaches a terminal status
+// from a readable envelope must not carry a stray diagnosis, in the
+// Report or in the ledger -- diagnosis is reserved for the three
+// non-success dispatch paths, never a normal envelope-decided outcome.
+func TestExecuteSuccessfulLaneReportsNoDiagnosisOrLedgerNote(t *testing.T) {
+	wtPath := t.TempDir()
+	fe := &fakeExecutor{outcome: executor.Outcome{ExitCode: 0, Stderr: "some incidental stderr chatter"}}
+	deps := newTestDeps(t, wtPath, func(string) fs.FS {
+		return fstest.MapFS{".lucind/result.json": {Data: []byte(doneEnvelopeJSON)}}
+	}, fe)
+
+	report, err := run.Execute(context.Background(), deps, testPacket())
+	if err != nil {
+		t.Fatalf("Execute() error = %v, want nil", err)
+	}
+	if report.Status != lane.Done {
+		t.Fatalf("report.Status = %v, want %v", report.Status, lane.Done)
+	}
+	if report.Diagnosis != "" {
+		t.Errorf("report.Diagnosis = %q, want empty for a successful lane", report.Diagnosis)
+	}
+
+	details := laneNoteDetails(t, deps.Ledger, "run-1")
+	if anyContains(details, "some incidental stderr chatter") {
+		t.Errorf("ledger notes = %+v, want no note carrying the incidental stderr for a successful lane", details)
+	}
+}

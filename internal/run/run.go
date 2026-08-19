@@ -72,6 +72,81 @@ const DefaultModel = "gemini-3.7-flash-high"
 // should know the captured output they are looking at may be incomplete.
 const outputTruncatedDetail = "dispatch output capture truncated: captured stdout/stderr may be incomplete for diagnosis (lane status is unaffected)"
 
+// streamDetailCap bounds how much of a dispatch's captured stdout or
+// stderr is ever written into a ledger note, per stream. A captured
+// stream from an agent CLI can run to megabytes -- a ledger row holding
+// all of it would be its own defect (unbounded row growth in a database
+// meant to stay small and queryable) -- so this is a deliberately small
+// cap, generous enough to carry a real diagnostic (a stack trace, a final
+// error message, a few lines of context) without turning the ledger into
+// a log store.
+//
+// The cap applies independently to each stream, kept at the same 4096
+// bytes it was before stdout capture was added, rather than being halved
+// to a shared 2048-byte budget across the two: a diagnosis note now caps
+// out at up to two capped chunks (worst case ~8KiB plus labels), which is
+// still small next to "unbounded" and preserves the one property that
+// actually matters here -- whichever stream carries the real diagnosis
+// (agy's failures land on stdout, not stderr; see diagnosisDetail) gets
+// the full 4096-byte budget on its own, never squeezed by an empty or
+// irrelevant sibling stream.
+const streamDetailCap = 4096
+
+// noStreamDetail is recorded in place of a captured stream when a
+// non-success dispatch produced none on it, so an empty capture reads as
+// "nothing was written," never as a truncated note that merely looks
+// empty.
+const noStreamDetail = "(none captured)"
+
+// streamTruncatedMarker is appended to a stream detail that was cut down
+// to streamDetailCap, so a reader of the ledger can tell at a glance that
+// what they are looking at is a clipped tail, not the stream's complete
+// content.
+const streamTruncatedMarker = "...[truncated, showing last %d of %d bytes]"
+
+// diagnosisDetail formats the reason a lane failed together with its
+// captured stderr AND stdout, each independently bounded by
+// streamDetailCap, for a single ledger note (see EventLaneNote). reason
+// is decideStatus's own explanation (e.g. "dispatch exited 1" or
+// "dispatch timed out"); stderr and stdout are the dispatch's raw
+// captured streams.
+//
+// Both streams are captured, not stderr alone: agy -- the only executor
+// this binary currently dispatches -- was observed, reproducing the
+// incident that motivated this change, to report its failure as
+// structured JSON on STDOUT (e.g. {"status":"ERROR","error":"timeout
+// waiting for response",...}) while STDERR was empty. Stderr alone would
+// have recorded nothing at all for that exact incident. The two streams
+// are labelled distinctly and truncated independently, since one may be
+// empty while the other carries the whole diagnosis -- precisely what was
+// observed.
+//
+// The **tail** of each stream is kept, not the head: a process that dies
+// reports why in its last output -- the final panic, the last error line
+// a CLI prints before exiting -- not its first. Keeping the head would
+// systematically discard exactly the part of the capture most likely to
+// explain the failure.
+func diagnosisDetail(reason, stderr, stdout string) string {
+	return fmt.Sprintf("%s\nstderr: %s\nstdout: %s", reason, formatStreamDetail(stderr), formatStreamDetail(stdout))
+}
+
+// formatStreamDetail bounds and labels one captured stream (stdout or
+// stderr) for inclusion in a diagnosisDetail note -- see its doc comment
+// for the tail-keeping and per-stream-cap rationale.
+func formatStreamDetail(stream string) string {
+	if stream == "" {
+		return noStreamDetail
+	}
+
+	if len(stream) <= streamDetailCap {
+		return stream
+	}
+
+	tail := stream[len(stream)-streamDetailCap:]
+	marker := fmt.Sprintf(streamTruncatedMarker, streamDetailCap, len(stream))
+	return fmt.Sprintf("%s\n%s", tail, marker)
+}
+
 // Deps is everything Execute needs from the outside world. Every field is
 // injected so the whole flow is testable without git, without a real agent
 // and without the network.
@@ -116,6 +191,21 @@ type Report struct {
 	// dispatch's captured output to diagnose something, they may not be
 	// looking at the whole picture.
 	OutputCaptureIncomplete bool
+	// Diagnosis carries the same reason-plus-streams text recorded as the
+	// lane's ledger note (see diagnosisDetail) for any of the three
+	// non-success dispatch outcomes -- non-zero exit, timeout, or an
+	// exit-0 dispatch whose envelope could not be read. It is empty for a
+	// lane whose terminal status came from a readable envelope, since
+	// that already explains itself through Envelope. Diagnosis exists so
+	// a caller that never touches the ledger -- e.g. cmd/lucind-ai's
+	// printReport -- can still see why a lane failed. It is not, by
+	// itself, proof of what specifically went wrong inside the
+	// dispatched process, only the captured (and possibly truncated)
+	// tail of what that process wrote to stderr and stdout before its
+	// outcome was decided -- both streams, since agy has been observed
+	// reporting its own failures as structured JSON on stdout rather than
+	// stderr (see diagnosisDetail).
+	Diagnosis string
 }
 
 // Execute runs one packet end to end: create its worktree, register it in
@@ -221,12 +311,20 @@ func Execute(ctx context.Context, deps Deps, p packet.Packet) (Report, error) {
 
 	status, envelope, reason := decideStatus(deps, wt.Path, outcome)
 
+	// diagnosis is empty exactly when reason is empty (the envelope
+	// decided a terminal status cleanly): reason is decideStatus's own
+	// explanation for a non-zero exit, a timeout, or an unreadable
+	// envelope, and it is worth nothing on its own without the captured
+	// stderr and stdout that a person would otherwise have to open the
+	// ledger's SQLite file to go looking for.
+	var diagnosis string
 	if reason != "" {
+		diagnosis = diagnosisDetail(reason, outcome.Stderr, outcome.Stdout)
 		if err := deps.Ledger.AppendEvent(persistCtx, ledger.Event{
 			RunID:  deps.RunID,
 			LaneID: p.ID,
 			Type:   ledger.EventLaneNote,
-			Detail: reason,
+			Detail: diagnosis,
 			At:     now,
 		}); err != nil {
 			cause := fmt.Errorf("run: append reason event for %q: %w", p.ID, err)
@@ -261,6 +359,7 @@ func Execute(ctx context.Context, deps Deps, p packet.Packet) (Report, error) {
 		Worktree:                wt.Path,
 		Envelope:                envelope,
 		OutputCaptureIncomplete: outcome.OutputTruncated,
+		Diagnosis:               diagnosis,
 	}, nil
 }
 
