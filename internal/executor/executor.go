@@ -21,6 +21,10 @@ type Request struct {
 	WorktreePath string
 	// Model is optional; the flag is omitted entirely when this is empty.
 	Model string
+	// SchemaPath is the path to the result schema on disk; --json-schema is
+	// omitted when empty (cursor-agent cannot be constrained at the
+	// source, so this is a belt, not the braces).
+	SchemaPath string
 }
 
 // Outcome is what actually happened when the child process ran, nothing
@@ -31,6 +35,11 @@ type Outcome struct {
 	TimedOut bool
 	// Stderr is captured for diagnosis when a dispatch fails or times out.
 	Stderr string
+	// Stdout is captured for diagnosis too: this binary has never
+	// completed a real dispatch yet, and a failed first run with no
+	// captured stdout is undiagnosable. This is not speculative --
+	// it is the minimum needed to debug the first real invocation.
+	Stdout string
 }
 
 // Executor runs one Request, bounded by ctx.

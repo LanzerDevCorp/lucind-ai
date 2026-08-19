@@ -27,6 +27,21 @@ const schemaResourceURL = "lucind-ai://internal/result/result.schema.json"
 // so this panics rather than surfacing a runtime error on first use.
 var compiledSchema = mustCompileSchema()
 
+// SchemaJSON returns the raw bytes of the embedded result.schema.json, so a
+// caller (for example the executor package, writing it to disk for agy's
+// --json-schema flag) can consume the same contract this package validates
+// against.
+//
+// It returns a defensive copy on every call: schemaJSON is a package-level
+// slice shared across the whole process, and handing out the live backing
+// array would let one caller's mutation corrupt every other caller (and
+// this package's own validation) silently.
+func SchemaJSON() []byte {
+	cp := make([]byte, len(schemaJSON))
+	copy(cp, schemaJSON)
+	return cp
+}
+
 func mustCompileSchema() *jsonschema.Schema {
 	var doc any
 	if err := json.Unmarshal(schemaJSON, &doc); err != nil {

@@ -252,6 +252,20 @@ func containsFlag(argv []string, flag string) bool {
 	return false
 }
 
+// flagValue returns the value immediately following flag in argv, and
+// whether flag was found at all with a value after it.
+func flagValue(argv []string, flag string) (string, bool) {
+	for i, a := range argv {
+		if a == flag {
+			if i+1 >= len(argv) {
+				return "", false
+			}
+			return argv[i+1], true
+		}
+	}
+	return "", false
+}
+
 func TestRunOmitsModelFlagWhenEmpty(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping subprocess test in -short mode")
@@ -289,5 +303,117 @@ func TestRunIncludesModelFlagWhenSet(t *testing.T) {
 	}
 	if argv[idx+1] != "gemini-3.7-flash-high" {
 		t.Errorf("--model value = %q, want %q", argv[idx+1], "gemini-3.7-flash-high")
+	}
+}
+
+// TestRunAlwaysPassesMandatoryFlags asserts every flag runtime.md documents
+// as mandatory for a non-interactive dispatch is present on a plain Run,
+// regardless of what the Request does or doesn't set. --dangerously-skip-
+// permissions in particular is a live blocker, not a nicety: without it a
+// headless run stalls on an interactive permission prompt and the lane
+// dies on the wall clock for no reason.
+func TestRunAlwaysPassesMandatoryFlags(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping subprocess test in -short mode")
+	}
+
+	argv := captureArgv(t, executor.Request{
+		Prompt:       "do the thing",
+		WorktreePath: t.TempDir(),
+	})
+
+	for _, want := range []string{"--dangerously-skip-permissions"} {
+		if !containsFlag(argv, want) {
+			t.Errorf("argv = %v, want it to contain %q", argv, want)
+		}
+	}
+
+	if got, ok := flagValue(argv, "--output-format"); !ok || got != "json" {
+		t.Errorf("--output-format = (%q, %v), want (%q, true)", got, ok, "json")
+	}
+	if got, ok := flagValue(argv, "--mode"); !ok || got != "accept-edits" {
+		t.Errorf("--mode = (%q, %v), want (%q, true)", got, ok, "accept-edits")
+	}
+}
+
+func TestRunOmitsJSONSchemaFlagWhenSchemaPathEmpty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping subprocess test in -short mode")
+	}
+
+	argv := captureArgv(t, executor.Request{
+		Prompt:       "do the thing",
+		WorktreePath: t.TempDir(),
+	})
+	if containsFlag(argv, "--json-schema") {
+		t.Errorf("argv = %v, want no --json-schema flag when Request.SchemaPath is empty", argv)
+	}
+}
+
+func TestRunIncludesJSONSchemaFlagWhenSchemaPathSet(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping subprocess test in -short mode")
+	}
+
+	schemaPath := filepath.Join(t.TempDir(), "result.schema.json")
+	argv := captureArgv(t, executor.Request{
+		Prompt:       "do the thing",
+		WorktreePath: t.TempDir(),
+		SchemaPath:   schemaPath,
+	})
+
+	if got, ok := flagValue(argv, "--json-schema"); !ok || got != schemaPath {
+		t.Errorf("--json-schema = (%q, %v), want (%q, true)", got, ok, schemaPath)
+	}
+}
+
+func TestRunOmitsAddDirFlagWhenWorktreePathEmpty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping subprocess test in -short mode")
+	}
+
+	argv := captureArgv(t, executor.Request{
+		Prompt: "do the thing",
+	})
+	if containsFlag(argv, "--add-dir") {
+		t.Errorf("argv = %v, want no --add-dir flag when Request.WorktreePath is empty", argv)
+	}
+}
+
+func TestRunIncludesAddDirFlagWithWorktreePath(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping subprocess test in -short mode")
+	}
+
+	worktree := t.TempDir()
+	argv := captureArgv(t, executor.Request{
+		Prompt:       "do the thing",
+		WorktreePath: worktree,
+	})
+
+	if got, ok := flagValue(argv, "--add-dir"); !ok || got != worktree {
+		t.Errorf("--add-dir = (%q, %v), want (%q, true)", got, ok, worktree)
+	}
+}
+
+func TestRunCapturesStdout(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping subprocess test in -short mode")
+	}
+
+	stub := writeStub(t, "#!/bin/sh\necho '{\"status\":\"done\"}'\nexit 0\n")
+	worktree := t.TempDir()
+
+	a := executor.Agy{Binary: stub}
+	outcome, err := a.Run(context.Background(), executor.Request{
+		Prompt:       "do the thing",
+		WorktreePath: worktree,
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v, want nil", err)
+	}
+	const want = "{\"status\":\"done\"}\n"
+	if outcome.Stdout != want {
+		t.Errorf("Stdout = %q, want %q", outcome.Stdout, want)
 	}
 }
