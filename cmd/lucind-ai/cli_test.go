@@ -128,24 +128,12 @@ func TestRunUnsupportedExecutorNamesIt(t *testing.T) {
 // TestRunAcceptsCursorAgentExecutor proves that a packet specifying
 // "executor: cursor-agent" passes the pre-dispatch unsupported executor check.
 func TestRunAcceptsCursorAgentExecutor(t *testing.T) {
-	var stdout, stderr bytes.Buffer
-
-	dir := t.TempDir()
-	path := filepath.Join(dir, "packet.md")
-	content := "---\n" +
-		"id: lane-1\n" +
-		"executor: cursor-agent\n" +
-		"routed_by: single-piece precision\n" +
-		"---\n" +
-		"Do the thing.\n"
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-		t.Fatalf("write packet fixture: %v", err)
+	factory, ok := supportedExecutors["cursor-agent"]
+	if !ok {
+		t.Fatalf("supportedExecutors[%q] not found, want cursor-agent to be accepted as a supported executor", "cursor-agent")
 	}
-
-	run(context.Background(), []string{"run", "--packet", path}, &stdout, &stderr)
-
-	if strings.Contains(stderr.String(), "unsupported executor") {
-		t.Fatalf("stderr = %q, want cursor-agent to be accepted as a supported executor", stderr.String())
+	if factory == nil || factory() == nil {
+		t.Fatalf("supportedExecutors[%q] factory returned nil", "cursor-agent")
 	}
 }
 
