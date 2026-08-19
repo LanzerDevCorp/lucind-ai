@@ -13,7 +13,6 @@
     --ink-soft:  #55636e;
     --ink-faint: #8494a0;
     --rule:      #ccd6db;
-    --accent:    #0d6c68;
     --warn:      #9c500b;
     --ghost:     #93a3ad;
 
@@ -30,7 +29,6 @@
       --ink-soft:  #9aabb5;
       --ink-faint: #6c7f8a;
       --rule:      #2b3a44;
-      --accent:    #46b5ac;
       --warn:      #d9963f;
       --ghost:     #5b6d78;
     }
@@ -43,7 +41,6 @@
     --ink-soft:  #9aabb5;
     --ink-faint: #6c7f8a;
     --rule:      #2b3a44;
-    --accent:    #46b5ac;
     --warn:      #d9963f;
     --ghost:     #5b6d78;
   }
@@ -132,7 +129,7 @@
   <div class="fig-scroll">
     <figure>
       <svg viewBox="0 0 1080 700" role="img"
-           aria-label="Estado real de lucind-ai al 18 de agosto de 2026. Tres estados: existe y corrió, probado pero sin conectar, y diseñado pero inexistente. Once paquetes en Go existen y pasan go test con -race: internal/lane no tiene ningún import, ni siquiera de la librería estándar, lo que hace que la barrera nunca pueda importar el ledger un hecho de compilación. internal/barrier es la máquina de estados de join pura, sin time, sin context, sin I/O, que libera sólo cuando todos los carriles llegan a un estado terminal y sólo integra los que terminan en done. internal/ledgerpath resuelve la ruta del ledger. internal/worktree crea y detecta worktrees vinculados. internal/ledger persiste en SQLite puro Go con WAL, busy timeout releído y un pool de cuatro conexiones. internal/buildcheck prueba en un subproceso real que el build sin cgo compila limpio. internal/packet parsea paquetes desde frontmatter. internal/result valida envelopes contra el schema embebido en internal/result/result.schema.json. internal/executor despacha agy de forma headless. El composition root en internal/run y la CLI en cmd/lucind-ai conectan todo el flujo de despacho de punta a punta. Por debajo, sigue pendiente: el ejecutor cursor-agent, la integración con árbol combinado y bisección, la web de aprobaciones y cualquier corrida de RDD. Un despacho real de agy ya corrió de punta a punta a través de este binario. Engram guarda la narrativa y sigue viva.">
+           aria-label="Estado real de lucind-ai al 19 de agosto de 2026. Dos estados: existe y corrió, y diseñado pero inexistente. Once paquetes en Go existen y pasan go test con -race: internal/lane no tiene ningún import, ni siquiera de la librería estándar, lo que hace que la barrera nunca pueda importar el ledger un hecho de compilación. internal/barrier es la máquina de estados de join pura, sin time, sin context, sin I/O, que libera sólo cuando todos los carriles llegan a un estado terminal y sólo integra los que terminan en done. internal/ledgerpath resuelve la ruta del ledger. internal/worktree crea y detecta worktrees vinculados. internal/ledger persiste en SQLite puro Go con WAL, busy timeout releído y un pool de cuatro conexiones. internal/buildcheck prueba en un subproceso real que el build sin cgo compila limpio. internal/packet parsea paquetes desde frontmatter. internal/result valida envelopes contra el schema embebido en internal/result/result.schema.json. internal/executor despacha agy de forma headless. El composition root en internal/run y la CLI en cmd/lucind-ai conectan todo el flujo de despacho de punta a punta. Por debajo, sigue pendiente: el ejecutor cursor-agent, la integración con árbol combinado y bisección, la web de aprobaciones y cualquier corrida de RDD. Un despacho real de agy ya corrió de punta a punta a través de este binario. Engram guarda la narrativa y sigue viva.">
         <defs>
           <marker id="a" viewBox="0 0 10 10" refX="9" refY="5"
                   markerWidth="7" markerHeight="7" orient="auto-start-reverse">
@@ -140,7 +137,7 @@
           </marker>
           <marker id="aa" viewBox="0 0 10 10" refX="9" refY="5"
                   markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-            <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--accent)"/>
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor"/>
           </marker>
           <marker id="ag" viewBox="0 0 10 10" refX="9" refY="5"
                   markerWidth="7" markerHeight="7" orient="auto-start-reverse">
@@ -152,28 +149,26 @@
           </marker>
         </defs>
 
-        <!-- leyenda: tres estados -->
+        <!-- leyenda: dos estados -->
         <g font-family="ui-monospace, Menlo, Consolas, monospace" font-size="10.5">
           <line x1="460" y1="26" x2="490" y2="26" stroke="currentColor" stroke-width="1.4"/>
           <text x="498" y="30" fill="currentColor" opacity="0.75">existe y corrió</text>
-          <line x1="650" y1="26" x2="680" y2="26" stroke="var(--accent)" stroke-width="1.6"/>
-          <text x="688" y="30" fill="var(--accent)">probado · sin conectar</text>
-          <line x1="880" y1="26" x2="910" y2="26" stroke="var(--ghost)"
+          <line x1="650" y1="26" x2="680" y2="26" stroke="var(--ghost)"
                 stroke-width="1.4" stroke-dasharray="5 4"/>
-          <text x="918" y="30" fill="var(--ghost)">diseñado · no existe</text>
+          <text x="688" y="30" fill="var(--ghost)">diseñado · no existe</text>
         </g>
 
         <!-- banda 1: paquetes del núcleo probados -->
         <text x="20" y="52" font-family="ui-monospace, Menlo, Consolas, monospace"
-              font-size="11" letter-spacing="0.06em" fill="var(--accent)">PROBADO — go test ./... -race verde en todos los paquetes · gofmt y vet limpios</text>
+              font-size="11" letter-spacing="0.06em" fill="currentColor">EXISTE Y CORRIÓ — go test ./... -race verde · un despacho real pasó por estos paquetes</text>
 
         <!-- internal/lane -->
         <rect x="20" y="64" width="140" height="176" rx="3" fill="none"
-              stroke="var(--accent)" stroke-width="1.6"/>
+              stroke="currentColor" stroke-width="1.6"/>
         <text x="34" y="88" font-family="system-ui, sans-serif" font-size="13"
-              fill="var(--accent)">internal/lane</text>
+              fill="currentColor">internal/lane</text>
         <text x="34" y="110" font-family="ui-monospace, Menlo, Consolas, monospace"
-              font-size="9.5" fill="var(--accent)">cero imports</text>
+              font-size="9.5" fill="currentColor">cero imports</text>
         <g font-family="ui-monospace, Menlo, Consolas, monospace" font-size="9.5"
            fill="currentColor" opacity="0.8">
           <text x="34" y="127">ni siquiera stdlib</text>
@@ -184,18 +179,18 @@
         </g>
 
         <!-- import real: barrier -> lane -->
-        <line x1="176" y1="150" x2="163" y2="150" stroke="var(--accent)"
+        <line x1="176" y1="150" x2="163" y2="150" stroke="currentColor"
               stroke-width="1.4" marker-end="url(#aa)"/>
         <text x="169" y="141" text-anchor="middle" font-family="ui-monospace, Menlo, Consolas, monospace"
-              font-size="8.5" fill="var(--accent)">imports</text>
+              font-size="8.5" fill="currentColor">imports</text>
 
         <!-- internal/barrier -->
         <rect x="176" y="64" width="160" height="176" rx="3" fill="none"
-              stroke="var(--accent)" stroke-width="1.6"/>
+              stroke="currentColor" stroke-width="1.6"/>
         <text x="190" y="88" font-family="system-ui, sans-serif" font-size="13"
-              fill="var(--accent)">internal/barrier</text>
+              fill="currentColor">internal/barrier</text>
         <text x="190" y="110" font-family="ui-monospace, Menlo, Consolas, monospace"
-              font-size="9.5" fill="var(--accent)">join puro de estados</text>
+              font-size="9.5" fill="currentColor">join puro de estados</text>
         <g font-family="ui-monospace, Menlo, Consolas, monospace" font-size="9.5"
            fill="currentColor" opacity="0.8">
           <text x="190" y="127">imports: errors, fmt,</text>
@@ -210,9 +205,9 @@
 
         <!-- internal/ledgerpath -->
         <rect x="352" y="64" width="160" height="176" rx="3" fill="none"
-              stroke="var(--accent)" stroke-width="1.6"/>
+              stroke="currentColor" stroke-width="1.6"/>
         <text x="366" y="88" font-family="system-ui, sans-serif" font-size="12"
-              fill="var(--accent)">internal/ledgerpath</text>
+              fill="currentColor">internal/ledgerpath</text>
         <g font-family="ui-monospace, Menlo, Consolas, monospace" font-size="9.5"
            fill="currentColor" opacity="0.8">
           <text x="366" y="110">Resolve →</text>
@@ -227,11 +222,11 @@
 
         <!-- internal/ledger -->
         <rect x="528" y="64" width="175" height="176" rx="3" fill="none"
-              stroke="var(--accent)" stroke-width="1.6"/>
+              stroke="currentColor" stroke-width="1.6"/>
         <text x="542" y="88" font-family="system-ui, sans-serif" font-size="13"
-              fill="var(--accent)">internal/ledger</text>
+              fill="currentColor">internal/ledger</text>
         <g font-family="ui-monospace, Menlo, Consolas, monospace" font-size="9.5"
-           fill="var(--accent)">
+           fill="currentColor">
           <text x="542" y="110">SQLite · modernc.org/</text>
           <text x="542" y="125">sqlite v1.56.0 · sin cgo</text>
         </g>
@@ -246,9 +241,9 @@
 
         <!-- internal/buildcheck -->
         <rect x="719" y="64" width="140" height="176" rx="3" fill="none"
-              stroke="var(--accent)" stroke-width="1.6"/>
+              stroke="currentColor" stroke-width="1.6"/>
         <text x="733" y="88" font-family="system-ui, sans-serif" font-size="12"
-              fill="var(--accent)">internal/buildcheck</text>
+              fill="currentColor">internal/buildcheck</text>
         <g font-family="ui-monospace, Menlo, Consolas, monospace" font-size="9.5"
            fill="currentColor" opacity="0.85">
           <text x="733" y="110">test de subproceso</text>
@@ -264,7 +259,7 @@
         <text x="889" y="88" font-family="system-ui, sans-serif" font-size="13"
               fill="currentColor">cmd/lucind-ai</text>
         <text x="889" y="110" font-family="ui-monospace, Menlo, Consolas, monospace"
-              font-size="9.5" fill="var(--accent)">compila limpio</text>
+              font-size="9.5" fill="currentColor">compila limpio</text>
         <g font-family="ui-monospace, Menlo, Consolas, monospace" font-size="9.5"
            fill="currentColor" opacity="0.85">
           <text x="889" y="127">subcomando run</text>
@@ -272,33 +267,33 @@
           <text x="889" y="164">y internal/run</text>
         </g>
         <text x="889" y="184" font-family="ui-monospace, Menlo, Consolas, monospace"
-              font-size="9.5" fill="var(--accent)">composition root</text>
+              font-size="9.5" fill="currentColor">composition root</text>
         <text x="889" y="199" font-family="ui-monospace, Menlo, Consolas, monospace"
-              font-size="9.5" fill="var(--accent)">cableado a run ↓</text>
+              font-size="9.5" fill="currentColor">cableado a run ↓</text>
 
         <!-- CONECTADO: composition root -->
-        <line x1="256" y1="240" x2="256" y2="258" stroke="var(--accent)"
+        <line x1="256" y1="240" x2="256" y2="258" stroke="currentColor"
               stroke-width="1.4"/>
-        <line x1="616" y1="240" x2="616" y2="258" stroke="var(--accent)"
+        <line x1="616" y1="240" x2="616" y2="258" stroke="currentColor"
               stroke-width="1.4"/>
-        <line x1="256" y1="258" x2="380" y2="258" stroke="var(--accent)"
+        <line x1="256" y1="258" x2="380" y2="258" stroke="currentColor"
               stroke-width="1.4"/>
-        <line x1="490" y1="258" x2="616" y2="258" stroke="var(--accent)"
+        <line x1="490" y1="258" x2="616" y2="258" stroke="currentColor"
               stroke-width="1.4"/>
         <text x="435" y="263" text-anchor="middle" font-family="ui-monospace, Menlo, Consolas, monospace"
-              font-size="14" fill="var(--accent)">✓</text>
+              font-size="14" fill="currentColor">✓</text>
         <text x="436" y="284" text-anchor="middle" font-family="ui-monospace, Menlo, Consolas, monospace"
-              font-size="11.5" letter-spacing="0.1em" fill="var(--accent)">COMPOSITION ROOT (RUN)</text>
+              font-size="11.5" letter-spacing="0.1em" fill="currentColor">COMPOSITION ROOT (RUN)</text>
         <text x="436" y="300" text-anchor="middle" font-family="ui-monospace, Menlo, Consolas, monospace"
-              font-size="9.5" fill="var(--accent)" opacity="0.9">internal/run llama ledger.Open() y conecta barrier↔ledger</text>
+              font-size="9.5" fill="currentColor" opacity="0.9">internal/run llama ledger.Open() y conecta barrier↔ledger</text>
 
-        <line x1="968" y1="240" x2="968" y2="258" stroke="var(--accent)"
+        <line x1="968" y1="240" x2="968" y2="258" stroke="currentColor"
               stroke-width="1.4"/>
-        <circle cx="968" cy="262" r="3" fill="var(--accent)"/>
+        <circle cx="968" cy="262" r="3" fill="currentColor"/>
         <text x="978" y="252" font-family="ui-monospace, Menlo, Consolas, monospace"
-              font-size="9" fill="var(--accent)" opacity="0.9">conecta con</text>
+              font-size="9" fill="currentColor" opacity="0.9">conecta con</text>
         <text x="978" y="265" font-family="ui-monospace, Menlo, Consolas, monospace"
-              font-size="9" fill="var(--accent)" opacity="0.9">internal/run</text>
+              font-size="9" fill="currentColor" opacity="0.9">internal/run</text>
 
         <!-- banda 2: lo que sigue sin existir -->
         <text x="20" y="326" font-family="ui-monospace, Menlo, Consolas, monospace"
@@ -323,7 +318,7 @@
         <text x="444" y="364" font-family="system-ui, sans-serif" font-size="13"
               fill="currentColor">agy · Antigravity</text>
         <text x="444" y="386" font-family="ui-monospace, Menlo, Consolas, monospace"
-              font-size="10" fill="var(--accent)">1 paquete · 2 rondas · mergeado</text>
+              font-size="10" fill="currentColor">1 paquete · 2 rondas · mergeado</text>
         <text x="444" y="403" font-family="ui-monospace, Menlo, Consolas, monospace"
               font-size="10" fill="currentColor" opacity="0.8">barrido y volumen</text>
         <text x="444" y="420" font-family="ui-monospace, Menlo, Consolas, monospace"
@@ -389,9 +384,9 @@
 
         <!-- engram -->
         <rect x="20" y="656" width="1040" height="14" rx="3" fill="none"
-              stroke="var(--accent)" stroke-width="1.6"/>
+              stroke="currentColor" stroke-width="1.6"/>
         <text x="44" y="667" font-family="ui-monospace, Menlo, Consolas, monospace"
-              font-size="9.5" letter-spacing="0.14em" fill="var(--accent)">ENGRAM · la narrativa y las decisiones · vive hoy</text>
+              font-size="9.5" letter-spacing="0.14em" fill="currentColor">ENGRAM · la narrativa y las decisiones · vive hoy</text>
       </svg>
       <figcaption>Arriba, las piezas del núcleo probadas. <span class="m">internal/lane</span> no importa
         nada — ni siquiera la librería estándar — así que "la barrera nunca importa el ledger" es
