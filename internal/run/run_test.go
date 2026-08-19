@@ -26,9 +26,10 @@ import (
 // every branch of Execute's dispatch-decision logic without spawning a
 // real process.
 type fakeExecutor struct {
-	outcome executor.Outcome
-	err     error
-	gotReq  executor.Request
+	outcome      executor.Outcome
+	err          error
+	gotReq       executor.Request
+	defaultModel string
 	// beforeReturn, when set, runs just before Run returns. Tests use it
 	// to inject a side effect (e.g. closing the ledger) at the exact
 	// point in Execute's flow where the dispatch would normally succeed,
@@ -43,6 +44,10 @@ func (f *fakeExecutor) Run(_ context.Context, req executor.Request) (executor.Ou
 		f.beforeReturn()
 	}
 	return f.outcome, f.err
+}
+
+func (f *fakeExecutor) DefaultModel() string {
+	return f.defaultModel
 }
 
 // doneEnvelopeJSON is a minimal envelope that satisfies result.schema.json
@@ -572,11 +577,15 @@ func TestExecuteRequestCarriesExplicitModel(t *testing.T) {
 }
 
 // TestExecuteRequestFallsBackToDefaultModelWhenPacketOmitsIt proves a
-// packet that names no model still dispatches with the project default,
-// applied here at the composition root rather than inside packet.Parse.
+// packet that names no model still dispatches with the resolved executor's
+// own default, applied here at the composition root rather than inside
+// packet.Parse.
 func TestExecuteRequestFallsBackToDefaultModelWhenPacketOmitsIt(t *testing.T) {
 	wtPath := t.TempDir()
-	fe := &fakeExecutor{outcome: executor.Outcome{ExitCode: 0}}
+	fe := &fakeExecutor{
+		outcome:      executor.Outcome{ExitCode: 0},
+		defaultModel: "stub-executor-default",
+	}
 	deps := newTestDeps(t, wtPath, func(string) fs.FS {
 		return fstest.MapFS{".lucind/result.json": {Data: []byte(doneEnvelopeJSON)}}
 	}, fe)
@@ -587,8 +596,8 @@ func TestExecuteRequestFallsBackToDefaultModelWhenPacketOmitsIt(t *testing.T) {
 		t.Fatalf("Execute() error = %v, want nil", err)
 	}
 
-	if fe.gotReq.Model != run.DefaultModel {
-		t.Errorf("gotReq.Model = %q, want run.DefaultModel = %q", fe.gotReq.Model, run.DefaultModel)
+	if fe.gotReq.Model != "stub-executor-default" {
+		t.Errorf("gotReq.Model = %q, want %q", fe.gotReq.Model, "stub-executor-default")
 	}
 }
 

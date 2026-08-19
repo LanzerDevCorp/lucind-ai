@@ -56,4 +56,8 @@ type Outcome struct {
 // Executor runs one Request, bounded by ctx.
 type Executor interface {
 	Run(ctx context.Context, req Request) (Outcome, error)
+	// DefaultModel returns the model this executor runs on when a packet
+	// names none. Each executor owns its own default -- there is no
+	// project-wide fallback.
+	DefaultModel() string
 }

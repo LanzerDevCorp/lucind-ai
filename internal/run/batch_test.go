@@ -132,6 +132,10 @@ func (f *batchFakeExecutor) Run(ctx context.Context, req executor.Request) (exec
 	return outcome, nil
 }
 
+func (f *batchFakeExecutor) DefaultModel() string {
+	return "stub-default"
+}
+
 // newBatchTestDeps builds run.Deps wired to a real on-disk ledger, one
 // distinct stub worktree per lane (keyed by lane ID, so tests can control
 // each lane's fake executor outcome and result envelope independently), and
@@ -651,6 +655,10 @@ func (r *recordingFakeExecutor) Run(_ context.Context, req executor.Request) (ex
 	defer r.mu.Unlock()
 	r.requests = append(r.requests, req)
 	return executor.Outcome{ExitCode: 0}, nil
+}
+
+func (r *recordingFakeExecutor) DefaultModel() string {
+	return "stub-default"
 }
 
 // TestExecuteBatchDispatchesDifferentExecutorsPerPacket proves that a batch

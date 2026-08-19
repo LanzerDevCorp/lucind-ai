@@ -81,6 +81,11 @@ type Agy struct {
 	WaitDelay time.Duration
 }
 
+// DefaultModel returns the model Agy runs on when a packet names none.
+func (a Agy) DefaultModel() string {
+	return "gemini-3.7-flash-high"
+}
+
 // Run execs agy with req.Prompt, in req.WorktreePath, bounded by ctx.
 //
 // agy exposes no --cwd flag, so the worktree is selected by setting the
