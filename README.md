@@ -68,18 +68,18 @@ Honest, because a plan that claims to be finished is the same failure this proje
 | Piece | State |
 |---|---|
 | Requirements | fixed — see `docs/prd.md` |
-| The `lucind-ai` binary | **not one line written** |
-| SQLite ledger | not written |
+| The `lucind-ai` binary | written — dispatches via `run --packet <path>` (repeatable) |
+| SQLite ledger | written (schema v2) — used by `internal/run` |
 | Approvals web UI | not written |
-| Barrier / parallel dispatch | not written |
-| Execution lane (`agy`) | one packet, two rounds, merged — under the old prose design |
+| Barrier / parallel dispatch | written — joins N lanes concurrently under one barrier |
+| Execution lane (`agy`) | written — dispatched headlessly by the binary; multiple end-to-end runs completed |
 | Execution lane (`cursor-agent`) | logged in 2026-08-17, has never executed |
 | Review via RDD | never run |
 | Human lane | one packet, closed — it found two defects in its own instructions |
-| Packet templates, envelope schema | written; nothing validates against the schema yet |
+| Packet templates, envelope schema | written — embedded and validated on every dispatch (`internal/result/`) |
 | Claude Code plugin / marketplace | to be removed — distribution machinery for an audience of one |
 
-Nothing here is installable yet. [`docs/estado-real.html`](docs/estado-real.html) is the same picture,
+Installable via `go install ./cmd/lucind-ai`. [`docs/estado-real.html`](docs/estado-real.html) is the same picture,
 drawn, with the same distinction between what exists and what does not.
 
 ## What is in here
@@ -88,6 +88,10 @@ drawn, with the same distinction between what exists and what does not.
 docs/prd.md                            the source of truth
 docs/estado-real.html                  the design, drawn, with an honesty legend
 docs/research/meta-harness-landscape.md  what already exists in the field
+
+cmd/lucind-ai/                         the binary CLI entry point
+internal/                              barrier, ledger, executor, and run packages
+internal/result/result.schema.json     result envelope schema, embedded into the binary
 
 plugin/claude-code/skills/lucind-ai/
 ├── SKILL.md                           to shrink to: how to write a packet, how to drive the binary
