@@ -22,7 +22,18 @@ phases:
       reading each preserved worktree directly, work itself was correct and cleanly committed.
       Recovered by merging both branches to main by hand (user-authorized).
   spec:
-    status: pending
+    status: done
+    engram_topic: sdd/approvals-web-ui/spec
+    engram_id: 1802
+    drafts:
+      - openspec/changes/approvals-web-ui/specs-agy/
+      - openspec/changes/approvals-web-ui/specs-cursor-agent/
+    note: |
+      First dual-executor lane pair to come back status=done and auto-integrate through
+      lucind-ai's own internal/integrate (f21234f) -- confirms the packet-template.md fix
+      (ecc0811) resolved the envelope-delivery defect from propose/design. Synthesized 3 full
+      specs (approvals-web-ui, lane-approval-wait, lane-execution) combining both drafts'
+      complementary coverage.
   design:
     status: done
     engram_topic: sdd/approvals-web-ui/design
