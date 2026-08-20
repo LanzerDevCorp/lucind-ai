@@ -84,7 +84,29 @@ phases:
       PRs matching cursor-agent's suggested PR1/PR2/PR3 split) BEFORE any apply phase is
       dispatched for this change. Not resolved in this session (planning-only).
   apply:
-    status: pending
+    status: done
+    note: |
+      Implemented via hand-split packet dispatch (this change's own DAG-split feature could not
+      bootstrap its own implementation, so tasks.md was split by hand into phase-scoped packets
+      with disjoint allowed_paths instead). Phases 1-6, 9 dispatched first (internal/packet
+      AllowedPaths + DisjointAllowedPaths, internal/run scope-check gate, internal/dag
+      parse/Kahn/emit/split, cmd/lucind-ai split subcommand + overlap check + integrated_ids/
+      reverted_ids stdout, SKILL.md/template docs, cleanup comments). Phase 7 (e2e: two-packet
+      one-edge apply-dag.yaml through split then sequential fake-executor dispatch, proving wave
+      2 never runs after a blocked wave 1) landed last, test-only, auto-integrated cleanly.
+      Phase 8 (testing sweep) verified directly by the orchestrator: go test ./... -race
+      -count=1 green across all packages; git log confirms zero apply-dag-dispatch commits
+      touched internal/run/integrate.go, internal/resolve/resolve.go,
+      internal/integrate/integrate.go, or internal/run/batch.go -- the reused-unmodified
+      constraint held for the whole apply phase.
+      review_budget_lines raised from 2000 to 5000 (state.yaml, this session, explicit user
+      instruction) before apply started, resolving the tasks-phase over-budget flag without a
+      chained-PR split; delivery_strategy stayed single-pr.
+      agy hit repeated network timeouts (eligibility check, googleusercontent.com dial timeout)
+      on Phase 1's first two attempts; subsequent core-implementation phases were proactively
+      routed to cursor-agent instead of retrying agy a third time. cursor-agent's
+      Co-authored-by trailer bug recurred on at least one lane; stripped via git commit-tree
+      rewrite before merge, per the established fix.
   verify:
     status: pending
   archive:
