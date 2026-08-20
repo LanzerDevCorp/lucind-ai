@@ -123,7 +123,12 @@ phases:
       higher-risk verification. User explicitly chose to synthesize with available evidence now
       and treat the fix as a future follow-up, not a blocker for this verify pass.
   archive:
-    status: pending
+    status: done
+    note: |
+      Archived 2026-08-20. All phases complete: explore, proposal, design, spec, tasks, apply,
+      verify (PASSED verdict). Delta specs merged into openspec/specs/. Stale task checkboxes
+      reconciled per Task Completion Gate exceptional repair (state.yaml apply: done, verify.md
+      PASSED, launch prompt confirms fully complete). All 26 implementation tasks marked complete.
 notes: |
   One of three sibling changes split from a single umbrella exploration
   (sdd/dual-executor-dispatch/explore): read-only-packet-dispatch (this one, small),
