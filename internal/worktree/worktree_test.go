@@ -362,3 +362,180 @@ func TestDeleteBranchHonoursCancelledContext(t *testing.T) {
 		t.Errorf("branch %q was deleted despite a cancelled context", wt.Branch)
 	}
 }
+
+func TestHasUniqueCommits(t *testing.T) {
+	if testing.Short() {
+		t.Skip("shells out to real git")
+	}
+
+	primaryRoot := initRepo(t)
+
+	wt, err := worktree.Create(context.Background(), primaryRoot, "lane1")
+	if err != nil {
+		t.Fatalf("Create() error = %v, want nil", err)
+	}
+
+	// Fresh worktree: no unique commits.
+	hasCommits, err := worktree.HasUniqueCommits(context.Background(), wt.Path, primaryRoot)
+	if err != nil {
+		t.Fatalf("HasUniqueCommits() error = %v, want nil", err)
+	}
+	if hasCommits {
+		t.Errorf("HasUniqueCommits() = true, want false for fresh worktree")
+	}
+
+	// Commit on the lane branch.
+	laneFile := filepath.Join(wt.Path, "feature.txt")
+	if err := os.WriteFile(laneFile, []byte("lane work\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(feature.txt) error = %v", err)
+	}
+	runGit(t, wt.Path, "add", "feature.txt")
+	runGit(t, wt.Path, "commit", "-m", "lane commit")
+
+	// Now unique commits are present.
+	hasCommits, err = worktree.HasUniqueCommits(context.Background(), wt.Path, primaryRoot)
+	if err != nil {
+		t.Fatalf("HasUniqueCommits() error = %v, want nil", err)
+	}
+	if !hasCommits {
+		t.Errorf("HasUniqueCommits() = false, want true after commit on lane branch")
+	}
+}
+
+func TestHasUniqueCommitsHonoursCancelledContext(t *testing.T) {
+	if testing.Short() {
+		t.Skip("shells out to real git")
+	}
+
+	primaryRoot := initRepo(t)
+
+	wt, err := worktree.Create(context.Background(), primaryRoot, "lane1")
+	if err != nil {
+		t.Fatalf("Create() error = %v, want nil", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err = worktree.HasUniqueCommits(ctx, wt.Path, primaryRoot)
+	if err == nil {
+		t.Fatalf("HasUniqueCommits() error = nil, want non-nil for an already-cancelled context")
+	}
+}
+
+func TestHasUniqueCommitsWrapsGitFailureWithStderr(t *testing.T) {
+	if testing.Short() {
+		t.Skip("shells out to real git")
+	}
+
+	primaryRoot := t.TempDir()
+	wtDir := t.TempDir()
+
+	_, err := worktree.HasUniqueCommits(context.Background(), wtDir, primaryRoot)
+	if err == nil {
+		t.Fatalf("HasUniqueCommits() error = nil, want non-nil")
+	}
+	if !strings.Contains(strings.ToLower(err.Error()), "not a git repository") && !strings.Contains(strings.ToLower(err.Error()), "fatal") && !strings.Contains(strings.ToLower(err.Error()), "error") {
+		t.Errorf("HasUniqueCommits() error = %q, want git stderr", err.Error())
+	}
+}
+
+func TestPorcelainEmpty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("shells out to real git")
+	}
+
+	primaryRoot := initRepo(t)
+
+	// Add .gitignore in primary repo ignoring .lucind/ and commit it.
+	gitignorePath := filepath.Join(primaryRoot, ".gitignore")
+	if err := os.WriteFile(gitignorePath, []byte(".lucind/\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(.gitignore) error = %v", err)
+	}
+	runGit(t, primaryRoot, "add", ".gitignore")
+	runGit(t, primaryRoot, "commit", "-m", "ignore .lucind/")
+
+	wt, err := worktree.Create(context.Background(), primaryRoot, "lane1")
+	if err != nil {
+		t.Fatalf("Create() error = %v, want nil", err)
+	}
+
+	// Fresh worktree: porcelain is empty.
+	empty, err := worktree.PorcelainEmpty(context.Background(), wt.Path)
+	if err != nil {
+		t.Fatalf("PorcelainEmpty() error = %v, want nil", err)
+	}
+	if !empty {
+		t.Errorf("PorcelainEmpty() = false, want true for fresh worktree")
+	}
+
+	// Writing only .lucind/result.json in a repo ignoring .lucind/ leaves porcelain empty.
+	lucindDir := filepath.Join(wt.Path, ".lucind")
+	if err := os.MkdirAll(lucindDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll(.lucind) error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(lucindDir, "result.json"), []byte(`{"status":"done"}`), 0o644); err != nil {
+		t.Fatalf("WriteFile(result.json) error = %v", err)
+	}
+
+	empty, err = worktree.PorcelainEmpty(context.Background(), wt.Path)
+	if err != nil {
+		t.Fatalf("PorcelainEmpty() error = %v, want nil", err)
+	}
+	if !empty {
+		t.Errorf("PorcelainEmpty() = false, want true when only ignored .lucind/result.json is present")
+	}
+
+	// Adding an untracked non-ignored file makes PorcelainEmpty false.
+	untrackedFile := filepath.Join(wt.Path, "untracked.txt")
+	if err := os.WriteFile(untrackedFile, []byte("untracked content\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(untracked.txt) error = %v", err)
+	}
+
+	empty, err = worktree.PorcelainEmpty(context.Background(), wt.Path)
+	if err != nil {
+		t.Fatalf("PorcelainEmpty() error = %v, want nil", err)
+	}
+	if empty {
+		t.Errorf("PorcelainEmpty() = true, want false when untracked non-ignored file is present")
+	}
+}
+
+func TestPorcelainEmptyHonoursCancelledContext(t *testing.T) {
+	if testing.Short() {
+		t.Skip("shells out to real git")
+	}
+
+	primaryRoot := initRepo(t)
+
+	wt, err := worktree.Create(context.Background(), primaryRoot, "lane1")
+	if err != nil {
+		t.Fatalf("Create() error = %v, want nil", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err = worktree.PorcelainEmpty(ctx, wt.Path)
+	if err == nil {
+		t.Fatalf("PorcelainEmpty() error = nil, want non-nil for an already-cancelled context")
+	}
+}
+
+func TestPorcelainEmptyWrapsGitFailureWithStderr(t *testing.T) {
+	if testing.Short() {
+		t.Skip("shells out to real git")
+	}
+
+	wtDir := t.TempDir()
+
+	_, err := worktree.PorcelainEmpty(context.Background(), wtDir)
+	if err == nil {
+		t.Fatalf("PorcelainEmpty() error = nil, want non-nil")
+	}
+	if !strings.Contains(strings.ToLower(err.Error()), "not a git repository") && !strings.Contains(strings.ToLower(err.Error()), "fatal") && !strings.Contains(strings.ToLower(err.Error()), "error") {
+		t.Errorf("PorcelainEmpty() error = %q, want git stderr", err.Error())
+	}
+}
+
+
