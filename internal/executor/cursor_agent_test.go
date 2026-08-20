@@ -289,6 +289,39 @@ func TestCursorAgentRunAlwaysPassesMandatoryFlags(t *testing.T) {
 	}
 }
 
+func TestCursorAgentKnownModelsIncludesDefaultAndTestedEscalation(t *testing.T) {
+	c := executor.CursorAgent{}
+	known := c.KnownModels()
+	if len(known) == 0 {
+		t.Fatalf("KnownModels() = %v, want at least one model", known)
+	}
+	wantDefault, wantEscalation := false, false
+	for _, m := range known {
+		if m == c.DefaultModel() {
+			wantDefault = true
+		}
+		if m == "claude-opus-4-8-high" {
+			wantEscalation = true
+		}
+	}
+	if !wantDefault {
+		t.Errorf("KnownModels() = %v, want it to include DefaultModel() %q", known, c.DefaultModel())
+	}
+	if !wantEscalation {
+		t.Errorf("KnownModels() = %v, want it to include the deliberately-tested escalation model %q (see TestCursorAgentRunIncludesModelFlagWhenSet)", known, "claude-opus-4-8-high")
+	}
+}
+
+func TestCursorAgentKnownModelsExcludesOtherProviderFamilies(t *testing.T) {
+	c := executor.CursorAgent{}
+	known := c.KnownModels()
+	for _, m := range known {
+		if strings.HasPrefix(m, "gemini-") {
+			t.Errorf("KnownModels() = %v, want no gemini- model -- that is agy's provider family, not cursor-agent's; this is the exact mismatch that silently billed against Cursor's Other Models quota", known)
+		}
+	}
+}
+
 func TestCursorAgentRunOmitsModelFlagWhenEmpty(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping subprocess test in -short mode")

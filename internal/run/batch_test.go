@@ -139,6 +139,10 @@ func (f *batchFakeExecutor) DefaultModel() string {
 	return "stub-default"
 }
 
+func (f *batchFakeExecutor) KnownModels() []string {
+	return []string{"stub-default"}
+}
+
 // newBatchTestDeps builds run.Deps wired to a real on-disk ledger, one
 // distinct stub worktree per lane (keyed by lane ID, so tests can control
 // each lane's fake executor outcome and result envelope independently), and
@@ -668,6 +672,10 @@ func (r *recordingFakeExecutor) Run(_ context.Context, req executor.Request) (ex
 
 func (r *recordingFakeExecutor) DefaultModel() string {
 	return "stub-default"
+}
+
+func (r *recordingFakeExecutor) KnownModels() []string {
+	return []string{"stub-default"}
 }
 
 // TestExecuteBatchDispatchesDifferentExecutorsPerPacket proves that a batch

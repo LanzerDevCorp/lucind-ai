@@ -159,6 +159,96 @@ func TestRunUnsupportedExecutorNamesIt(t *testing.T) {
 	}
 }
 
+// TestRunModelMismatchedToExecutorIsRejected proves the exact regression
+// this check exists for: a packet naming a model from a different
+// provider family than its executor (here, a gemini- model on
+// cursor-agent) is rejected before any worktree is created, rather than
+// silently dispatching and billing against the wrong quota tier.
+func TestRunModelMismatchedToExecutorIsRejected(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "packet.md")
+	content := "---\n" +
+		"id: lane-1\n" +
+		"executor: cursor-agent\n" +
+		"routed_by: single-piece precision\n" +
+		"model: gemini-3.7-flash-high\n" +
+		"---\n" +
+		"Do the thing.\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write packet fixture: %v", err)
+	}
+
+	code := run(context.Background(), []string{"run", "--packet", path}, &stdout, &stderr)
+
+	if code == 0 {
+		t.Fatalf("run with mismatched model exit code = 0, want non-zero")
+	}
+	if !strings.Contains(stderr.String(), "gemini-3.7-flash-high") {
+		t.Fatalf("stderr = %q, want it to name the mismatched model", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "cursor-agent") {
+		t.Fatalf("stderr = %q, want it to name the executor", stderr.String())
+	}
+}
+
+// TestRunKnownModelForExecutorPasses proves a model that genuinely belongs
+// to the named executor -- including a deliberate escalation away from
+// that executor's own default -- passes the check.
+func TestRunKnownModelForExecutorPasses(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "packet.md")
+	content := "---\n" +
+		"id: lane-1\n" +
+		"executor: cursor-agent\n" +
+		"routed_by: single-piece precision\n" +
+		"model: claude-opus-4-8-high\n" +
+		"---\n" +
+		"Do the thing.\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write packet fixture: %v", err)
+	}
+
+	code := run(context.Background(), []string{"run", "--packet", path}, &stdout, &stderr)
+
+	// The model check must pass; the run still fails downstream because
+	// this test has no real primary root / ledger wired -- what matters
+	// here is that the model mismatch message never appears.
+	if code == 0 {
+		t.Fatalf("run exit code = 0 with no real dispatch environment, want non-zero for an unrelated reason")
+	}
+	if strings.Contains(stderr.String(), "not a known model") {
+		t.Fatalf("stderr = %q, want the known model claude-opus-4-8-high to pass the check", stderr.String())
+	}
+}
+
+// TestRunOmittedModelSkipsModelCheck proves a packet that omits model
+// entirely is never subject to the known-model check, for any executor.
+func TestRunOmittedModelSkipsModelCheck(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "packet.md")
+	content := "---\n" +
+		"id: lane-1\n" +
+		"executor: cursor-agent\n" +
+		"routed_by: single-piece precision\n" +
+		"---\n" +
+		"Do the thing.\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write packet fixture: %v", err)
+	}
+
+	run(context.Background(), []string{"run", "--packet", path}, &stdout, &stderr)
+
+	if strings.Contains(stderr.String(), "not a known model") {
+		t.Fatalf("stderr = %q, want an omitted model to never trigger the known-model check", stderr.String())
+	}
+}
+
 // TestRunAcceptsCursorAgentExecutor proves that a packet specifying
 // "executor: cursor-agent" passes the pre-dispatch unsupported executor check.
 func TestRunAcceptsCursorAgentExecutor(t *testing.T) {
@@ -947,6 +1037,10 @@ func (testDoneExecutor) Run(ctx context.Context, req executor.Request) (executor
 
 func (testDoneExecutor) DefaultModel() string {
 	return "test-model"
+}
+
+func (testDoneExecutor) KnownModels() []string {
+	return []string{"test-model"}
 }
 
 func extractRunID(stdout string) string {

@@ -155,6 +155,32 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 		}
 	}
 
+	// A named model must be one this executor actually knows -- checked
+	// for every packet before any of them dispatches, exactly like the
+	// executor-support check above. This is what stops a copy-pasted or
+	// mistaken model string from a different provider family (e.g. a
+	// gemini- model named for cursor-agent) from silently running -- and
+	// billing -- as if it belonged to that executor. An omitted model is
+	// always fine: the executor supplies its own DefaultModel.
+	for i, p := range ps {
+		if p.Model == "" {
+			continue
+		}
+		factory := supportedExecutors[p.Executor] // already validated to exist above
+		known := factory().KnownModels()
+		ok := false
+		for _, m := range known {
+			if m == p.Model {
+				ok = true
+				break
+			}
+		}
+		if !ok {
+			fmt.Fprintf(stderr, "lucind-ai: packet %q names model %q, not a known model for executor %q (known: %s)\n", packetFlags[i], p.Model, p.Executor, strings.Join(known, ", "))
+			return 1
+		}
+	}
+
 	// Upfront batch-disjointness check: must stay before ExecuteBatch and
 	// worktree.Create so Create is not the first overlap-failure side effect.
 	if err := packet.DisjointAllowedPaths(ps); err != nil {

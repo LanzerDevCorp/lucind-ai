@@ -60,4 +60,12 @@ type Executor interface {
 	// names none. Each executor owns its own default -- there is no
 	// project-wide fallback.
 	DefaultModel() string
+	// KnownModels returns every model identifier this executor is allowed
+	// to run, DefaultModel included. A packet naming a model outside this
+	// set is rejected before dispatch (cmd/lucind-ai/cli.go's pre-dispatch
+	// validation), so a copy-pasted or mistaken model string from a
+	// different provider family can never silently run -- and bill -- as
+	// this executor. Extending the set is a deliberate code change to this
+	// method, never something a packet author can do by typing a string.
+	KnownModels() []string
 }

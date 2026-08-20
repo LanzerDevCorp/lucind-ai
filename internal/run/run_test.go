@@ -51,6 +51,10 @@ func (f *fakeExecutor) DefaultModel() string {
 	return f.defaultModel
 }
 
+func (f *fakeExecutor) KnownModels() []string {
+	return []string{f.defaultModel}
+}
+
 // doneEnvelopeJSON is a minimal envelope that satisfies result.schema.json
 // with status "done".
 const doneEnvelopeJSON = `{

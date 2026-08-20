@@ -86,6 +86,14 @@ func (a Agy) DefaultModel() string {
 	return "gemini-3.7-flash-high"
 }
 
+// KnownModels returns every model a packet may deliberately request for
+// Agy. Extend this list only for a model actually verified against the
+// real agy CLI -- see internal/executor.Executor.KnownModels's doc comment
+// for why this is not free text.
+func (a Agy) KnownModels() []string {
+	return []string{"gemini-3.7-flash-high"}
+}
+
 // Run execs agy with req.Prompt, in req.WorktreePath, bounded by ctx.
 //
 // agy exposes no --cwd flag, so the worktree is selected by setting the

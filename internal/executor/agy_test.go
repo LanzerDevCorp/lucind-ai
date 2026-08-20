@@ -342,6 +342,24 @@ func TestRunOmitsModelFlagWhenEmpty(t *testing.T) {
 	}
 }
 
+func TestAgyKnownModelsIncludesDefaultModel(t *testing.T) {
+	a := executor.Agy{}
+	known := a.KnownModels()
+	if len(known) == 0 {
+		t.Fatalf("KnownModels() = %v, want at least one model", known)
+	}
+	found := false
+	for _, m := range known {
+		if m == a.DefaultModel() {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("KnownModels() = %v, want it to include DefaultModel() %q", known, a.DefaultModel())
+	}
+}
+
 func TestRunIncludesModelFlagWhenSet(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping subprocess test in -short mode")
