@@ -60,7 +60,28 @@ phases:
       duration, git SHA) over agy's verify-mechanical.txt. New CLI subcommand `lucind-ai check`
       wrapping the existing internal/integrate.Check -- both drafts agreed independently.
   spec:
-    status: pending
+    status: done
+    engram_topic: sdd/verify-dual-dispatch/spec
+    drafts:
+      - openspec/changes/verify-dual-dispatch/specs-agy/
+      - openspec/changes/verify-dual-dispatch/specs-cursor-agent/
+    canonical: openspec/changes/verify-dual-dispatch/specs/
+    note: |
+      Dispatched via real lucind-ai run (agy + cursor-agent), both lanes done, no allowed_paths
+      collision this time (each packet targeted its own specs-<executor>/ directory, unlike the
+      proposal/design phases' authoring mistake). cursor-agent's commit carried the known
+      Co-authored-by trailer, stripped via commit-tree rewrite before merge. Both merged to main
+      cleanly, no conflicts. agy split into 4 capability files (mechanical-check-cli,
+      verify-judgment-packet, mechanical-rerun-prohibition, verdict-reconciliation);
+      cursor-agent split into 3 (verify-mechanical-check, verify-judgment-packet,
+      verify-dual-dispatch). Canonical follows cursor-agent's 3-file split (consistent with the
+      convention already used for read-only-packet-dispatch and apply-dag-dispatch's canonical
+      specs), but folds in agy's finer-grained requirement breakdown of verdict reconciliation
+      (separate Unanimous/Disagreement/Lane-Failure/Ambiguity-Escalation requirements instead of
+      cursor-agent's single "Four-Case" requirement) and agy's explicit "Terminal Consumers of
+      the Mechanical Log Artifact" and "Read-Only Tool Selection Guidance" requirements, which
+      cursor-agent's drafts covered only implicitly inside other requirements. No contradictions
+      between drafts -- pure convergence, unlike design's naming/detail differences.
   tasks:
     status: pending
   apply:
