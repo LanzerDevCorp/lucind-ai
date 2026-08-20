@@ -83,7 +83,32 @@ phases:
       cursor-agent's drafts covered only implicitly inside other requirements. No contradictions
       between drafts -- pure convergence, unlike design's naming/detail differences.
   tasks:
-    status: pending
+    status: done
+    engram_topic: sdd/verify-dual-dispatch/tasks
+    drafts:
+      - openspec/changes/verify-dual-dispatch/tasks-agy.md
+      - openspec/changes/verify-dual-dispatch/tasks-cursor-agent.md
+    canonical: openspec/changes/verify-dual-dispatch/tasks.md
+    note: |
+      Dispatched via real lucind-ai run (agy + cursor-agent), both lanes done, distinct allowed
+      paths this time (tasks-agy.md / tasks-cursor-agent.md), no collision. cursor-agent's commit
+      carried the known Co-authored-by trailer, stripped via commit-tree rewrite before merge.
+      Both merged to main cleanly. cursor-agent's draft was more precise (exact test bodies with
+      concrete assertion strings, formatMechanicalLog split into its own testable unit) and was
+      adopted near-verbatim as canonical, same pattern as both sibling changes' tasks phase.
+      Review-budget forecast: 740-1090 lines (cursor-agent) / 500-750 lines (agy) -- both
+      independently confirm this is the smallest of the three sibling changes by a wide margin,
+      comfortably under the 2000-line budget, single-pr delivery strategy unchanged, no chained-
+      PR decision needed (unlike apply-dag-dispatch's corroborated over-budget forecast).
+
+      Mid-session process fix: discovered (user-flagged) that all packet dispatch files this
+      session had been authored at the primary repo root instead of the gitignored
+      .lucind/packets/ -- the actual cause of the recurring "primary root has uncommitted
+      changes" integrate failure on every single batch this session, not an inherent binary
+      limitation. Documented in plugin/claude-code/skills/lucind-ai/SKILL.md (commit 6289684,
+      new "Where to author packet files" section) so future sessions don't repeat it. This
+      change's own packets (propose/design/specs) were still authored at the root before the fix
+      landed; only this tasks-phase dispatch and any future ones should use .lucind/packets/.
   apply:
     status: pending
   verify:
