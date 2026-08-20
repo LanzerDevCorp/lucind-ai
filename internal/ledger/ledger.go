@@ -460,3 +460,271 @@ func parseNullableTimestamp(v sql.NullString) (*time.Time, error) {
 	}
 	return &t, nil
 }
+
+func formatNullableTimestamp(t *time.Time) any {
+	if t == nil || t.IsZero() {
+		return nil
+	}
+	return t.UTC().Format(time.RFC3339)
+}
+
+// Decision represents the status of an approval request.
+type Decision string
+
+const (
+	DecisionPending  Decision = "pending"
+	DecisionApproved Decision = "approved"
+	DecisionRejected Decision = "rejected"
+	DecisionTimedOut Decision = "timed_out"
+)
+
+// Valid reports whether d is one of the four defined decision values.
+func (d Decision) Valid() bool {
+	switch d {
+	case DecisionPending, DecisionApproved, DecisionRejected, DecisionTimedOut:
+		return true
+	default:
+		return false
+	}
+}
+
+// Approval represents one row of the approvals table: a per-lane human approval
+// decision record.
+type Approval struct {
+	RunID               string
+	LaneID              string
+	PacketID            string
+	Approver            string
+	Evidence            string
+	Decision            Decision
+	DefectSurfacedLater bool
+	RequestedAt         time.Time
+	DecidedAt           *time.Time
+}
+
+// RequestApproval records a new pending approval row for a lane.
+func (l *Ledger) RequestApproval(ctx context.Context, app Approval) error {
+	if app.Decision == "" {
+		app.Decision = DecisionPending
+	}
+	if !app.Decision.Valid() {
+		return fmt.Errorf("ledger: invalid approval decision %q", app.Decision)
+	}
+	if app.RequestedAt.IsZero() {
+		app.RequestedAt = time.Now().UTC()
+	}
+
+	_, err := l.db.ExecContext(ctx, `
+		INSERT INTO approvals (
+			run_id, lane_id, packet_id, approver, decision, evidence,
+			defect_surfaced_later, requested_at, decided_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		app.RunID, app.LaneID, app.PacketID, app.Approver, string(app.Decision),
+		app.Evidence, boolToInt(app.DefectSurfacedLater),
+		app.RequestedAt.UTC().Format(time.RFC3339),
+		formatNullableTimestamp(app.DecidedAt),
+	)
+	if err != nil {
+		return fmt.Errorf("ledger: request approval: %w", err)
+	}
+	return nil
+}
+
+// Decide records a decision (approved, rejected, timed_out) on a lane's approval row.
+func (l *Ledger) Decide(ctx context.Context, runID, laneID, approver string, d Decision) error {
+	if !d.Valid() {
+		return fmt.Errorf("ledger: invalid approval decision %q", d)
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	res, err := l.db.ExecContext(ctx, `
+		UPDATE approvals
+		SET decision = ?, approver = ?, decided_at = ?
+		WHERE run_id = ? AND lane_id = ?`,
+		string(d), approver, now, runID, laneID,
+	)
+	if err != nil {
+		return fmt.Errorf("ledger: decide approval: %w", err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("ledger: read rows affected: %w", err)
+	}
+	if affected == 0 {
+		return ErrLaneUnknown
+	}
+	return nil
+}
+
+// MarkDefectSurfaced flags or unflags that a defect later surfaced for an approved lane.
+func (l *Ledger) MarkDefectSurfaced(ctx context.Context, runID, laneID string, surfaced bool) error {
+	res, err := l.db.ExecContext(ctx, `
+		UPDATE approvals
+		SET defect_surfaced_later = ?
+		WHERE run_id = ? AND lane_id = ?`,
+		boolToInt(surfaced), runID, laneID,
+	)
+	if err != nil {
+		return fmt.Errorf("ledger: mark defect surfaced: %w", err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("ledger: read rows affected: %w", err)
+	}
+	if affected == 0 {
+		return ErrLaneUnknown
+	}
+	return nil
+}
+
+// Approval returns the approval record for the given (runID, laneID).
+func (l *Ledger) Approval(ctx context.Context, runID, laneID string) (Approval, error) {
+	var (
+		app            Approval
+		dec            string
+		defectSurfaced int
+		reqAt          string
+		decAt          sql.NullString
+	)
+	err := l.db.QueryRowContext(ctx, `
+		SELECT run_id, lane_id, packet_id, approver, decision, evidence,
+		       defect_surfaced_later, requested_at, decided_at
+		FROM approvals
+		WHERE run_id = ? AND lane_id = ?`,
+		runID, laneID,
+	).Scan(
+		&app.RunID, &app.LaneID, &app.PacketID, &app.Approver, &dec,
+		&app.Evidence, &defectSurfaced, &reqAt, &decAt,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return Approval{}, ErrLaneUnknown
+		}
+		return Approval{}, fmt.Errorf("ledger: query approval: %w", err)
+	}
+
+	app.Decision = Decision(dec)
+	app.DefectSurfacedLater = defectSurfaced != 0
+	parsedReq, err := time.Parse(time.RFC3339, reqAt)
+	if err != nil {
+		return Approval{}, fmt.Errorf("ledger: parse requested_at %q: %w", reqAt, err)
+	}
+	app.RequestedAt = parsedReq
+	if t, err := parseNullableTimestamp(decAt); err != nil {
+		return Approval{}, err
+	} else {
+		app.DecidedAt = t
+	}
+	return app, nil
+}
+
+// PendingApprovals returns all pending approval rows ordered by requested_at.
+func (l *Ledger) PendingApprovals(ctx context.Context) ([]Approval, error) {
+	rows, err := l.db.QueryContext(ctx, `
+		SELECT run_id, lane_id, packet_id, approver, decision, evidence,
+		       defect_surfaced_later, requested_at, decided_at
+		FROM approvals
+		WHERE decision = 'pending'
+		ORDER BY requested_at ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("ledger: query pending approvals: %w", err)
+	}
+	defer rows.Close()
+	return scanApprovals(rows)
+}
+
+// Approvals returns all approvals for a specific runID ordered by requested_at.
+func (l *Ledger) Approvals(ctx context.Context, runID string) ([]Approval, error) {
+	rows, err := l.db.QueryContext(ctx, `
+		SELECT run_id, lane_id, packet_id, approver, decision, evidence,
+		       defect_surfaced_later, requested_at, decided_at
+		FROM approvals
+		WHERE run_id = ?
+		ORDER BY requested_at ASC`, runID)
+	if err != nil {
+		return nil, fmt.Errorf("ledger: query approvals: %w", err)
+	}
+	defer rows.Close()
+	return scanApprovals(rows)
+}
+
+func scanApprovals(rows *sql.Rows) ([]Approval, error) {
+	var out []Approval
+	for rows.Next() {
+		var (
+			app            Approval
+			dec            string
+			defectSurfaced int
+			reqAt          string
+			decAt          sql.NullString
+		)
+		if err := rows.Scan(
+			&app.RunID, &app.LaneID, &app.PacketID, &app.Approver, &dec,
+			&app.Evidence, &defectSurfaced, &reqAt, &decAt,
+		); err != nil {
+			return nil, fmt.Errorf("ledger: scan approval row: %w", err)
+		}
+		app.Decision = Decision(dec)
+		app.DefectSurfacedLater = defectSurfaced != 0
+		parsedReq, err := time.Parse(time.RFC3339, reqAt)
+		if err != nil {
+			return nil, fmt.Errorf("ledger: parse requested_at %q: %w", reqAt, err)
+		}
+		app.RequestedAt = parsedReq
+		if t, err := parseNullableTimestamp(decAt); err != nil {
+			return nil, err
+		} else {
+			app.DecidedAt = t
+		}
+		out = append(out, app)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("ledger: iterate approval rows: %w", err)
+	}
+	return out, nil
+}
+
+// WaitDecision polls the approvals table every 250ms until a non-pending decision is reached
+// or ctx is cancelled. If ctx is cancelled/times out while pending, it records timed_out.
+func (l *Ledger) WaitDecision(ctx context.Context, runID, laneID string) (Approval, error) {
+	ticker := time.NewTicker(250 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		app, err := l.Approval(ctx, runID, laneID)
+		if err != nil {
+			return Approval{}, err
+		}
+		if app.Decision != DecisionPending {
+			return app, nil
+		}
+
+		select {
+		case <-ctx.Done():
+			_ = l.Decide(context.Background(), runID, laneID, app.Approver, DecisionTimedOut)
+			app, _ = l.Approval(context.Background(), runID, laneID)
+			return app, ctx.Err()
+		case <-ticker.C:
+		}
+	}
+}
+
+// ApproverRate calculates the wrong-approval rate for a given approver:
+// flagged defects / approved count. If approved count is 0, returns 0.0.
+func (l *Ledger) ApproverRate(ctx context.Context, approver string) (float64, error) {
+	var totalApproved, flagged int
+	err := l.db.QueryRowContext(ctx, `
+		SELECT
+			COUNT(*),
+			COALESCE(SUM(defect_surfaced_later), 0)
+		FROM approvals
+		WHERE approver = ? AND decision = 'approved'`,
+		approver,
+	).Scan(&totalApproved, &flagged)
+	if err != nil {
+		return 0, fmt.Errorf("ledger: query approver rate: %w", err)
+	}
+	if totalApproved == 0 {
+		return 0.0, nil
+	}
+	return float64(flagged) / float64(totalApproved), nil
+}

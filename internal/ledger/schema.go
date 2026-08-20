@@ -7,7 +7,7 @@ import (
 )
 
 // schemaVersion is the migration version this schema represents.
-const schemaVersion = 2
+const schemaVersion = 3
 
 const schemaMigrationsDDL = `
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -41,6 +41,19 @@ CREATE TABLE IF NOT EXISTS events (
   at      TEXT NOT NULL
 ) STRICT;
 CREATE INDEX IF NOT EXISTS idx_events_run ON events(run_id, id);
+
+CREATE TABLE IF NOT EXISTS approvals (
+  run_id                TEXT    NOT NULL,
+  lane_id               TEXT    NOT NULL,
+  packet_id             TEXT    NOT NULL,
+  approver              TEXT    NOT NULL DEFAULT '',
+  decision              TEXT    NOT NULL CHECK (decision IN ('pending','approved','rejected','timed_out')),
+  evidence              TEXT    NOT NULL DEFAULT '',
+  defect_surfaced_later INTEGER NOT NULL DEFAULT 0 CHECK (defect_surfaced_later IN (0,1)),
+  requested_at          TEXT    NOT NULL,
+  decided_at            TEXT,
+  PRIMARY KEY (run_id, lane_id)
+) STRICT;
 `
 
 const migrateV1ToV2DDL = `
@@ -62,6 +75,21 @@ DROP TABLE events;
 ALTER TABLE events_new RENAME TO events;
 
 CREATE INDEX IF NOT EXISTS idx_events_run ON events(run_id, id);
+`
+
+const migrateV2ToV3DDL = `
+CREATE TABLE IF NOT EXISTS approvals (
+  run_id                TEXT    NOT NULL,
+  lane_id               TEXT    NOT NULL,
+  packet_id             TEXT    NOT NULL,
+  approver              TEXT    NOT NULL DEFAULT '',
+  decision              TEXT    NOT NULL CHECK (decision IN ('pending','approved','rejected','timed_out')),
+  evidence              TEXT    NOT NULL DEFAULT '',
+  defect_surfaced_later INTEGER NOT NULL DEFAULT 0 CHECK (defect_surfaced_later IN (0,1)),
+  requested_at          TEXT    NOT NULL,
+  decided_at            TEXT,
+  PRIMARY KEY (run_id, lane_id)
+) STRICT;
 `
 
 // migrate applies the schema inside one transaction and records the
@@ -89,12 +117,12 @@ func migrate(ctx context.Context, db *sql.DB) error {
 		}
 		now := time.Now().UTC().Format(time.RFC3339)
 		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?), (?, ?)`,
-			1, now, 2, now,
+			`INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?), (?, ?), (?, ?)`,
+			1, now, 2, now, 3, now,
 		); err != nil {
 			return err
 		}
-		currentVersion = 2
+		currentVersion = 3
 	}
 
 	if currentVersion < 2 {
@@ -108,6 +136,19 @@ func migrate(ctx context.Context, db *sql.DB) error {
 			return err
 		}
 		currentVersion = 2
+	}
+
+	if currentVersion < 3 {
+		if _, err := tx.ExecContext(ctx, migrateV2ToV3DDL); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)`,
+			3, time.Now().UTC().Format(time.RFC3339),
+		); err != nil {
+			return err
+		}
+		currentVersion = 3
 	}
 
 	return tx.Commit()

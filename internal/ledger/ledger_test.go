@@ -682,3 +682,383 @@ func TestMigrateIsIdempotent(t *testing.T) {
 		t.Errorf("Events details = [%q, %q], want [note 1, note 2]", events[0].Detail, events[1].Detail)
 	}
 }
+
+func TestMigrateV2DatabaseCreatesApprovalsTableAndPreservesRows(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	dbPath := ledgerpath.Resolve(root)
+
+	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
+		t.Fatalf("create .lucind dir: %v", err)
+	}
+
+	dsn := "file:" + dbPath + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)"
+	rawDB, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		t.Fatalf("raw open: %v", err)
+	}
+
+	// Apply schema v2 directly
+	v2DDL := `
+CREATE TABLE IF NOT EXISTS schema_migrations (
+  version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL) STRICT;
+
+CREATE TABLE IF NOT EXISTS lanes (
+  run_id             TEXT    NOT NULL,
+  lane_id            TEXT    NOT NULL,
+  packet_id          TEXT    NOT NULL,
+  executor           TEXT    NOT NULL CHECK (executor IN ('agy','cursor-agent','human')),
+  routing_condition  TEXT    NOT NULL CHECK (length(trim(routing_condition)) > 0),
+  status             TEXT    NOT NULL CHECK (status IN
+                       ('pending','running','done','blocked','deviated','failed')),
+  worktree_path      TEXT    NOT NULL DEFAULT '',
+  worktree_preserved INTEGER NOT NULL DEFAULT 0 CHECK (worktree_preserved IN (0,1)),
+  attempt            INTEGER NOT NULL DEFAULT 1 CHECK (attempt >= 1),
+  started_at         TEXT,
+  ended_at           TEXT,
+  PRIMARY KEY (run_id, lane_id)
+) STRICT;
+
+CREATE TABLE IF NOT EXISTS events (
+  id      INTEGER PRIMARY KEY AUTOINCREMENT,
+  run_id  TEXT NOT NULL,
+  lane_id TEXT,
+  type    TEXT NOT NULL CHECK (type IN ('run_started','lane_registered',
+            'lane_status_changed','lane_note','barrier_released','run_ended')),
+  detail  TEXT NOT NULL DEFAULT '',
+  at      TEXT NOT NULL
+) STRICT;
+CREATE INDEX IF NOT EXISTS idx_events_run ON events(run_id, id);
+`
+	if _, err := rawDB.ExecContext(ctx, v2DDL); err != nil {
+		rawDB.Close()
+		t.Fatalf("apply v2 schema DDL: %v", err)
+	}
+
+	v2AppliedAt := "2026-08-19T10:00:00Z"
+	if _, err := rawDB.ExecContext(ctx,
+		`INSERT INTO schema_migrations (version, applied_at) VALUES (1, ?), (2, ?)`,
+		v2AppliedAt, v2AppliedAt,
+	); err != nil {
+		rawDB.Close()
+		t.Fatalf("record v2 migration: %v", err)
+	}
+
+	// Insert lane under v2.
+	if _, err := rawDB.ExecContext(ctx, `
+		INSERT INTO lanes (run_id, lane_id, packet_id, executor, routing_condition, status, worktree_path, worktree_preserved, attempt)
+		VALUES ('run-1', 'lane-a', 'p-a', 'agy', 'cond-a', 'running', '/path/a', 0, 1)
+	`); err != nil {
+		rawDB.Close()
+		t.Fatalf("insert v2 lane: %v", err)
+	}
+
+	if err := rawDB.Close(); err != nil {
+		t.Fatalf("close raw DB: %v", err)
+	}
+
+	// Open the v2 database through normal Open, triggering migration to v3.
+	l, err := Open(ctx, root)
+	if err != nil {
+		t.Fatalf("Open on v2 database: %v", err)
+	}
+	defer l.Close()
+
+	// Verify schema_migrations has version 3
+	var v3Count int
+	if err := l.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM schema_migrations WHERE version = 3`).Scan(&v3Count); err != nil {
+		t.Fatalf("query version 3: %v", err)
+	}
+	if v3Count != 1 {
+		t.Errorf("version 3 count = %d, want 1", v3Count)
+	}
+
+	// Verify approvals table exists and defaults work
+	if _, err := l.db.ExecContext(ctx, `
+		INSERT INTO approvals (run_id, lane_id, packet_id, decision, requested_at)
+		VALUES ('run-1', 'lane-a', 'p-a', 'pending', '2026-08-19T10:00:00Z')
+	`); err != nil {
+		t.Fatalf("insert into approvals failed: %v", err)
+	}
+
+	var defectSurfacedLater int
+	var approver string
+	if err := l.db.QueryRowContext(ctx, `SELECT approver, defect_surfaced_later FROM approvals WHERE run_id = 'run-1' AND lane_id = 'lane-a'`).Scan(&approver, &defectSurfacedLater); err != nil {
+		t.Fatalf("select from approvals: %v", err)
+	}
+	if approver != "" {
+		t.Errorf("approver = %q, want empty string default", approver)
+	}
+	if defectSurfacedLater != 0 {
+		t.Errorf("defect_surfaced_later = %d, want 0 default", defectSurfacedLater)
+	}
+
+	// Verify constraint on invalid decision
+	if _, err := l.db.ExecContext(ctx, `
+		INSERT INTO approvals (run_id, lane_id, packet_id, decision, requested_at)
+		VALUES ('run-1', 'lane-b', 'p-b', 'invalid_decision', '2026-08-19T10:00:00Z')
+	`); err == nil {
+		t.Errorf("expected error inserting invalid decision into approvals table, got nil")
+	}
+
+	// Assert lanes were preserved.
+	lanes, err := l.Lanes(ctx, "run-1")
+	if err != nil {
+		t.Fatalf("Lanes(run-1): %v", err)
+	}
+	if len(lanes) != 1 || lanes[0].LaneID != "lane-a" {
+		t.Fatalf("lanes not preserved properly: %+v", lanes)
+	}
+}
+
+func TestLedgerApprovalLifecycleAndDecision(t *testing.T) {
+	ctx := context.Background()
+	l := openTestLedger(t)
+
+	// Register a lane first
+	if err := l.RegisterLane(ctx, Lane{
+		RunID:            "run-1",
+		LaneID:           "lane-1",
+		PacketID:         "pkt-1",
+		Executor:         "agy",
+		RoutingCondition: "cond",
+		Status:           lane.Running,
+	}); err != nil {
+		t.Fatalf("RegisterLane: %v", err)
+	}
+
+	reqAt := time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC)
+	app := Approval{
+		RunID:       "run-1",
+		LaneID:      "lane-1",
+		PacketID:    "pkt-1",
+		Evidence:    "file.go:42",
+		RequestedAt: reqAt,
+	}
+
+	if err := l.RequestApproval(ctx, app); err != nil {
+		t.Fatalf("RequestApproval: %v", err)
+	}
+
+	// Verify read back
+	got, err := l.Approval(ctx, "run-1", "lane-1")
+	if err != nil {
+		t.Fatalf("Approval: %v", err)
+	}
+	if got.Decision != DecisionPending {
+		t.Errorf("got.Decision = %v, want %v", got.Decision, DecisionPending)
+	}
+	if got.Evidence != "file.go:42" {
+		t.Errorf("got.Evidence = %q, want %q", got.Evidence, "file.go:42")
+	}
+
+	// Test WaitDecision unblocks on Decide
+	doneCh := make(chan struct{})
+	var waited Approval
+	var waitErr error
+	go func() {
+		defer close(doneCh)
+		waitCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		waited, waitErr = l.WaitDecision(waitCtx, "run-1", "lane-1")
+	}()
+
+	time.Sleep(50 * time.Millisecond)
+	if err := l.Decide(ctx, "run-1", "lane-1", "alice", DecisionApproved); err != nil {
+		t.Fatalf("Decide: %v", err)
+	}
+
+	<-doneCh
+	if waitErr != nil {
+		t.Fatalf("WaitDecision failed: %v", waitErr)
+	}
+	if waited.Decision != DecisionApproved {
+		t.Errorf("waited.Decision = %v, want %v", waited.Decision, DecisionApproved)
+	}
+	if waited.Approver != "alice" {
+		t.Errorf("waited.Approver = %q, want alice", waited.Approver)
+	}
+	if waited.DecidedAt == nil {
+		t.Errorf("waited.DecidedAt is nil, want timestamp")
+	}
+}
+
+func TestLedgerWaitDecisionTimesOut(t *testing.T) {
+	ctx := context.Background()
+	l := openTestLedger(t)
+
+	if err := l.RequestApproval(ctx, Approval{
+		RunID:       "run-1",
+		LaneID:      "lane-1",
+		PacketID:    "pkt-1",
+		RequestedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("RequestApproval: %v", err)
+	}
+
+	waitCtx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+	defer cancel()
+
+	app, err := l.WaitDecision(waitCtx, "run-1", "lane-1")
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("WaitDecision err = %v, want context.DeadlineExceeded", err)
+	}
+	if app.Decision != DecisionTimedOut {
+		t.Errorf("app.Decision = %v, want %v", app.Decision, DecisionTimedOut)
+	}
+
+	// Verify DB was updated to timed_out
+	dbApp, err := l.Approval(ctx, "run-1", "lane-1")
+	if err != nil {
+		t.Fatalf("Approval: %v", err)
+	}
+	if dbApp.Decision != DecisionTimedOut {
+		t.Errorf("dbApp.Decision = %v, want %v", dbApp.Decision, DecisionTimedOut)
+	}
+}
+
+func TestLedgerApproverRateZeroDefectHistory(t *testing.T) {
+	ctx := context.Background()
+	l := openTestLedger(t)
+
+	// User has 3 approvals, none flagged
+	for i := 1; i <= 3; i++ {
+		laneID := fmt.Sprintf("lane-%d", i)
+		if err := l.RequestApproval(ctx, Approval{
+			RunID:       "run-1",
+			LaneID:      laneID,
+			PacketID:    "pkt-1",
+			RequestedAt: time.Now().UTC(),
+		}); err != nil {
+			t.Fatalf("RequestApproval: %v", err)
+		}
+		if err := l.Decide(ctx, "run-1", laneID, "alice", DecisionApproved); err != nil {
+			t.Fatalf("Decide: %v", err)
+		}
+	}
+
+	rate, err := l.ApproverRate(ctx, "alice")
+	if err != nil {
+		t.Fatalf("ApproverRate: %v", err)
+	}
+	if rate != 0.0 {
+		t.Errorf("rate = %f, want 0.0", rate)
+	}
+}
+
+func TestLedgerApproverRateOwnRateOnly(t *testing.T) {
+	ctx := context.Background()
+	l := openTestLedger(t)
+
+	// Alice: 2 approvals, 1 defect
+	// Bob: 2 approvals, 0 defect
+	apps := []struct {
+		laneID   string
+		approver string
+		defect   bool
+	}{
+		{"lane-a1", "alice", false},
+		{"lane-a2", "alice", true},
+		{"lane-b1", "bob", false},
+		{"lane-b2", "bob", false},
+	}
+
+	for _, a := range apps {
+		if err := l.RequestApproval(ctx, Approval{
+			RunID:       "run-1",
+			LaneID:      a.laneID,
+			PacketID:    "pkt-1",
+			RequestedAt: time.Now().UTC(),
+		}); err != nil {
+			t.Fatalf("RequestApproval: %v", err)
+		}
+		if err := l.Decide(ctx, "run-1", a.laneID, a.approver, DecisionApproved); err != nil {
+			t.Fatalf("Decide: %v", err)
+		}
+		if a.defect {
+			if err := l.MarkDefectSurfaced(ctx, "run-1", a.laneID, true); err != nil {
+				t.Fatalf("MarkDefectSurfaced: %v", err)
+			}
+		}
+	}
+
+	aliceRate, err := l.ApproverRate(ctx, "alice")
+	if err != nil {
+		t.Fatalf("ApproverRate(alice): %v", err)
+	}
+	if aliceRate != 0.5 {
+		t.Errorf("aliceRate = %f, want 0.5 (50%%)", aliceRate)
+	}
+
+	bobRate, err := l.ApproverRate(ctx, "bob")
+	if err != nil {
+		t.Fatalf("ApproverRate(bob): %v", err)
+	}
+	if bobRate != 0.0 {
+		t.Errorf("bobRate = %f, want 0.0", bobRate)
+	}
+}
+
+func TestLedgerLaterFailureDoesNotAutoInferDefect(t *testing.T) {
+	ctx := context.Background()
+	l := openTestLedger(t)
+
+	// Register lane 1 with packet-x, approve it
+	if err := l.RegisterLane(ctx, Lane{
+		RunID:            "run-1",
+		LaneID:           "lane-1",
+		PacketID:         "pkt-x",
+		Executor:         "agy",
+		RoutingCondition: "cond",
+		Status:           lane.Done,
+	}); err != nil {
+		t.Fatalf("RegisterLane: %v", err)
+	}
+	if err := l.RequestApproval(ctx, Approval{
+		RunID:       "run-1",
+		LaneID:      "lane-1",
+		PacketID:    "pkt-x",
+		RequestedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("RequestApproval: %v", err)
+	}
+	if err := l.Decide(ctx, "run-1", "lane-1", "alice", DecisionApproved); err != nil {
+		t.Fatalf("Decide: %v", err)
+	}
+
+	// Later run with same packet fails
+	if err := l.RegisterLane(ctx, Lane{
+		RunID:            "run-2",
+		LaneID:           "lane-2",
+		PacketID:         "pkt-x",
+		Executor:         "agy",
+		RoutingCondition: "cond",
+		Status:           lane.Running,
+	}); err != nil {
+		t.Fatalf("RegisterLane run-2: %v", err)
+	}
+	if err := l.SetStatus(ctx, "run-2", "lane-2", lane.Failed, time.Now().UTC()); err != nil {
+		t.Fatalf("SetStatus failed: %v", err)
+	}
+
+	// Verify approval for lane-1 is still defect_surfaced_later = false
+	app1, err := l.Approval(ctx, "run-1", "lane-1")
+	if err != nil {
+		t.Fatalf("Approval: %v", err)
+	}
+	if app1.DefectSurfacedLater {
+		t.Errorf("DefectSurfacedLater was auto-inferred to true after later failure, want false")
+	}
+
+	// Explicit mark sets it
+	if err := l.MarkDefectSurfaced(ctx, "run-1", "lane-1", true); err != nil {
+		t.Fatalf("MarkDefectSurfaced: %v", err)
+	}
+	app1After, err := l.Approval(ctx, "run-1", "lane-1")
+	if err != nil {
+		t.Fatalf("Approval after mark: %v", err)
+	}
+	if !app1After.DefectSurfacedLater {
+		t.Errorf("DefectSurfacedLater is false after MarkDefectSurfaced, want true")
+	}
+}

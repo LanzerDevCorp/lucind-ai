@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -24,6 +25,7 @@ import (
 	"github.com/LanzerDevCorp/lucind-ai/internal/packet"
 	"github.com/LanzerDevCorp/lucind-ai/internal/result"
 	lucindrun "github.com/LanzerDevCorp/lucind-ai/internal/run"
+	"github.com/LanzerDevCorp/lucind-ai/internal/serve"
 	"github.com/LanzerDevCorp/lucind-ai/internal/worktree"
 )
 
@@ -40,7 +42,7 @@ const defaultTimeout = 20 * time.Minute
 // error, so a person driving the binary from a terminal always sees the one
 // invocation that works rather than a stack trace. --packet is repeatable:
 // each occurrence adds one more lane to the batch.
-const usage = "usage: lucind-ai run --packet <path> [--packet <path> ...] [--timeout <duration>]\n       lucind-ai split --dag <path> --out <dir>\n       lucind-ai check [--out <path>]\n       lucind-ai --version"
+const usage = "usage: lucind-ai run --packet <path> [--packet <path> ...] [--timeout <duration>] [--approval-timeout <duration>]\n       lucind-ai split --dag <path> --out <dir>\n       lucind-ai check [--out <path>]\n       lucind-ai serve [--addr <addr>] [--approver <name>] [--approval-timeout <duration>]\n       lucind-ai --version"
 
 // depsFactory constructs run.Deps for runDispatch. In production it is
 // productionDeps; tests may override it to inject test doubles or observe dependency calls.
@@ -95,6 +97,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return runSplit(ctx, args[1:], stdout, stderr)
 	case "check":
 		return runCheck(ctx, args[1:], stdout, stderr)
+	case "serve":
+		return serveDispatch(ctx, args[1:], stdout, stderr)
 	case "--version", "-v":
 		fmt.Fprintf(stdout, "lucind-ai %s (%s, %s/%s)\n", version, runtime.Version(), runtime.GOOS, runtime.GOARCH)
 		return 0
@@ -118,6 +122,7 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 	var packetFlags packetPaths
 	fs.Var(&packetFlags, "packet", "path to a dispatch packet (repeatable: one lane per occurrence)")
 	timeout := fs.Duration("timeout", defaultTimeout, "wall clock budget granted to each lane")
+	approvalTimeout := fs.Duration("approval-timeout", 0, "approval timeout budget granted to lane gates (0 = no wait / bypass)")
 
 	if err := fs.Parse(args); err != nil {
 		// flag.ContinueOnError already invoked fs.Usage() on a parse
@@ -214,7 +219,7 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 	}
 	defer ledg.Close()
 
-	deps := depsFactory(runID, primaryRoot, ledg, *timeout)
+	deps := depsFactory(runID, primaryRoot, ledg, *timeout, *approvalTimeout)
 
 	// N lanes is N simultaneous subscription quota burns. The forecast
 	// only prints for an actual batch (more than one lane): a single
@@ -489,7 +494,7 @@ func resolvePrimaryRoot(ctx context.Context) (string, error) {
 
 // productionDeps constructs the production run.Deps wiring real-world
 // dependencies (git, ledger, worktree, executors, clock).
-func productionDeps(runID, primaryRoot string, ledg *ledger.Ledger, timeout time.Duration) lucindrun.Deps {
+func productionDeps(runID, primaryRoot string, ledg *ledger.Ledger, timeout, approvalTimeout time.Duration) lucindrun.Deps {
 	return lucindrun.Deps{
 		RunID:       runID,
 		PrimaryRoot: primaryRoot,
@@ -501,10 +506,11 @@ func productionDeps(runID, primaryRoot string, ledg *ledger.Ledger, timeout time
 			}
 			return factory(), nil
 		},
-		CreateWorktree: worktree.Create,
-		WorktreeFS:     os.DirFS,
-		Now:            time.Now,
-		LaneTimeout:    timeout,
+		CreateWorktree:  worktree.Create,
+		WorktreeFS:      os.DirFS,
+		Now:             time.Now,
+		LaneTimeout:     timeout,
+		ApprovalTimeout: approvalTimeout,
 		HasUniqueLaneCommits: func(ctx context.Context, worktreePath, baseSHA string) (bool, error) {
 			return worktree.HasUniqueCommits(ctx, worktreePath, baseSHA)
 		},
@@ -539,4 +545,67 @@ func productionDeps(runID, primaryRoot string, ledg *ledger.Ledger, timeout time
 			return os.WriteFile(filepath.Join(dir, laneID+".json"), data, 0o644)
 		},
 	}
+}
+
+func defaultApprover() string {
+	if u, err := user.Current(); err == nil && u.Username != "" {
+		return u.Username
+	}
+	if u := os.Getenv("USER"); u != "" {
+		return u
+	}
+	return "anonymous"
+}
+
+// serveDispatch implements the "serve" subcommand: localhost approvals web UI.
+func serveDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	fs.Usage = func() {
+		fmt.Fprintln(stderr, usage)
+		fs.PrintDefaults()
+	}
+
+	addr := fs.String("addr", "127.0.0.1:7433", "listen address (loopback only)")
+	approver := fs.String("approver", defaultApprover(), "signed-in approver identity")
+	approvalTimeout := fs.Duration("approval-timeout", 30*time.Minute, "default approval timeout")
+
+	if err := fs.Parse(args); err != nil {
+		return 1
+	}
+
+	if !serve.IsLoopback(*addr) {
+		fmt.Fprintf(stderr, "lucind-ai: %v\n", fmt.Errorf("%w: %s", serve.ErrNonLoopback, *addr))
+		return 1
+	}
+
+	primaryRoot, err := resolvePrimaryRoot(ctx)
+	if err != nil {
+		fmt.Fprintf(stderr, "lucind-ai: %v\n", err)
+		return 1
+	}
+
+	if worktree.IsLinkedWorktree(primaryRoot) {
+		fmt.Fprintf(stderr, "lucind-ai: refusing to run from inside a linked worktree (%s); run from the primary repository instead\n", primaryRoot)
+		return 1
+	}
+
+	ledg, err := ledger.Open(ctx, primaryRoot)
+	if err != nil {
+		fmt.Fprintf(stderr, "lucind-ai: open ledger: %v\n", err)
+		return 1
+	}
+	defer ledg.Close()
+
+	opencodeCmd := "opencode run --agent build -m openai/gpt-5.6-sol"
+	handler := serve.NewHandler(ledg, *approver, opencodeCmd)
+
+	fmt.Fprintf(stdout, "lucind-ai serve listening on http://%s (approver: %s, approval timeout: %s)\n", *addr, *approver, *approvalTimeout)
+
+	if err := serve.ListenAndServe(ctx, *addr, handler); err != nil {
+		fmt.Fprintf(stderr, "lucind-ai: %v\n", err)
+		return 1
+	}
+
+	return 0
 }
