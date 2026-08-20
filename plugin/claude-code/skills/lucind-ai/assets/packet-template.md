@@ -42,6 +42,9 @@ Two are mandatory in every packet:
 
 *(Read-only packets: if frontmatter sets `read_only: true`, replace criterion 2 with: the worktree carries no unique commits and no working-tree changes relative to the lane's birth point. Evidence: `git status --porcelain` empty and `HEAD` equals `git merge-base HEAD <primary HEAD>`.)*
 
+*(Qualitative verification lanes: see `verify-packet-template.md` for the standardized read-only judgment packet template.)*
+
+
 Then the packet's own:
 
 - [ ] …
