@@ -170,37 +170,7 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 	}
 	defer ledg.Close()
 
-	deps := lucindrun.Deps{
-		RunID:       runID,
-		PrimaryRoot: primaryRoot,
-		Ledger:      ledg,
-		LookupExecutor: func(name string) (executor.Executor, error) {
-			factory, ok := supportedExecutors[name]
-			if !ok {
-				return nil, fmt.Errorf("unsupported executor %q", name)
-			}
-			return factory(), nil
-		},
-		CreateWorktree: worktree.Create,
-		WorktreeFS:     os.DirFS,
-		Now:            time.Now,
-		LaneTimeout:    *timeout,
-		CombineTree:    integrate.Combine,
-		RunChecks:      integrate.Check,
-		PromoteTarget:  integrate.Promote,
-		DiscardCombined: func(ctx context.Context, primaryRoot, path, branch string) error {
-			if err := worktree.Remove(ctx, primaryRoot, path); err != nil {
-				return err
-			}
-			return worktree.DeleteBranch(ctx, primaryRoot, branch)
-		},
-		RemoveLaneWorktree: func(ctx context.Context, primaryRoot, path, branch string) error {
-			if err := worktree.Remove(ctx, primaryRoot, path); err != nil {
-				return err
-			}
-			return worktree.DeleteBranch(ctx, primaryRoot, branch)
-		},
-	}
+	deps := productionDeps(runID, primaryRoot, ledg, *timeout)
 
 	// N lanes is N simultaneous subscription quota burns. The forecast
 	// only prints for an actual batch (more than one lane): a single
@@ -313,3 +283,44 @@ func resolvePrimaryRoot(ctx context.Context) (string, error) {
 	}
 	return root, nil
 }
+
+// productionDeps constructs the production run.Deps wiring real-world
+// dependencies (git, ledger, worktree, executors, clock).
+func productionDeps(runID, primaryRoot string, ledg *ledger.Ledger, timeout time.Duration) lucindrun.Deps {
+	return lucindrun.Deps{
+		RunID:       runID,
+		PrimaryRoot: primaryRoot,
+		Ledger:      ledg,
+		LookupExecutor: func(name string) (executor.Executor, error) {
+			factory, ok := supportedExecutors[name]
+			if !ok {
+				return nil, fmt.Errorf("unsupported executor %q", name)
+			}
+			return factory(), nil
+		},
+		CreateWorktree: worktree.Create,
+		WorktreeFS:     os.DirFS,
+		Now:            time.Now,
+		LaneTimeout:    timeout,
+		HasUniqueLaneCommits: func(ctx context.Context, worktreePath string) (bool, error) {
+			return worktree.HasUniqueCommits(ctx, worktreePath, primaryRoot)
+		},
+		PorcelainEmpty: worktree.PorcelainEmpty,
+		CombineTree:    integrate.Combine,
+		RunChecks:      integrate.Check,
+		PromoteTarget:  integrate.Promote,
+		DiscardCombined: func(ctx context.Context, primaryRoot, path, branch string) error {
+			if err := worktree.Remove(ctx, primaryRoot, path); err != nil {
+				return err
+			}
+			return worktree.DeleteBranch(ctx, primaryRoot, branch)
+		},
+		RemoveLaneWorktree: func(ctx context.Context, primaryRoot, path, branch string) error {
+			if err := worktree.Remove(ctx, primaryRoot, path); err != nil {
+				return err
+			}
+			return worktree.DeleteBranch(ctx, primaryRoot, branch)
+		},
+	}
+}
+
