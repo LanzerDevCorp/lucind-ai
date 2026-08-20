@@ -75,7 +75,29 @@ phases:
       canonical. Review-budget forecast: 900-1300 lines, well under the 2000-line budget --
       no chained-PR decision needed for this change.
   apply:
-    status: pending
+    status: done
+    note: |
+      Implemented via real lucind-ai run dispatch to agy/cursor-agent, hand-split into 4 waves
+      since the binary's own DAG-splitter (apply-dag-dispatch) doesn't exist as code yet --
+      Wave A: Unit 1 (packet.go, agy) + Unit 2 (worktree.go, cursor-agent), no file overlap,
+      both done, auto-integrated cleanly (commits 0bf3565, ed8e805). Wave B: Unit 3 (run.go,
+      agy) + Unit 5 (result/assets/SKILL.md docs, cursor-agent), no file overlap, both done;
+      Unit 5's own generated test (TestSkillAssetContract) asserted on a SKILL.md section that
+      was concurrently trimmed mid-flight (unrelated user-requested edit moving binary-freshness
+      guidance to the new project CLAUDE.md) -- auto-integrate correctly bisected and reverted
+      Unit 5, fixed by dropping the one stale assertion and re-merging by hand (commits 19be89a,
+      22cc104, 553c384). Wave C: Unit 4 (cli.go wiring, agy solo) -- first attempt hit a
+      transient agy CLI network timeout (eligibility check dial timeout, same class of flake
+      seen earlier this session), cleaned stale worktree/branch and redispatched successfully
+      (commit e89b30b). Unit 6 (end-to-end): orchestrator dispatched a real read_only:true
+      packet directly (not via a change-authoring packet); reached lane.Done, integrate
+      succeeded with 0 reverted, and the lane's worktree/branch were auto-cleaned by the
+      binary's own successful-combine path -- only possible if enforceCompletionMode accepted
+      the lane as a compliant read-only lane (no unique commits, clean tree). Full `go test
+      ./... -race -count=1` green throughout. Also fixed en route (not scoped to this change but
+      touching the binary along the way): added `lucind-ai --version`/`-v` (commit 440ef53,
+      `make install` target) after discovering the stale $GOPATH/bin binary that caused earlier
+      "unsupported executor" errors this session.
   verify:
     status: pending
   archive:
