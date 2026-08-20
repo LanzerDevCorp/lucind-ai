@@ -192,3 +192,45 @@ func TestSingleApprovalAndDefectEndpoints(t *testing.T) {
 		t.Errorf("appAfterDefect.DefectSurfacedLater = false, want true")
 	}
 }
+
+func TestDecideAlreadyDecidedReturns409Conflict(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	l, err := ledger.Open(ctx, root)
+	if err != nil {
+		t.Fatalf("ledger.Open: %v", err)
+	}
+	defer l.Close()
+
+	if err := l.RequestApproval(ctx, ledger.Approval{
+		RunID:       "run-1",
+		LaneID:      "lane-1",
+		PacketID:    "pkt-1",
+		Evidence:    "file.go:10",
+		RequestedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("RequestApproval: %v", err)
+	}
+
+	handler := serve.NewHandler(l, "alice", "opencode run --agent build -m openai/gpt-5.6-sol")
+
+	// First decision succeeds with 200 OK
+	approveBody := `{"decision": "approved"}`
+	req := httptest.NewRequest(http.MethodPost, "/approvals/run-1/lane-1", bytes.NewBufferString(approveBody))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("First POST approve code = %d, want 200 OK (body: %s)", rec.Code, rec.Body.String())
+	}
+
+	// Second decision returns 409 Conflict
+	rejectBody := `{"decision": "rejected"}`
+	req2 := httptest.NewRequest(http.MethodPost, "/approvals/run-1/lane-1", bytes.NewBufferString(rejectBody))
+	req2.Header.Set("Content-Type", "application/json")
+	rec2 := httptest.NewRecorder()
+	handler.ServeHTTP(rec2, req2)
+	if rec2.Code != http.StatusConflict {
+		t.Errorf("Second POST approve code = %d, want 409 Conflict (body: %s)", rec2.Code, rec2.Body.String())
+	}
+}

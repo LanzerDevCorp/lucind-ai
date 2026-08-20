@@ -41,8 +41,12 @@ var (
 	ErrRoutingConditionMissing = errors.New("ledger: routing condition is required")
 
 	// ErrLaneUnknown is returned when an operation targets a (run_id,
-	// lane_id) pair that has no row in the lanes table.
+	// lane_id) pair that has no row in the lanes table or approvals table.
 	ErrLaneUnknown = errors.New("ledger: lane not found")
+
+	// ErrAlreadyDecided is returned when Decide is called on an approval
+	// row that has already been decided (decision != 'pending').
+	ErrAlreadyDecided = errors.New("ledger: approval already decided")
 
 	// ErrPragmaNotApplied is returned by Open when a required pragma
 	// (journal_mode=wal or busy_timeout=5000) did not take effect on the
@@ -539,7 +543,7 @@ func (l *Ledger) Decide(ctx context.Context, runID, laneID, approver string, d D
 	res, err := l.db.ExecContext(ctx, `
 		UPDATE approvals
 		SET decision = ?, approver = ?, decided_at = ?
-		WHERE run_id = ? AND lane_id = ?`,
+		WHERE run_id = ? AND lane_id = ? AND decision = 'pending'`,
 		string(d), approver, now, runID, laneID,
 	)
 	if err != nil {
@@ -550,7 +554,10 @@ func (l *Ledger) Decide(ctx context.Context, runID, laneID, approver string, d D
 		return fmt.Errorf("ledger: read rows affected: %w", err)
 	}
 	if affected == 0 {
-		return ErrLaneUnknown
+		if _, err := l.Approval(ctx, runID, laneID); err != nil {
+			return err
+		}
+		return ErrAlreadyDecided
 	}
 	return nil
 }

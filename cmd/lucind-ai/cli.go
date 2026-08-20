@@ -568,7 +568,7 @@ func serveDispatch(ctx context.Context, args []string, stdout, stderr io.Writer)
 
 	addr := fs.String("addr", "127.0.0.1:7433", "listen address (loopback only)")
 	approver := fs.String("approver", defaultApprover(), "signed-in approver identity")
-	approvalTimeout := fs.Duration("approval-timeout", 30*time.Minute, "default approval timeout")
+	approvalTimeout := fs.Duration("approval-timeout", 30*time.Minute, "informational only -- does not gate lanes; pass --approval-timeout to 'lucind-ai run' to actually enable the wait")
 
 	if err := fs.Parse(args); err != nil {
 		return 1

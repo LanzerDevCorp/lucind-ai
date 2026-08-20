@@ -1062,3 +1062,50 @@ func TestLedgerLaterFailureDoesNotAutoInferDefect(t *testing.T) {
 		t.Errorf("DefectSurfacedLater is false after MarkDefectSurfaced, want true")
 	}
 }
+
+func TestLedgerDecideAlreadyDecidedReturnsError(t *testing.T) {
+	ctx := context.Background()
+	l := openTestLedger(t)
+
+	if err := l.RequestApproval(ctx, Approval{
+		RunID:       "run-1",
+		LaneID:      "lane-1",
+		PacketID:    "pkt-1",
+		RequestedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("RequestApproval: %v", err)
+	}
+
+	// First decision succeeds
+	if err := l.Decide(ctx, "run-1", "lane-1", "alice", DecisionApproved); err != nil {
+		t.Fatalf("First Decide failed: %v", err)
+	}
+
+	// Second decision must fail with ErrAlreadyDecided and not overwrite the stored decision
+	err := l.Decide(ctx, "run-1", "lane-1", "bob", DecisionRejected)
+	if !errors.Is(err, ErrAlreadyDecided) {
+		t.Fatalf("Second Decide err = %v, want ErrAlreadyDecided", err)
+	}
+
+	// Verify the original decision and approver were preserved
+	app, err := l.Approval(ctx, "run-1", "lane-1")
+	if err != nil {
+		t.Fatalf("Approval: %v", err)
+	}
+	if app.Decision != DecisionApproved {
+		t.Errorf("app.Decision = %v, want %v", app.Decision, DecisionApproved)
+	}
+	if app.Approver != "alice" {
+		t.Errorf("app.Approver = %q, want alice", app.Approver)
+	}
+}
+
+func TestLedgerDecideNonexistentApprovalReturnsErrLaneUnknown(t *testing.T) {
+	ctx := context.Background()
+	l := openTestLedger(t)
+
+	err := l.Decide(ctx, "nonexistent-run", "nonexistent-lane", "alice", DecisionApproved)
+	if !errors.Is(err, ErrLaneUnknown) {
+		t.Fatalf("Decide on nonexistent row err = %v, want ErrLaneUnknown", err)
+	}
+}

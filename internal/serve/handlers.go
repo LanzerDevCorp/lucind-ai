@@ -3,6 +3,7 @@ package serve
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -192,6 +193,14 @@ func handleDecide(w http.ResponseWriter, r *http.Request, l *ledger.Ledger, defa
 	}
 
 	if err := l.Decide(r.Context(), runID, laneID, approver, ledger.Decision(decisionStr)); err != nil {
+		if errors.Is(err, ledger.ErrAlreadyDecided) {
+			http.Error(w, fmt.Sprintf("approval already decided: %v", err), http.StatusConflict)
+			return
+		}
+		if errors.Is(err, ledger.ErrLaneUnknown) {
+			http.Error(w, fmt.Sprintf("approval not found: %v", err), http.StatusNotFound)
+			return
+		}
 		http.Error(w, fmt.Sprintf("failed to record decision: %v", err), http.StatusInternalServerError)
 		return
 	}
