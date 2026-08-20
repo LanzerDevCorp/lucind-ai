@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -110,7 +111,12 @@ func TestExecuteHappyPathEnvelopeDoneReachesLaneDone(t *testing.T) {
 		return fstest.MapFS{".lucind/result.json": {Data: []byte(doneEnvelopeJSON)}}
 	}, fe)
 
-	report, err := run.Execute(context.Background(), deps, testPacket())
+	p := testPacket()
+	if len(p.AllowedPaths) != 0 {
+		t.Fatalf("testPacket().AllowedPaths = %v, want empty (omitted) allowed_paths", p.AllowedPaths)
+	}
+
+	report, err := run.Execute(context.Background(), deps, p)
 	if err != nil {
 		t.Fatalf("Execute() error = %v, want nil", err)
 	}
@@ -1445,4 +1451,612 @@ func TestExecuteGitInspectionErrorFailsLaneWithLedgerNote(t *testing.T) {
 			t.Errorf("ledger notes = %+v, want note with error message", details)
 		}
 	})
+}
+
+func initGitRepo(t *testing.T) string {
+	t.Helper()
+
+	root := t.TempDir()
+	runGit(t, root, "init")
+	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("seed\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(README.md) error = %v", err)
+	}
+	runGit(t, root, "add", "README.md")
+	runGit(t, root, "commit", "-m", "seed commit")
+
+	return root
+}
+
+func runGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+
+	cmd := exec.Command("git", append([]string{
+		"-c", "user.email=run-test@example.com",
+		"-c", "user.name=run-test",
+	}, args...)...)
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v error = %v, output = %s", args, err, out)
+	}
+}
+
+func setupGitWorktree(t *testing.T, primaryRoot, laneID string) string {
+	t.Helper()
+	wtPath := t.TempDir()
+	runGit(t, primaryRoot, "worktree", "add", "-b", "lucind/"+laneID, wtPath)
+	return wtPath
+}
+
+func TestExecuteScopeCheckInScopeChangesReachesDone(t *testing.T) {
+	if testing.Short() {
+		t.Skip("shells out to real git")
+	}
+
+	primaryRoot := initGitRepo(t)
+	wtPath := setupGitWorktree(t, primaryRoot, "lane-a")
+
+	// Create in-scope files (committed, unstaged, and untracked)
+	ledgerDir := filepath.Join(wtPath, "internal", "ledger")
+	if err := os.MkdirAll(ledgerDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(ledgerDir, "committed.go"), []byte("package ledger\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile error = %v", err)
+	}
+	runGit(t, wtPath, "add", "internal/ledger/committed.go")
+	runGit(t, wtPath, "commit", "-m", "add committed.go")
+
+	if err := os.WriteFile(filepath.Join(ledgerDir, "unstaged.go"), []byte("package ledger\n// unstaged\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile error = %v", err)
+	}
+	runGit(t, wtPath, "add", "internal/ledger/unstaged.go")
+	if err := os.WriteFile(filepath.Join(ledgerDir, "unstaged.go"), []byte("package ledger\n// unstaged modified\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile error = %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(ledgerDir, "untracked.go"), []byte("package ledger\n// untracked\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile error = %v", err)
+	}
+
+	fe := &fakeExecutor{outcome: executor.Outcome{ExitCode: 0}}
+	deps := newTestDeps(t, wtPath, func(string) fs.FS {
+		return fstest.MapFS{".lucind/result.json": {Data: []byte(doneEnvelopeJSON)}}
+	}, fe)
+	deps.PrimaryRoot = primaryRoot
+
+	p := testPacket()
+	p.AllowedPaths = []string{"internal/ledger/"}
+
+	report, err := run.Execute(context.Background(), deps, p)
+	if err != nil {
+		t.Fatalf("Execute() error = %v, want nil", err)
+	}
+
+	if report.Status != lane.Done {
+		t.Errorf("report.Status = %v, want %v", report.Status, lane.Done)
+	}
+
+	states, err := deps.Ledger.LaneStates(context.Background(), "run-1")
+	if err != nil {
+		t.Fatalf("LaneStates() error = %v", err)
+	}
+	if len(states) != 1 || states[0].Status != lane.Done {
+		t.Errorf("LaneStates() = %+v, want lane.Done", states)
+	}
+}
+
+func TestExecuteScopeCheckDemotesOutOfScopeTrackedFileToDeviated(t *testing.T) {
+	if testing.Short() {
+		t.Skip("shells out to real git")
+	}
+
+	primaryRoot := initGitRepo(t)
+	wtPath := setupGitWorktree(t, primaryRoot, "lane-a")
+
+	// Create and commit an out-of-scope tracked file
+	serveDir := filepath.Join(wtPath, "internal", "serve")
+	if err := os.MkdirAll(serveDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(serveDir, "server.go"), []byte("package serve\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile error = %v", err)
+	}
+	runGit(t, wtPath, "add", "internal/serve/server.go")
+	runGit(t, wtPath, "commit", "-m", "add server.go")
+
+	fe := &fakeExecutor{outcome: executor.Outcome{ExitCode: 0}}
+	deps := newTestDeps(t, wtPath, func(string) fs.FS {
+		return fstest.MapFS{".lucind/result.json": {Data: []byte(doneEnvelopeJSON)}}
+	}, fe)
+	deps.PrimaryRoot = primaryRoot
+
+	p := testPacket()
+	p.AllowedPaths = []string{"internal/ledger/"}
+
+	report, err := run.Execute(context.Background(), deps, p)
+	if err != nil {
+		t.Fatalf("Execute() error = %v, want nil", err)
+	}
+
+	if report.Status != lane.Deviated {
+		t.Errorf("report.Status = %v, want %v", report.Status, lane.Deviated)
+	}
+
+	states, err := deps.Ledger.LaneStates(context.Background(), "run-1")
+	if err != nil {
+		t.Fatalf("LaneStates() error = %v", err)
+	}
+	if len(states) != 1 || states[0].Status != lane.Deviated {
+		t.Errorf("LaneStates() = %+v, want lane.Deviated", states)
+	}
+
+	details := laneNoteDetails(t, deps.Ledger, "run-1")
+	if !anyContains(details, "internal/serve/server.go") {
+		t.Errorf("ledger notes = %+v, want note naming internal/serve/server.go", details)
+	}
+}
+
+func TestExecuteScopeCheckDemotesOutOfScopeUntrackedFileToDeviated(t *testing.T) {
+	if testing.Short() {
+		t.Skip("shells out to real git")
+	}
+
+	primaryRoot := initGitRepo(t)
+	wtPath := setupGitWorktree(t, primaryRoot, "lane-a")
+
+	// Create an untracked out-of-scope file
+	serveDir := filepath.Join(wtPath, "internal", "serve")
+	if err := os.MkdirAll(serveDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(serveDir, "server.go"), []byte("package serve\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile error = %v", err)
+	}
+
+	fe := &fakeExecutor{outcome: executor.Outcome{ExitCode: 0}}
+	deps := newTestDeps(t, wtPath, func(string) fs.FS {
+		return fstest.MapFS{".lucind/result.json": {Data: []byte(doneEnvelopeJSON)}}
+	}, fe)
+	deps.PrimaryRoot = primaryRoot
+
+	p := testPacket()
+	p.AllowedPaths = []string{"internal/ledger/"}
+
+	report, err := run.Execute(context.Background(), deps, p)
+	if err != nil {
+		t.Fatalf("Execute() error = %v, want nil", err)
+	}
+
+	if report.Status != lane.Deviated {
+		t.Errorf("report.Status = %v, want %v", report.Status, lane.Deviated)
+	}
+
+	states, err := deps.Ledger.LaneStates(context.Background(), "run-1")
+	if err != nil {
+		t.Fatalf("LaneStates() error = %v", err)
+	}
+	if len(states) != 1 || states[0].Status != lane.Deviated {
+		t.Errorf("LaneStates() = %+v, want lane.Deviated", states)
+	}
+
+	details := laneNoteDetails(t, deps.Ledger, "run-1")
+	if !anyContains(details, "internal/serve/server.go") {
+		t.Errorf("ledger notes = %+v, want note naming internal/serve/server.go", details)
+	}
+}
+
+func TestExecuteScopeCheckZeroCommitsUntrackedInScopeReachesDone(t *testing.T) {
+	if testing.Short() {
+		t.Skip("shells out to real git")
+	}
+
+	primaryRoot := initGitRepo(t)
+	wtPath := setupGitWorktree(t, primaryRoot, "lane-a")
+
+	// 0 unique commits on lane branch; create in-scope untracked file
+	ledgerDir := filepath.Join(wtPath, "internal", "ledger")
+	if err := os.MkdirAll(ledgerDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(ledgerDir, "untracked.go"), []byte("package ledger\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile error = %v", err)
+	}
+
+	fe := &fakeExecutor{outcome: executor.Outcome{ExitCode: 0}}
+	deps := newTestDeps(t, wtPath, func(string) fs.FS {
+		return fstest.MapFS{".lucind/result.json": {Data: []byte(doneEnvelopeJSON)}}
+	}, fe)
+	deps.PrimaryRoot = primaryRoot
+
+	p := testPacket()
+	p.AllowedPaths = []string{"internal/ledger/"}
+
+	report, err := run.Execute(context.Background(), deps, p)
+	if err != nil {
+		t.Fatalf("Execute() error = %v, want nil", err)
+	}
+
+	if report.Status != lane.Done {
+		t.Errorf("report.Status = %v, want %v", report.Status, lane.Done)
+	}
+
+	states, err := deps.Ledger.LaneStates(context.Background(), "run-1")
+	if err != nil {
+		t.Fatalf("LaneStates() error = %v", err)
+	}
+	if len(states) != 1 || states[0].Status != lane.Done {
+		t.Errorf("LaneStates() = %+v, want lane.Done", states)
+	}
+}
+
+func TestExecuteScopeCheckTwoCommitsEarlierOutOfScopeDemotesToDeviated(t *testing.T) {
+	if testing.Short() {
+		t.Skip("shells out to real git")
+	}
+
+	primaryRoot := initGitRepo(t)
+	wtPath := setupGitWorktree(t, primaryRoot, "lane-a")
+
+	// Commit 1: touches out-of-scope internal/serve/server.go
+	serveDir := filepath.Join(wtPath, "internal", "serve")
+	if err := os.MkdirAll(serveDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(serveDir, "server.go"), []byte("package serve\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile error = %v", err)
+	}
+	runGit(t, wtPath, "add", "internal/serve/server.go")
+	runGit(t, wtPath, "commit", "-m", "commit 1 out of scope")
+
+	// Commit 2: touches in-scope internal/ledger/ledger.go
+	ledgerDir := filepath.Join(wtPath, "internal", "ledger")
+	if err := os.MkdirAll(ledgerDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(ledgerDir, "ledger.go"), []byte("package ledger\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile error = %v", err)
+	}
+	runGit(t, wtPath, "add", "internal/ledger/ledger.go")
+	runGit(t, wtPath, "commit", "-m", "commit 2 in scope")
+
+	fe := &fakeExecutor{outcome: executor.Outcome{ExitCode: 0}}
+	deps := newTestDeps(t, wtPath, func(string) fs.FS {
+		return fstest.MapFS{".lucind/result.json": {Data: []byte(doneEnvelopeJSON)}}
+	}, fe)
+	deps.PrimaryRoot = primaryRoot
+
+	p := testPacket()
+	p.AllowedPaths = []string{"internal/ledger/"}
+
+	report, err := run.Execute(context.Background(), deps, p)
+	if err != nil {
+		t.Fatalf("Execute() error = %v, want nil", err)
+	}
+
+	if report.Status != lane.Deviated {
+		t.Errorf("report.Status = %v, want %v", report.Status, lane.Deviated)
+	}
+
+	states, err := deps.Ledger.LaneStates(context.Background(), "run-1")
+	if err != nil {
+		t.Fatalf("LaneStates() error = %v", err)
+	}
+	if len(states) != 1 || states[0].Status != lane.Deviated {
+		t.Errorf("LaneStates() = %+v, want lane.Deviated", states)
+	}
+
+	details := laneNoteDetails(t, deps.Ledger, "run-1")
+	if !anyContains(details, "internal/serve/server.go") {
+		t.Errorf("ledger notes = %+v, want note naming internal/serve/server.go", details)
+	}
+}
+
+func TestExecuteScopeCheckMultipleInScopeCommitsReachesDone(t *testing.T) {
+	if testing.Short() {
+		t.Skip("shells out to real git")
+	}
+
+	primaryRoot := initGitRepo(t)
+	wtPath := setupGitWorktree(t, primaryRoot, "lane-a")
+
+	ledgerDir := filepath.Join(wtPath, "internal", "ledger")
+	if err := os.MkdirAll(ledgerDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll error = %v", err)
+	}
+
+	// Commit 1: in-scope
+	if err := os.WriteFile(filepath.Join(ledgerDir, "first.go"), []byte("package ledger\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile error = %v", err)
+	}
+	runGit(t, wtPath, "add", "internal/ledger/first.go")
+	runGit(t, wtPath, "commit", "-m", "commit 1 in scope")
+
+	// Commit 2: in-scope
+	if err := os.WriteFile(filepath.Join(ledgerDir, "second.go"), []byte("package ledger\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile error = %v", err)
+	}
+	runGit(t, wtPath, "add", "internal/ledger/second.go")
+	runGit(t, wtPath, "commit", "-m", "commit 2 in scope")
+
+	fe := &fakeExecutor{outcome: executor.Outcome{ExitCode: 0}}
+	deps := newTestDeps(t, wtPath, func(string) fs.FS {
+		return fstest.MapFS{".lucind/result.json": {Data: []byte(doneEnvelopeJSON)}}
+	}, fe)
+	deps.PrimaryRoot = primaryRoot
+
+	p := testPacket()
+	p.AllowedPaths = []string{"internal/ledger/"}
+
+	report, err := run.Execute(context.Background(), deps, p)
+	if err != nil {
+		t.Fatalf("Execute() error = %v, want nil", err)
+	}
+
+	if report.Status != lane.Done {
+		t.Errorf("report.Status = %v, want %v", report.Status, lane.Done)
+	}
+
+	states, err := deps.Ledger.LaneStates(context.Background(), "run-1")
+	if err != nil {
+		t.Fatalf("LaneStates() error = %v", err)
+	}
+	if len(states) != 1 || states[0].Status != lane.Done {
+		t.Errorf("LaneStates() = %+v, want lane.Done", states)
+	}
+}
+
+func TestExecuteScopeCheckBlockedAndFailedEnvelopesNeverRewrittenToDeviated(t *testing.T) {
+	if testing.Short() {
+		t.Skip("shells out to real git")
+	}
+
+	tests := []struct {
+		name       string
+		envelope   string
+		wantStatus lane.Status
+	}{
+		{
+			name:       "blocked envelope",
+			envelope:   blockedEnvelopeJSON,
+			wantStatus: lane.Blocked,
+		},
+		{
+			name: "failed envelope",
+			envelope: `{
+				"packet_id": "lane-a",
+				"status": "failed",
+				"summary": "something crashed",
+				"hard_stops": [{"hard_stop": "do not touch internal/barrier", "fired": false}]
+			}`,
+			wantStatus: lane.Failed,
+		},
+		{
+			name: "deviated envelope",
+			envelope: `{
+				"packet_id": "lane-a",
+				"status": "deviated",
+				"summary": "deliberate deviation",
+				"hard_stops": [{"hard_stop": "do not touch internal/barrier", "fired": false}],
+				"deviations": [{"expected": "plan a", "actual": "plan b", "reason": "needed"}]
+			}`,
+			wantStatus: lane.Deviated,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			primaryRoot := initGitRepo(t)
+			wtPath := setupGitWorktree(t, primaryRoot, "lane-a")
+
+			// Create an out-of-scope tracked file
+			serveDir := filepath.Join(wtPath, "internal", "serve")
+			if err := os.MkdirAll(serveDir, 0o755); err != nil {
+				t.Fatalf("MkdirAll error = %v", err)
+			}
+			if err := os.WriteFile(filepath.Join(serveDir, "server.go"), []byte("package serve\n"), 0o644); err != nil {
+				t.Fatalf("WriteFile error = %v", err)
+			}
+			runGit(t, wtPath, "add", "internal/serve/server.go")
+			runGit(t, wtPath, "commit", "-m", "out-of-scope commit")
+
+			fe := &fakeExecutor{outcome: executor.Outcome{ExitCode: 0}}
+			deps := newTestDeps(t, wtPath, func(string) fs.FS {
+				return fstest.MapFS{".lucind/result.json": {Data: []byte(tt.envelope)}}
+			}, fe)
+			deps.PrimaryRoot = primaryRoot
+
+			p := testPacket()
+			p.AllowedPaths = []string{"internal/ledger/"}
+
+			report, err := run.Execute(context.Background(), deps, p)
+			if err != nil {
+				t.Fatalf("Execute() error = %v, want nil", err)
+			}
+
+			if report.Status != tt.wantStatus {
+				t.Errorf("report.Status = %v, want %v", report.Status, tt.wantStatus)
+			}
+
+			states, err := deps.Ledger.LaneStates(context.Background(), "run-1")
+			if err != nil {
+				t.Fatalf("LaneStates() error = %v", err)
+			}
+			if len(states) != 1 || states[0].Status != tt.wantStatus {
+				t.Errorf("LaneStates() = %+v, want %v", states, tt.wantStatus)
+			}
+		})
+	}
+}
+
+func TestExecuteScopeCheckForceAddedLucindFileExcludedFromUnion(t *testing.T) {
+	if testing.Short() {
+		t.Skip("shells out to real git")
+	}
+
+	primaryRoot := initGitRepo(t)
+	wtPath := setupGitWorktree(t, primaryRoot, "lane-a")
+
+	// Force-add .lucind/result.json
+	lucindPath := filepath.Join(wtPath, ".lucind")
+	if err := os.MkdirAll(lucindPath, 0o755); err != nil {
+		t.Fatalf("MkdirAll error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(lucindPath, "result.json"), []byte(doneEnvelopeJSON), 0o644); err != nil {
+		t.Fatalf("WriteFile error = %v", err)
+	}
+	runGit(t, wtPath, "add", "-f", ".lucind/result.json")
+	runGit(t, wtPath, "commit", "-m", "force add .lucind/result.json")
+
+	fe := &fakeExecutor{outcome: executor.Outcome{ExitCode: 0}}
+	deps := newTestDeps(t, wtPath, func(string) fs.FS {
+		return fstest.MapFS{".lucind/result.json": {Data: []byte(doneEnvelopeJSON)}}
+	}, fe)
+	deps.PrimaryRoot = primaryRoot
+
+	p := testPacket()
+	p.AllowedPaths = []string{"internal/ledger/"}
+
+	report, err := run.Execute(context.Background(), deps, p)
+	if err != nil {
+		t.Fatalf("Execute() error = %v, want nil", err)
+	}
+
+	if report.Status != lane.Done {
+		t.Errorf("report.Status = %v, want %v", report.Status, lane.Done)
+	}
+
+	states, err := deps.Ledger.LaneStates(context.Background(), "run-1")
+	if err != nil {
+		t.Fatalf("LaneStates() error = %v", err)
+	}
+	if len(states) != 1 || states[0].Status != lane.Done {
+		t.Errorf("LaneStates() = %+v, want lane.Done", states)
+	}
+}
+
+func TestExecuteScopeCheckGitFailureResolvesToBlocked(t *testing.T) {
+	if testing.Short() {
+		t.Skip("shells out to real git")
+	}
+
+	t.Run("primaryRoot is not a git repo", func(t *testing.T) {
+		invalidPrimaryRoot := t.TempDir()
+		wtPath := t.TempDir()
+
+		fe := &fakeExecutor{outcome: executor.Outcome{ExitCode: 0}}
+		deps := newTestDeps(t, wtPath, func(string) fs.FS {
+			return fstest.MapFS{".lucind/result.json": {Data: []byte(doneEnvelopeJSON)}}
+		}, fe)
+		deps.PrimaryRoot = invalidPrimaryRoot
+
+		p := testPacket()
+		p.AllowedPaths = []string{"internal/ledger/"}
+
+		report, err := run.Execute(context.Background(), deps, p)
+		if err != nil {
+			t.Fatalf("Execute() error = %v, want nil", err)
+		}
+
+		if report.Status != lane.Blocked {
+			t.Errorf("report.Status = %v, want %v (must not guess Done or Deviated)", report.Status, lane.Blocked)
+		}
+
+		states, err := deps.Ledger.LaneStates(context.Background(), "run-1")
+		if err != nil {
+			t.Fatalf("LaneStates() error = %v", err)
+		}
+		if len(states) != 1 || states[0].Status != lane.Blocked {
+			t.Errorf("LaneStates() = %+v, want lane.Blocked", states)
+		}
+
+		details := laneNoteDetails(t, deps.Ledger, "run-1")
+		if !anyContains(details, "git rev-parse HEAD in primary root failed") {
+			t.Errorf("ledger notes = %+v, want note diagnosing primary rev-parse failure", details)
+		}
+	})
+
+	t.Run("worktreePath is not a git repo", func(t *testing.T) {
+		primaryRoot := initGitRepo(t)
+		invalidWtPath := t.TempDir()
+
+		fe := &fakeExecutor{outcome: executor.Outcome{ExitCode: 0}}
+		deps := newTestDeps(t, invalidWtPath, func(string) fs.FS {
+			return fstest.MapFS{".lucind/result.json": {Data: []byte(doneEnvelopeJSON)}}
+		}, fe)
+		deps.PrimaryRoot = primaryRoot
+
+		p := testPacket()
+		p.AllowedPaths = []string{"internal/ledger/"}
+
+		report, err := run.Execute(context.Background(), deps, p)
+		if err != nil {
+			t.Fatalf("Execute() error = %v, want nil", err)
+		}
+
+		if report.Status != lane.Blocked {
+			t.Errorf("report.Status = %v, want %v (must not guess Done or Deviated)", report.Status, lane.Blocked)
+		}
+
+		states, err := deps.Ledger.LaneStates(context.Background(), "run-1")
+		if err != nil {
+			t.Fatalf("LaneStates() error = %v", err)
+		}
+		if len(states) != 1 || states[0].Status != lane.Blocked {
+			t.Errorf("LaneStates() = %+v, want lane.Blocked", states)
+		}
+
+		details := laneNoteDetails(t, deps.Ledger, "run-1")
+		if !anyContains(details, "git diff") {
+			t.Errorf("ledger notes = %+v, want note diagnosing git diff failure", details)
+		}
+	})
+}
+
+func TestExecuteScopeCheckEmptyAllowedPathsArraySkipsGitAndStaysDone(t *testing.T) {
+	cases := []struct {
+		name         string
+		allowedPaths []string
+	}{
+		{
+			name:         "nil slice (omitted)",
+			allowedPaths: nil,
+		},
+		{
+			name:         "empty slice (parsed from JSON [])",
+			allowedPaths: []string{},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			nonGitRoot := "/non-existent-primary-root"
+			nonGitWt := t.TempDir()
+
+			fe := &fakeExecutor{outcome: executor.Outcome{ExitCode: 0}}
+			deps := newTestDeps(t, nonGitWt, func(string) fs.FS {
+				return fstest.MapFS{".lucind/result.json": {Data: []byte(doneEnvelopeJSON)}}
+			}, fe)
+			deps.PrimaryRoot = nonGitRoot
+
+			p := testPacket()
+			p.AllowedPaths = tc.allowedPaths
+
+			report, err := run.Execute(context.Background(), deps, p)
+			if err != nil {
+				t.Fatalf("Execute() error = %v, want nil", err)
+			}
+
+			if report.Status != lane.Done {
+				t.Errorf("report.Status = %v, want %v", report.Status, lane.Done)
+			}
+
+			states, err := deps.Ledger.LaneStates(context.Background(), "run-1")
+			if err != nil {
+				t.Fatalf("LaneStates() error = %v", err)
+			}
+			if len(states) != 1 || states[0].Status != lane.Done {
+				t.Errorf("LaneStates() = %+v, want lane.Done", states)
+			}
+		})
+	}
 }

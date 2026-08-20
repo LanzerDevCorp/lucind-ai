@@ -15,7 +15,9 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/LanzerDevCorp/lucind-ai/internal/executor"
@@ -317,6 +319,10 @@ func Execute(ctx context.Context, deps Deps, p packet.Packet) (Report, error) {
 
 	status, envelope, reason := decideStatus(deps, wt.Path, outcome)
 
+	if status == lane.Done && len(p.AllowedPaths) > 0 {
+		status, reason = enforceAllowedPaths(ctx, deps, wt.Path, p)
+	}
+
 	if status == lane.Done {
 		status, reason = enforceCompletionMode(ctx, deps, wt.Path, p)
 	}
@@ -436,6 +442,84 @@ func decideStatus(deps Deps, worktreePath string, outcome executor.Outcome) (lan
 		}
 		return st, &envelope, ""
 	}
+}
+
+// enforceAllowedPaths inspects the actual git diff of the worktree against
+// primaryRoot's HEAD using a three-way diff union (committed-since-base,
+// unstaged, and untracked). If any changed path is outside p.AllowedPaths,
+// the lane is demoted to lane.Deviated with a reason listing the offending
+// paths. If any git command fails, the lane becomes lane.Blocked with a
+// diagnostic reason.
+func enforceAllowedPaths(ctx context.Context, deps Deps, worktreePath string, p packet.Packet) (lane.Status, string) {
+	primaryHeadCmd := exec.CommandContext(ctx, "git", "-C", deps.PrimaryRoot, "rev-parse", "HEAD")
+	var primaryStderr strings.Builder
+	primaryHeadCmd.Stderr = &primaryStderr
+	primaryHeadOut, err := primaryHeadCmd.Output()
+	if err != nil {
+		return lane.Blocked, fmt.Sprintf("git rev-parse HEAD in primary root failed: %v: %s", err, strings.TrimSpace(primaryStderr.String()))
+	}
+	base := strings.TrimSpace(string(primaryHeadOut))
+
+	diffCmd := exec.CommandContext(ctx, "git", "-C", worktreePath, "diff", "--name-only", "--diff-filter=ACDMRT", base, "HEAD")
+	var diffStderr strings.Builder
+	diffCmd.Stderr = &diffStderr
+	diffOut, err := diffCmd.Output()
+	if err != nil {
+		return lane.Blocked, fmt.Sprintf("git diff %s HEAD in worktree failed: %v: %s", base, err, strings.TrimSpace(diffStderr.String()))
+	}
+
+	unstagedCmd := exec.CommandContext(ctx, "git", "-C", worktreePath, "diff", "--name-only", "--diff-filter=ACDMRT")
+	var unstagedStderr strings.Builder
+	unstagedCmd.Stderr = &unstagedStderr
+	unstagedOut, err := unstagedCmd.Output()
+	if err != nil {
+		return lane.Blocked, fmt.Sprintf("git diff unstaged in worktree failed: %v: %s", err, strings.TrimSpace(unstagedStderr.String()))
+	}
+
+	lsCmd := exec.CommandContext(ctx, "git", "-C", worktreePath, "ls-files", "-o", "--exclude-standard")
+	var lsStderr strings.Builder
+	lsCmd.Stderr = &lsStderr
+	lsOut, err := lsCmd.Output()
+	if err != nil {
+		return lane.Blocked, fmt.Sprintf("git ls-files in worktree failed: %v: %s", err, strings.TrimSpace(lsStderr.String()))
+	}
+
+	seen := make(map[string]bool)
+	var changedPaths []string
+
+	addPaths := func(output []byte) {
+		lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
+			}
+			if strings.HasPrefix(line, ".lucind/") || line == ".lucind" {
+				continue
+			}
+			if !seen[line] {
+				seen[line] = true
+				changedPaths = append(changedPaths, line)
+			}
+		}
+	}
+
+	addPaths(diffOut)
+	addPaths(unstagedOut)
+	addPaths(lsOut)
+
+	var offending []string
+	for _, path := range changedPaths {
+		if !packet.PathInScope(path, p.AllowedPaths) {
+			offending = append(offending, path)
+		}
+	}
+
+	if len(offending) > 0 {
+		return lane.Deviated, fmt.Sprintf("actual diff touched paths outside declared allowed_paths: %s", strings.Join(offending, ", "))
+	}
+
+	return lane.Done, ""
 }
 
 // enforceCompletionMode verifies real git state after decideStatus mapped
