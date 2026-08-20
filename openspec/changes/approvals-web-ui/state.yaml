@@ -65,9 +65,20 @@ phases:
       lucind-ai serve HTTP server with embedded static assets, and CLI serve command.
       All tests passing under race detector.
   verify:
-    status: pending
+    status: blocked
+    engram_topic: sdd/approvals-web-ui/verify
+    note: |
+      Two-stage verify: mechanical check passed (verify-mechanical.log, candidate f7421fb).
+      Dual qualitative dispatch (agy done/no findings, cursor-agent done/8 findings).
+      Orchestrator independently verified 3 of cursor-agent's findings against real code and
+      spec text: (1) BLOCKING -- internal/serve/static/app.js isValidEvidence violates the
+      "Bare claim withheld" MUST-NOT spec scenario (approvals-web-ui/spec.md:61-65), any
+      multi-line string renders as evidence; (2) serve --approval-timeout is decorative,
+      unused beyond the log banner; (3) ledger.Decide has no decision='pending' guard, a late
+      UI click can race a timeout. Full detail: openspec/changes/approvals-web-ui/verify.md.
   archive:
     status: pending
+    note: blocked on verify remediation -- do not archive until verify:status is done
 notes: |
   Dual-executor SDD phase experiment (session request): design/proposal/specs/tasks phases author
   their content via lucind-ai packets dispatched to agy AND cursor-agent in parallel where the
