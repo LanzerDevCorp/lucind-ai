@@ -83,7 +83,30 @@ phases:
       "Transitive dependency ordering authorizes overlap" scenario; canonical adopts it,
       otherwise follows cursor-agent's tighter prose and file:line citation style.
   tasks:
-    status: pending
+    status: done
+    engram_topic: sdd/apply-dag-dispatch-hardening/tasks
+    drafts:
+      - openspec/changes/apply-dag-dispatch-hardening/tasks-agy.md
+      - openspec/changes/apply-dag-dispatch-hardening/tasks-cursor-agent.md
+    canonical: openspec/changes/apply-dag-dispatch-hardening/tasks.md
+    note: |
+      Dispatched via real lucind-ai run (agy + cursor-agent), both lanes done, merged to main
+      cleanly (0 reverted), no AI-attribution trailer. 8-phase Strict TDD RED/GREEN checklist:
+      internal/dag reachability+global overlap, internal/worktree BaseSHA, test-double
+      plumbing, internal/run NUL parsers, internal/run four-way union, cmd/lucind-ai wiring,
+      testing sweep, cleanup. No apply-dag.yaml sidecar (single PR, 3 work-unit commits).
+      Forecast: 650-1200 lines, comfortably under review_budget_lines: 10000.
+
+      cursor-agent's draft was measurably more rigorous and adopted as the base: it cites real
+      existing test-file line numbers (run_test.go:1490 setupGitWorktree, cli_test.go:667/837/
+      970/1064/1279), correctly flags that internal/run/run_test.go is package run_test and the
+      new unexported parsers must be exposed via export_test.go (agy's draft omits this --
+      without it the parser RED tests would not compile), adds a CLI-level split regression
+      test as the terminal consumer of ErrUnorderedOverlap (Waves -> Split -> runSplit), and
+      separates test-double plumbing into its own explicit phase. agy's draft contributed one
+      genuinely useful addition folded into canonical Phase 1: an isolated unit test for the
+      `reaches` helper alone (direct edge / transitive chain / reverse-false / disjoint-false)
+      before testing it through Waves -- cheaper to diagnose on failure.
   apply:
     status: pending
   verify:
