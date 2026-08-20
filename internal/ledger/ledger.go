@@ -735,3 +735,118 @@ func (l *Ledger) ApproverRate(ctx context.Context, approver string) (float64, er
 	}
 	return float64(flagged) / float64(totalApproved), nil
 }
+
+// DB returns the underlying *sql.DB connection pool.
+func (l *Ledger) DB() *sql.DB {
+	return l.db
+}
+
+// IntegrationEvent is one row of the integration_events table: an append-only
+// audit record of feature and reconciliation lifecycle events.
+type IntegrationEvent struct {
+	ID        int64
+	FeatureID string
+	AttemptID string
+	Type      string
+	Detail    string
+	At        time.Time
+}
+
+// WriteWithAudit atomically executes an optional state mutation function and appends
+// an IntegrationEvent in the same SQLite transaction. If either the mutation or
+// the audit append fails, the transaction is rolled back.
+func (l *Ledger) WriteWithAudit(ctx context.Context, mutate func(tx *sql.Tx) error, evt IntegrationEvent) error {
+	if evt.FeatureID == "" {
+		return errors.New("ledger: integration event feature_id is required")
+	}
+	if evt.Type == "" {
+		return errors.New("ledger: integration event type is required")
+	}
+
+	tx, err := l.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("ledger: begin write-with-audit tx: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck // no-op once Commit succeeds
+
+	if mutate != nil {
+		if err := mutate(tx); err != nil {
+			return err
+		}
+	}
+
+	var attemptID sql.NullString
+	if evt.AttemptID != "" {
+		attemptID = sql.NullString{String: evt.AttemptID, Valid: true}
+	}
+
+	at := evt.At
+	if at.IsZero() {
+		at = time.Now().UTC()
+	}
+
+	if _, err := tx.ExecContext(ctx,
+		`INSERT INTO integration_events (feature_id, attempt_id, type, detail, at) VALUES (?, ?, ?, ?, ?)`,
+		evt.FeatureID, attemptID, evt.Type, evt.Detail, at.UTC().Format(time.RFC3339),
+	); err != nil {
+		return fmt.Errorf("ledger: insert integration event: %w", err)
+	}
+
+	return tx.Commit()
+}
+
+// PruneIntegrationEvents deletes all integration_events rows where at < cutoff.
+// It returns the number of deleted rows.
+func (l *Ledger) PruneIntegrationEvents(ctx context.Context, cutoff time.Time) (int64, error) {
+	res, err := l.db.ExecContext(ctx,
+		`DELETE FROM integration_events WHERE at < ?`,
+		cutoff.UTC().Format(time.RFC3339),
+	)
+	if err != nil {
+		return 0, fmt.Errorf("ledger: prune integration events: %w", err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("ledger: read rows affected: %w", err)
+	}
+	return affected, nil
+}
+
+// IntegrationEvents returns all integration_events for the given featureID ordered by id.
+func (l *Ledger) IntegrationEvents(ctx context.Context, featureID string) ([]IntegrationEvent, error) {
+	rows, err := l.db.QueryContext(ctx, `
+		SELECT id, feature_id, attempt_id, type, detail, at
+		FROM integration_events WHERE feature_id = ? ORDER BY id`, featureID)
+	if err != nil {
+		return nil, fmt.Errorf("ledger: query integration events: %w", err)
+	}
+	defer rows.Close()
+
+	var out []IntegrationEvent
+	for rows.Next() {
+		var (
+			e         IntegrationEvent
+			attemptID sql.NullString
+			at        string
+		)
+		if err := rows.Scan(&e.ID, &e.FeatureID, &attemptID, &e.Type, &e.Detail, &at); err != nil {
+			return nil, fmt.Errorf("ledger: scan integration event row: %w", err)
+		}
+		if attemptID.Valid {
+			e.AttemptID = attemptID.String
+		}
+		parsed, err := time.Parse(time.RFC3339, at)
+		if err != nil {
+			return nil, fmt.Errorf("ledger: parse integration event timestamp %q: %w", at, err)
+		}
+		e.At = parsed
+
+		out = append(out, e)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("ledger: iterate integration event rows: %w", err)
+	}
+
+	return out, nil
+}
+

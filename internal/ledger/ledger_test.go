@@ -1109,3 +1109,283 @@ func TestLedgerDecideNonexistentApprovalReturnsErrLaneUnknown(t *testing.T) {
 		t.Fatalf("Decide on nonexistent row err = %v, want ErrLaneUnknown", err)
 	}
 }
+
+func TestFreshLedgerMigratesToV4WithAllSevenTables(t *testing.T) {
+	ctx := context.Background()
+	l := openTestLedger(t)
+
+	var currentVersion int
+	if err := l.db.QueryRowContext(ctx, `SELECT MAX(version) FROM schema_migrations`).Scan(&currentVersion); err != nil {
+		t.Fatalf("query schema_migrations max version: %v", err)
+	}
+	if currentVersion != 4 {
+		t.Errorf("currentVersion = %d, want 4", currentVersion)
+	}
+
+	wantTables := []string{
+		"features",
+		"integration_attempts",
+		"feature_leases",
+		"overlap_evidence",
+		"reconciliation_requests",
+		"reconciliation_candidates",
+		"integration_events",
+	}
+
+	for _, tbl := range wantTables {
+		var name string
+		err := l.db.QueryRowContext(ctx, `SELECT name FROM sqlite_master WHERE type='table' AND name=?`, tbl).Scan(&name)
+		if err != nil {
+			t.Errorf("table %q does not exist in fresh v4 ledger: %v", tbl, err)
+		}
+	}
+}
+
+func TestMigrateV3DatabasePreservesDataAndAdvancesToV4(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	dbPath := ledgerpath.Resolve(root)
+
+	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
+		t.Fatalf("create .lucind dir: %v", err)
+	}
+
+	dsn := "file:" + dbPath + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)"
+	rawDB, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		t.Fatalf("raw open: %v", err)
+	}
+
+	// Apply v3 schema
+	v3DDL := schemaMigrationsDDL + schemaDDL
+	if _, err := rawDB.ExecContext(ctx, v3DDL); err != nil {
+		rawDB.Close()
+		t.Fatalf("apply v3 schema DDL: %v", err)
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	if _, err := rawDB.ExecContext(ctx,
+		`INSERT INTO schema_migrations (version, applied_at) VALUES (1, ?), (2, ?), (3, ?)`,
+		now, now, now,
+	); err != nil {
+		rawDB.Close()
+		t.Fatalf("record v3 migrations: %v", err)
+	}
+
+	// Insert data into lanes, events, approvals under v3
+	if _, err := rawDB.ExecContext(ctx, `
+		INSERT INTO lanes (run_id, lane_id, packet_id, executor, routing_condition, status, worktree_path, worktree_preserved, attempt)
+		VALUES ('run-v3', 'lane-v3', 'p-v3', 'agy', 'cond-v3', 'done', '/path/v3', 1, 1)
+	`); err != nil {
+		rawDB.Close()
+		t.Fatalf("insert v3 lane: %v", err)
+	}
+	if _, err := rawDB.ExecContext(ctx, `
+		INSERT INTO events (id, run_id, lane_id, type, detail, at)
+		VALUES (1, 'run-v3', 'lane-v3', 'lane_status_changed', 'done', ?)
+	`, now); err != nil {
+		rawDB.Close()
+		t.Fatalf("insert v3 event: %v", err)
+	}
+	if _, err := rawDB.ExecContext(ctx, `
+		INSERT INTO approvals (run_id, lane_id, packet_id, approver, decision, evidence, defect_surfaced_later, requested_at, decided_at)
+		VALUES ('run-v3', 'lane-v3', 'p-v3', 'alice', 'approved', 'evidence.txt', 0, ?, ?)
+	`, now, now); err != nil {
+		rawDB.Close()
+		t.Fatalf("insert v3 approval: %v", err)
+	}
+
+	if err := rawDB.Close(); err != nil {
+		t.Fatalf("close raw DB: %v", err)
+	}
+
+	// Open the v3 database through normal Open, triggering migration to v4.
+	l, err := Open(ctx, root)
+	if err != nil {
+		t.Fatalf("Open on v3 database: %v", err)
+	}
+	defer l.Close()
+
+	// Verify schema_migrations reaches version 4
+	var v4Count int
+	if err := l.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM schema_migrations WHERE version = 4`).Scan(&v4Count); err != nil {
+		t.Fatalf("query version 4: %v", err)
+	}
+	if v4Count != 1 {
+		t.Errorf("version 4 count = %d, want 1", v4Count)
+	}
+
+	// Assert v3 data was preserved
+	lanes, err := l.Lanes(ctx, "run-v3")
+	if err != nil {
+		t.Fatalf("Lanes: %v", err)
+	}
+	if len(lanes) != 1 || lanes[0].LaneID != "lane-v3" || lanes[0].Status != lane.Done {
+		t.Fatalf("lanes altered by migration: %+v", lanes)
+	}
+
+	events, err := l.Events(ctx, "run-v3")
+	if err != nil {
+		t.Fatalf("Events: %v", err)
+	}
+	if len(events) != 1 || events[0].Detail != "done" {
+		t.Fatalf("events altered by migration: %+v", events)
+	}
+
+	app, err := l.Approval(ctx, "run-v3", "lane-v3")
+	if err != nil {
+		t.Fatalf("Approval: %v", err)
+	}
+	if app.Decision != DecisionApproved || app.Approver != "alice" {
+		t.Fatalf("approvals altered by migration: %+v", app)
+	}
+
+	// Verify all 7 new tables exist
+	wantTables := []string{
+		"features",
+		"integration_attempts",
+		"feature_leases",
+		"overlap_evidence",
+		"reconciliation_requests",
+		"reconciliation_candidates",
+		"integration_events",
+	}
+	for _, tbl := range wantTables {
+		var name string
+		err := l.db.QueryRowContext(ctx, `SELECT name FROM sqlite_master WHERE type='table' AND name=?`, tbl).Scan(&name)
+		if err != nil {
+			t.Errorf("table %q does not exist after migration: %v", tbl, err)
+		}
+	}
+
+	// Verify idempotency: calling migrate again does nothing and creates no duplicate rows
+	if err := migrate(ctx, l.db); err != nil {
+		t.Fatalf("second migrate: %v", err)
+	}
+	var totalMigrations int
+	if err := l.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM schema_migrations`).Scan(&totalMigrations); err != nil {
+		t.Fatalf("query total migrations: %v", err)
+	}
+	if totalMigrations != 4 {
+		t.Errorf("total migrations count after second migrate = %d, want 4", totalMigrations)
+	}
+}
+
+func TestAtomicStateAndAuditAppendSuccessAndRollback(t *testing.T) {
+	ctx := context.Background()
+	l := openTestLedger(t)
+
+	now := time.Date(2026, 8, 20, 10, 0, 0, 0, time.UTC)
+
+	// 1. Successful atomic state + audit write
+	err := l.WriteWithAudit(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, `
+			INSERT INTO features (id, parent_ref, base_sha, expected_parent_sha, status, created_at, updated_at)
+			VALUES ('feat-1', 'refs/heads/feature-1', 'sha1', 'sha1', 'active', ?, ?)`,
+			now.Format(time.RFC3339), now.Format(time.RFC3339),
+		)
+		return err
+	}, IntegrationEvent{
+		FeatureID: "feat-1",
+		Type:      "feature_created",
+		Detail:    "created feat-1",
+		At:        now,
+	})
+	if err != nil {
+		t.Fatalf("WriteWithAudit failed: %v", err)
+	}
+
+	// Verify feature exists
+	var featStatus string
+	if err := l.db.QueryRowContext(ctx, `SELECT status FROM features WHERE id = 'feat-1'`).Scan(&featStatus); err != nil {
+		t.Fatalf("query feature: %v", err)
+	}
+	if featStatus != "active" {
+		t.Errorf("featStatus = %q, want active", featStatus)
+	}
+
+	// Verify event exists
+	events, err := l.IntegrationEvents(ctx, "feat-1")
+	if err != nil {
+		t.Fatalf("IntegrationEvents: %v", err)
+	}
+	if len(events) != 1 || events[0].Type != "feature_created" || events[0].Detail != "created feat-1" {
+		t.Fatalf("unexpected events: %+v", events)
+	}
+
+	// 2. Failure rollback: inject failure on audit insert (e.g. NULL feature_id violates NOT NULL constraint)
+	err = l.WriteWithAudit(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, `
+			INSERT INTO features (id, parent_ref, base_sha, expected_parent_sha, status, created_at, updated_at)
+			VALUES ('feat-failed', 'refs/heads/feature-failed', 'sha2', 'sha2', 'active', ?, ?)`,
+			now.Format(time.RFC3339), now.Format(time.RFC3339),
+		)
+		return err
+	}, IntegrationEvent{
+		FeatureID: "", // empty FeatureID violates NOT NULL constraint (or will be rejected)
+		Type:      "", // empty Type violates NOT NULL / check
+		At:        now,
+	})
+	if err == nil {
+		t.Fatal("expected WriteWithAudit to fail on invalid event, got nil")
+	}
+
+	// Verify feat-failed was NOT written to features table (transaction was rolled back)
+	var count int
+	if err := l.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM features WHERE id = 'feat-failed'`).Scan(&count); err != nil {
+		t.Fatalf("query count: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("features table contains feat-failed row, expected rollback!")
+	}
+}
+
+func TestPruneIntegrationEventsRetention(t *testing.T) {
+	ctx := context.Background()
+	l := openTestLedger(t)
+
+	t1 := time.Date(2026, 8, 10, 10, 0, 0, 0, time.UTC)
+	t2 := time.Date(2026, 8, 15, 10, 0, 0, 0, time.UTC)
+	t3 := time.Date(2026, 8, 19, 10, 0, 0, 0, time.UTC)
+
+	for _, evt := range []IntegrationEvent{
+		{FeatureID: "feat-ret", Type: "event1", Detail: "d1", At: t1},
+		{FeatureID: "feat-ret", Type: "event2", Detail: "d2", At: t2},
+		{FeatureID: "feat-ret", Type: "event3", Detail: "d3", At: t3},
+	} {
+		if err := l.WriteWithAudit(ctx, nil, evt); err != nil {
+			t.Fatalf("insert event: %v", err)
+		}
+	}
+
+	eventsBefore, err := l.IntegrationEvents(ctx, "feat-ret")
+	if err != nil {
+		t.Fatalf("IntegrationEvents before prune: %v", err)
+	}
+	if len(eventsBefore) != 3 {
+		t.Fatalf("expected 3 events before prune, got %d", len(eventsBefore))
+	}
+
+	// Prune with cutoff at 2026-08-16 (t1 and t2 should be deleted, t3 kept)
+	cutoff := time.Date(2026, 8, 16, 0, 0, 0, 0, time.UTC)
+	pruned, err := l.PruneIntegrationEvents(ctx, cutoff)
+	if err != nil {
+		t.Fatalf("PruneIntegrationEvents: %v", err)
+	}
+	if pruned != 2 {
+		t.Errorf("pruned count = %d, want 2", pruned)
+	}
+
+	eventsAfter, err := l.IntegrationEvents(ctx, "feat-ret")
+	if err != nil {
+		t.Fatalf("IntegrationEvents after prune: %v", err)
+	}
+	if len(eventsAfter) != 1 {
+		t.Fatalf("expected 1 event after prune, got %d", len(eventsAfter))
+	}
+	if eventsAfter[0].Type != "event3" || !eventsAfter[0].At.Equal(t3) {
+		t.Errorf("surviving event = %+v, want event3 at %v", eventsAfter[0], t3)
+	}
+}
+
+
