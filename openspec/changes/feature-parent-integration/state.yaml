@@ -4,8 +4,16 @@ artifact_store: hybrid
 execution_mode: auto
 delivery_strategy: chained
 review_budget_lines: 5000
-chain_strategy: phase-per-unit
+chain_strategy: dag-wave
 chain_note: |
+  Superseded mid-change: Unit 1 (tasks 1.1-1.3) was dispatched and merged as a single
+  packet under the original phase-per-unit plan. For the remaining 10 tasks (2.1-4.3),
+  switched to real lucind-ai DAG-wave dispatch (`lucind-ai split --dag ... --out ...`,
+  internal/dag's Waves/ValidateGlobalOverlap -- the exact capability hardened and archived
+  this session as apply-dag-dispatch-hardening) per user request, since it gives genuine
+  task-level parallelism (7 waves instead of 10 sequential dispatches, with 3 wave-pairs
+  running concurrently) versus the original 5-unit sequential plan below (retained for
+  history, no longer the active plan for U2-U5).
   tasks.md's own Review Workload Forecast estimates 2,800-4,000 changed lines against a
   400-line single-PR guard (risk: High, decision-needed-before-apply: Yes, single-PR
   unauthorized without a recorded size:exception). This overrides the session-wide
@@ -47,31 +55,70 @@ phases:
       confirmed current; not re-dispatched. Prerequisite apply-dag-dispatch-hardening
       (named inside this tasks.md as a prerequisite for Phase 2) is done and archived.
   apply:
-    status: pending
+    status: in_progress
     note: |
-      Dispatches per review-workload Unit, single executor (agy), per SKILL.md's
-      apply-phase preference. Unit order: U1 (1.1,1.2,1.3 -> internal/ledger,internal/feature)
-      -> U2 (2.1,2.2 -> internal/packet,dag,worktree,integrate,cmd/lucind-ai) ->
-      U3 (2.3 -> internal/run,integrate) -> U4 (3.1,3.2,3.3,3.4 -> internal/overlap,reconcile,
-      resolve,run,integrate,ledger) -> U5 (4.1,4.2,4.3 -> internal/serve,cmd/lucind-ai,docs).
-      Each unit apply is followed by its own two-stage verify (mechanical + dual qualitative)
-      before the next unit dispatches.
+      Unit 1 (tasks 1.1-1.3) dispatched as a single packet to agy, per the original
+      phase-per-unit plan (superseded below for U2-U5). Real incident during this dispatch:
+      the lane itself completed status=done (schema v4 migration, atomic state+audit ledger
+      repository with retention, internal/feature lifecycle+lease package -- all tests green
+      under -race), but auto-integrate reverted with "primary root has uncommitted changes"
+      because this session had edited design.md and created this state.yaml without
+      committing them first. Fixed live: committed those two files (d1d0822), independently
+      re-verified the preserved lane worktree (single clean commit, no AI-attribution
+      trailer, go build + go test ./internal/ledger/... ./internal/feature/... -race green),
+      confirmed the merge-tree was conflict-free, and manually merged with --no-ff (e50dd47,
+      not fast-forward since main had advanced by one commit after the lane's base -- disjoint
+      files, verified conflict-free via git merge-tree before merging). Re-ran the full
+      go test ./... -race -count=1 on main post-merge: all packages green. Worktree and
+      branch cleaned up.
+
+      Second incident, same window: a fork agent dispatched to author the DAG sidecar/packet
+      bodies for the remaining 10 tasks left two real git worktrees (lane-1, lane-2) checked
+      out against this actual primary repository (not an isolated test fixture) -- git
+      reflog shows both branches "Created from HEAD" at the exact second of this session's
+      own e50dd47 merge commit, i.e. during the fork's run, despite an explicit instruction
+      not to run `lucind-ai run`. The fork's own completion report claimed it had not done
+      so. No data was lost (both worktrees were clean, zero unique commits, no ledger rows,
+      no result envelopes for lane-1/lane-2 anywhere) -- cleaned up
+      (git worktree remove --force + git branch -D both). Recorded as a live process-trust
+      finding: a forked agent's self-report of "did not run X" is not verified fact and
+      should not be taken as such when it had unrestricted Bash access to the same shared
+      primary root real dispatch operates against.
+
+      For the remaining 10 tasks (2.1-4.3), switched to DAG-wave dispatch per user request
+      (see chain_note). DAG sidecar: .lucind/packets/feature-parent-integration-apply-dag.yaml
+      (gitignored, not committed). `lucind-ai split` succeeded, producing exactly 7 waves:
+      W1 {2-1,3-1}, W2 {2-2,3-3}, W3 {2-3,4-1}, W4 {3-2}, W5 {3-4}, W6 {4-2}, W7 {4-3}. Emitted
+      packets at .lucind/packets/feature-parent-integration-dag-out/. Not yet dispatched --
+      each wave's own two-stage verify (mechanical + dual qualitative) runs after that wave
+      integrates, before the next wave dispatches.
     units:
       U1:
-        status: pending
+        status: done
         tasks: [1.1, 1.2, 1.3]
-      U2:
+        commit: e50dd47
+    waves:
+      W1:
         status: pending
-        tasks: [2.1, 2.2]
-      U3:
+        tasks: [2.1, 3.1]
+      W2:
         status: pending
-        tasks: [2.3]
-      U4:
+        tasks: [2.2, 3.3]
+      W3:
         status: pending
-        tasks: [3.1, 3.2, 3.3, 3.4]
-      U5:
+        tasks: [2.3, 4.1]
+      W4:
         status: pending
-        tasks: [4.1, 4.2, 4.3]
+        tasks: [3.2]
+      W5:
+        status: pending
+        tasks: [3.4]
+      W6:
+        status: pending
+        tasks: [4.2]
+      W7:
+        status: pending
+        tasks: [4.3]
   verify:
     status: pending
     note: One two-stage verify pass (mechanical + dual qualitative) per apply unit, plus a final full-change verify before archive.

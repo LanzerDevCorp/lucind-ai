@@ -35,9 +35,9 @@ Non-executable; paths add safety edges: W1 `1.1`; W2 `1.2 + 2.1`; W3 `1.3 + 2.2 
 
 ## Phase 1: Foundation
 
-- [ ] 1.1 `internal/ledger`: **RED** v3 atomic state/audit, retention; **GREEN** repositories. Ledger. **Deps:** none. U1.
-- [ ] 1.2 `internal/feature`: **RED** lifecycle/base/no rewrite or `main`; **GREEN** audit. Temp-Git. **Deps:** 1.1. U1.
-- [ ] 1.3 `internal/{ledger,feature}`: **RED** serialization, expired fence/recovery, cross-feature concurrency; **GREEN** fences. Multi-handle SQLite. **Deps:** 1.1, 1.2. U1.
+- [x] 1.1 `internal/ledger`: **RED** v4 atomic state/audit, retention; **GREEN** repositories. Ledger. **Deps:** none. U1.
+- [x] 1.2 `internal/feature`: **RED** lifecycle/base/no rewrite or `main`; **GREEN** audit. Temp-Git. **Deps:** 1.1. U1.
+- [x] 1.3 `internal/{ledger,feature}`: **RED** serialization, expired fence/recovery, cross-feature concurrency; **GREEN** fences. Multi-handle SQLite. **Deps:** 1.1, 1.2. U1.
 
 ## Phase 2: Targets and Git
 
