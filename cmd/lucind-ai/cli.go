@@ -38,7 +38,8 @@ const defaultTimeout = 20 * time.Minute
 // error, so a person driving the binary from a terminal always sees the one
 // invocation that works rather than a stack trace. --packet is repeatable:
 // each occurrence adds one more lane to the batch.
-const usage = "usage: lucind-ai run --packet <path> [--packet <path> ...] [--timeout <duration>]\n       lucind-ai split --dag <path> --out <dir>\n       lucind-ai --version"
+const usage = "usage: lucind-ai run --packet <path> [--packet <path> ...] [--timeout <duration>]\n       lucind-ai split --dag <path> --out <dir>\n       lucind-ai check [--out <path>]\n       lucind-ai --version"
+
 
 // depsFactory constructs run.Deps for runDispatch. In production it is
 // productionDeps; tests may override it to inject test doubles or observe dependency calls.
@@ -91,6 +92,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return runDispatch(ctx, args[1:], stdout, stderr)
 	case "split":
 		return runSplit(ctx, args[1:], stdout, stderr)
+	case "check":
+		return runCheck(ctx, args[1:], stdout, stderr)
 	case "--version", "-v":
 		fmt.Fprintf(stdout, "lucind-ai %s (%s, %s/%s)\n", version, runtime.Version(), runtime.GOOS, runtime.GOARCH)
 		return 0
@@ -270,6 +273,106 @@ func runSplit(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 	}
 	return 0
 }
+
+// runCheck implements the "check" subcommand: executes lucind-checks.sh
+// via internal/integrate.Check deterministically and reports results.
+func runCheck(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("check", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	fs.Usage = func() {
+		fmt.Fprintln(stderr, "usage: lucind-ai check [--out <path>]")
+		fs.PrintDefaults()
+	}
+
+	outPath := fs.String("out", "", "path to write execution record")
+	if err := fs.Parse(args); err != nil {
+		return 1
+	}
+
+	if len(fs.Args()) > 0 {
+		fmt.Fprintf(stderr, "lucind-ai: unexpected argument(s): %s\n", strings.Join(fs.Args(), " "))
+		fs.Usage()
+		return 1
+	}
+
+	root, err := resolvePrimaryRoot(ctx)
+	if err != nil {
+		if wd, wdErr := os.Getwd(); wdErr == nil {
+			root = wd
+		} else {
+			fmt.Fprintf(stderr, "lucind-ai: %v\n", err)
+			return 1
+		}
+	}
+
+	start := time.Now()
+	passed, checkOutput, checkErr := integrate.Check(ctx, root)
+	duration := time.Since(start)
+	if checkErr != nil {
+		fmt.Fprintf(stderr, "lucind-ai: check: %v\n", checkErr)
+		return 1
+	}
+
+	commitSHA := resolveCommitSHA(ctx, root)
+
+	exitCode := 0
+	if !passed {
+		exitCode = 1
+	}
+
+	if *outPath != "" {
+		content := formatMechanicalLog(commitSHA, exitCode, duration, checkOutput)
+		if err := os.MkdirAll(filepath.Dir(*outPath), 0o755); err != nil {
+			fmt.Fprintf(stderr, "lucind-ai: create log directory: %v\n", err)
+			return 1
+		}
+		if err := os.WriteFile(*outPath, []byte(content), 0o644); err != nil {
+			fmt.Fprintf(stderr, "lucind-ai: write log file: %v\n", err)
+			return 1
+		}
+	}
+
+	if !passed {
+		fmt.Fprintln(stderr, strings.TrimRight(checkOutput, "\n"))
+		return 1
+	}
+
+	fmt.Fprint(stdout, checkOutput)
+	if !strings.HasSuffix(checkOutput, "\n") {
+		fmt.Fprintln(stdout)
+	}
+	fmt.Fprintf(stdout, "status:   passed\nduration: %v\ncommit:   %s\n", duration, commitSHA)
+
+	return 0
+}
+
+// formatMechanicalLog formats the structured metadata header followed by the
+// check transcript for verify-mechanical.log.
+func formatMechanicalLog(commitSHA string, exitCode int, duration time.Duration, output string) string {
+	var sb strings.Builder
+	sb.WriteString("=== lucind-ai mechanical check ===\n")
+	sb.WriteString(fmt.Sprintf("Git Commit SHA: %s\n", commitSHA))
+	sb.WriteString("Command: lucind-checks.sh\n")
+	sb.WriteString(fmt.Sprintf("Duration: %v\n", duration))
+	sb.WriteString(fmt.Sprintf("Exit Code: %d\n", exitCode))
+	sb.WriteString("==================================\n")
+	sb.WriteString(output)
+	return sb.String()
+}
+
+
+// resolveCommitSHA runs "git rev-parse HEAD" in dir and returns the trimmed commit SHA.
+func resolveCommitSHA(ctx context.Context, dir string) string {
+	cmd := exec.CommandContext(ctx, "git", "rev-parse", "HEAD")
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		return "unknown"
+	}
+	return strings.TrimSpace(string(out))
+}
+
+
 
 // printReport prints a short, human-readable summary of one lane's run.
 // A lane that did not reach lane.Done gets a visually unmissable banner so

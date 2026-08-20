@@ -538,4 +538,52 @@ func TestPorcelainEmptyWrapsGitFailureWithStderr(t *testing.T) {
 	}
 }
 
+// TestLinkedWorktreeInheritsCommittedMechanicalLog (Task 2.3 & 2.4) proves that a log file
+// committed to the primary repository branch is automatically inherited into newly created linked
+// worktrees via git branch inheritance, requiring zero custom file copying.
+func TestLinkedWorktreeInheritsCommittedMechanicalLog(t *testing.T) {
+	if testing.Short() {
+		t.Skip("shells out to real git")
+	}
+
+	primaryRoot := initRepo(t)
+
+	logDir := filepath.Join(primaryRoot, "openspec", "changes", "verify-test")
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll error = %v", err)
+	}
+
+	sampleContent := "=== lucind-ai mechanical check ===\n" +
+		"Git Commit SHA: 1234567890abcdef1234567890abcdef12345678\n" +
+		"Command: lucind-checks.sh\n" +
+		"Duration: 1.5s\n" +
+		"Exit Code: 0\n" +
+		"==================================\n" +
+		"PASS: all suites clean\n"
+
+	logPath := filepath.Join(logDir, "verify-mechanical.log")
+	if err := os.WriteFile(logPath, []byte(sampleContent), 0o644); err != nil {
+		t.Fatalf("WriteFile error = %v", err)
+	}
+
+	runGit(t, primaryRoot, "add", "openspec/changes/verify-test/verify-mechanical.log")
+	runGit(t, primaryRoot, "commit", "-m", "chore: record mechanical check")
+
+	wt, err := worktree.Create(context.Background(), primaryRoot, "verify-lane-test")
+	if err != nil {
+		t.Fatalf("worktree.Create() error = %v", err)
+	}
+
+	wtLogPath := filepath.Join(wt.Path, "openspec", "changes", "verify-test", "verify-mechanical.log")
+	wtLogBytes, err := os.ReadFile(wtLogPath)
+	if err != nil {
+		t.Fatalf("ReadFile(%q) in linked worktree error = %v", wtLogPath, err)
+	}
+
+	if string(wtLogBytes) != sampleContent {
+		t.Fatalf("linked worktree log content = %q, want %q", string(wtLogBytes), sampleContent)
+	}
+}
+
+
 

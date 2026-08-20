@@ -958,3 +958,338 @@ func extractRunID(stdout string) string {
 	return ""
 }
 
+// TestRunCheckMissingScriptFails (Task 1.1) proves that invoking check in a repository
+// lacking lucind-checks.sh returns exit code 1 and writes the missing-script message to stderr.
+func TestRunCheckMissingScriptFails(t *testing.T) {
+	if testing.Short() {
+		t.Skip("shells out to real git")
+	}
+	repoDir := initRepo(t)
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(repoDir); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(cwd)
+
+	var stdout, stderr bytes.Buffer
+	code := run(context.Background(), []string{"check"}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("run(check) exit code = %d, want 1; stderr = %q", code, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "no lucind-checks.sh found at the project root") {
+		t.Fatalf("stderr = %q, want it to contain %q", stderr.String(), "no lucind-checks.sh found at the project root")
+	}
+}
+
+// TestRunCheckScriptFails (Task 1.3 & 1.4) proves that a repository with a failing
+// lucind-checks.sh exits 1 and prints the failure transcript.
+func TestRunCheckScriptFails(t *testing.T) {
+	if testing.Short() {
+		t.Skip("shells out to real git")
+	}
+	repoDir := initRepo(t)
+	scriptPath := filepath.Join(repoDir, "lucind-checks.sh")
+	scriptContent := "#!/bin/sh\necho \"FAIL: linter error\"\nexit 1\n"
+	if err := os.WriteFile(scriptPath, []byte(scriptContent), 0o755); err != nil {
+		t.Fatalf("WriteFile(lucind-checks.sh) error = %v", err)
+	}
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(repoDir); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(cwd)
+
+	var stdout, stderr bytes.Buffer
+	code := run(context.Background(), []string{"check"}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("run(check) exit code = %d, want 1; stderr = %q, stdout = %q", code, stderr.String(), stdout.String())
+	}
+	combined := stdout.String() + stderr.String()
+	if !strings.Contains(combined, "FAIL: linter error") {
+		t.Fatalf("combined output = %q, want it to contain %q", combined, "FAIL: linter error")
+	}
+}
+
+// TestRunCheckScriptPasses (Task 1.5 & 1.6) proves that a repository with a passing
+// lucind-checks.sh exits 0 and prints status, elapsed duration, git commit SHA, and transcript.
+func TestRunCheckScriptPasses(t *testing.T) {
+	if testing.Short() {
+		t.Skip("shells out to real git")
+	}
+	repoDir := initRepo(t)
+	scriptPath := filepath.Join(repoDir, "lucind-checks.sh")
+	scriptContent := "#!/bin/sh\necho \"PASS: all suites clean\"\nexit 0\n"
+	if err := os.WriteFile(scriptPath, []byte(scriptContent), 0o755); err != nil {
+		t.Fatalf("WriteFile(lucind-checks.sh) error = %v", err)
+	}
+
+	// Get commit SHA from HEAD
+	cmd := exec.Command("git", "rev-parse", "HEAD")
+	cmd.Dir = repoDir
+	commitBytes, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git rev-parse HEAD error = %v", err)
+	}
+	expectedSHA := strings.TrimSpace(string(commitBytes))
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(repoDir); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(cwd)
+
+	var stdout, stderr bytes.Buffer
+	code := run(context.Background(), []string{"check"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run(check) exit code = %d, want 0; stderr = %q, stdout = %q", code, stderr.String(), stdout.String())
+	}
+	outStr := stdout.String()
+	if !strings.Contains(outStr, "PASS: all suites clean") {
+		t.Errorf("stdout = %q, want it to contain %q", outStr, "PASS: all suites clean")
+	}
+	if !strings.Contains(outStr, "passed") {
+		t.Errorf("stdout = %q, want it to contain execution status %q", outStr, "passed")
+	}
+	if !strings.Contains(outStr, expectedSHA) {
+		t.Errorf("stdout = %q, want it to contain git commit SHA %q", outStr, expectedSHA)
+	}
+	if !strings.Contains(strings.ToLower(outStr), "duration") {
+		t.Errorf("stdout = %q, want it to contain execution duration", outStr)
+	}
+}
+
+// TestRunCheckOutFlagWritesLogFile (Task 1.7 & 1.8) proves that passing --out <path>
+// writes the complete record with structured header to the specified file, creating parent dirs.
+func TestRunCheckOutFlagWritesLogFile(t *testing.T) {
+	if testing.Short() {
+		t.Skip("shells out to real git")
+	}
+	repoDir := initRepo(t)
+	scriptPath := filepath.Join(repoDir, "lucind-checks.sh")
+	scriptContent := "#!/bin/sh\necho \"PASS: all suites clean\"\nexit 0\n"
+	if err := os.WriteFile(scriptPath, []byte(scriptContent), 0o755); err != nil {
+		t.Fatalf("WriteFile(lucind-checks.sh) error = %v", err)
+	}
+
+	logPath := filepath.Join(repoDir, "openspec", "changes", "test-change", "verify-mechanical.log")
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(repoDir); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(cwd)
+
+	var stdout, stderr bytes.Buffer
+	code := run(context.Background(), []string{"check", "--out", logPath}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run(check --out) exit code = %d, want 0; stderr = %q, stdout = %q", code, stderr.String(), stdout.String())
+	}
+
+	logBytes, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("ReadFile(logPath) error = %v", err)
+	}
+	logContent := string(logBytes)
+
+	if !strings.Contains(logContent, "=== lucind-ai mechanical check ===") {
+		t.Errorf("logContent = %q, want it to contain header banner", logContent)
+	}
+	if !strings.Contains(logContent, "Git Commit SHA:") {
+		t.Errorf("logContent = %q, want it to contain 'Git Commit SHA:'", logContent)
+	}
+	if !strings.Contains(logContent, "Duration:") {
+		t.Errorf("logContent = %q, want it to contain 'Duration:'", logContent)
+	}
+	if !strings.Contains(logContent, "Exit Code: 0") {
+		t.Errorf("logContent = %q, want it to contain 'Exit Code: 0'", logContent)
+	}
+	if !strings.Contains(logContent, "PASS: all suites clean") {
+		t.Errorf("logContent = %q, want it to contain transcript %q", logContent, "PASS: all suites clean")
+	}
+}
+
+// TestRunCheckOutFlagOverwritesExistingLog (Task 1.7 & 1.8) proves that re-running
+// check with --out overwrites any existing log file cleanly.
+func TestRunCheckOutFlagOverwritesExistingLog(t *testing.T) {
+	if testing.Short() {
+		t.Skip("shells out to real git")
+	}
+	repoDir := initRepo(t)
+	scriptPath := filepath.Join(repoDir, "lucind-checks.sh")
+	scriptContent := "#!/bin/sh\necho \"PASS: first run\"\nexit 0\n"
+	if err := os.WriteFile(scriptPath, []byte(scriptContent), 0o755); err != nil {
+		t.Fatalf("WriteFile(lucind-checks.sh) error = %v", err)
+	}
+
+	logPath := filepath.Join(repoDir, "openspec", "changes", "test-change", "verify-mechanical.log")
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(repoDir); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(cwd)
+
+	var stdout, stderr bytes.Buffer
+	code := run(context.Background(), []string{"check", "--out", logPath}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("first run(check --out) exit code = %d, want 0", code)
+	}
+
+	// Update script for second run
+	secondScript := "#!/bin/sh\necho \"PASS: second run\"\nexit 0\n"
+	if err := os.WriteFile(scriptPath, []byte(secondScript), 0o755); err != nil {
+		t.Fatalf("WriteFile(lucind-checks.sh) error = %v", err)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = run(context.Background(), []string{"check", "--out", logPath}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("second run(check --out) exit code = %d, want 0", code)
+	}
+
+	logBytes, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("ReadFile(logPath) error = %v", err)
+	}
+	logContent := string(logBytes)
+
+	if strings.Contains(logContent, "PASS: first run") {
+		t.Errorf("logContent = %q, want old content to be cleanly overwritten", logContent)
+	}
+	if !strings.Contains(logContent, "PASS: second run") {
+		t.Errorf("logContent = %q, want it to contain new content %q", logContent, "PASS: second run")
+	}
+}
+
+// TestRunCheckOmitOutFlagCreatesNoFile (Task 1.5 & 1.6) proves that omitting --out
+// writes to stdout/stderr only and does not create any log file.
+func TestRunCheckOmitOutFlagCreatesNoFile(t *testing.T) {
+	if testing.Short() {
+		t.Skip("shells out to real git")
+	}
+	repoDir := initRepo(t)
+	scriptPath := filepath.Join(repoDir, "lucind-checks.sh")
+	scriptContent := "#!/bin/sh\necho \"PASS: all suites clean\"\nexit 0\n"
+	if err := os.WriteFile(scriptPath, []byte(scriptContent), 0o755); err != nil {
+		t.Fatalf("WriteFile(lucind-checks.sh) error = %v", err)
+	}
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(repoDir); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(cwd)
+
+	logPath := filepath.Join(repoDir, "verify-mechanical.log")
+
+	var stdout, stderr bytes.Buffer
+	code := run(context.Background(), []string{"check"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run(check) exit code = %d, want 0", code)
+	}
+
+	if _, err := os.Stat(logPath); !os.IsNotExist(err) {
+		t.Errorf("expected no log file created at %s, but stat error = %v", logPath, err)
+	}
+}
+
+// TestRunCheckUsageAndUnknownFlags (Task 1.9 & 1.10) proves that unknown flags and unexpected
+// positional arguments to check exit 1 and print usage, and that the global usage string documents check.
+func TestRunCheckUsageAndUnknownFlags(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+
+	// 1. Unknown flag to check
+	code := run(context.Background(), []string{"check", "--bogus"}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("run(check --bogus) exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "usage: lucind-ai check [--out <path>]") {
+		t.Fatalf("stderr = %q, want check usage text", stderr.String())
+	}
+
+	// 2. Unexpected positional argument to check
+	stderr.Reset()
+	code = run(context.Background(), []string{"check", "extra-arg"}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("run(check extra-arg) exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "usage: lucind-ai check [--out <path>]") {
+		t.Fatalf("stderr = %q, want check usage text", stderr.String())
+	}
+
+	// 3. Global usage documents check subcommand alongside run, split, --version
+	stderr.Reset()
+	code = run(context.Background(), nil, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("run(nil) exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "lucind-ai check [--out <path>]") {
+		t.Fatalf("global usage stderr = %q, want it to document 'lucind-ai check [--out <path>]'", stderr.String())
+	}
+}
+
+// TestFormatMechanicalLogHeader (Task 2.1 & 2.2) proves that formatMechanicalLog prepends
+// the structured header with 40-char commit SHA, exit code, duration, and command line to transcript.
+func TestFormatMechanicalLogHeader(t *testing.T) {
+	commitSHA := "0123456789abcdef0123456789abcdef01234567"
+	exitCode := 0
+	duration := 1234 * time.Millisecond
+	transcript := "PASS: unit tests passed\n"
+
+	got := formatMechanicalLog(commitSHA, exitCode, duration, transcript)
+
+	if !strings.HasPrefix(got, "=== lucind-ai mechanical check ===\n") {
+		t.Errorf("got = %q, want prefix '=== lucind-ai mechanical check ===\\n'", got)
+	}
+	if !strings.Contains(got, "Git Commit SHA: 0123456789abcdef0123456789abcdef01234567\n") {
+		t.Errorf("got = %q, want it to contain 'Git Commit SHA: %s\\n'", got, commitSHA)
+	}
+	if !strings.Contains(got, "Command: lucind-checks.sh\n") {
+		t.Errorf("got = %q, want it to contain 'Command: lucind-checks.sh\\n'", got)
+	}
+	if !strings.Contains(got, "Duration: 1.234s\n") {
+		t.Errorf("got = %q, want it to contain 'Duration: 1.234s\\n'", got)
+	}
+	if !strings.Contains(got, "Exit Code: 0\n") {
+		t.Errorf("got = %q, want it to contain 'Exit Code: 0\\n'", got)
+	}
+	if !strings.Contains(got, "==================================\n") {
+		t.Errorf("got = %q, want it to contain header delimiter", got)
+	}
+	if !strings.HasSuffix(got, transcript) {
+		t.Errorf("got = %q, want suffix %q", got, transcript)
+	}
+
+	// Test non-zero exit code
+	failLog := formatMechanicalLog(commitSHA, 1, 500*time.Millisecond, "FAIL\n")
+	if !strings.Contains(failLog, "Exit Code: 1\n") {
+		t.Errorf("failLog = %q, want 'Exit Code: 1\\n'", failLog)
+	}
+}
+
+
+
+
+
+
+
