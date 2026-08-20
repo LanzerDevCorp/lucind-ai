@@ -15,6 +15,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/LanzerDevCorp/lucind-ai/internal/dag"
 	"github.com/LanzerDevCorp/lucind-ai/internal/executor"
 	"github.com/LanzerDevCorp/lucind-ai/internal/integrate"
 	"github.com/LanzerDevCorp/lucind-ai/internal/lane"
@@ -37,7 +38,11 @@ const defaultTimeout = 20 * time.Minute
 // error, so a person driving the binary from a terminal always sees the one
 // invocation that works rather than a stack trace. --packet is repeatable:
 // each occurrence adds one more lane to the batch.
-const usage = "usage: lucind-ai run --packet <path> [--packet <path> ...] [--timeout <duration>]\n       lucind-ai --version"
+const usage = "usage: lucind-ai run --packet <path> [--packet <path> ...] [--timeout <duration>]\n       lucind-ai split --dag <path> --out <dir>\n       lucind-ai --version"
+
+// depsFactory constructs run.Deps for runDispatch. In production it is
+// productionDeps; tests may override it to inject test doubles or observe dependency calls.
+var depsFactory = productionDeps
 
 // supportedExecutors names every packet.Executor value this binary knows
 // how to dispatch. Unlisted values are a routing error, never a silent
@@ -84,6 +89,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	switch args[0] {
 	case "run":
 		return runDispatch(ctx, args[1:], stdout, stderr)
+	case "split":
+		return runSplit(ctx, args[1:], stdout, stderr)
 	case "--version", "-v":
 		fmt.Fprintf(stdout, "lucind-ai %s (%s, %s/%s)\n", version, runtime.Version(), runtime.GOOS, runtime.GOARCH)
 		return 0
@@ -145,6 +152,13 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 		}
 	}
 
+	// Upfront batch-disjointness check: must stay before ExecuteBatch and
+	// worktree.Create so Create is not the first overlap-failure side effect.
+	if err := packet.DisjointAllowedPaths(ps); err != nil {
+		fmt.Fprintf(stderr, "lucind-ai: %v\n", err)
+		return 1
+	}
+
 	primaryRoot, err := resolvePrimaryRoot(ctx)
 	if err != nil {
 		fmt.Fprintf(stderr, "lucind-ai: resolve primary repository root: %v\n", err)
@@ -170,7 +184,7 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 	}
 	defer ledg.Close()
 
-	deps := productionDeps(runID, primaryRoot, ledg, *timeout)
+	deps := depsFactory(runID, primaryRoot, ledg, *timeout)
 
 	// N lanes is N simultaneous subscription quota burns. The forecast
 	// only prints for an actual batch (more than one lane): a single
@@ -202,13 +216,7 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 	}
 	fmt.Fprintf(stdout, "released:  %t\n", batch.Released)
 
-	if integrateReport.Reason != "" {
-		fmt.Fprintf(stdout, "integrate: attempted=%t passed=%t integrated=%d reverted=%d reason=%s\n",
-			integrateReport.Attempted, integrateReport.Passed, len(integrateReport.Integrated), len(integrateReport.Reverted), integrateReport.Reason)
-	} else {
-		fmt.Fprintf(stdout, "integrate: attempted=%t passed=%t integrated=%d reverted=%d\n",
-			integrateReport.Attempted, integrateReport.Passed, len(integrateReport.Integrated), len(integrateReport.Reverted))
-	}
+	printIntegrateReport(stdout, integrateReport)
 
 	reverted := make(map[string]bool, len(integrateReport.Reverted))
 	for _, id := range integrateReport.Reverted {
@@ -223,6 +231,42 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 		if r.Status != lane.Done || reverted[r.LaneID] {
 			return 1
 		}
+	}
+	return 0
+}
+
+// runSplit implements the "split" subcommand: parses an apply-dag.yaml sidecar,
+// validates DAG structure and disjointness, emits generated packet files under --out,
+// and prints copy-pasteable wave commands to stdout in dependency order.
+func runSplit(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("split", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	fs.Usage = func() {
+		fmt.Fprintln(stderr, usage)
+		fs.PrintDefaults()
+	}
+
+	dagPath := fs.String("dag", "", "path to apply-dag.yaml sidecar")
+	outDir := fs.String("out", "", "output directory for emitted packet markdown files")
+
+	if err := fs.Parse(args); err != nil {
+		return 1
+	}
+
+	if *dagPath == "" {
+		fmt.Fprintln(stderr, "lucind-ai: --dag is required")
+		fs.Usage()
+		return 1
+	}
+	if *outDir == "" {
+		fmt.Fprintln(stderr, "lucind-ai: --out is required")
+		fs.Usage()
+		return 1
+	}
+
+	if err := dag.Split(*dagPath, *outDir, stdout); err != nil {
+		fmt.Fprintf(stderr, "lucind-ai: %v\n", err)
+		return 1
 	}
 	return 0
 }
@@ -261,6 +305,30 @@ func printReport(w io.Writer, r lucindrun.Report) {
 			fmt.Fprintln(w, "---------------------------")
 		}
 	}
+}
+
+// printIntegrateReport prints the integration outcome summary, including
+// the integrate count line, integrated_ids, and reverted_ids.
+func printIntegrateReport(w io.Writer, rep lucindrun.IntegrateReport) {
+	if rep.Reason != "" {
+		fmt.Fprintf(w, "integrate: attempted=%t passed=%t integrated=%d reverted=%d reason=%s\n",
+			rep.Attempted, rep.Passed, len(rep.Integrated), len(rep.Reverted), rep.Reason)
+	} else {
+		fmt.Fprintf(w, "integrate: attempted=%t passed=%t integrated=%d reverted=%d\n",
+			rep.Attempted, rep.Passed, len(rep.Integrated), len(rep.Reverted))
+	}
+	printIDList(w, "integrated_ids", rep.Integrated)
+	printIDList(w, "reverted_ids", rep.Reverted)
+}
+
+// printIDList formats an ID list on a single line. When ids is empty, it
+// prints an explicitly empty list ("<label>:\n") rather than omitting the line.
+func printIDList(w io.Writer, label string, ids []string) {
+	if len(ids) == 0 {
+		fmt.Fprintf(w, "%s:\n", label)
+		return
+	}
+	fmt.Fprintf(w, "%s: %s\n", label, strings.Join(ids, " "))
 }
 
 // resolvePrimaryRoot runs "git rev-parse --show-toplevel" in the process's

@@ -10,7 +10,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/LanzerDevCorp/lucind-ai/internal/executor"
 	"github.com/LanzerDevCorp/lucind-ai/internal/lane"
+	"github.com/LanzerDevCorp/lucind-ai/internal/ledger"
 	lucindrun "github.com/LanzerDevCorp/lucind-ai/internal/run"
 	"github.com/LanzerDevCorp/lucind-ai/internal/worktree"
 )
@@ -251,6 +253,102 @@ func TestRunMultiplePacketsSecondUnsupportedExecutorIsCaught(t *testing.T) {
 	}
 }
 
+// TestRunOverlappingAllowedPathsFailsBeforeCreateWorktree (Task 5.4) proves that
+// two packets whose declared AllowedPaths overlap fail the upfront disjointness check,
+// returning exit code 1 and never invoking CreateWorktree.
+func TestRunOverlappingAllowedPathsFailsBeforeCreateWorktree(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+
+	dir := t.TempDir()
+	p1 := filepath.Join(dir, "packet-1.md")
+	p1Content := "---\n" +
+		"id: lane-1\n" +
+		"executor: agy\n" +
+		"routed_by: test\n" +
+		"allowed_paths: [\"internal/foo/\"]\n" +
+		"---\n" +
+		"Task 1\n"
+	if err := os.WriteFile(p1, []byte(p1Content), 0o644); err != nil {
+		t.Fatalf("write packet 1: %v", err)
+	}
+
+	p2 := filepath.Join(dir, "packet-2.md")
+	p2Content := "---\n" +
+		"id: lane-2\n" +
+		"executor: agy\n" +
+		"routed_by: test\n" +
+		"allowed_paths: [\"internal/foo/bar.go\"]\n" +
+		"---\n" +
+		"Task 2\n"
+	if err := os.WriteFile(p2, []byte(p2Content), 0o644); err != nil {
+		t.Fatalf("write packet 2: %v", err)
+	}
+
+	createCalled := false
+	origFactory := depsFactory
+	defer func() { depsFactory = origFactory }()
+	depsFactory = func(runID, primaryRoot string, ledg *ledger.Ledger, timeout time.Duration) lucindrun.Deps {
+		deps := origFactory(runID, primaryRoot, ledg, timeout)
+		deps.CreateWorktree = func(ctx context.Context, primaryRoot, laneID string) (worktree.Worktree, error) {
+			createCalled = true
+			return origFactory(runID, primaryRoot, ledg, timeout).CreateWorktree(ctx, primaryRoot, laneID)
+		}
+		return deps
+	}
+
+	code := run(context.Background(), []string{"run", "--packet", p1, "--packet", p2}, &stdout, &stderr)
+
+	if code != 1 {
+		t.Fatalf("run with overlapping allowed_paths exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "overlapping allowed_paths") {
+		t.Fatalf("stderr = %q, want it to report overlapping allowed_paths error", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "lane-1") || !strings.Contains(stderr.String(), "lane-2") {
+		t.Fatalf("stderr = %q, want it to name the overlapping packet IDs", stderr.String())
+	}
+	if createCalled {
+		t.Fatalf("CreateWorktree was invoked, want it never to be called when allowed_paths overlap")
+	}
+}
+
+// TestRunDisjointAllowedPathsPassesCheck (Task 5.5) proves that two packets declaring
+// disjoint allowed_paths pass the upfront check and proceed past it.
+func TestRunDisjointAllowedPathsPassesCheck(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+
+	dir := t.TempDir()
+	p1 := filepath.Join(dir, "packet-1.md")
+	p1Content := "---\n" +
+		"id: lane-1\n" +
+		"executor: agy\n" +
+		"routed_by: test\n" +
+		"allowed_paths: [\"internal/foo/\"]\n" +
+		"---\n" +
+		"Task 1\n"
+	if err := os.WriteFile(p1, []byte(p1Content), 0o644); err != nil {
+		t.Fatalf("write packet 1: %v", err)
+	}
+
+	p2 := filepath.Join(dir, "packet-2.md")
+	p2Content := "---\n" +
+		"id: lane-2\n" +
+		"executor: agy\n" +
+		"routed_by: test\n" +
+		"allowed_paths: [\"internal/bar/\"]\n" +
+		"---\n" +
+		"Task 2\n"
+	if err := os.WriteFile(p2, []byte(p2Content), 0o644); err != nil {
+		t.Fatalf("write packet 2: %v", err)
+	}
+
+	run(context.Background(), []string{"run", "--packet", p1, "--packet", p2}, &stdout, &stderr)
+
+	if strings.Contains(stderr.String(), "overlapping allowed_paths") {
+		t.Fatalf("stderr = %q, want disjoint allowed_paths to pass the upfront check", stderr.String())
+	}
+}
+
 // TestPrintReportNotesIncompleteOutputCaptureWhenTruncated proves a report
 // carrying OutputCaptureIncomplete gets a diagnostic note, printed after
 // the status line (subordinate to it, never a headline), and that the note
@@ -384,6 +482,59 @@ func TestPrintReportOmitsDiagnosisBlockForDoneLane(t *testing.T) {
 	}
 }
 
+// TestPrintIntegrateReportIncludesIntegratedAndRevertedIDs (Task 5.1) proves that
+// given an IntegrateReport with both integrated and reverted lanes, printIntegrateReport
+// writes the integrate summary line and the integrated_ids and reverted_ids lines.
+func TestPrintIntegrateReportIncludesIntegratedAndRevertedIDs(t *testing.T) {
+	var stdout bytes.Buffer
+	rep := lucindrun.IntegrateReport{
+		Attempted:  true,
+		Passed:     true,
+		Integrated: []string{"apply-ledger"},
+		Reverted:   []string{"apply-serve"},
+		Reason:     "bisected out of batch",
+	}
+
+	printIntegrateReport(&stdout, rep)
+
+	out := stdout.String()
+	if !strings.Contains(out, "integrate: attempted=true passed=true integrated=1 reverted=1 reason=bisected out of batch") {
+		t.Errorf("printIntegrateReport output = %q, want it to contain integrate summary count line", out)
+	}
+	if !strings.Contains(out, "integrated_ids: apply-ledger") {
+		t.Errorf("printIntegrateReport output = %q, want it to contain integrated_ids: apply-ledger", out)
+	}
+	if !strings.Contains(out, "reverted_ids: apply-serve") {
+		t.Errorf("printIntegrateReport output = %q, want it to contain reverted_ids: apply-serve", out)
+	}
+}
+
+// TestPrintIntegrateReportAllIntegratedExplicitlyEmptyRevertedIDs (Task 5.2) proves that
+// when all lanes integrate and none are reverted, printIntegrateReport writes integrated_ids
+// and an explicitly empty reverted_ids: line (not omitted).
+func TestPrintIntegrateReportAllIntegratedExplicitlyEmptyRevertedIDs(t *testing.T) {
+	var stdout bytes.Buffer
+	rep := lucindrun.IntegrateReport{
+		Attempted:  true,
+		Passed:     true,
+		Integrated: []string{"lane-1", "lane-2"},
+		Reverted:   nil,
+	}
+
+	printIntegrateReport(&stdout, rep)
+
+	out := stdout.String()
+	if !strings.Contains(out, "integrate: attempted=true passed=true integrated=2 reverted=0") {
+		t.Errorf("printIntegrateReport output = %q, want it to contain integrate summary count line", out)
+	}
+	if !strings.Contains(out, "integrated_ids: lane-1 lane-2") {
+		t.Errorf("printIntegrateReport output = %q, want it to contain integrated_ids: lane-1 lane-2", out)
+	}
+	if !strings.Contains(out, "reverted_ids:\n") {
+		t.Errorf("printIntegrateReport output = %q, want it to contain explicitly empty reverted_ids:", out)
+	}
+}
+
 // initRepo creates a throwaway git repository in t.TempDir() with one
 // commit, so "git worktree add" has a HEAD to branch from. It works on a
 // machine with no configured git identity by passing user.email/user.name
@@ -510,5 +661,300 @@ func TestProductionDepsGitInspectionErrorPropagation(t *testing.T) {
 	if err == nil {
 		t.Error("PorcelainEmpty() error = nil, want non-nil for non-git directory")
 	}
+}
+
+// TestRunSplitTwoWaveDAGSuccess (Task 5.8) proves that invoking `lucind-ai split`
+// with --dag and --out on a valid two-wave fixture writes packet files, prints
+// the copy-pasteable wave commands to stdout, and exits 0.
+func TestRunSplitTwoWaveDAGSuccess(t *testing.T) {
+	tempDir := t.TempDir()
+	bodiesDir := filepath.Join(tempDir, "bodies")
+	if err := os.MkdirAll(bodiesDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, name := range []string{"apply-ledger", "apply-serve", "apply-run"} {
+		body := "# Goal\n\nGoal for " + name + "\n\n## Done criteria\n\n- [ ] Done\n"
+		if err := os.WriteFile(filepath.Join(bodiesDir, name+".md"), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	yamlContent := `change: apply-dag-dispatch
+packets:
+  - id: apply-ledger
+    executor: agy
+    routed_by: schema and CRUD isolated from HTTP
+    allowed_paths:
+      - internal/ledger/
+    depends_on: []
+    body_path: bodies/apply-ledger.md
+  - id: apply-serve
+    executor: cursor-agent
+    routed_by: HTTP isolated after ledger exists
+    allowed_paths:
+      - internal/serve/
+    depends_on:
+      - apply-ledger
+    body_path: bodies/apply-serve.md
+  - id: apply-run
+    executor: agy
+    routed_by: run logic isolated after ledger exists
+    allowed_paths:
+      - internal/run/
+    depends_on:
+      - apply-ledger
+    body_path: bodies/apply-run.md
+`
+	dagPath := filepath.Join(tempDir, "apply-dag.yaml")
+	if err := os.WriteFile(dagPath, []byte(yamlContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	outDir := filepath.Join(tempDir, "packets")
+	var stdout, stderr bytes.Buffer
+
+	code := run(context.Background(), []string{"split", "--dag", dagPath, "--out", outDir}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run(split) exit code = %d, want 0; stderr = %q", code, stderr.String())
+	}
+
+	// Verify emitted packet files
+	for _, expected := range []string{"apply-ledger.md", "apply-serve.md", "apply-run.md"} {
+		path := filepath.Join(outDir, expected)
+		if _, err := os.Stat(path); err != nil {
+			t.Errorf("expected emitted file %s not found: %v", expected, err)
+		}
+	}
+
+	// Verify wave commands on stdout
+	outStr := stdout.String()
+	if !strings.Contains(outStr, "lucind-ai run --packet "+filepath.Join(outDir, "apply-ledger.md")) {
+		t.Errorf("stdout = %q, want it to contain wave 1 command", outStr)
+	}
+	if !strings.Contains(outStr, "apply-serve.md") || !strings.Contains(outStr, "apply-run.md") {
+		t.Errorf("stdout = %q, want it to contain wave 2 command with both packets", outStr)
+	}
+}
+
+// TestRunSplitValidationFailuresExit1AndWriteNoFiles (Task 5.9) proves that
+// invalid DAGs (cyclic, duplicate-id, empty-allowed_paths) exit 1 and write no files under --out.
+func TestRunSplitValidationFailuresExit1AndWriteNoFiles(t *testing.T) {
+	tests := []struct {
+		name string
+		yaml string
+	}{
+		{
+			name: "duplicate id",
+			yaml: `change: test
+packets:
+  - id: dup
+    executor: agy
+    routed_by: test
+    allowed_paths: [internal/a/]
+    depends_on: []
+    body_path: bodies/dup.md
+  - id: dup
+    executor: agy
+    routed_by: test
+    allowed_paths: [internal/b/]
+    depends_on: []
+    body_path: bodies/dup.md`,
+		},
+		{
+			name: "cycle",
+			yaml: `change: test
+packets:
+  - id: p1
+    executor: agy
+    routed_by: test
+    allowed_paths: [internal/a/]
+    depends_on: [p2]
+    body_path: bodies/p1.md
+  - id: p2
+    executor: agy
+    routed_by: test
+    allowed_paths: [internal/b/]
+    depends_on: [p1]
+    body_path: bodies/p2.md`,
+		},
+		{
+			name: "empty allowed_paths",
+			yaml: `change: test
+packets:
+  - id: p1
+    executor: agy
+    routed_by: test
+    allowed_paths: []
+    depends_on: []
+    body_path: bodies/p1.md`,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			tempDir := t.TempDir()
+			bodiesDir := filepath.Join(tempDir, "bodies")
+			if err := os.MkdirAll(bodiesDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			for _, id := range []string{"dup", "p1", "p2"} {
+				if err := os.WriteFile(filepath.Join(bodiesDir, id+".md"), []byte("# Goal\nGoal\n"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			dagPath := filepath.Join(tempDir, "apply-dag.yaml")
+			if err := os.WriteFile(dagPath, []byte(tc.yaml), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			outDir := filepath.Join(tempDir, "packets")
+			var stdout, stderr bytes.Buffer
+
+			code := run(context.Background(), []string{"split", "--dag", dagPath, "--out", outDir}, &stdout, &stderr)
+			if code != 1 {
+				t.Fatalf("run(split) on %s exit code = %d, want 1", tc.name, code)
+			}
+			if stderr.Len() == 0 {
+				t.Fatalf("run(split) on %s stderr is empty, want error output", tc.name)
+			}
+
+			// OutDir should either not exist or have 0 files
+			if entries, err := os.ReadDir(outDir); err == nil && len(entries) > 0 {
+				t.Fatalf("outDir has %d entries, want 0 files written on validation failure", len(entries))
+			}
+		})
+	}
+}
+
+// TestRunSplitMissingFlagsIsUsageError proves that split requires --dag and --out.
+func TestRunSplitMissingFlagsIsUsageError(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := run(context.Background(), []string{"split"}, &stdout, &stderr)
+	if code == 0 {
+		t.Fatalf("run(split with no flags) exit code = 0, want 1")
+	}
+	if !strings.Contains(stderr.String(), "--dag") {
+		t.Fatalf("stderr = %q, want mention of --dag", stderr.String())
+	}
+
+	stderr.Reset()
+	code = run(context.Background(), []string{"split", "--dag", "some/path.yaml"}, &stdout, &stderr)
+	if code == 0 {
+		t.Fatalf("run(split with no --out) exit code = 0, want 1")
+	}
+	if !strings.Contains(stderr.String(), "--out") {
+		t.Fatalf("stderr = %q, want mention of --out", stderr.String())
+	}
+}
+
+// TestRunSequentialInvocationsProduceDistinctRunIDs (Task 5.11 & 5.12) proves that
+// two sequential runDispatch invocations produce two distinct run id lines on stdout.
+func TestRunSequentialInvocationsProduceDistinctRunIDs(t *testing.T) {
+	primaryRoot := initRepo(t)
+
+	p1 := filepath.Join(primaryRoot, "packet-1.md")
+	p1Content := "---\n" +
+		"id: lane-1\n" +
+		"executor: agy\n" +
+		"routed_by: test\n" +
+		"---\n" +
+		"Task 1\n"
+	if err := os.WriteFile(p1, []byte(p1Content), 0o644); err != nil {
+		t.Fatalf("write packet 1: %v", err)
+	}
+
+	origFactory := depsFactory
+	defer func() { depsFactory = origFactory }()
+	depsFactory = func(runID, primaryRoot string, ledg *ledger.Ledger, timeout time.Duration) lucindrun.Deps {
+		deps := origFactory(runID, primaryRoot, ledg, timeout)
+		deps.CreateWorktree = func(ctx context.Context, primaryRoot, laneID string) (worktree.Worktree, error) {
+			return worktree.Worktree{Path: t.TempDir(), Branch: "branch-" + laneID}, nil
+		}
+		deps.HasUniqueLaneCommits = func(ctx context.Context, worktreePath string) (bool, error) {
+			return true, nil
+		}
+		deps.PorcelainEmpty = func(ctx context.Context, worktreePath string) (bool, error) {
+			return true, nil
+		}
+		deps.LookupExecutor = func(name string) (executor.Executor, error) {
+			return testDoneExecutor{}, nil
+		}
+		deps.CombineTree = func(ctx context.Context, primaryRoot, runID string, branches []string) (string, string, error) {
+			return t.TempDir(), "integration-branch", nil
+		}
+		deps.RunChecks = func(ctx context.Context, worktreePath string) (bool, string, error) {
+			return true, "", nil
+		}
+		deps.PromoteTarget = func(ctx context.Context, primaryRoot, integrationBranch string) error {
+			return nil
+		}
+		deps.DiscardCombined = func(ctx context.Context, primaryRoot, worktreePath, branchName string) error {
+			return nil
+		}
+		deps.RemoveLaneWorktree = func(ctx context.Context, primaryRoot, worktreePath, branch string) error {
+			return nil
+		}
+		return deps
+	}
+
+	// Change working directory to primaryRoot for resolvePrimaryRoot
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(primaryRoot); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(cwd)
+
+	var stdout1, stderr1 bytes.Buffer
+	code1 := run(context.Background(), []string{"run", "--packet", p1}, &stdout1, &stderr1)
+	if code1 != 0 {
+		t.Fatalf("run 1 exit code = %d, want 0; stderr = %q", code1, stderr1.String())
+	}
+
+	var stdout2, stderr2 bytes.Buffer
+	code2 := run(context.Background(), []string{"run", "--packet", p1}, &stdout2, &stderr2)
+	if code2 != 0 {
+		t.Fatalf("run 2 exit code = %d, want 0; stderr = %q", code2, stderr2.String())
+	}
+
+	runID1 := extractRunID(stdout1.String())
+	runID2 := extractRunID(stdout2.String())
+
+	if runID1 == "" {
+		t.Fatalf("run 1 stdout has no run id line; stdout = %q", stdout1.String())
+	}
+	if runID2 == "" {
+		t.Fatalf("run 2 stdout has no run id line; stdout = %q", stdout2.String())
+	}
+	if runID1 == runID2 {
+		t.Fatalf("run 1 and run 2 produced the same run id %q, want distinct run IDs per wave", runID1)
+	}
+}
+
+type testDoneExecutor struct{}
+
+func (testDoneExecutor) Run(ctx context.Context, req executor.Request) (executor.Outcome, error) {
+	envelope := `{"packet_id": "lane-1", "status": "done", "summary": "done", "hard_stops": []}`
+	envelopePath := filepath.Join(req.WorktreePath, ".lucind", "result.json")
+	_ = os.MkdirAll(filepath.Dir(envelopePath), 0o755)
+	_ = os.WriteFile(envelopePath, []byte(envelope), 0o644)
+	return executor.Outcome{ExitCode: 0}, nil
+}
+
+func (testDoneExecutor) DefaultModel() string {
+	return "test-model"
+}
+
+func extractRunID(stdout string) string {
+	for _, line := range strings.Split(stdout, "\n") {
+		if strings.HasPrefix(line, "run id: ") {
+			return strings.TrimSpace(strings.TrimPrefix(line, "run id: "))
+		}
+	}
+	return ""
 }
 
