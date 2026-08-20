@@ -1025,14 +1025,20 @@ func TestRunSequentialInvocationsProduceDistinctRunIDs(t *testing.T) {
 	}
 }
 
-type testDoneExecutor struct{}
+type testDoneExecutor struct {
+	exitCode int
+	envelope string
+}
 
-func (testDoneExecutor) Run(ctx context.Context, req executor.Request) (executor.Outcome, error) {
-	envelope := `{"packet_id": "lane-1", "status": "done", "summary": "done", "hard_stops": []}`
+func (e testDoneExecutor) Run(ctx context.Context, req executor.Request) (executor.Outcome, error) {
+	envelope := e.envelope
+	if envelope == "" {
+		envelope = `{"packet_id": "lane-1", "status": "done", "summary": "done", "hard_stops": []}`
+	}
 	envelopePath := filepath.Join(req.WorktreePath, ".lucind", "result.json")
 	_ = os.MkdirAll(filepath.Dir(envelopePath), 0o755)
 	_ = os.WriteFile(envelopePath, []byte(envelope), 0o644)
-	return executor.Outcome{ExitCode: 0}, nil
+	return executor.Outcome{ExitCode: e.exitCode}, nil
 }
 
 func (testDoneExecutor) DefaultModel() string {
@@ -1050,6 +1056,215 @@ func extractRunID(stdout string) string {
 		}
 	}
 	return ""
+}
+
+const blockedApplyRootEnvelope = `{
+	"packet_id": "apply-root",
+	"status": "blocked",
+	"summary": "blocked",
+	"hard_stops": [{"hard_stop": "stop", "fired": true, "note": "wave 1 blocked"}]
+}`
+
+// writeApplyDagTwoPacketFixture builds the Phase 7 two-node DAG (one
+// depends_on edge) and splits it. It returns the two stdout wave packet
+// paths in dependency order (root then leaf).
+func writeApplyDagTwoPacketFixture(t *testing.T) (wave1Path, wave2Path string) {
+	t.Helper()
+
+	tempDir := t.TempDir()
+	bodiesDir := filepath.Join(tempDir, "bodies")
+	if err := os.MkdirAll(bodiesDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	rootBody := "## Goal\n\nRoot packet work that the leaf depends on.\n"
+	leafBody := "## Goal\n\nLeaf packet work that runs after the root.\n"
+	if err := os.WriteFile(filepath.Join(bodiesDir, "apply-root.md"), []byte(rootBody), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bodiesDir, "apply-leaf.md"), []byte(leafBody), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	yamlContent := `change: apply-dag-dispatch
+packets:
+  - id: apply-root
+    executor: agy
+    routed_by: root has no dependencies
+    allowed_paths:
+      - internal/root/
+    depends_on: []
+    body_path: bodies/apply-root.md
+  - id: apply-leaf
+    executor: agy
+    routed_by: leaf depends on root
+    allowed_paths:
+      - internal/leaf/
+    depends_on:
+      - apply-root
+    body_path: bodies/apply-leaf.md
+`
+	dagPath := filepath.Join(tempDir, "apply-dag.yaml")
+	if err := os.WriteFile(dagPath, []byte(yamlContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	outDir := filepath.Join(tempDir, "packets")
+	var stdout, stderr bytes.Buffer
+	code := run(context.Background(), []string{"split", "--dag", dagPath, "--out", outDir}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run(split) exit code = %d, want 0; stderr = %q", code, stderr.String())
+	}
+
+	lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("split stdout = %q, want exactly two wave lines", stdout.String())
+	}
+	wave1Path = packetPathFromWaveLine(t, lines[0])
+	wave2Path = packetPathFromWaveLine(t, lines[1])
+	return wave1Path, wave2Path
+}
+
+func packetPathFromWaveLine(t *testing.T, line string) string {
+	t.Helper()
+	const prefix = "lucind-ai run --packet "
+	if !strings.HasPrefix(line, prefix) {
+		t.Fatalf("wave line %q, want prefix %q", line, prefix)
+	}
+	path := strings.TrimSpace(strings.TrimPrefix(line, prefix))
+	if path == "" || strings.Contains(path, " --") {
+		t.Fatalf("wave line %q, want a single --packet path", line)
+	}
+	return path
+}
+
+// overrideDispatchDeps installs the runDispatch test doubles used by
+// TestRunSequentialInvocationsProduceDistinctRunIDs, substituting exec for
+// LookupExecutor. CreateWorktree stays the production git worktree so the
+// AllowedPaths scope-check can inspect a real repo; a dummy TempDir would
+// Block as a git failure once emitted packets carry allowed_paths.
+func overrideDispatchDeps(t *testing.T, exec executor.Executor) {
+	t.Helper()
+	origFactory := depsFactory
+	t.Cleanup(func() { depsFactory = origFactory })
+	depsFactory = func(runID, primaryRoot string, ledg *ledger.Ledger, timeout time.Duration) lucindrun.Deps {
+		deps := origFactory(runID, primaryRoot, ledg, timeout)
+		deps.CreateWorktree = origFactory(runID, primaryRoot, ledg, timeout).CreateWorktree
+		deps.HasUniqueLaneCommits = func(ctx context.Context, worktreePath string) (bool, error) {
+			return true, nil
+		}
+		deps.PorcelainEmpty = func(ctx context.Context, worktreePath string) (bool, error) {
+			return true, nil
+		}
+		deps.LookupExecutor = func(name string) (executor.Executor, error) {
+			return exec, nil
+		}
+		deps.CombineTree = func(ctx context.Context, primaryRoot, runID string, branches []string) (string, string, error) {
+			return t.TempDir(), "integration-branch", nil
+		}
+		deps.RunChecks = func(ctx context.Context, worktreePath string) (bool, string, error) {
+			return true, "", nil
+		}
+		deps.PromoteTarget = func(ctx context.Context, primaryRoot, integrationBranch string) error {
+			return nil
+		}
+		deps.DiscardCombined = func(ctx context.Context, primaryRoot, worktreePath, branchName string) error {
+			return nil
+		}
+		deps.RemoveLaneWorktree = func(ctx context.Context, primaryRoot, worktreePath, branch string) error {
+			return nil
+		}
+		return deps
+	}
+}
+
+// TestApplyDagTwoWaveSequentialDispatch (Phase 7.3) parses the two
+// lucind-ai run --packet lines from a two-node one-edge split and
+// dispatches them sequentially against testDoneExecutor. Wave 2 is only
+// invoked after wave 1 exits 0 — the test is the sequencer, not the binary.
+func TestApplyDagTwoWaveSequentialDispatch(t *testing.T) {
+	t.Run("wave2 after wave1 done", func(t *testing.T) {
+		primaryRoot := initRepo(t)
+		wave1Path, wave2Path := writeApplyDagTwoPacketFixture(t)
+		overrideDispatchDeps(t, testDoneExecutor{})
+
+		cwd, err := os.Getwd()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chdir(primaryRoot); err != nil {
+			t.Fatal(err)
+		}
+		defer os.Chdir(cwd)
+
+		var stdout1, stderr1 bytes.Buffer
+		code1 := run(context.Background(), []string{"run", "--packet", wave1Path}, &stdout1, &stderr1)
+
+		wave2Dispatched := false
+		var stdout2, stderr2 bytes.Buffer
+		var code2 int
+		if code1 == 0 {
+			wave2Dispatched = true
+			code2 = run(context.Background(), []string{"run", "--packet", wave2Path}, &stdout2, &stderr2)
+		}
+		if code1 != 0 {
+			t.Fatalf("wave 1 exit code = %d, want 0; stderr = %q; stdout = %q", code1, stderr1.String(), stdout1.String())
+		}
+		if !wave2Dispatched {
+			t.Fatal("wave 2 was not dispatched after wave 1 exit 0")
+		}
+		if code2 != 0 {
+			t.Fatalf("wave 2 exit code = %d, want 0; stderr = %q; stdout = %q", code2, stderr2.String(), stdout2.String())
+		}
+
+		runID1 := extractRunID(stdout1.String())
+		runID2 := extractRunID(stdout2.String())
+		if runID1 == "" {
+			t.Fatalf("wave 1 stdout has no run id line; stdout = %q", stdout1.String())
+		}
+		if runID2 == "" {
+			t.Fatalf("wave 2 stdout has no run id line; stdout = %q", stdout2.String())
+		}
+		if runID1 == runID2 {
+			t.Fatalf("wave 1 and wave 2 produced the same run id %q, want distinct run IDs", runID1)
+		}
+		if !strings.Contains(stdout1.String(), "integrated_ids: apply-root") {
+			t.Fatalf("wave 1 stdout = %q, want integrated_ids: apply-root", stdout1.String())
+		}
+	})
+
+	t.Run("wave2 skipped when wave1 blocked", func(t *testing.T) {
+		primaryRoot := initRepo(t)
+		wave1Path, wave2Path := writeApplyDagTwoPacketFixture(t)
+		overrideDispatchDeps(t, testDoneExecutor{
+			exitCode: 1,
+			envelope: blockedApplyRootEnvelope,
+		})
+
+		cwd, err := os.Getwd()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chdir(primaryRoot); err != nil {
+			t.Fatal(err)
+		}
+		defer os.Chdir(cwd)
+
+		var stdout1, stderr1 bytes.Buffer
+		code1 := run(context.Background(), []string{"run", "--packet", wave1Path}, &stdout1, &stderr1)
+
+		wave2Dispatched := false
+		if code1 == 0 {
+			wave2Dispatched = true
+			var stdout2, stderr2 bytes.Buffer
+			_ = run(context.Background(), []string{"run", "--packet", wave2Path}, &stdout2, &stderr2)
+		}
+		if code1 == 0 {
+			t.Fatalf("wave 1 exit code = 0, want non-zero after blocked envelope; stdout = %q", stdout1.String())
+		}
+		if wave2Dispatched {
+			t.Fatal("wave 2 was dispatched after a non-zero wave 1 exit")
+		}
+	})
 }
 
 // TestRunCheckMissingScriptFails (Task 1.1) proves that invoking check in a repository
@@ -1380,10 +1595,3 @@ func TestFormatMechanicalLogHeader(t *testing.T) {
 		t.Errorf("failLog = %q, want 'Exit Code: 1\\n'", failLog)
 	}
 }
-
-
-
-
-
-
-
