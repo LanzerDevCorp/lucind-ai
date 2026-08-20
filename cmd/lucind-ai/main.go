@@ -11,6 +11,16 @@ import (
 	"os"
 )
 
+// version is the build identifier reported by `lucind-ai --version` / `-v`.
+// It is overridden at build time via:
+//
+//	go install -ldflags "-X main.version=$(git describe --tags --always --dirty)" ./cmd/lucind-ai
+//
+// (see the `install` target in the repository Makefile). The zero value
+// "dev" marks a binary built without that flag, so an ad-hoc `go build`
+// output is never silently mistaken for a real, traceable build.
+var version = "dev"
+
 func main() {
 	os.Exit(run(context.Background(), os.Args[1:], os.Stdout, os.Stderr))
 }

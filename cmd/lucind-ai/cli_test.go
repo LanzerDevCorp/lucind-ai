@@ -51,6 +51,35 @@ func TestRunUnknownSubcommandPrintsUsageAndFails(t *testing.T) {
 	}
 }
 
+func TestRunVersionFlagPrintsVersion(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+
+	code := run(context.Background(), []string{"--version"}, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("run(--version) exit code = %d, want 0", code)
+	}
+	if !strings.Contains(stdout.String(), "lucind-ai") {
+		t.Fatalf("stdout = %q, want it to contain %q", stdout.String(), "lucind-ai")
+	}
+	if !strings.Contains(stdout.String(), version) {
+		t.Fatalf("stdout = %q, want it to contain the build version %q", stdout.String(), version)
+	}
+}
+
+func TestRunShortVersionFlagPrintsVersion(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+
+	code := run(context.Background(), []string{"-v"}, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("run(-v) exit code = %d, want 0", code)
+	}
+	if !strings.Contains(stdout.String(), "lucind-ai") {
+		t.Fatalf("stdout = %q, want it to contain %q", stdout.String(), "lucind-ai")
+	}
+}
+
 func TestRunMissingPacketFlagIsUsageError(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 

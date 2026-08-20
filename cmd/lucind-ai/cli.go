@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -36,7 +37,7 @@ const defaultTimeout = 20 * time.Minute
 // error, so a person driving the binary from a terminal always sees the one
 // invocation that works rather than a stack trace. --packet is repeatable:
 // each occurrence adds one more lane to the batch.
-const usage = "usage: lucind-ai run --packet <path> [--packet <path> ...] [--timeout <duration>]"
+const usage = "usage: lucind-ai run --packet <path> [--packet <path> ...] [--timeout <duration>]\n       lucind-ai --version"
 
 // supportedExecutors names every packet.Executor value this binary knows
 // how to dispatch. Unlisted values are a routing error, never a silent
@@ -83,6 +84,9 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	switch args[0] {
 	case "run":
 		return runDispatch(ctx, args[1:], stdout, stderr)
+	case "--version", "-v":
+		fmt.Fprintf(stdout, "lucind-ai %s (%s, %s/%s)\n", version, runtime.Version(), runtime.GOOS, runtime.GOARCH)
+		return 0
 	default:
 		fmt.Fprintf(stderr, "lucind-ai: unknown subcommand %q\n%s\n", args[0], usage)
 		return 1
