@@ -3,6 +3,7 @@ package packet_test
 import (
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -565,6 +566,130 @@ func TestPacketTemplateVerifyPointerNote(t *testing.T) {
 	}
 }
 
+func TestSkillMDVerifyOperationalWorkflow(t *testing.T) {
+	skillPath := filepath.Join("..", "..", "plugin", "claude-code", "skills", "lucind-ai", "SKILL.md")
+	data, err := os.ReadFile(skillPath)
+	if err != nil {
+		t.Fatalf("ReadFile(%s) error = %v", skillPath, err)
+	}
+	content := string(data)
 
+	verifyRow, ok := skillMDTableRow(content, "`verify`")
+	if !ok {
+		t.Fatal("SKILL.md target-direction table missing `verify` row")
+	}
 
+	// Target-direction verify row: operational two-stage dispatch, not a blocker.
+	if !strings.Contains(verifyRow, "lucind-ai check") {
+		t.Errorf("verify row does not document Stage 1 mechanical check via lucind-ai check:\n%s", verifyRow)
+	}
+	if !strings.Contains(verifyRow, "agy") || !strings.Contains(verifyRow, "cursor-agent") {
+		t.Errorf("verify row does not document Stage 2 qualitative judgment dual-dispatched to agy + cursor-agent:\n%s", verifyRow)
+	}
+	if !strings.Contains(verifyRow, "Built. See **Verify dispatch** below.") {
+		t.Errorf("verify row is not marked built / does not point at Verify dispatch:\n%s", verifyRow)
+	}
+	for _, blocked := range []string{
+		"once tooling exists",
+		"not yet built",
+		"Needs an explicit",
+	} {
+		if strings.Contains(verifyRow, blocked) {
+			t.Errorf("verify row still contains blocked/unbuilt language %q:\n%s", blocked, verifyRow)
+		}
+	}
 
+	// Stage 1: Mechanical Check
+	if !strings.Contains(content, "Stage 1: Mechanical Check") {
+		t.Error("SKILL.md missing Stage 1: Mechanical Check")
+	}
+	if !strings.Contains(content, "lucind-ai check --out openspec/changes/<change-id>/verify-mechanical.log") {
+		t.Error("SKILL.md missing lucind-ai check --out openspec/changes/<change-id>/verify-mechanical.log")
+	}
+	if !strings.Contains(content, "Halts immediately") && !strings.Contains(content, "halt immediately") {
+		t.Error("SKILL.md Stage 1 does not say verification halts immediately if checks fail")
+	}
+	if !strings.Contains(content, "candidate branch") || !strings.Contains(strings.ToLower(content), "commit") {
+		t.Error("SKILL.md Stage 1 does not say the log is committed to the candidate branch HEAD on pass")
+	}
+
+	// Stage 2: Dual Qualitative Judgment Dispatch
+	if !strings.Contains(content, "Stage 2: Dual Qualitative Judgment Dispatch") {
+		t.Error("SKILL.md missing Stage 2: Dual Qualitative Judgment Dispatch")
+	}
+	if !strings.Contains(content, "packets/verify-<id>-agy.md") {
+		t.Error("SKILL.md missing packets/verify-<id>-agy.md")
+	}
+	if !strings.Contains(content, "packets/verify-<id>-cursor-agent.md") {
+		t.Error("SKILL.md missing packets/verify-<id>-cursor-agent.md")
+	}
+	if !strings.Contains(content, "verify-packet-template.md") {
+		t.Error("SKILL.md missing verify-packet-template.md")
+	}
+	if !strings.Contains(content, "read_only: true") {
+		t.Error("SKILL.md missing read_only: true")
+	}
+	if !strings.Contains(content, "## Context") {
+		t.Error("SKILL.md missing frozen mechanical summary in ## Context")
+	}
+	if !strings.Contains(content, "lucind-ai run --packet") || !strings.Contains(content, "verify-<id>-agy.md") || !strings.Contains(content, "verify-<id>-cursor-agent.md") {
+		t.Error("SKILL.md missing parallel lucind-ai run --packet dispatch of both verify lanes")
+	}
+	if !strings.Contains(strings.ToLower(content), "barrier") || !strings.Contains(strings.ToLower(content), "terminal") {
+		t.Error("SKILL.md Stage 2 does not document barrier join when both lanes reach terminal status")
+	}
+
+	// Stage 3: Evidence Cross-Checking & Verdict Reconciliation
+	if !strings.Contains(content, "Stage 3: Evidence Cross-Checking & Verdict Reconciliation") {
+		t.Error("SKILL.md missing Stage 3: Evidence Cross-Checking & Verdict Reconciliation")
+	}
+	if !strings.Contains(content, ".lucind/result.json") {
+		t.Error("SKILL.md Stage 3 does not read both .lucind/result.json envelopes")
+	}
+	if !strings.Contains(content, "file:line") {
+		t.Error("SKILL.md Stage 3 does not independently verify cited file:line evidence")
+	}
+
+	for _, want := range []string{
+		"Unanimous Pass",
+		"`done`/`done`",
+		"openspec/changes/<id>/verify.md",
+		"PASSED",
+		"verify: { status: done }",
+		"Disagreement / Disputed Defects",
+		"`blocked`/`deviated`",
+		"BLOCKED",
+		"Lane Failure",
+		"`failed`",
+		"Irreconcilable Ambiguity",
+	} {
+		if !strings.Contains(content, want) {
+			t.Errorf("SKILL.md Stage 3 missing %q", want)
+		}
+	}
+}
+
+func skillMDTableRow(content, phaseCell string) (string, bool) {
+	needle := "| " + phaseCell + " |"
+	for _, line := range strings.Split(content, "\n") {
+		if strings.HasPrefix(line, needle) {
+			return line, true
+		}
+	}
+	return "", false
+}
+
+func TestHumanPacketTemplateUntouched(t *testing.T) {
+	const rel = "plugin/claude-code/skills/lucind-ai/assets/human-packet-template.md"
+	repoRoot := filepath.Join("..", "..")
+	path := filepath.Join(repoRoot, rel)
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("stat %s: %v", path, err)
+	}
+	cmd := exec.Command("git", "diff", "--exit-code", "HEAD", "--", rel)
+	cmd.Dir = repoRoot
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Errorf("human-packet-template.md must match git HEAD (this packet does not touch it):\n%s", out)
+	}
+}

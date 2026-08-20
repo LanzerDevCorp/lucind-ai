@@ -96,7 +96,7 @@ arbitrate.
 |---|---|---|
 | `explore` | Dispatch via `lucind-ai run`, not a local Claude subagent — matches this project's own identity (Claude Code orchestrates, `agy`/`cursor-agent` execute). | Unblocked: frontmatter supports `read_only: true`; criterion 2 is replaced by `git status --porcelain` empty and `HEAD` equals `git merge-base HEAD <primary HEAD>`. |
 | `apply` | Author `openspec/changes/<id>/apply-dag.yaml` (sidecar; `tasks.md` stays the human checklist) → `lucind-ai split --dag … --out …` → run each printed `lucind-ai run` line **sequentially**, stop on exit 1. | Built. See **Apply dispatch** below. |
-| `verify` | Dual-dispatch `agy` + `cursor-agent` for the *qualitative* half of verification (does the implementation satisfy the spec's intent, are there coverage gaps) — not the mechanical half. | Mechanical checks (`go test`, `go vet`, `lucind-checks.sh`) are deterministic; running them twice through two LLMs adds no information, only cost. Dispatch only the judgment portion twice, once tooling exists to run mechanical checks a single time and hand both executors the same result to judge independently. |
+| `verify` | Stage 1: mechanical check once via `lucind-ai check`. Stage 2: Dual-dispatch `agy` + `cursor-agent` for the *qualitative* half of verification. | Built. See **Verify dispatch** below. |
 
 **Apply dispatch (built).** Apply authors packet files (and the sidecar when a DAG is wanted) and dispatches via `lucind-ai run`. It does **not** write the apply diff in the orchestrator's primary checkout.
 
@@ -109,6 +109,16 @@ When a DAG is wanted:
 3. Run each printed line **sequentially**. The orchestrator (this session, or a human) is the sequencer — the binary has no in-process `--dag` wave loop and no `--json` channel.
 
 Wave N+1 is dispatched only when wave N exits 0: every lane `done`, and none listed in `reverted_ids`. On a non-zero exit, halt. Read `integrated_ids` and `reverted_ids` from that wave's stdout (not a new report format). Confirm every wave-N id is listed under `integrated_ids` before running the next printed line.
+
+**Verify dispatch (built).** Verify is two-stage: mechanical checks (`lucind-checks.sh` via `lucind-ai check`) run once; Dual-dispatch `agy` + `cursor-agent` for the *qualitative* half of verification (spec intent, coverage gaps) — not the mechanical half. The orchestrator synthesizes one canonical `openspec/changes/<id>/verify.md`. Judgment lanes do **not** re-run the suite.
+
+1. **Stage 1: Mechanical Check.** Run `lucind-ai check --out openspec/changes/<change-id>/verify-mechanical.log` on the candidate branch. `check` wraps `lucind-checks.sh` through `internal/integrate.Check` and, when `--out` is set, writes a structured log (git SHA, command, duration, exit code, transcript). `--out` is optional on the CLI; this protocol always supplies it. Halts immediately if checks fail — remediate mechanical failures before any judgment dispatch. On pass, commit the log to the candidate branch `HEAD` so linked judgment worktrees inherit it (`.lucind/` is gitignored and is not shared across worktrees).
+2. **Stage 2: Dual Qualitative Judgment Dispatch.** Author `.lucind/packets/verify-<id>-agy.md` and `.lucind/packets/verify-<id>-cursor-agent.md` from `plugin/claude-code/skills/lucind-ai/assets/verify-packet-template.md` (`read_only: true`, frozen mechanical summary in `## Context`). Dispatch in parallel with `lucind-ai run --packet .lucind/packets/verify-<id>-agy.md --packet .lucind/packets/verify-<id>-cursor-agent.md`. The `run` barrier joins when both lanes reach terminal status. Do not execute `go test`, `go build`, `go vet`, or `lucind-checks.sh` in a judgment lane; the frozen transcript is already in `## Context`.
+3. **Stage 3: Evidence Cross-Checking & Verdict Reconciliation.** Read both lanes' `.lucind/result.json` envelopes. Independently verify every cited `file:line` against the real codebase (green criteria are not proof of complete work). Four-case reconciliation:
+   - **Unanimous Pass** (`done`/`done`): synthesizes `openspec/changes/<id>/verify.md` with overall status `PASSED`, consolidates complementary findings, updates `state.yaml` to `verify: { status: done }`.
+   - **Disagreement / Disputed Defects** (`blocked`/`deviated`): confirmed spec violations mark overall verdict `BLOCKED` with remediation tasks in `state.yaml`; demonstrable false positives are refuted with concrete `file:line` evidence in `verify.md` without blocking.
+   - **Lane Failure** (`failed` due to timeout/infra): re-dispatches the single failing lane before synthesis.
+   - **Irreconcilable Ambiguity**: contradictory interpretations of underspecified requirements unresolvable from specs/design set overall verdict `BLOCKED` and escalate decision options to the human.
 
 ### Packet Structure
 
@@ -146,6 +156,7 @@ Run from the primary repository root (the binary refuses to run from inside a li
 ```bash
 lucind-ai run --packet <path> [--packet <path> ...] [--timeout <duration>]
 lucind-ai split --dag <path> --out <dir>
+lucind-ai check [--out <path>]
 lucind-ai --version
 ```
 
@@ -155,6 +166,8 @@ lucind-ai --version
 | `--timeout <duration>` | Duration | `20m` | Wall-clock budget granted to each lane independently. |
 
 `lucind-ai split` takes two required flags: `--dag` (path to an `apply-dag.yaml` sidecar) and `--out` (directory for emitted packet markdown). It prints one `lucind-ai run --packet …` line per wave; it does not dispatch those waves.
+
+`lucind-ai check` runs `lucind-checks.sh` once via `internal/integrate.Check`. Transcript goes to stdout on pass and stderr on fail; `--out <path>` also writes the structured mechanical log (git SHA, command, duration, exit code, transcript). Exit 0 on pass, 1 on fail.
 
 ### Concurrency & Barrier
 
