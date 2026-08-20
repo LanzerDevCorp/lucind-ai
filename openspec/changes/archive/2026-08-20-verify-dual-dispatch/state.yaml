@@ -161,7 +161,15 @@ phases:
       `check --out` on a failing script is implemented correctly but untested. None contradicts a
       tested spec scenario. Full detail in verify.md.
   archive:
-    status: pending
+    status: done
+    note: |
+      Archived via sdd-archive executor. Three delta specs (verify-mechanical-check,
+      verify-judgment-packet, verify-dual-dispatch) merged into openspec/specs/ without
+      conflicts. Change folder moved from openspec/changes/verify-dual-dispatch/ to
+      openspec/changes/archive/2026-08-20-verify-dual-dispatch/ via git mv. Stale
+      checkbox reconciliation: tasks.md contains unchecked task boxes despite completion
+      proved by apply and verify phase notes (all tasks 1.1-5.4 implemented, tested,
+      integrated; full `go test ./... -race -count=1` suite green).
 notes: |
   One of three sibling changes split from a single umbrella exploration
   (sdd/dual-executor-dispatch/explore): read-only-packet-dispatch (small, done through tasks),
