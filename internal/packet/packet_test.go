@@ -82,6 +82,81 @@ func TestParseModelAbsentLeavesFieldEmpty(t *testing.T) {
 	}
 }
 
+func TestParseReadOnlyFrontmatter(t *testing.T) {
+	tests := []struct {
+		name         string
+		src          string
+		wantReadOnly bool
+	}{
+		{
+			name: "explicit read_only true",
+			src: "---\n" +
+				"id: fix-auth\n" +
+				"executor: agy\n" +
+				"routed_by: touches auth, Tier A verification required\n" +
+				"read_only: true\n" +
+				"---\n\n" +
+				"## Goal\n",
+			wantReadOnly: true,
+		},
+		{
+			name: "explicit read_only false",
+			src: "---\n" +
+				"id: fix-auth\n" +
+				"executor: agy\n" +
+				"routed_by: touches auth, Tier A verification required\n" +
+				"read_only: false\n" +
+				"---\n\n" +
+				"## Goal\n",
+			wantReadOnly: false,
+		},
+		{
+			name: "omitted key defaults to false",
+			src: "---\n" +
+				"id: fix-auth\n" +
+				"executor: agy\n" +
+				"routed_by: touches auth, Tier A verification required\n" +
+				"---\n\n" +
+				"## Goal\n",
+			wantReadOnly: false,
+		},
+		{
+			name: "id explore-foo with omitted key does not infer read_only",
+			src: "---\n" +
+				"id: explore-foo\n" +
+				"executor: agy\n" +
+				"routed_by: touches auth, Tier A verification required\n" +
+				"---\n\n" +
+				"## Goal\n",
+			wantReadOnly: false,
+		},
+		{
+			name: "unrecognized sibling keys ignored and read_only stays false",
+			src: "---\n" +
+				"id: fix-auth\n" +
+				"executor: agy\n" +
+				"routed_by: touches auth, Tier A verification required\n" +
+				"unknown_key: something\n" +
+				"another_key: 123\n" +
+				"---\n\n" +
+				"## Goal\n",
+			wantReadOnly: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p, err := packet.Parse(strings.NewReader(tt.src))
+			if err != nil {
+				t.Fatalf("Parse() error = %v, want nil", err)
+			}
+			if p.ReadOnly != tt.wantReadOnly {
+				t.Errorf("ReadOnly = %v, want %v", p.ReadOnly, tt.wantReadOnly)
+			}
+		})
+	}
+}
+
 func TestParseRejectsIncompletePackets(t *testing.T) {
 	tests := []struct {
 		name string
@@ -126,6 +201,46 @@ func TestParseRejectsIncompletePackets(t *testing.T) {
 		{
 			name: "body is empty",
 			src:  "---\nid: fix-auth\nexecutor: agy\nrouted_by: touches auth, Tier A verification required\n---\n\n\n",
+			want: packet.ErrEmptyBody,
+		},
+		{
+			name: "read_only is yes",
+			src:  "---\nid: fix-auth\nexecutor: agy\nrouted_by: touches auth, Tier A verification required\nread_only: yes\n---\n\n## Goal\n",
+			want: packet.ErrInvalidReadOnly,
+		},
+		{
+			name: "read_only is 1",
+			src:  "---\nid: fix-auth\nexecutor: agy\nrouted_by: touches auth, Tier A verification required\nread_only: 1\n---\n\n## Goal\n",
+			want: packet.ErrInvalidReadOnly,
+		},
+		{
+			name: "read_only is quoted string",
+			src:  "---\nid: fix-auth\nexecutor: agy\nrouted_by: touches auth, Tier A verification required\nread_only: \"true\"\n---\n\n## Goal\n",
+			want: packet.ErrInvalidReadOnly,
+		},
+		{
+			name: "read_only is empty",
+			src:  "---\nid: fix-auth\nexecutor: agy\nrouted_by: touches auth, Tier A verification required\nread_only:\n---\n\n## Goal\n",
+			want: packet.ErrInvalidReadOnly,
+		},
+		{
+			name: "id is missing with read_only true",
+			src:  "---\nexecutor: agy\nrouted_by: touches auth, Tier A verification required\nread_only: true\n---\n\n## Goal\n",
+			want: packet.ErrMissingID,
+		},
+		{
+			name: "executor is missing with read_only true",
+			src:  "---\nid: fix-auth\nrouted_by: touches auth, Tier A verification required\nread_only: true\n---\n\n## Goal\n",
+			want: packet.ErrMissingExecutor,
+		},
+		{
+			name: "routed_by is missing with read_only true",
+			src:  "---\nid: fix-auth\nexecutor: agy\nread_only: true\n---\n\n## Goal\n",
+			want: packet.ErrMissingRoutedBy,
+		},
+		{
+			name: "body is empty with read_only true",
+			src:  "---\nid: fix-auth\nexecutor: agy\nrouted_by: touches auth, Tier A verification required\nread_only: true\n---\n\n\n",
 			want: packet.ErrEmptyBody,
 		},
 	}

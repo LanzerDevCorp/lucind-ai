@@ -23,6 +23,7 @@ var (
 	ErrMissingExecutor = errors.New("packet: frontmatter is missing a non-empty executor")
 	ErrMissingRoutedBy = errors.New("packet: frontmatter is missing a non-empty routed_by")
 	ErrEmptyBody       = errors.New("packet: body is empty, there is no prompt to dispatch")
+	ErrInvalidReadOnly = errors.New("packet: frontmatter read_only must be a boolean (true or false)")
 )
 
 // Packet is one unit of delegated work.
@@ -42,6 +43,10 @@ type Packet struct {
 	// applied by internal/run when this field is empty — not filled in
 	// here, so Parse keeps reflecting frontmatter literally.
 	Model string
+	// ReadOnly marks this packet as exploration or read-only: it must
+	// produce no commits and leave a clean worktree. When absent, it
+	// defaults to false (write packet).
+	ReadOnly bool
 	// Body is the Markdown prompt, passed to the executor unchanged.
 	Body string
 }
@@ -72,6 +77,15 @@ func Parse(r io.Reader) (Packet, error) {
 			p.RoutedBy = strings.TrimSpace(value)
 		case "model":
 			p.Model = strings.TrimSpace(value)
+		case "read_only":
+			switch strings.TrimSpace(value) {
+			case "true":
+				p.ReadOnly = true
+			case "false":
+				p.ReadOnly = false
+			default:
+				return Packet{}, ErrInvalidReadOnly
+			}
 		}
 	}
 
