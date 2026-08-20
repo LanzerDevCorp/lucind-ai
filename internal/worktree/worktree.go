@@ -32,6 +32,9 @@ var ErrEmptyLaneID = errors.New("worktree: lane ID must not be empty")
 // already exists. Create never overwrites or reuses an existing directory.
 var ErrWorktreeExists = errors.New("worktree: target worktree path already exists")
 
+// ErrEmptyBaseSHA is returned by HasUniqueCommits when baseSHA is empty.
+var ErrEmptyBaseSHA = errors.New("worktree: base SHA must not be empty")
+
 // worktreesDirSuffix names the sibling directory that holds every lane's
 // linked worktree for a given primary repository.
 const worktreesDirSuffix = "-worktrees"
@@ -54,8 +57,9 @@ func pathFor(primaryRoot, laneID string) string {
 
 // Worktree is a created linked git worktree for one lane.
 type Worktree struct {
-	Path   string // absolute path to the worktree directory
-	Branch string // the branch checked out in it
+	Path    string // absolute path to the worktree directory
+	Branch  string // the branch checked out in it
+	BaseSHA string // hex SHA of this worktree's HEAD immediately after Create
 }
 
 // Create adds a linked git worktree for laneID off primaryRoot.
@@ -79,7 +83,17 @@ func Create(ctx context.Context, primaryRoot, laneID string) (Worktree, error) {
 		return Worktree{}, fmt.Errorf("worktree: git worktree add failed: %w: %s", err, strings.TrimSpace(stderr.String()))
 	}
 
-	return Worktree{Path: path, Branch: branch}, nil
+	headCmd := exec.CommandContext(ctx, "git", "-C", path, "rev-parse", "HEAD")
+	var headStderr strings.Builder
+	headCmd.Stderr = &headStderr
+	headOut, err := headCmd.Output()
+	if err != nil {
+		_ = Remove(ctx, primaryRoot, path)
+		return Worktree{}, fmt.Errorf("worktree: git rev-parse HEAD failed: %w: %s", err, strings.TrimSpace(headStderr.String()))
+	}
+	baseSHA := strings.TrimSpace(string(headOut))
+
+	return Worktree{Path: path, Branch: branch, BaseSHA: baseSHA}, nil
 }
 
 // Remove removes a linked git worktree at path off primaryRoot.
@@ -132,17 +146,12 @@ func IsLinkedWorktree(path string) bool {
 }
 
 // HasUniqueCommits reports whether the linked worktree at worktreePath has
-// unique commits not present in primaryRoot's history, determined by whether
-// worktree HEAD differs from git merge-base HEAD <primary HEAD>.
-func HasUniqueCommits(ctx context.Context, worktreePath, primaryRoot string) (bool, error) {
-	primaryHeadCmd := exec.CommandContext(ctx, "git", "-C", primaryRoot, "rev-parse", "HEAD")
-	var primaryStderr strings.Builder
-	primaryHeadCmd.Stderr = &primaryStderr
-	primaryHeadOut, err := primaryHeadCmd.Output()
-	if err != nil {
-		return false, fmt.Errorf("worktree: git rev-parse HEAD in primary root failed: %w: %s", err, strings.TrimSpace(primaryStderr.String()))
+// unique commits not present in baseSHA's history, determined by whether
+// worktree HEAD differs from git merge-base HEAD <baseSHA>.
+func HasUniqueCommits(ctx context.Context, worktreePath, baseSHA string) (bool, error) {
+	if strings.TrimSpace(baseSHA) == "" {
+		return false, ErrEmptyBaseSHA
 	}
-	primaryHead := strings.TrimSpace(string(primaryHeadOut))
 
 	wtHeadCmd := exec.CommandContext(ctx, "git", "-C", worktreePath, "rev-parse", "HEAD")
 	var wtStderr strings.Builder
@@ -153,7 +162,7 @@ func HasUniqueCommits(ctx context.Context, worktreePath, primaryRoot string) (bo
 	}
 	wtHead := strings.TrimSpace(string(wtHeadOut))
 
-	mergeBaseCmd := exec.CommandContext(ctx, "git", "-C", worktreePath, "merge-base", "HEAD", primaryHead)
+	mergeBaseCmd := exec.CommandContext(ctx, "git", "-C", worktreePath, "merge-base", "HEAD", baseSHA)
 	var mergeBaseStderr strings.Builder
 	mergeBaseCmd.Stderr = &mergeBaseStderr
 	mergeBaseOut, err := mergeBaseCmd.Output()

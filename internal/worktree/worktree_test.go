@@ -160,6 +160,35 @@ func TestCreateAddsLinkedWorktree(t *testing.T) {
 	}
 }
 
+func TestCreateRecordsBaseSHA(t *testing.T) {
+	if testing.Short() {
+		t.Skip("shells out to real git")
+	}
+
+	primaryRoot := initRepo(t)
+
+	wt, err := worktree.Create(context.Background(), primaryRoot, "fix-auth")
+	if err != nil {
+		t.Fatalf("Create() error = %v, want nil", err)
+	}
+
+	headOut := bytes.Buffer{}
+	cmd := exec.Command("git", "rev-parse", "HEAD")
+	cmd.Dir = wt.Path
+	cmd.Stdout = &headOut
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("git rev-parse error = %v", err)
+	}
+	wantSHA := strings.TrimSpace(headOut.String())
+
+	if wt.BaseSHA == "" {
+		t.Errorf("BaseSHA is empty, want %q", wantSHA)
+	}
+	if wt.BaseSHA != wantSHA {
+		t.Errorf("BaseSHA = %q, want %q", wt.BaseSHA, wantSHA)
+	}
+}
+
 func TestCreateWrapsGitFailureWithStderr(t *testing.T) {
 	if testing.Short() {
 		t.Skip("shells out to real git")
@@ -376,7 +405,7 @@ func TestHasUniqueCommits(t *testing.T) {
 	}
 
 	// Fresh worktree: no unique commits.
-	hasCommits, err := worktree.HasUniqueCommits(context.Background(), wt.Path, primaryRoot)
+	hasCommits, err := worktree.HasUniqueCommits(context.Background(), wt.Path, wt.BaseSHA)
 	if err != nil {
 		t.Fatalf("HasUniqueCommits() error = %v, want nil", err)
 	}
@@ -393,12 +422,77 @@ func TestHasUniqueCommits(t *testing.T) {
 	runGit(t, wt.Path, "commit", "-m", "lane commit")
 
 	// Now unique commits are present.
-	hasCommits, err = worktree.HasUniqueCommits(context.Background(), wt.Path, primaryRoot)
+	hasCommits, err = worktree.HasUniqueCommits(context.Background(), wt.Path, wt.BaseSHA)
 	if err != nil {
 		t.Fatalf("HasUniqueCommits() error = %v, want nil", err)
 	}
 	if !hasCommits {
 		t.Errorf("HasUniqueCommits() = false, want true after commit on lane branch")
+	}
+}
+
+func TestHasUniqueCommitsUsesRecordedBaseSHANotLivePrimaryHEAD(t *testing.T) {
+	if testing.Short() {
+		t.Skip("shells out to real git")
+	}
+
+	primaryRoot := initRepo(t)
+
+	wt, err := worktree.Create(context.Background(), primaryRoot, "lane1")
+	if err != nil {
+		t.Fatalf("Create() error = %v, want nil", err)
+	}
+
+	// Advance primary HEAD with an unrelated commit
+	if err := os.WriteFile(filepath.Join(primaryRoot, "primary.txt"), []byte("primary work\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(primary.txt) error = %v", err)
+	}
+	runGit(t, primaryRoot, "add", "primary.txt")
+	runGit(t, primaryRoot, "commit", "-m", "primary advance")
+
+	// (a) fresh lane still reports no unique commits against recorded baseSHA
+	hasCommits, err := worktree.HasUniqueCommits(context.Background(), wt.Path, wt.BaseSHA)
+	if err != nil {
+		t.Fatalf("HasUniqueCommits() error = %v, want nil", err)
+	}
+	if hasCommits {
+		t.Errorf("HasUniqueCommits() = true, want false against recorded BaseSHA for fresh lane")
+	}
+
+	// (b) after a lane commit, unique commits is true against recorded baseSHA even though primary moved
+	laneFile := filepath.Join(wt.Path, "feature.txt")
+	if err := os.WriteFile(laneFile, []byte("lane work\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(feature.txt) error = %v", err)
+	}
+	runGit(t, wt.Path, "add", "feature.txt")
+	runGit(t, wt.Path, "commit", "-m", "lane commit")
+
+	hasCommits, err = worktree.HasUniqueCommits(context.Background(), wt.Path, wt.BaseSHA)
+	if err != nil {
+		t.Fatalf("HasUniqueCommits() error = %v, want nil", err)
+	}
+	if !hasCommits {
+		t.Errorf("HasUniqueCommits() = false, want true after lane commit")
+	}
+}
+
+func TestHasUniqueCommitsRejectsEmptyBaseSHA(t *testing.T) {
+	if testing.Short() {
+		t.Skip("shells out to real git")
+	}
+
+	primaryRoot := initRepo(t)
+	wt, err := worktree.Create(context.Background(), primaryRoot, "lane1")
+	if err != nil {
+		t.Fatalf("Create() error = %v, want nil", err)
+	}
+
+	_, err = worktree.HasUniqueCommits(context.Background(), wt.Path, "")
+	if err == nil {
+		t.Fatalf("HasUniqueCommits with empty baseSHA error = nil, want non-nil")
+	}
+	if !strings.Contains(strings.ToLower(err.Error()), "base sha") {
+		t.Errorf("HasUniqueCommits error = %q, want it to name missing base SHA", err.Error())
 	}
 }
 
@@ -417,7 +511,7 @@ func TestHasUniqueCommitsHonoursCancelledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, err = worktree.HasUniqueCommits(ctx, wt.Path, primaryRoot)
+	_, err = worktree.HasUniqueCommits(ctx, wt.Path, wt.BaseSHA)
 	if err == nil {
 		t.Fatalf("HasUniqueCommits() error = nil, want non-nil for an already-cancelled context")
 	}
@@ -428,10 +522,9 @@ func TestHasUniqueCommitsWrapsGitFailureWithStderr(t *testing.T) {
 		t.Skip("shells out to real git")
 	}
 
-	primaryRoot := t.TempDir()
 	wtDir := t.TempDir()
 
-	_, err := worktree.HasUniqueCommits(context.Background(), wtDir, primaryRoot)
+	_, err := worktree.HasUniqueCommits(context.Background(), wtDir, "dummy-base-sha-1234567890abcdef")
 	if err == nil {
 		t.Fatalf("HasUniqueCommits() error = nil, want non-nil")
 	}

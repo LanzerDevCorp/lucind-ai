@@ -76,7 +76,7 @@ func testPacket() packet.Packet {
 // wired), a stubbed CreateWorktree that never touches git, and a pinned
 // clock. wtPath is a real temp directory standing in for the lane's
 // worktree, since Execute writes the result schema to real disk there.
-func newTestDeps(t *testing.T, wtPath string, fsys func(string) fs.FS, exec executor.Executor) run.Deps {
+func newTestDeps(t *testing.T, wtPath string, fsys func(string) fs.FS, exec executor.Executor, baseSHA ...string) run.Deps {
 	t.Helper()
 
 	l, err := ledger.Open(context.Background(), t.TempDir())
@@ -87,6 +87,11 @@ func newTestDeps(t *testing.T, wtPath string, fsys func(string) fs.FS, exec exec
 
 	now := time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC)
 
+	sha := ""
+	if len(baseSHA) > 0 {
+		sha = baseSHA[0]
+	}
+
 	return run.Deps{
 		RunID:       "run-1",
 		PrimaryRoot: "/primary",
@@ -95,7 +100,7 @@ func newTestDeps(t *testing.T, wtPath string, fsys func(string) fs.FS, exec exec
 			return exec, nil
 		},
 		CreateWorktree: func(_ context.Context, primaryRoot, laneID string) (worktree.Worktree, error) {
-			return worktree.Worktree{Path: wtPath, Branch: "lucind/" + laneID}, nil
+			return worktree.Worktree{Path: wtPath, Branch: "lucind/" + laneID, BaseSHA: sha}, nil
 		},
 		WorktreeFS: fsys,
 		Now:        func() time.Time { return now },
@@ -1487,11 +1492,27 @@ func runGit(t *testing.T, dir string, args ...string) {
 	}
 }
 
-func setupGitWorktree(t *testing.T, primaryRoot, laneID string) string {
+func setupGitWorktree(t *testing.T, primaryRoot, laneID string) (string, string) {
 	t.Helper()
 	wtPath := t.TempDir()
 	runGit(t, primaryRoot, "worktree", "add", "-b", "lucind/"+laneID, wtPath)
-	return wtPath
+	cmd := exec.Command("git", "-C", wtPath, "rev-parse", "HEAD")
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git rev-parse HEAD error = %v", err)
+	}
+	baseSHA := strings.TrimSpace(string(out))
+	return wtPath, baseSHA
+}
+
+func gitRevParse(t *testing.T, dir, rev string) string {
+	t.Helper()
+	cmd := exec.Command("git", "-C", dir, "rev-parse", rev)
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git rev-parse %s error = %v", rev, err)
+	}
+	return strings.TrimSpace(string(out))
 }
 
 func TestExecuteScopeCheckInScopeChangesReachesDone(t *testing.T) {
@@ -1500,7 +1521,7 @@ func TestExecuteScopeCheckInScopeChangesReachesDone(t *testing.T) {
 	}
 
 	primaryRoot := initGitRepo(t)
-	wtPath := setupGitWorktree(t, primaryRoot, "lane-a")
+	wtPath, birthSHA := setupGitWorktree(t, primaryRoot, "lane-a")
 
 	// Create in-scope files (committed, unstaged, and untracked)
 	ledgerDir := filepath.Join(wtPath, "internal", "ledger")
@@ -1528,8 +1549,16 @@ func TestExecuteScopeCheckInScopeChangesReachesDone(t *testing.T) {
 	fe := &fakeExecutor{outcome: executor.Outcome{ExitCode: 0}}
 	deps := newTestDeps(t, wtPath, func(string) fs.FS {
 		return fstest.MapFS{".lucind/result.json": {Data: []byte(doneEnvelopeJSON)}}
-	}, fe)
+	}, fe, birthSHA)
 	deps.PrimaryRoot = primaryRoot
+
+	wt, err := deps.CreateWorktree(context.Background(), primaryRoot, "lane-a")
+	if err != nil {
+		t.Fatalf("CreateWorktree error = %v", err)
+	}
+	if wt.BaseSHA != birthSHA {
+		t.Fatalf("CreateWorktree().BaseSHA = %q, want %q", wt.BaseSHA, birthSHA)
+	}
 
 	p := testPacket()
 	p.AllowedPaths = []string{"internal/ledger/"}
@@ -1558,7 +1587,7 @@ func TestExecuteScopeCheckDemotesOutOfScopeTrackedFileToDeviated(t *testing.T) {
 	}
 
 	primaryRoot := initGitRepo(t)
-	wtPath := setupGitWorktree(t, primaryRoot, "lane-a")
+	wtPath, birthSHA := setupGitWorktree(t, primaryRoot, "lane-a")
 
 	// Create and commit an out-of-scope tracked file
 	serveDir := filepath.Join(wtPath, "internal", "serve")
@@ -1574,7 +1603,7 @@ func TestExecuteScopeCheckDemotesOutOfScopeTrackedFileToDeviated(t *testing.T) {
 	fe := &fakeExecutor{outcome: executor.Outcome{ExitCode: 0}}
 	deps := newTestDeps(t, wtPath, func(string) fs.FS {
 		return fstest.MapFS{".lucind/result.json": {Data: []byte(doneEnvelopeJSON)}}
-	}, fe)
+	}, fe, birthSHA)
 	deps.PrimaryRoot = primaryRoot
 
 	p := testPacket()
@@ -1609,7 +1638,7 @@ func TestExecuteScopeCheckDemotesOutOfScopeUntrackedFileToDeviated(t *testing.T)
 	}
 
 	primaryRoot := initGitRepo(t)
-	wtPath := setupGitWorktree(t, primaryRoot, "lane-a")
+	wtPath, birthSHA := setupGitWorktree(t, primaryRoot, "lane-a")
 
 	// Create an untracked out-of-scope file
 	serveDir := filepath.Join(wtPath, "internal", "serve")
@@ -1623,7 +1652,7 @@ func TestExecuteScopeCheckDemotesOutOfScopeUntrackedFileToDeviated(t *testing.T)
 	fe := &fakeExecutor{outcome: executor.Outcome{ExitCode: 0}}
 	deps := newTestDeps(t, wtPath, func(string) fs.FS {
 		return fstest.MapFS{".lucind/result.json": {Data: []byte(doneEnvelopeJSON)}}
-	}, fe)
+	}, fe, birthSHA)
 	deps.PrimaryRoot = primaryRoot
 
 	p := testPacket()
@@ -1658,7 +1687,7 @@ func TestExecuteScopeCheckZeroCommitsUntrackedInScopeReachesDone(t *testing.T) {
 	}
 
 	primaryRoot := initGitRepo(t)
-	wtPath := setupGitWorktree(t, primaryRoot, "lane-a")
+	wtPath, birthSHA := setupGitWorktree(t, primaryRoot, "lane-a")
 
 	// 0 unique commits on lane branch; create in-scope untracked file
 	ledgerDir := filepath.Join(wtPath, "internal", "ledger")
@@ -1672,7 +1701,7 @@ func TestExecuteScopeCheckZeroCommitsUntrackedInScopeReachesDone(t *testing.T) {
 	fe := &fakeExecutor{outcome: executor.Outcome{ExitCode: 0}}
 	deps := newTestDeps(t, wtPath, func(string) fs.FS {
 		return fstest.MapFS{".lucind/result.json": {Data: []byte(doneEnvelopeJSON)}}
-	}, fe)
+	}, fe, birthSHA)
 	deps.PrimaryRoot = primaryRoot
 
 	p := testPacket()
@@ -1702,7 +1731,7 @@ func TestExecuteScopeCheckTwoCommitsEarlierOutOfScopeDemotesToDeviated(t *testin
 	}
 
 	primaryRoot := initGitRepo(t)
-	wtPath := setupGitWorktree(t, primaryRoot, "lane-a")
+	wtPath, birthSHA := setupGitWorktree(t, primaryRoot, "lane-a")
 
 	// Commit 1: touches out-of-scope internal/serve/server.go
 	serveDir := filepath.Join(wtPath, "internal", "serve")
@@ -1729,7 +1758,7 @@ func TestExecuteScopeCheckTwoCommitsEarlierOutOfScopeDemotesToDeviated(t *testin
 	fe := &fakeExecutor{outcome: executor.Outcome{ExitCode: 0}}
 	deps := newTestDeps(t, wtPath, func(string) fs.FS {
 		return fstest.MapFS{".lucind/result.json": {Data: []byte(doneEnvelopeJSON)}}
-	}, fe)
+	}, fe, birthSHA)
 	deps.PrimaryRoot = primaryRoot
 
 	p := testPacket()
@@ -1764,7 +1793,7 @@ func TestExecuteScopeCheckMultipleInScopeCommitsReachesDone(t *testing.T) {
 	}
 
 	primaryRoot := initGitRepo(t)
-	wtPath := setupGitWorktree(t, primaryRoot, "lane-a")
+	wtPath, birthSHA := setupGitWorktree(t, primaryRoot, "lane-a")
 
 	ledgerDir := filepath.Join(wtPath, "internal", "ledger")
 	if err := os.MkdirAll(ledgerDir, 0o755); err != nil {
@@ -1788,7 +1817,7 @@ func TestExecuteScopeCheckMultipleInScopeCommitsReachesDone(t *testing.T) {
 	fe := &fakeExecutor{outcome: executor.Outcome{ExitCode: 0}}
 	deps := newTestDeps(t, wtPath, func(string) fs.FS {
 		return fstest.MapFS{".lucind/result.json": {Data: []byte(doneEnvelopeJSON)}}
-	}, fe)
+	}, fe, birthSHA)
 	deps.PrimaryRoot = primaryRoot
 
 	p := testPacket()
@@ -1853,7 +1882,7 @@ func TestExecuteScopeCheckBlockedAndFailedEnvelopesNeverRewrittenToDeviated(t *t
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			primaryRoot := initGitRepo(t)
-			wtPath := setupGitWorktree(t, primaryRoot, "lane-a")
+			wtPath, birthSHA := setupGitWorktree(t, primaryRoot, "lane-a")
 
 			// Create an out-of-scope tracked file
 			serveDir := filepath.Join(wtPath, "internal", "serve")
@@ -1869,7 +1898,7 @@ func TestExecuteScopeCheckBlockedAndFailedEnvelopesNeverRewrittenToDeviated(t *t
 			fe := &fakeExecutor{outcome: executor.Outcome{ExitCode: 0}}
 			deps := newTestDeps(t, wtPath, func(string) fs.FS {
 				return fstest.MapFS{".lucind/result.json": {Data: []byte(tt.envelope)}}
-			}, fe)
+			}, fe, birthSHA)
 			deps.PrimaryRoot = primaryRoot
 
 			p := testPacket()
@@ -1901,7 +1930,7 @@ func TestExecuteScopeCheckForceAddedLucindFileExcludedFromUnion(t *testing.T) {
 	}
 
 	primaryRoot := initGitRepo(t)
-	wtPath := setupGitWorktree(t, primaryRoot, "lane-a")
+	wtPath, birthSHA := setupGitWorktree(t, primaryRoot, "lane-a")
 
 	// Force-add .lucind/result.json
 	lucindPath := filepath.Join(wtPath, ".lucind")
@@ -1917,7 +1946,7 @@ func TestExecuteScopeCheckForceAddedLucindFileExcludedFromUnion(t *testing.T) {
 	fe := &fakeExecutor{outcome: executor.Outcome{ExitCode: 0}}
 	deps := newTestDeps(t, wtPath, func(string) fs.FS {
 		return fstest.MapFS{".lucind/result.json": {Data: []byte(doneEnvelopeJSON)}}
-	}, fe)
+	}, fe, birthSHA)
 	deps.PrimaryRoot = primaryRoot
 
 	p := testPacket()
