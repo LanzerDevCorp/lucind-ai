@@ -94,6 +94,12 @@ func newTestDeps(t *testing.T, wtPath string, fsys func(string) fs.FS, exec exec
 		},
 		WorktreeFS: fsys,
 		Now:        func() time.Time { return now },
+		HasUniqueLaneCommits: func(context.Context, string) (bool, error) {
+			return true, nil
+		},
+		PorcelainEmpty: func(context.Context, string) (bool, error) {
+			return true, nil
+		},
 	}
 }
 
@@ -1092,4 +1098,351 @@ func TestExecuteSuccessfulLaneReportsNoDiagnosisOrLedgerNote(t *testing.T) {
 	if anyContains(details, "some incidental stderr chatter") {
 		t.Errorf("ledger notes = %+v, want no note carrying the incidental stderr for a successful lane", details)
 	}
+}
+
+func TestExecuteWriteDoneWithoutUniqueCommitsFails(t *testing.T) {
+	wtPath := t.TempDir()
+	fe := &fakeExecutor{outcome: executor.Outcome{ExitCode: 0}}
+	doneWithCommitJSON := `{
+		"packet_id": "lane-a",
+		"status": "done",
+		"summary": "claimed done with commit",
+		"commit": "deadbeef12345678",
+		"hard_stops": [{"hard_stop": "do not touch internal/barrier", "fired": false}]
+	}`
+	deps := newTestDeps(t, wtPath, func(string) fs.FS {
+		return fstest.MapFS{".lucind/result.json": {Data: []byte(doneWithCommitJSON)}}
+	}, fe)
+	deps.HasUniqueLaneCommits = func(context.Context, string) (bool, error) {
+		return false, nil
+	}
+
+	report, err := run.Execute(context.Background(), deps, testPacket())
+	if err != nil {
+		t.Fatalf("Execute() error = %v, want nil", err)
+	}
+
+	if report.Status != lane.Failed {
+		t.Errorf("report.Status = %v, want %v", report.Status, lane.Failed)
+	}
+
+	states, err := deps.Ledger.LaneStates(context.Background(), "run-1")
+	if err != nil {
+		t.Fatalf("LaneStates() error = %v", err)
+	}
+	if len(states) != 1 || states[0].LaneID != "lane-a" || states[0].Status != lane.Failed {
+		t.Errorf("LaneStates() = %+v, want one lane-a=failed", states)
+	}
+
+	details := laneNoteDetails(t, deps.Ledger, "run-1")
+	if !anyContains(details, "commit") {
+		t.Errorf("ledger notes = %+v, want a note naming the missing commit", details)
+	}
+}
+
+func TestExecuteWriteDoneWithDirtyWorktreeFails(t *testing.T) {
+	wtPath := t.TempDir()
+	fe := &fakeExecutor{outcome: executor.Outcome{ExitCode: 0}}
+	deps := newTestDeps(t, wtPath, func(string) fs.FS {
+		return fstest.MapFS{".lucind/result.json": {Data: []byte(doneEnvelopeJSON)}}
+	}, fe)
+	deps.HasUniqueLaneCommits = func(context.Context, string) (bool, error) {
+		return true, nil
+	}
+	deps.PorcelainEmpty = func(context.Context, string) (bool, error) {
+		return false, nil
+	}
+
+	report, err := run.Execute(context.Background(), deps, testPacket())
+	if err != nil {
+		t.Fatalf("Execute() error = %v, want nil", err)
+	}
+
+	if report.Status != lane.Failed {
+		t.Errorf("report.Status = %v, want %v", report.Status, lane.Failed)
+	}
+
+	states, err := deps.Ledger.LaneStates(context.Background(), "run-1")
+	if err != nil {
+		t.Fatalf("LaneStates() error = %v", err)
+	}
+	if len(states) != 1 || states[0].LaneID != "lane-a" || states[0].Status != lane.Failed {
+		t.Errorf("LaneStates() = %+v, want one lane-a=failed", states)
+	}
+
+	details := laneNoteDetails(t, deps.Ledger, "run-1")
+	if !anyContains(details, "uncommitted") && !anyContains(details, "dirty") {
+		t.Errorf("ledger notes = %+v, want a note naming uncommitted/dirty changes", details)
+	}
+}
+
+func TestExecuteReadOnlyDoneWithoutCommitsAndCleanTreeReachesDone(t *testing.T) {
+	wtPath := t.TempDir()
+	fe := &fakeExecutor{outcome: executor.Outcome{ExitCode: 0}}
+	deps := newTestDeps(t, wtPath, func(string) fs.FS {
+		return fstest.MapFS{".lucind/result.json": {Data: []byte(doneEnvelopeJSON)}}
+	}, fe)
+	deps.HasUniqueLaneCommits = func(context.Context, string) (bool, error) {
+		return false, nil
+	}
+	deps.PorcelainEmpty = func(context.Context, string) (bool, error) {
+		return true, nil
+	}
+
+	p := testPacket()
+	p.ReadOnly = true
+
+	report, err := run.Execute(context.Background(), deps, p)
+	if err != nil {
+		t.Fatalf("Execute() error = %v, want nil", err)
+	}
+
+	if report.Status != lane.Done {
+		t.Errorf("report.Status = %v, want %v", report.Status, lane.Done)
+	}
+
+	states, err := deps.Ledger.LaneStates(context.Background(), "run-1")
+	if err != nil {
+		t.Fatalf("LaneStates() error = %v", err)
+	}
+	if len(states) != 1 || states[0].LaneID != "lane-a" || states[0].Status != lane.Done {
+		t.Errorf("LaneStates() = %+v, want one lane-a=done", states)
+	}
+	if report.Diagnosis != "" {
+		t.Errorf("report.Diagnosis = %q, want empty", report.Diagnosis)
+	}
+}
+
+func TestExecuteReadOnlyDoneWithUniqueCommitsFails(t *testing.T) {
+	wtPath := t.TempDir()
+	fe := &fakeExecutor{outcome: executor.Outcome{ExitCode: 0}}
+	deps := newTestDeps(t, wtPath, func(string) fs.FS {
+		return fstest.MapFS{".lucind/result.json": {Data: []byte(doneEnvelopeJSON)}}
+	}, fe)
+	deps.HasUniqueLaneCommits = func(context.Context, string) (bool, error) {
+		return true, nil
+	}
+	deps.PorcelainEmpty = func(context.Context, string) (bool, error) {
+		return true, nil
+	}
+
+	p := testPacket()
+	p.ReadOnly = true
+
+	report, err := run.Execute(context.Background(), deps, p)
+	if err != nil {
+		t.Fatalf("Execute() error = %v, want nil", err)
+	}
+
+	if report.Status != lane.Failed {
+		t.Errorf("report.Status = %v, want %v", report.Status, lane.Failed)
+	}
+
+	states, err := deps.Ledger.LaneStates(context.Background(), "run-1")
+	if err != nil {
+		t.Fatalf("LaneStates() error = %v", err)
+	}
+	if len(states) != 1 || states[0].LaneID != "lane-a" || states[0].Status != lane.Failed {
+		t.Errorf("LaneStates() = %+v, want one lane-a=failed", states)
+	}
+
+	details := laneNoteDetails(t, deps.Ledger, "run-1")
+	if !anyContains(details, "commit") {
+		t.Errorf("ledger notes = %+v, want a note naming unique commits", details)
+	}
+}
+
+func TestExecuteReadOnlyDoneWithDirtyWorktreeFails(t *testing.T) {
+	wtPath := t.TempDir()
+	fe := &fakeExecutor{outcome: executor.Outcome{ExitCode: 0}}
+	deps := newTestDeps(t, wtPath, func(string) fs.FS {
+		return fstest.MapFS{".lucind/result.json": {Data: []byte(doneEnvelopeJSON)}}
+	}, fe)
+	deps.HasUniqueLaneCommits = func(context.Context, string) (bool, error) {
+		return false, nil
+	}
+	deps.PorcelainEmpty = func(context.Context, string) (bool, error) {
+		return false, nil
+	}
+
+	p := testPacket()
+	p.ReadOnly = true
+
+	report, err := run.Execute(context.Background(), deps, p)
+	if err != nil {
+		t.Fatalf("Execute() error = %v, want nil", err)
+	}
+
+	if report.Status != lane.Failed {
+		t.Errorf("report.Status = %v, want %v", report.Status, lane.Failed)
+	}
+
+	states, err := deps.Ledger.LaneStates(context.Background(), "run-1")
+	if err != nil {
+		t.Fatalf("LaneStates() error = %v", err)
+	}
+	if len(states) != 1 || states[0].LaneID != "lane-a" || states[0].Status != lane.Failed {
+		t.Errorf("LaneStates() = %+v, want one lane-a=failed", states)
+	}
+
+	details := laneNoteDetails(t, deps.Ledger, "run-1")
+	if !anyContains(details, "uncommitted") && !anyContains(details, "dirty") {
+		t.Errorf("ledger notes = %+v, want a note naming uncommitted/dirty changes", details)
+	}
+}
+
+func TestExecuteNonDoneStatusBypassesGitInspection(t *testing.T) {
+	deviatedJSON := `{
+		"packet_id": "lane-a",
+		"status": "deviated",
+		"summary": "deviated from plan",
+		"hard_stops": [{"hard_stop": "do not touch internal/barrier", "fired": false}],
+		"deviations": [{"expected": "plan a", "actual": "plan b", "reason": "needed"}]
+	}`
+	failedJSON := `{
+		"packet_id": "lane-a",
+		"status": "failed",
+		"summary": "technical failure",
+		"hard_stops": [{"hard_stop": "do not touch internal/barrier", "fired": false}]
+	}`
+
+	tests := []struct {
+		name       string
+		outcome    executor.Outcome
+		envelope   string
+		wantStatus lane.Status
+	}{
+		{
+			name:       "blocked envelope",
+			outcome:    executor.Outcome{ExitCode: 0},
+			envelope:   blockedEnvelopeJSON,
+			wantStatus: lane.Blocked,
+		},
+		{
+			name:       "deviated envelope",
+			outcome:    executor.Outcome{ExitCode: 0},
+			envelope:   deviatedJSON,
+			wantStatus: lane.Deviated,
+		},
+		{
+			name:       "failed envelope",
+			outcome:    executor.Outcome{ExitCode: 0},
+			envelope:   failedJSON,
+			wantStatus: lane.Failed,
+		},
+		{
+			name:       "non-zero exit",
+			outcome:    executor.Outcome{ExitCode: 1, Stderr: "syntax error"},
+			envelope:   "",
+			wantStatus: lane.Blocked,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			wtPath := t.TempDir()
+			fe := &fakeExecutor{outcome: tt.outcome}
+			var commitsCalls, porcelainCalls int
+			deps := newTestDeps(t, wtPath, func(string) fs.FS {
+				if tt.envelope == "" {
+					return fstest.MapFS{}
+				}
+				return fstest.MapFS{".lucind/result.json": {Data: []byte(tt.envelope)}}
+			}, fe)
+			deps.HasUniqueLaneCommits = func(context.Context, string) (bool, error) {
+				commitsCalls++
+				return true, nil
+			}
+			deps.PorcelainEmpty = func(context.Context, string) (bool, error) {
+				porcelainCalls++
+				return true, nil
+			}
+
+			report, err := run.Execute(context.Background(), deps, testPacket())
+			if err != nil {
+				t.Fatalf("Execute() error = %v, want nil", err)
+			}
+
+			if report.Status != tt.wantStatus {
+				t.Errorf("report.Status = %v, want %v", report.Status, tt.wantStatus)
+			}
+			if commitsCalls != 0 {
+				t.Errorf("HasUniqueLaneCommits called %d times, want 0", commitsCalls)
+			}
+			if porcelainCalls != 0 {
+				t.Errorf("PorcelainEmpty called %d times, want 0", porcelainCalls)
+			}
+		})
+	}
+}
+
+func TestExecuteGitInspectionErrorFailsLaneWithLedgerNote(t *testing.T) {
+	t.Run("HasUniqueLaneCommits error", func(t *testing.T) {
+		wtPath := t.TempDir()
+		fe := &fakeExecutor{outcome: executor.Outcome{ExitCode: 0}}
+		deps := newTestDeps(t, wtPath, func(string) fs.FS {
+			return fstest.MapFS{".lucind/result.json": {Data: []byte(doneEnvelopeJSON)}}
+		}, fe)
+		deps.HasUniqueLaneCommits = func(context.Context, string) (bool, error) {
+			return false, errors.New("git merge-base failed: bad object")
+		}
+
+		report, err := run.Execute(context.Background(), deps, testPacket())
+		if err != nil {
+			t.Fatalf("Execute() error = %v, want nil", err)
+		}
+
+		if report.Status != lane.Failed {
+			t.Errorf("report.Status = %v, want %v (not Blocked)", report.Status, lane.Failed)
+		}
+
+		states, err := deps.Ledger.LaneStates(context.Background(), "run-1")
+		if err != nil {
+			t.Fatalf("LaneStates() error = %v", err)
+		}
+		if len(states) != 1 || states[0].Status != lane.Failed {
+			t.Errorf("LaneStates() = %+v, want lane.Failed", states)
+		}
+
+		details := laneNoteDetails(t, deps.Ledger, "run-1")
+		if !anyContains(details, "git merge-base failed: bad object") {
+			t.Errorf("ledger notes = %+v, want note with error message", details)
+		}
+	})
+
+	t.Run("PorcelainEmpty error", func(t *testing.T) {
+		wtPath := t.TempDir()
+		fe := &fakeExecutor{outcome: executor.Outcome{ExitCode: 0}}
+		deps := newTestDeps(t, wtPath, func(string) fs.FS {
+			return fstest.MapFS{".lucind/result.json": {Data: []byte(doneEnvelopeJSON)}}
+		}, fe)
+		deps.HasUniqueLaneCommits = func(context.Context, string) (bool, error) {
+			return true, nil
+		}
+		deps.PorcelainEmpty = func(context.Context, string) (bool, error) {
+			return false, errors.New("git status failed: permission denied")
+		}
+
+		report, err := run.Execute(context.Background(), deps, testPacket())
+		if err != nil {
+			t.Fatalf("Execute() error = %v, want nil", err)
+		}
+
+		if report.Status != lane.Failed {
+			t.Errorf("report.Status = %v, want %v (not Blocked)", report.Status, lane.Failed)
+		}
+
+		states, err := deps.Ledger.LaneStates(context.Background(), "run-1")
+		if err != nil {
+			t.Fatalf("LaneStates() error = %v", err)
+		}
+		if len(states) != 1 || states[0].Status != lane.Failed {
+			t.Errorf("LaneStates() = %+v, want lane.Failed", states)
+		}
+
+		details := laneNoteDetails(t, deps.Ledger, "run-1")
+		if !anyContains(details, "git status failed: permission denied") {
+			t.Errorf("ledger notes = %+v, want note with error message", details)
+		}
+	})
 }

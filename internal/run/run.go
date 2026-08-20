@@ -157,6 +157,9 @@ type Deps struct {
 	// deadline continues to mean.
 	LaneTimeout time.Duration
 
+	HasUniqueLaneCommits func(ctx context.Context, worktreePath string) (bool, error)
+	PorcelainEmpty       func(ctx context.Context, worktreePath string) (bool, error)
+
 	CombineTree        func(ctx context.Context, primaryRoot, runID string, branches []string) (worktreePath, branchName string, err error)
 	RunChecks          func(ctx context.Context, worktreePath string) (passed bool, output string, err error)
 	PromoteTarget      func(ctx context.Context, primaryRoot, integrationBranch string) error
@@ -314,6 +317,10 @@ func Execute(ctx context.Context, deps Deps, p packet.Packet) (Report, error) {
 
 	status, envelope, reason := decideStatus(deps, wt.Path, outcome)
 
+	if status == lane.Done {
+		status, reason = enforceCompletionMode(ctx, deps, wt.Path, p)
+	}
+
 	// diagnosis is empty exactly when reason is empty (the envelope
 	// decided a terminal status cleanly): reason is decideStatus's own
 	// explanation for a non-zero exit, a timeout, or an unreadable
@@ -429,6 +436,42 @@ func decideStatus(deps Deps, worktreePath string, outcome executor.Outcome) (lan
 		}
 		return st, &envelope, ""
 	}
+}
+
+// enforceCompletionMode verifies real git state after decideStatus mapped
+// an envelope to lane.Done. A write packet requires at least one unique
+// commit and a clean working tree; a read-only packet requires no unique
+// commits and a clean working tree. If git inspection fails or git state
+// violates the declared completion mode, the lane becomes lane.Failed with
+// an explanatory reason.
+func enforceCompletionMode(ctx context.Context, deps Deps, worktreePath string, p packet.Packet) (lane.Status, string) {
+	hasCommits, err := deps.HasUniqueLaneCommits(ctx, worktreePath)
+	if err != nil {
+		return lane.Failed, fmt.Sprintf("check unique lane commits: %v", err)
+	}
+
+	porcelainEmpty, err := deps.PorcelainEmpty(ctx, worktreePath)
+	if err != nil {
+		return lane.Failed, fmt.Sprintf("check porcelain status: %v", err)
+	}
+
+	if !p.ReadOnly {
+		if !hasCommits {
+			return lane.Failed, "write packet completed without unique commits on lane branch"
+		}
+		if !porcelainEmpty {
+			return lane.Failed, "write packet completed with uncommitted changes in worktree"
+		}
+		return lane.Done, ""
+	}
+
+	if hasCommits {
+		return lane.Failed, "read-only packet completed with unique commits on lane branch"
+	}
+	if !porcelainEmpty {
+		return lane.Failed, "read-only packet completed with uncommitted changes in worktree"
+	}
+	return lane.Done, ""
 }
 
 // writeResultSchema writes the embedded result schema into worktreePath at

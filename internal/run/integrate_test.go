@@ -1158,3 +1158,51 @@ func TestTryCombineDiscardsWorktree(t *testing.T) {
 		}
 	})
 }
+
+// TestIntegratePassedDoneLanesBranchesPassedToCombineTreeWithoutReadOnlyFilter
+// verifies that Integrate passes every released Done lane's branch to
+// CombineTree without filtering out read-only lanes: a read-only lane that
+// passed completion mode has zero unique commits, so merging its branch is
+// already a correct no-op (Design Decision 3).
+func TestIntegratePassedDoneLanesBranchesPassedToCombineTreeWithoutReadOnlyFilter(t *testing.T) {
+	rec := &integrateRecorder{
+		combineRetPath:   "/wt/integrate-run-1",
+		combineRetBranch: "lucind/integrate-run-1",
+		checkRetPassed:   true,
+		checkRetOutput:   "PASS: all tests passed",
+	}
+	deps, l := newIntegrateTestDeps(t, rec)
+
+	registerTestLane(t, l, "run-1", "lane-write", lane.Done, "/wt/lane-write", true)
+	registerTestLane(t, l, "run-1", "lane-readonly", lane.Done, "/wt/lane-readonly", true)
+
+	batch := run.BatchReport{
+		RunID:    "run-1",
+		Released: true,
+		Outcome: barrier.Outcome{
+			Released:  true,
+			Integrate: []string{"lane-write", "lane-readonly"},
+		},
+		Lanes: []run.Report{
+			{LaneID: "lane-write", Status: lane.Done, Worktree: "/wt/lane-write"},
+			{LaneID: "lane-readonly", Status: lane.Done, Worktree: "/wt/lane-readonly"},
+		},
+	}
+
+	report, err := run.Integrate(context.Background(), deps, batch)
+	if err != nil {
+		t.Fatalf("Integrate() error = %v, want nil", err)
+	}
+
+	if !report.Passed {
+		t.Errorf("report.Passed = false, want true")
+	}
+
+	if len(rec.combineCalls) != 1 {
+		t.Fatalf("CombineTree calls = %d, want 1", len(rec.combineCalls))
+	}
+	gotBranches := rec.combineCalls[0].Branches
+	if len(gotBranches) != 2 || gotBranches[0] != "lucind/lane-write" || gotBranches[1] != "lucind/lane-readonly" {
+		t.Errorf("CombineTree branches = %v, want [lucind/lane-write, lucind/lane-readonly]", gotBranches)
+	}
+}
