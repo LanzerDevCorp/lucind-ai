@@ -2,7 +2,7 @@
 id: <id>
 executor: agy
 routed_by: <the condition that selected this lane and this verification level — never the executor's name; that is the outcome of routing, not its reason>
-model: <model, e.g. gemini-3.7-flash-high>
+model: <optional — omit to use the executor's own default (agy: gemini-3.7-flash-high, cursor-agent: cursor-grok-4.6-high); set explicitly only to override it>
 ---
 
 # Packet <id>

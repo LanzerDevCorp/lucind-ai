@@ -24,7 +24,7 @@ Every packet must open with a YAML frontmatter block enclosed by `---`:
 | `id` | Yes | Unique identifier for the lane. Names the branch (`lucind/<id>`) and worktree directory. |
 | `executor` | Yes | Execution runtime to dispatch (currently `agy` or `cursor-agent`). |
 | `routed_by` | Yes | The explicit condition that triggered this routing decision — never the executor name. |
-| `model` | No | Model name passed to executor. Defaults to `gemini-3.7-flash-high` when omitted. |
+| `model` | No | Model name passed to executor. Omitted, each executor supplies its own default (`agy`: `gemini-3.7-flash-high`; `cursor-agent`: `cursor-grok-4.6-high`) — do not hardcode `gemini-3.7-flash-high` for a `cursor-agent` packet, it bills against Cursor's separate, more limited "Other Models" quota instead of the included "Cursor Models" quota. |
 
 The document body following the closing `---` is the prompt passed to the executor and must not be empty.
 
