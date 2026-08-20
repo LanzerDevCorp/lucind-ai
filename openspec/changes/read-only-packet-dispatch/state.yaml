@@ -99,7 +99,29 @@ phases:
       `make install` target) after discovering the stale $GOPATH/bin binary that caused earlier
       "unsupported executor" errors this session.
   verify:
-    status: pending
+    status: done
+    engram_topic: sdd/read-only-packet-dispatch/verify
+    canonical: openspec/changes/read-only-packet-dispatch/verify.md
+    note: |
+      First real end-to-end use of the now-fully-built verify-dual-dispatch mechanism (Stage 1
+      mechanical check + Stage 2 dual read-only judgment dispatch), run against this change as
+      the candidate. Stage 1: lucind-ai check passed clean (commit cce1c97, log committed as
+      verify-mechanical.log). Stage 2: two read_only:true packets dispatched to agy and
+      cursor-agent in parallel, both returned done, both PASS with no blocking findings, both
+      integrated cleanly with zero reverted. Overall verdict PASSED.
+      Real gap discovered during Stage 3 reconciliation: Integrate removes a lane's worktree as
+      soon as it's folded into integrated_ids (internal/run/integrate.go:158), including
+      read_only lanes with nothing to merge, and lucind-ai run's stdout only ever prints
+      Envelope.Summary (cmd/lucind-ai/cli.go:409-414) -- never the structured Envelope.Findings.
+      The ledger persists only status transitions, not the envelope body. So this reconciliation
+      relied on each lane's free-text summary, not independently re-verified file:line citations
+      as design.md's Stage 3 describes -- not something either sibling change's own design
+      anticipated. Both summaries were specific enough and mutually consistent to support PASSED
+      here, but the underlying gap (persist the full envelope before worktree removal, e.g. copy
+      .lucind/result.json into the primary root or store it in the ledger) is unresolved and
+      should be fixed before this reconciliation step is relied on for a disputed or
+      higher-risk verification. User explicitly chose to synthesize with available evidence now
+      and treat the fix as a future follow-up, not a blocker for this verify pass.
   archive:
     status: pending
 notes: |
