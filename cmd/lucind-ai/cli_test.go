@@ -1557,6 +1557,68 @@ func TestRunCheckUsageAndUnknownFlags(t *testing.T) {
 	}
 }
 
+// TestRunCheckEndToEndWithRealScript (Task 5.1) proves that check against a real
+// two-line executable lucind-checks.sh in a real temp git repo writes the full
+// mechanical log contract to --out.
+func TestRunCheckEndToEndWithRealScript(t *testing.T) {
+	if testing.Short() {
+		t.Skip("shells out to real git")
+	}
+	repoDir := initRepo(t)
+	scriptPath := filepath.Join(repoDir, "lucind-checks.sh")
+	scriptContent := "#!/bin/sh\nset -e\necho \"BUILD: ok\"\necho \"TESTS: ok\"\n"
+	if err := os.WriteFile(scriptPath, []byte(scriptContent), 0o755); err != nil {
+		t.Fatalf("WriteFile(lucind-checks.sh) error = %v", err)
+	}
+
+	cmd := exec.Command("git", "rev-parse", "HEAD")
+	cmd.Dir = repoDir
+	commitBytes, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git rev-parse HEAD error = %v", err)
+	}
+	expectedSHA := strings.TrimSpace(string(commitBytes))
+
+	logPath := filepath.Join(repoDir, "openspec/changes/e2e/verify-mechanical.log")
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(repoDir); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(cwd)
+
+	var stdout, stderr bytes.Buffer
+	code := run(context.Background(), []string{"check", "--out", logPath}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run(check --out) exit code = %d, want 0; stderr = %q, stdout = %q", code, stderr.String(), stdout.String())
+	}
+
+	logBytes, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("ReadFile(logPath) error = %v", err)
+	}
+	logContent := string(logBytes)
+
+	if !strings.Contains(logContent, expectedSHA) {
+		t.Errorf("logContent = %q, want it to contain git commit SHA %q", logContent, expectedSHA)
+	}
+	if !strings.Contains(logContent, "Duration:") {
+		t.Errorf("logContent = %q, want it to contain duration", logContent)
+	}
+	if !strings.Contains(logContent, "Exit Code: 0") {
+		t.Errorf("logContent = %q, want it to contain 'Exit Code: 0'", logContent)
+	}
+	if !strings.Contains(logContent, "BUILD: ok") {
+		t.Errorf("logContent = %q, want it to contain transcript %q", logContent, "BUILD: ok")
+	}
+	if !strings.Contains(logContent, "TESTS: ok") {
+		t.Errorf("logContent = %q, want it to contain transcript %q", logContent, "TESTS: ok")
+	}
+}
+
 // TestFormatMechanicalLogHeader (Task 2.1 & 2.2) proves that formatMechanicalLog prepends
 // the structured header with 40-char commit SHA, exit code, duration, and command line to transcript.
 func TestFormatMechanicalLogHeader(t *testing.T) {
