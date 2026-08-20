@@ -14,8 +14,8 @@ phases:
     engram_topic: sdd/approvals-web-ui/proposal
     engram_id: 1797
     drafts:
-      - openspec/changes/approvals-web-ui/proposal-agy.md
-      - openspec/changes/approvals-web-ui/proposal-cursor-agent.md
+      - openspec/changes/archive/2026-08-20-approvals-web-ui/proposal-agy.md
+      - openspec/changes/archive/2026-08-20-approvals-web-ui/proposal-cursor-agent.md
     note: |
       Both dual-executor lanes came back status=blocked from a stale packet-template.md Return
       section (missing the .lucind/result.json instruction, fixed in ecc0811) -- verified by
@@ -26,8 +26,8 @@ phases:
     engram_topic: sdd/approvals-web-ui/spec
     engram_id: 1802
     drafts:
-      - openspec/changes/approvals-web-ui/specs-agy/
-      - openspec/changes/approvals-web-ui/specs-cursor-agent/
+      - openspec/changes/archive/2026-08-20-approvals-web-ui/specs-agy/
+      - openspec/changes/archive/2026-08-20-approvals-web-ui/specs-cursor-agent/
     note: |
       First dual-executor lane pair to come back status=done and auto-integrate through
       lucind-ai's own internal/integrate (f21234f) -- confirms the packet-template.md fix
@@ -48,8 +48,8 @@ phases:
     engram_topic: sdd/approvals-web-ui/tasks
     engram_id: 1808
     drafts:
-      - openspec/changes/approvals-web-ui/tasks-agy.md
-      - openspec/changes/approvals-web-ui/tasks-cursor-agent.md
+      - openspec/changes/archive/2026-08-20-approvals-web-ui/tasks-agy.md
+      - openspec/changes/archive/2026-08-20-approvals-web-ui/tasks-cursor-agent.md
     note: |
       agy's first attempt failed on transient infra (Eligibility check / dial tcp timeout,
       num_turns:0). Retrying the same packet id without cleanup caused a second failure
@@ -71,7 +71,7 @@ phases:
       Two-stage verify: mechanical check passed (verify-mechanical.log, candidate f7421fb).
       Dual qualitative dispatch (agy done/no findings, cursor-agent done/8 findings).
       Orchestrator independently verified 3 confirmed findings against real code and spec
-      text, initially BLOCKED (see openspec/changes/approvals-web-ui/verify.md), then
+      text, initially BLOCKED (see openspec/changes/archive/2026-08-20-approvals-web-ui/verify.md), then
       dispatched a small TDD remediation packet (agy, commit 662b871, integrated via
       6902555): removed the over-permissive `trimmed.includes('\n')` clause from
       internal/serve/static/app.js's isValidEvidence (closes the "Bare claim withheld" spec
@@ -81,7 +81,13 @@ phases:
       go build/vet/test -race -count=1 run -- all green, tests are real (httptest 409 assert,
       ledger double-decide assert, JS source-shape assert for the removed disjunct).
   archive:
-    status: pending
+    status: done
+    engram_topic: sdd/approvals-web-ui/archive-report
+    note: |
+      Delta specs merged into main openspec/specs/ (3 new full specs: approvals-web-ui,
+      lane-approval-wait, lane-execution). Change folder moved to archive with 2026-08-20
+      date prefix. All tasks verified complete, verify verdict PASSED (post-remediation).
+      SDD cycle complete.
 notes: |
   Dual-executor SDD phase experiment (session request): design/proposal/specs/tasks phases author
   their content via lucind-ai packets dispatched to agy AND cursor-agent in parallel where the
