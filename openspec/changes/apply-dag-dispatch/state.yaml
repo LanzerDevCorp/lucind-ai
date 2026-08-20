@@ -28,15 +28,28 @@ phases:
       explicit rollback-boundary exclusion (integrate.go/resolve.go/integrate.go stay out
       of any future revert since they're reused, not changed).
   design:
-    status: dispatched
+    status: done
+    engram_topic: sdd/apply-dag-dispatch/design
     drafts:
       - openspec/changes/apply-dag-dispatch/design-agy.md
       - openspec/changes/apply-dag-dispatch/design-cursor-agent.md
+    canonical: openspec/changes/apply-dag-dispatch/design.md
     note: |
       Dispatched in parallel with proposal, not waiting on it -- explicit session decision.
       Flagged as the highest-uncertainty piece of the three sibling changes (no code precedent
-      for declared-scope-vs-actual-diff enforcement) -- expect the two drafts to diverge more
-      than the read-only-packet-dispatch pair did.
+      for declared-scope-vs-actual-diff enforcement) -- diverged more than the
+      read-only-packet-dispatch pair did, as expected. agy's first attempt blocked on a
+      transient agy CLI network timeout (eligibility check hit a googleusercontent.com dial
+      timeout); retried cleanly after removing the stale worktree/branch, both lanes done,
+      merged to main. Strong agreement on sequential-lucind-ai-run-per-wave and rollback.
+      Two real disagreements resolved in canonical: (1) DAG representation -- cursor-agent's
+      separate apply-dag.yaml sidecar chosen over agy's tasks.md-embedded-YAML, since the
+      latter would require redesigning sdd-tasks's output contract project-wide, not just this
+      change; (2) agy's git-diff scope check used `git diff --name-only HEAD~1`, which breaks
+      for a lane with 0 or 2+ commits -- a real bug caught by comparing drafts. cursor-agent's
+      base-SHA + three-way-diff-union approach adopted instead. Also adopted cursor-agent's
+      minimal partial-failure fix (print integrated_ids/reverted_ids on stdout) over agy's
+      larger --json-flag proposal.
   spec:
     status: pending
   tasks:
