@@ -319,6 +319,10 @@ func Execute(ctx context.Context, deps Deps, p packet.Packet) (Report, error) {
 
 	status, envelope, reason := decideStatus(deps, wt.Path, outcome)
 
+	// Base-SHA three-way diff union, never `git diff --name-only HEAD~1`:
+	// HEAD~1 does not resolve for a zero-commit lane and misses earlier
+	// commits in a multi-commit lane, silently letting out-of-scope work
+	// through undetected.
 	if status == lane.Done && len(p.AllowedPaths) > 0 {
 		status, reason = enforceAllowedPaths(ctx, deps, wt.Path, p)
 	}
