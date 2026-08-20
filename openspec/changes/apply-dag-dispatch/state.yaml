@@ -3,7 +3,7 @@ created: 2026-08-19
 artifact_store: hybrid
 execution_mode: auto
 delivery_strategy: single-pr
-review_budget_lines: 2000
+review_budget_lines: 5000
 phases:
   explore:
     status: done
