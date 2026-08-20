@@ -79,3 +79,24 @@ func TestItemsStartUnselectedInUI(t *testing.T) {
 		t.Errorf("index.html should not have pre-selected or pre-checked controls")
 	}
 }
+
+func TestStaticEvidenceValidationRejectsBareMultilineProse(t *testing.T) {
+	staticFS := serve.StaticFS()
+
+	jsData, err := fs.ReadFile(staticFS, "app.js")
+	if err != nil {
+		t.Fatalf("fs.ReadFile(app.js): %v", err)
+	}
+	jsStr := string(jsData)
+
+	if !strings.Contains(jsStr, "function isValidEvidence") {
+		t.Fatalf("app.js does not define isValidEvidence")
+	}
+
+	// Finding 1 / Spec 61-65: Bare claim withheld -- bare multi-line prose with a newline
+	// must NOT be treated as valid command output. The bare `trimmed.includes('\n')`
+	// clause must be absent from isValidEvidence.
+	if strings.Contains(jsStr, "trimmed.includes('\\n')") || strings.Contains(jsStr, "trimmed.includes(\"\\n\")") {
+		t.Errorf("app.js contains over-permissive trimmed.includes('\\n') in isValidEvidence; bare multi-line prose must not qualify as valid evidence")
+	}
+}

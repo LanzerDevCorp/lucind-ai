@@ -15,7 +15,7 @@ function isValidEvidence(ev) {
   if (!trimmed) return false;
   // Evidence must be command output or file:line reference
   const hasFileLine = /[\w\-./]+\.\w+:\d+/.test(trimmed);
-  const hasCommandOutput = trimmed.includes('\n') || trimmed.startsWith('ok ') || trimmed.startsWith('PASS') || trimmed.startsWith('$ ') || trimmed.includes('---');
+  const hasCommandOutput = trimmed.startsWith('ok ') || trimmed.startsWith('PASS') || trimmed.startsWith('$ ') || trimmed.includes('---');
   return hasFileLine || hasCommandOutput;
 }
 
