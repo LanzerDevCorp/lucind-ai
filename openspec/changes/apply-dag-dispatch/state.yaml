@@ -108,7 +108,29 @@ phases:
       Co-authored-by trailer bug recurred on at least one lane; stripped via git commit-tree
       rewrite before merge, per the established fix.
   verify:
-    status: pending
+    status: done
+    engram_topic: sdd/apply-dag-dispatch/verify
+    canonical: openspec/changes/apply-dag-dispatch/verify.md
+    note: |
+      Real end-to-end verify: Stage 1 lucind-ai check passed clean (commit b5488f0, log
+      committed). Stage 2: two read_only:true packets dispatched to agy and cursor-agent in
+      parallel, both done, both PASS, both integrated cleanly. First verify pass this session run
+      after the fix-persist-lane-envelope fix landed, so the full structured envelopes (including
+      findings[] with file:line citations) survived past worktree removal in
+      .lucind/results/verify-apply-dag-dispatch-{agy,cursor-agent}.json -- a real qualitative
+      improvement over read-only-packet-dispatch's own verify pass, which had to rely on stdout
+      summaries alone. Note: the first dispatch attempt for this change silently ran against a
+      stale installed lucind-ai binary (built at commit 4cf6b4d, 15 commits behind main) and
+      produced no persisted envelope despite the fix already being merged -- caught, fixed via
+      `make install`, and the dispatch was redone cleanly. Two non-blocking findings from
+      cursor-agent's envelope, both independently re-verified by the orchestrator against real
+      code (not just restated): (1) internal/dag/waves.go's disjointness check is per-wave only,
+      so a same-value-overlap pair placed in different waves by Kahn's algorithm with no direct
+      depends_on edge between them is never checked, narrower than design.md's stated guarantee;
+      (2) internal/run/run.go's three-way diff union (committed-since-base, unstaged, untracked)
+      misses a path that is staged but not committed and unmodified since staging. Neither
+      contradicts a tested spec scenario; both are real gaps worth future hardening. Full detail
+      in verify.md.
   archive:
     status: pending
 notes: |
