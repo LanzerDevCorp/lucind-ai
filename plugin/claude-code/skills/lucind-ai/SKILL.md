@@ -25,6 +25,8 @@ Every packet must open with a YAML frontmatter block enclosed by `---`:
 | `executor` | Yes | Execution runtime to dispatch (currently `agy` or `cursor-agent`). |
 | `routed_by` | Yes | The explicit condition that triggered this routing decision — never the executor name. |
 | `model` | No | Model name passed to executor. Omitted, each executor supplies its own default (`agy`: `gemini-3.7-flash-high`; `cursor-agent`: `cursor-grok-4.6-high`) — do not hardcode `gemini-3.7-flash-high` for a `cursor-agent` packet, it bills against Cursor's separate, more limited "Other Models" quota instead of the included "Cursor Models" quota. |
+| `read_only` | No | `true` or `false`. Omitted defaults to write. A `true` packet must produce no unique commits and leave a clean worktree. |
+| `allowed_paths` | No | Single-line JSON array of repository-relative paths this packet may touch, e.g. `allowed_paths: ["internal/dag/", "cmd/lucind-ai/cli.go"]`. Omitted (or empty) is today's exact path: no overlap check across the batch, no post-run diff check. A YAML list under the key does not parse — the value after `:` must be one JSON array. |
 
 The document body following the closing `---` is the prompt passed to the executor and must not be empty.
 
@@ -88,13 +90,25 @@ extending `lane.Status` to a 7th value were sharper). Neither draft alone was th
 That is the bar for "worth it" — complementary specificity, not necessarily a contradiction to
 arbitrate.
 
-**Target direction, not yet built — do not attempt without addressing the named blocker:**
+**Target direction — do not attempt an unbuilt phase without addressing its named blocker:**
 
 | Phase | Target | Blocker |
 |---|---|---|
 | `explore` | Dispatch via `lucind-ai run`, not a local Claude subagent — matches this project's own identity (Claude Code orchestrates, `agy`/`cursor-agent` execute). | Unblocked: frontmatter supports `read_only: true`; criterion 2 is replaced by `git status --porcelain` empty and `HEAD` equals `git merge-base HEAD <primary HEAD>`. |
-| `apply` | Split `tasks.md` into independent packets and dispatch as a DAG (parallel where tasks share no file scope) via `lucind-ai run`, not `sdd-apply`'s own Read/Edit/Write. Not new engineering — bisection + `internal/resolve` (`docs/prd.md` §6 steps 6-8) already exist for exactly this. | Needs an orchestrator step that turns `tasks.md` into a DAG of packets with non-overlapping `allowed_paths`, dispatched in dependency order. Not built. |
+| `apply` | Author `openspec/changes/<id>/apply-dag.yaml` (sidecar; `tasks.md` stays the human checklist) → `lucind-ai split --dag … --out …` → run each printed `lucind-ai run` line **sequentially**, stop on exit 1. | Built. See **Apply dispatch** below. |
 | `verify` | Dual-dispatch `agy` + `cursor-agent` for the *qualitative* half of verification (does the implementation satisfy the spec's intent, are there coverage gaps) — not the mechanical half. | Mechanical checks (`go test`, `go vet`, `lucind-checks.sh`) are deterministic; running them twice through two LLMs adds no information, only cost. Dispatch only the judgment portion twice, once tooling exists to run mechanical checks a single time and hand both executors the same result to judge independently. |
+
+**Apply dispatch (built).** Apply authors packet files (and the sidecar when a DAG is wanted) and dispatches via `lucind-ai run`. It does **not** write the apply diff in the orchestrator's primary checkout.
+
+An **absent** sidecar is still valid — one packet or a hand-split set, no `split` required (the pattern used for `read-only-packet-dispatch`'s own apply).
+
+When a DAG is wanted:
+
+1. Author `openspec/changes/<id>/apply-dag.yaml`. `tasks.md` stays the human checklist; it is not the parse source.
+2. Run `lucind-ai split --dag openspec/changes/<id>/apply-dag.yaml --out .lucind/packets`. `split` writes one packet file per node under `--out` and prints one copy-pasteable `lucind-ai run --packet …` line per wave to stdout. That stdout *is* the wave plan; `split` does not write a `waves.json`. Point `--out` at `.lucind/packets/` (or a subdirectory of it) so the primary root stays clean.
+3. Run each printed line **sequentially**. The orchestrator (this session, or a human) is the sequencer — the binary has no in-process `--dag` wave loop and no `--json` channel.
+
+Wave N+1 is dispatched only when wave N exits 0: every lane `done`, and none listed in `reverted_ids`. On a non-zero exit, halt. Read `integrated_ids` and `reverted_ids` from that wave's stdout (not a new report format). Confirm every wave-N id is listed under `integrated_ids` before running the next printed line.
 
 ### Packet Structure
 
@@ -131,6 +145,7 @@ Run from the primary repository root (the binary refuses to run from inside a li
 
 ```bash
 lucind-ai run --packet <path> [--packet <path> ...] [--timeout <duration>]
+lucind-ai split --dag <path> --out <dir>
 lucind-ai --version
 ```
 
@@ -138,6 +153,8 @@ lucind-ai --version
 |---|---|---|---|
 | `--packet <path>` | String (repeatable) | *(required)* | Path to a packet file. Each instance adds one concurrent lane. |
 | `--timeout <duration>` | Duration | `20m` | Wall-clock budget granted to each lane independently. |
+
+`lucind-ai split` takes two required flags: `--dag` (path to an `apply-dag.yaml` sidecar) and `--out` (directory for emitted packet markdown). It prints one `lucind-ai run --packet …` line per wave; it does not dispatch those waves.
 
 ### Concurrency & Barrier
 
@@ -150,5 +167,6 @@ lucind-ai --version
 - **Ledger**: SQLite database at `.lucind/lucind.db` records lane registrations, status transitions, and barrier events.
 - **Envelope**: Dispatched runners write structured envelopes to `.lucind/result.json`, validated against `.lucind/result.schema.json`.
 - **Preservation**: All lane worktrees are preserved on completion or failure.
-- **Exit code**: Returns `0` only when every lane in the batch achieves `done`. Returns `1` if any lane blocked, deviated, or failed.
+- **Integrate IDs**: After the per-lane reports, stdout includes `integrated_ids:` and `reverted_ids:` (space-separated ids on the same line; an empty list prints the label with no ids). Read those lines — they are not a new report format.
+- **Exit code**: Returns `0` only when every lane in the batch achieves `done` **and** none are listed in `reverted_ids`. Bisection can print `status: done` then revert; a `done` status line is not sufficient. Returns `1` if any lane blocked, deviated, failed, or was reverted.
 
