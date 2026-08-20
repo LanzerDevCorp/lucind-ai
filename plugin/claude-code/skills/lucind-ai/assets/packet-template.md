@@ -3,6 +3,7 @@ id: <id>
 executor: agy
 routed_by: <the condition that selected this lane and this verification level — never the executor's name; that is the outcome of routing, not its reason>
 model: <optional — omit to use the executor's own default (agy: gemini-3.7-flash-high, cursor-agent: cursor-grok-4.6-high); set explicitly only to override it>
+allowed_paths: ["path/one", "path/two"]
 ---
 
 # Packet <id>
@@ -54,6 +55,9 @@ Then the packet's own:
 
 Only these may be created or modified. Touching anything else is a **deviation** — finish
 nothing further, report it, and stop.
+
+When frontmatter `allowed_paths` is set, the binary demotes a `done` envelope to
+`deviated` if the worktree diff leaves that list.
 
 - `path/one`
 - `path/two`
