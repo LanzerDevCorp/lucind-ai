@@ -28,6 +28,23 @@ Every packet must open with a YAML frontmatter block enclosed by `---`:
 
 The document body following the closing `---` is the prompt passed to the executor and must not be empty.
 
+### Where to author packet files
+
+Write every packet file under `.lucind/packets/` (e.g. `.lucind/packets/<id>.md`), never at the
+primary repository root or anywhere else inside the tracked tree. `.lucind/` is gitignored
+(`.gitignore:2`), so packet files there never show up in `git status --porcelain` on the primary
+root.
+
+This is not cosmetic: `lucind-ai run`'s own `Integrate` step refuses to merge completed lanes
+back to `main` when the primary root has uncommitted changes at merge time
+(`internal/run/integrate.go`), and dispatching a packet requires that file to exist on disk while
+`lucind-ai run` is invoked from the primary root. A packet written anywhere inside the tracked
+tree — repo root included — makes the primary root dirty for the whole batch and reliably fails
+auto-integration with `integrate: primary root has uncommitted changes` on every single batch,
+turning a should-be-automatic merge into manual per-lane recovery work every time. Authoring
+under `.lucind/packets/` instead avoids this failure mode entirely; no other packet content or
+dispatch step changes.
+
 ### Executor preference by SDD phase
 
 Prefer this `executor:` value by SDD lifecycle phase when writing a packet. It is a preference the author applies by hand, not a rule enforced by any code — `executor` stays a value a human writes by hand (`docs/prd.md` section 6 step 1), and there is and will remain no code-level routing. It is a second, complementary lens to the aptitude map in `docs/prd.md` section 5 (sweeps-vs-precision); a packet author may weigh both when they point in different directions.
