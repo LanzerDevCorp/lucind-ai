@@ -176,6 +176,12 @@ func newBatchTestDeps(t *testing.T, worktreeRoot func(laneID string) string, env
 			return fstest.MapFS{".lucind/result.json": {Data: data}}
 		},
 		Now: func() time.Time { return now },
+		HasUniqueLaneCommits: func(context.Context, string) (bool, error) {
+			return true, nil
+		},
+		PorcelainEmpty: func(context.Context, string) (bool, error) {
+			return true, nil
+		},
 	}
 }
 
