@@ -64,7 +64,25 @@ phases:
       (unlike design) -- 3 canonical capability specs synthesized following cursor-agent's
       split: apply-dag-dispatch, allowed-paths-enforcement, sdd-apply.
   tasks:
-    status: pending
+    status: done
+    engram_topic: sdd/apply-dag-dispatch/tasks
+    drafts:
+      - openspec/changes/apply-dag-dispatch/tasks-agy.md
+      - openspec/changes/apply-dag-dispatch/tasks-cursor-agent.md
+    canonical: openspec/changes/apply-dag-dispatch/tasks.md
+    note: |
+      Dispatched via real lucind-ai run (agy + cursor-agent), both lanes done. cursor-agent's
+      commit had the known Co-authored-by trailer, stripped via commit-tree rewrite before
+      merge. cursor-agent's draft was far more precise (per-scenario RED/GREEN, already
+      incorporates the HEAD~1 bug fix from design, explicit constraints/sequencing notes) and
+      was adopted near-verbatim as canonical.
+      REVIEW-BUDGET ALERT: both drafts independently flag this change as over the 2000-line
+      budget under single-pr -- agy estimated 1700-2400 (High/Elevated), cursor-agent 2600-3800
+      (explicit Yes, over-budget). This is a real, corroborated risk, not a single draft's
+      caution. state.yaml still says delivery_strategy: single-pr -- per the SDD Review
+      Workload Guard, this must be resolved (size:exception accepted, or re-cut to chained
+      PRs matching cursor-agent's suggested PR1/PR2/PR3 split) BEFORE any apply phase is
+      dispatched for this change. Not resolved in this session (planning-only).
   apply:
     status: pending
   verify:

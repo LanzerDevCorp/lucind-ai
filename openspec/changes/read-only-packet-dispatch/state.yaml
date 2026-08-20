@@ -61,7 +61,19 @@ phases:
       (unlike design) -- 3 canonical capability specs synthesized: read-only-packet-schema,
       read-only-done-criterion, completion-mode-enforcement.
   tasks:
-    status: pending
+    status: done
+    engram_topic: sdd/read-only-packet-dispatch/tasks
+    drafts:
+      - openspec/changes/read-only-packet-dispatch/tasks-agy.md
+      - openspec/changes/read-only-packet-dispatch/tasks-cursor-agent.md
+    canonical: openspec/changes/read-only-packet-dispatch/tasks.md
+    note: |
+      Dispatched via real lucind-ai run (agy + cursor-agent), both lanes done. cursor-agent's
+      commit had the known Co-authored-by trailer, stripped via commit-tree rewrite before
+      merge. cursor-agent's draft was more precise (named test functions, exact RED/GREEN
+      scenarios, explicit sequencing notes and constraints) and was adopted near-verbatim as
+      canonical. Review-budget forecast: 900-1300 lines, well under the 2000-line budget --
+      no chained-PR decision needed for this change.
   apply:
     status: pending
   verify:
