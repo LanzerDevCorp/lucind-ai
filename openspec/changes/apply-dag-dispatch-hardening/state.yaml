@@ -21,9 +21,46 @@ phases:
       at .lucind/results/explore-apply-dag-dispatch-hardening.json. Lane done, clean
       worktree, integrated with 0 reverted.
   proposal:
-    status: pending
+    status: done
+    engram_topic: sdd/apply-dag-dispatch-hardening/proposal
+    drafts:
+      - openspec/changes/apply-dag-dispatch-hardening/proposal-agy.md
+      - openspec/changes/apply-dag-dispatch-hardening/proposal-cursor-agent.md
+    canonical: openspec/changes/apply-dag-dispatch-hardening/proposal.md
+    note: |
+      Dispatched via real lucind-ai run (agy + cursor-agent packets, one lucind-ai run
+      invocation carrying all 4 proposal+design packets concurrently), not a Claude Code
+      subagent. Both lanes done, merged to main cleanly (0 reverted), no AI-attribution
+      trailer. Drafts converged on scope and file:line citations; cursor-agent's draft kept
+      a tighter proposal/design boundary (mechanism left to design.md, "Observable contracts"
+      section) and explicitly named exploration edge case 6 as an out-of-scope follow-up --
+      agy's draft leaked git-flag-level mechanism into the proposal and implicitly folded
+      edge case 6 in as "fix now" without discussion. Canonical adopts cursor-agent's scope
+      discipline and edge-6 disposition, agy's Affected Areas granularity.
   design:
-    status: pending
+    status: done
+    engram_topic: sdd/apply-dag-dispatch-hardening/design
+    drafts:
+      - openspec/changes/apply-dag-dispatch-hardening/design-agy.md
+      - openspec/changes/apply-dag-dispatch-hardening/design-cursor-agent.md
+    canonical: openspec/changes/apply-dag-dispatch-hardening/design.md
+    note: |
+      Dispatched in parallel with proposal, not waiting on it -- explicit session decision,
+      consistent with this project's own established precedent (read-only-packet-dispatch's
+      archived state.yaml: "Dispatched in parallel with proposal, not waiting on it").
+      Both lanes done, merged to main cleanly (0 reverted). Both drafts converged heavily on
+      architecture (ValidateGlobalOverlap in internal/dag before Waves returns; Worktree.BaseSHA
+      recorded at Create; four-way NUL-delimited diff union with a new --cached leg). Real,
+      material divergence found and reconciled: agy's HasUniqueCommits replaced the existing
+      merge-base comparison with a plain SHA equality check (a silent correctness regression);
+      cursor-agent explicitly preserved merge-base semantics against the recorded SHA. cursor-
+      agent also added -M explicitly (rename detection independent of the diff.renames config),
+      specified empty-baseSHA -> lane.Blocked fail-closed behavior, and gave reasoned
+      fix-now/defer dispositions for every candidate item and edge case (deferring PorcelainEmpty
+      -z, -C copy detection, and edge case 6 with explicit rationale) where agy's disposition
+      table marked nearly everything "fix now" without discussion. Canonical adopts cursor-
+      agent's design as the base, folding in agy's independently-useful framing (reachability.go
+      as one acceptable file-placement option).
   spec:
     status: pending
   tasks:
