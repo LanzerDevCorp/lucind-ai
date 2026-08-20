@@ -1,0 +1,82 @@
+change: verify-dual-dispatch
+created: 2026-08-20
+artifact_store: hybrid
+execution_mode: auto
+delivery_strategy: single-pr
+review_budget_lines: 2000
+phases:
+  explore:
+    status: done
+    note: |
+      Inherited from the umbrella exploration covering all three dual-executor-dispatch
+      directions (engram sdd/dual-executor-dispatch/explore). This change is the "small,
+      dependent" direction (verify-phase dual dispatch for the qualitative half only). Depends
+      on read-only-packet-dispatch's design (Packet.ReadOnly, enforceCompletionMode) being
+      final, since verify's judgment packets are read-only lanes by construction -- that
+      dependency is now satisfied (read-only-packet-dispatch design/spec/tasks all done).
+    engram_topic: sdd/dual-executor-dispatch/explore
+  proposal:
+    status: done
+    engram_topic: sdd/verify-dual-dispatch/proposal
+    drafts:
+      - openspec/changes/verify-dual-dispatch/proposal-agy.md
+      - openspec/changes/verify-dual-dispatch/proposal-cursor-agent.md
+    canonical: openspec/changes/verify-dual-dispatch/proposal.md
+    note: |
+      Dispatched via real lucind-ai run (agy + cursor-agent packets), in parallel with design
+      (not sequentially -- same explicit session decision as the other two sibling changes).
+      Both lanes done; cursor-agent's commit carried the known Co-authored-by trailer, stripped
+      via commit-tree rewrite before merge. Both packets independently used the same allowed
+      path (openspec/changes/verify-dual-dispatch/proposal.md) -- an authoring mistake this
+      session (should have used distinct proposal-agy.md/proposal-cursor-agent.md allowed paths
+      like every prior phase) -- recovered post-merge by aborting the conflicted second merge,
+      renaming each branch's file to its draft name (proposal-agy.md / proposal-cursor-agent.md)
+      before merging the other, with no content loss. Drafts converged heavily (unlike
+      apply-dag-dispatch's design pair): canonical adopts cursor-agent's sharper
+      current-behavior-vs-target-behavior evidence table and open-questions structure, merged
+      with agy's Affected-Areas/Risks table framing -- same split this project used for
+      read-only-packet-dispatch's canonical proposal.
+  design:
+    status: done
+    engram_topic: sdd/verify-dual-dispatch/design
+    drafts:
+      - openspec/changes/verify-dual-dispatch/design-agy.md
+      - openspec/changes/verify-dual-dispatch/design-cursor-agent.md
+    canonical: openspec/changes/verify-dual-dispatch/design.md
+    note: |
+      Dispatched in parallel with proposal, not waiting on it. Same same-allowed-path authoring
+      mistake and same recovery as proposal (renamed to design-agy.md / design-cursor-agent.md
+      post-merge, no content loss). Both lanes done, cursor-agent's Co-authored-by trailer
+      stripped via commit-tree rewrite before merge. Both drafts converged strongly on all 5
+      decisions -- no real technical bug caught between them this time (unlike
+      apply-dag-dispatch's HEAD~1 bug). Canonical synthesis: adopted cursor-agent's more
+      concrete/actionable treatment of mechanical-rerun prohibition (Decision 3, explicit hard
+      stop wording + rejected chmod/delete alternatives) and its explicit "no new
+      result.schema.json fields" stance (Decision 2); adopted agy's verify.md canonical-report
+      naming (matches this project's existing proposal.md/design.md/tasks.md convention) over
+      cursor-agent's verify-report.md; merged cursor-agent's explicit human-escalation-on-genuine-
+      ambiguity step into agy's 3-case reconciliation table (Decision 4); adopted cursor-agent's
+      verify-mechanical.log naming and richer captured-field set (command line, exit code,
+      duration, git SHA) over agy's verify-mechanical.txt. New CLI subcommand `lucind-ai check`
+      wrapping the existing internal/integrate.Check -- both drafts agreed independently.
+  spec:
+    status: pending
+  tasks:
+    status: pending
+  apply:
+    status: pending
+  verify:
+    status: pending
+  archive:
+    status: pending
+notes: |
+  One of three sibling changes split from a single umbrella exploration
+  (sdd/dual-executor-dispatch/explore): read-only-packet-dispatch (small, done through tasks),
+  apply-dag-dispatch (large, independent, done through tasks), verify-dual-dispatch (this one,
+  small, depends on read-only-packet-dispatch). Planning-only session per explicit user
+  instruction -- no apply phase until the user asks.
+  Dual-executor SDD phase experiment: propose/design phases author their content via lucind-ai
+  packets dispatched to agy AND cursor-agent in parallel, per
+  plugin/claude-code/skills/lucind-ai/SKILL.md's routing preference table. The orchestrator
+  (this Claude Code session) synthesizes/selects from parallel outputs and owns the canonical
+  artifact in openspec/ + engram.
