@@ -1,8 +1,13 @@
 # Verify: Approvals Web UI
 
-**Overall status: BLOCKED** — one confirmed spec violation, plus two independently-confirmed
-defects worth remediating before archive. Not a rejection of the implementation as a whole: the
-core ledger/run/HTTP-decision path is solid and well-tested.
+**Overall status: PASSED (post-remediation)** — originally BLOCKED on the findings below.
+Remediated via a scoped TDD dispatch (packet `remediate-approvals-web-ui-verify`, commit
+`662b871`, integrated `6902555`): removed the over-permissive `trimmed.includes('\n')` disjunct
+from `isValidEvidence` (closes the spec violation), clarified `serve --approval-timeout`'s help
+text as informational-only, added a `decision='pending'` guard + `ErrAlreadyDecided`/409 to
+`ledger.Decide`. Orchestrator independently re-verified the diff and a real
+`go build/vet/test -race -count=1` run — all green. The findings below are preserved as the
+original verify record; treat this file's header as the current status.
 
 ## Stage 1: Mechanical Check
 

@@ -65,20 +65,23 @@ phases:
       lucind-ai serve HTTP server with embedded static assets, and CLI serve command.
       All tests passing under race detector.
   verify:
-    status: blocked
+    status: done
     engram_topic: sdd/approvals-web-ui/verify
     note: |
       Two-stage verify: mechanical check passed (verify-mechanical.log, candidate f7421fb).
       Dual qualitative dispatch (agy done/no findings, cursor-agent done/8 findings).
-      Orchestrator independently verified 3 of cursor-agent's findings against real code and
-      spec text: (1) BLOCKING -- internal/serve/static/app.js isValidEvidence violates the
-      "Bare claim withheld" MUST-NOT spec scenario (approvals-web-ui/spec.md:61-65), any
-      multi-line string renders as evidence; (2) serve --approval-timeout is decorative,
-      unused beyond the log banner; (3) ledger.Decide has no decision='pending' guard, a late
-      UI click can race a timeout. Full detail: openspec/changes/approvals-web-ui/verify.md.
+      Orchestrator independently verified 3 confirmed findings against real code and spec
+      text, initially BLOCKED (see openspec/changes/approvals-web-ui/verify.md), then
+      dispatched a small TDD remediation packet (agy, commit 662b871, integrated via
+      6902555): removed the over-permissive `trimmed.includes('\n')` clause from
+      internal/serve/static/app.js's isValidEvidence (closes the "Bare claim withheld" spec
+      violation), clarified serve --approval-timeout's help text as informational-only, and
+      added a decision='pending' WHERE guard + ErrAlreadyDecided/409 to ledger.Decide's race.
+      Orchestrator independently re-verified all 3 fixes inline against the diff and a real
+      go build/vet/test -race -count=1 run -- all green, tests are real (httptest 409 assert,
+      ledger double-decide assert, JS source-shape assert for the removed disjunct).
   archive:
     status: pending
-    note: blocked on verify remediation -- do not archive until verify:status is done
 notes: |
   Dual-executor SDD phase experiment (session request): design/proposal/specs/tasks phases author
   their content via lucind-ai packets dispatched to agy AND cursor-agent in parallel where the
