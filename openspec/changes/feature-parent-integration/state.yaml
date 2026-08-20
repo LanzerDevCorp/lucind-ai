@@ -1,0 +1,88 @@
+change: feature-parent-integration
+created: 2026-08-20
+artifact_store: hybrid
+execution_mode: auto
+delivery_strategy: chained
+review_budget_lines: 5000
+chain_strategy: phase-per-unit
+chain_note: |
+  tasks.md's own Review Workload Forecast estimates 2,800-4,000 changed lines against a
+  400-line single-PR guard (risk: High, decision-needed-before-apply: Yes, single-PR
+  unauthorized without a recorded size:exception). This overrides the session-wide
+  single-pr default from the apply-dag-dispatch-hardening/feature-parent-integration
+  kickoff for this change only: apply/verify runs once per review-workload Unit
+  (U1..U5, matching tasks.md's Work units table), each producing its own commit(s) and
+  passing its own verify before the next unit dispatches. Archive happens once after
+  all five units are done and the final unit's verify passes.
+phases:
+  explore:
+    status: done
+    note: |
+      Adopted pre-existing: explore.md was authored directly (not via lucind-ai packet
+      dispatch) in a prior session, before this change was brought under full SDD/lucind-ai
+      convention. Content reviewed and confirmed current; not re-dispatched.
+  proposal:
+    status: done
+    note: Adopted pre-existing, same as explore. Content reviewed and confirmed current.
+  design:
+    status: done
+    note: |
+      Adopted pre-existing, same as explore/proposal. One correction applied this session:
+      the Persistence section named schema "v3" for the new features/integration_attempts/
+      feature_leases/overlap_evidence/reconciliation_requests/reconciliation_candidates/
+      integration_events tables. approvals-web-ui (archived 2026-08-20, after this design.md
+      was originally written) already shipped schema v3 (the `approvals` table). Corrected
+      to schema v4 in design.md before any dispatch, so migration numbering does not collide.
+  spec:
+    status: done
+    note: |
+      Adopted pre-existing: specs/parent-feature-integration/spec.md and
+      specs/reconciliation-approval/spec.md were authored directly, not via lucind-ai packet
+      dispatch. Content reviewed and confirmed current; not re-dispatched.
+  tasks:
+    status: done
+    note: |
+      Adopted pre-existing: tasks.md (4 phases, 12 work units, review-workload Units U1-U5)
+      was authored directly, not via lucind-ai packet dispatch. Content reviewed and
+      confirmed current; not re-dispatched. Prerequisite apply-dag-dispatch-hardening
+      (named inside this tasks.md as a prerequisite for Phase 2) is done and archived.
+  apply:
+    status: pending
+    note: |
+      Dispatches per review-workload Unit, single executor (agy), per SKILL.md's
+      apply-phase preference. Unit order: U1 (1.1,1.2,1.3 -> internal/ledger,internal/feature)
+      -> U2 (2.1,2.2 -> internal/packet,dag,worktree,integrate,cmd/lucind-ai) ->
+      U3 (2.3 -> internal/run,integrate) -> U4 (3.1,3.2,3.3,3.4 -> internal/overlap,reconcile,
+      resolve,run,integrate,ledger) -> U5 (4.1,4.2,4.3 -> internal/serve,cmd/lucind-ai,docs).
+      Each unit apply is followed by its own two-stage verify (mechanical + dual qualitative)
+      before the next unit dispatches.
+    units:
+      U1:
+        status: pending
+        tasks: [1.1, 1.2, 1.3]
+      U2:
+        status: pending
+        tasks: [2.1, 2.2]
+      U3:
+        status: pending
+        tasks: [2.3]
+      U4:
+        status: pending
+        tasks: [3.1, 3.2, 3.3, 3.4]
+      U5:
+        status: pending
+        tasks: [4.1, 4.2, 4.3]
+  verify:
+    status: pending
+    note: One two-stage verify pass (mechanical + dual qualitative) per apply unit, plus a final full-change verify before archive.
+  archive:
+    status: pending
+notes: |
+  This change was originally drafted (explore/proposal/design/tasks/specs) outside the
+  lucind-ai dual-executor dispatch pattern established this session for
+  apply-dag-dispatch-hardening. Rather than re-dispatch already-complete, implementation-ready
+  planning docs to agy/cursor-agent for no material gain, this state.yaml adopts them as-is
+  (with the one schema-version correction above) and starts real lucind-ai dispatch at the
+  apply phase, per user instruction. Apply and verify follow the project's established
+  real-dispatch conventions (agy for apply, dual agy+cursor-agent read-only judgment for
+  verify) exactly as used for apply-dag-dispatch-hardening.
