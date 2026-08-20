@@ -10,7 +10,9 @@ import (
 
 	"github.com/LanzerDevCorp/lucind-ai/internal/lane"
 	"github.com/LanzerDevCorp/lucind-ai/internal/result"
+	"github.com/santhosh-tekuri/jsonschema/v6"
 )
+
 
 func TestReadFullyPopulatedEnvelopeRoundTrips(t *testing.T) {
 	src := `{
@@ -429,4 +431,102 @@ func TestEnvelopeCommitSchemaContract(t *testing.T) {
 		t.Errorf("commit description %q does not mention binary enforcement", commitProp.Description)
 	}
 }
+
+func TestVerifyResultEnvelopeSchemaCompliance(t *testing.T) {
+	validVerifyJSON := `{
+		"packet_id": "verify-sample-cursor-agent",
+		"status": "done",
+		"summary": "VERDICT: PASS. Implementation satisfies all spec requirements in specs/sample/spec.md. Mechanical checks passed cleanly.",
+		"hard_stops": [
+			{"hard_stop": "Executing mechanical test/build commands when mechanical results are already provided.", "fired": false}
+		],
+		"findings": [
+			{"finding": "Non-blocking documentation typo in helper comment", "evidence": "internal/sample/sample.go:42", "affects": "Documentation only"}
+		],
+		"done_criteria": [
+			{"criterion": "no unique commits, clean tree", "met": true, "evidence": "git status --porcelain empty; HEAD == merge-base"}
+		]
+	}`
+
+	// 1. Validate valid verify judgment envelope directly against result.SchemaJSON().
+	var schemaDoc any
+	if err := json.Unmarshal(result.SchemaJSON(), &schemaDoc); err != nil {
+		t.Fatalf("Unmarshal(result.SchemaJSON()) error = %v", err)
+	}
+	c := jsonschema.NewCompiler()
+	if err := c.AddResource("lucind-ai://test/schema.json", schemaDoc); err != nil {
+		t.Fatalf("AddResource() error = %v", err)
+	}
+	sch, err := c.Compile("lucind-ai://test/schema.json")
+	if err != nil {
+		t.Fatalf("Compile() error = %v", err)
+	}
+
+	var validDoc any
+	if err := json.Unmarshal([]byte(validVerifyJSON), &validDoc); err != nil {
+		t.Fatalf("Unmarshal(validVerifyJSON) error = %v", err)
+	}
+	if err := sch.Validate(validDoc); err != nil {
+		t.Fatalf("Validate(validVerifyJSON) failed against result.SchemaJSON(): %v", err)
+	}
+
+	// Also assert result.Read accepts the verify envelope and parses findings.
+	fsys := fstest.MapFS{
+		"result.json": {Data: []byte(validVerifyJSON)},
+	}
+	e, err := result.Read(fsys, "result.json")
+	if err != nil {
+		t.Fatalf("Read(validVerifyJSON) error = %v, want nil", err)
+	}
+	if e.PacketID != "verify-sample-cursor-agent" {
+		t.Errorf("PacketID = %q, want %q", e.PacketID, "verify-sample-cursor-agent")
+	}
+	if e.Commit != "" {
+		t.Errorf("Commit = %q, want empty", e.Commit)
+	}
+	if len(e.Findings) != 1 {
+		t.Fatalf("len(Findings) = %d, want 1", len(e.Findings))
+	}
+	wantFinding := result.Finding{
+		Finding:  "Non-blocking documentation typo in helper comment",
+		Evidence: "internal/sample/sample.go:42",
+		Affects:  "Documentation only",
+	}
+	if e.Findings[0] != wantFinding {
+		t.Errorf("Findings[0] = %+v, want %+v", e.Findings[0], wantFinding)
+	}
+
+	// 2. Add unauthorized top-level property "verdict": "pass".
+	invalidVerifyJSON := `{
+		"packet_id": "verify-sample-cursor-agent",
+		"status": "done",
+		"summary": "VERDICT: PASS. Implementation satisfies all spec requirements in specs/sample/spec.md. Mechanical checks passed cleanly.",
+		"verdict": "pass",
+		"hard_stops": [
+			{"hard_stop": "Executing mechanical test/build commands when mechanical results are already provided.", "fired": false}
+		],
+		"findings": [
+			{"finding": "Non-blocking documentation typo in helper comment", "evidence": "internal/sample/sample.go:42", "affects": "Documentation only"}
+		],
+		"done_criteria": [
+			{"criterion": "no unique commits, clean tree", "met": true, "evidence": "git status --porcelain empty; HEAD == merge-base"}
+		]
+	}`
+
+	var invalidDoc any
+	if err := json.Unmarshal([]byte(invalidVerifyJSON), &invalidDoc); err != nil {
+		t.Fatalf("Unmarshal(invalidVerifyJSON) error = %v", err)
+	}
+	if err := sch.Validate(invalidDoc); err == nil {
+		t.Errorf("Validate(invalidVerifyJSON) error = nil, want validation failure due to additionalProperties: false")
+	}
+
+	fsysInvalid := fstest.MapFS{
+		"result.json": {Data: []byte(invalidVerifyJSON)},
+	}
+	if _, err := result.Read(fsysInvalid, "result.json"); !errors.Is(err, result.ErrSchemaInvalid) {
+		t.Errorf("Read(invalidVerifyJSON) error = %v, want it to wrap ErrSchemaInvalid", err)
+	}
+}
+
 

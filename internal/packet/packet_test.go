@@ -472,4 +472,97 @@ func TestSkillAssetContract(t *testing.T) {
 	}
 }
 
+func TestVerifyPacketTemplateAssetStructure(t *testing.T) {
+	templatePath := filepath.Join("..", "..", "plugin", "claude-code", "skills", "lucind-ai", "assets", "verify-packet-template.md")
+	data, err := os.ReadFile(templatePath)
+	if err != nil {
+		t.Fatalf("ReadFile(%s) error = %v", templatePath, err)
+	}
+	content := string(data)
+
+	p, err := packet.Parse(strings.NewReader(content))
+	if err != nil {
+		t.Fatalf("packet.Parse() error = %v", err)
+	}
+
+	if !p.ReadOnly {
+		t.Errorf("Packet.ReadOnly = %v, want true", p.ReadOnly)
+	}
+
+	// Assert body contains exact frontmatter skeleton with read_only: true.
+	if !strings.Contains(content, "read_only: true") {
+		t.Errorf("template asset missing 'read_only: true' in frontmatter skeleton")
+	}
+
+	// Assert body contains the three read-only done criteria:
+	// 1. "Every indirection introduced is demonstrably consumed by a terminal consumer."
+	if !strings.Contains(p.Body, "Every indirection introduced is demonstrably consumed by a terminal consumer.") {
+		t.Errorf("template body missing done criterion 1: 'Every indirection introduced is demonstrably consumed by a terminal consumer.'")
+	}
+	// 2. "The worktree carries no unique commits and no working-tree changes relative to the lane's birth point (`git status --porcelain` empty AND `HEAD` equals `git merge-base HEAD <primary HEAD>`)."
+	if !strings.Contains(p.Body, "The worktree carries no unique commits and no working-tree changes relative to the lane's birth point (`git status --porcelain` empty AND `HEAD` equals `git merge-base HEAD <primary HEAD>`).") {
+		t.Errorf("template body missing done criterion 2: 'The worktree carries no unique commits and no working-tree changes relative to the lane's birth point (`git status --porcelain` empty AND `HEAD` equals `git merge-base HEAD <primary HEAD>`).'")
+	}
+	// 3. "Qualitative evaluation completed" (.lucind/result.json populated with status, summary, and structured findings).
+	if !strings.Contains(p.Body, "Qualitative evaluation completed") ||
+		!strings.Contains(p.Body, ".lucind/result.json") ||
+		!strings.Contains(p.Body, "status") ||
+		!strings.Contains(p.Body, "summary") ||
+		!strings.Contains(p.Body, "findings") {
+		t.Errorf("template body missing done criterion 3 for qualitative evaluation completion")
+	}
+
+	// Assert body does NOT contain a write-packet commit done criterion ("The work is committed").
+	if strings.Contains(p.Body, "The work is committed") {
+		t.Errorf("template body contains write-packet commit criterion 'The work is committed', want it omitted")
+	}
+
+	// Assert ## Out of scope explicitly forbids executing go test, go build, go vet, lucind-checks.sh, or any shell test/build suite.
+	if !strings.Contains(p.Body, "## Out of scope") {
+		t.Errorf("template body missing '## Out of scope' section")
+	}
+	for _, forbidden := range []string{"go test", "go build", "go vet", "lucind-checks.sh"} {
+		if !strings.Contains(p.Body, forbidden) {
+			t.Errorf("template body out of scope section does not mention forbidden command %q", forbidden)
+		}
+	}
+
+	// Assert ## Hard stops contains exact hard stop string:
+	// "Executing mechanical test/build commands when mechanical results are already provided."
+	wantHardStop := "Executing mechanical test/build commands when mechanical results are already provided."
+	if !strings.Contains(p.Body, wantHardStop) {
+		t.Errorf("template body missing hard stop %q", wantHardStop)
+	}
+
+	// Assert ## Context contains sections for embedding frozen mechanical log transcript and summary.
+	if !strings.Contains(p.Body, "## Context") {
+		t.Errorf("template body missing '## Context' section")
+	}
+	if !strings.Contains(p.Body, "transcript") || !strings.Contains(p.Body, "summary") {
+		t.Errorf("template body ## Context missing mechanical log transcript or summary placeholders")
+	}
+
+	// Assert tool-selection guidance instructs using read/navigation tools (Read, Glob, Grep, codegraph) and read-only git queries (git diff, git log, git show).
+	for _, tool := range []string{"Read", "Glob", "Grep", "codegraph", "git diff", "git log", "git show"} {
+		if !strings.Contains(p.Body, tool) {
+			t.Errorf("template body tool-selection guidance missing recommended tool/query %q", tool)
+		}
+	}
+}
+
+func TestPacketTemplateVerifyPointerNote(t *testing.T) {
+	templatePath := filepath.Join("..", "..", "plugin", "claude-code", "skills", "lucind-ai", "assets", "packet-template.md")
+	data, err := os.ReadFile(templatePath)
+	if err != nil {
+		t.Fatalf("ReadFile(%s) error = %v", templatePath, err)
+	}
+	content := string(data)
+
+	if !strings.Contains(content, "verify-packet-template.md") {
+		t.Errorf("packet-template.md missing pointer note referencing 'verify-packet-template.md' for qualitative verification lanes")
+	}
+}
+
+
+
 
