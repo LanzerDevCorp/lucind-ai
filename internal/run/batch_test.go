@@ -868,3 +868,120 @@ func TestExecuteBatchOutOfScopeUntrackedFileDeviatedExcludedFromIntegrate(t *tes
 		}
 	}
 }
+
+func TestExecuteBatchBarrierStaysIdleWhileOneLaneWaitsForApproval(t *testing.T) {
+	root := t.TempDir()
+	p1 := batchPacket("lane-fast")
+	p2 := batchPacket("lane-wait")
+
+	fe := newBatchFakeExecutor()
+	fe.outcomeFor[root+"/lane-fast"] = executor.Outcome{ExitCode: 0}
+	fe.outcomeFor[root+"/lane-wait"] = executor.Outcome{ExitCode: 0}
+
+	deps := newBatchTestDeps(t, func(id string) string {
+		return root + "/" + id
+	}, func(id string) []byte {
+		return []byte(laneEnvelopeJSON(id, "done"))
+	}, fe, nil)
+	deps.ApprovalTimeout = 3 * time.Second
+
+	// In a background goroutine, handle approvals
+	go func() {
+		var fastDecided, waitDecided bool
+		for !fastDecided || !waitDecided {
+			time.Sleep(20 * time.Millisecond)
+			if !fastDecided {
+				appFast, err1 := deps.Ledger.Approval(context.Background(), deps.RunID, "lane-fast")
+				if err1 == nil && appFast.Decision == ledger.DecisionPending {
+					if err := deps.Ledger.Decide(context.Background(), deps.RunID, "lane-fast", "alice", ledger.DecisionApproved); err == nil {
+						fastDecided = true
+					}
+				}
+			}
+			if !waitDecided {
+				appWait, err2 := deps.Ledger.Approval(context.Background(), deps.RunID, "lane-wait")
+				if err2 == nil && appWait.Decision == ledger.DecisionPending {
+					time.Sleep(50 * time.Millisecond)
+					if err := deps.Ledger.Decide(context.Background(), deps.RunID, "lane-wait", "alice", ledger.DecisionApproved); err == nil {
+						waitDecided = true
+					}
+				}
+			}
+		}
+	}()
+
+	report, err := run.ExecuteBatch(context.Background(), deps, []packet.Packet{p1, p2})
+	if err != nil {
+		t.Fatalf("ExecuteBatch() error = %v", err)
+	}
+	if !report.Released {
+		t.Errorf("report.Released = %v, want true", report.Released)
+	}
+	if len(report.Lanes) != 2 {
+		t.Fatalf("len(report.Lanes) = %d, want 2", len(report.Lanes))
+	}
+	for _, r := range report.Lanes {
+		if r.Status != lane.Done {
+			t.Errorf("lane %s status = %v, want %v", r.LaneID, r.Status, lane.Done)
+		}
+	}
+}
+
+func TestExecuteBatchBarrierObservesBlockedWhenApprovalRejected(t *testing.T) {
+	root := t.TempDir()
+	p1 := batchPacket("lane-fast")
+	p2 := batchPacket("lane-rej")
+
+	fe := newBatchFakeExecutor()
+	fe.outcomeFor[root+"/lane-fast"] = executor.Outcome{ExitCode: 0}
+	fe.outcomeFor[root+"/lane-rej"] = executor.Outcome{ExitCode: 0}
+
+	deps := newBatchTestDeps(t, func(id string) string {
+		return root + "/" + id
+	}, func(id string) []byte {
+		return []byte(laneEnvelopeJSON(id, "done"))
+	}, fe, nil)
+	deps.ApprovalTimeout = 3 * time.Second
+
+	go func() {
+		var fastDecided, rejDecided bool
+		for !fastDecided || !rejDecided {
+			time.Sleep(20 * time.Millisecond)
+			if !fastDecided {
+				appFast, err1 := deps.Ledger.Approval(context.Background(), deps.RunID, "lane-fast")
+				if err1 == nil && appFast.Decision == ledger.DecisionPending {
+					if err := deps.Ledger.Decide(context.Background(), deps.RunID, "lane-fast", "alice", ledger.DecisionApproved); err == nil {
+						fastDecided = true
+					}
+				}
+			}
+			if !rejDecided {
+				appRej, err2 := deps.Ledger.Approval(context.Background(), deps.RunID, "lane-rej")
+				if err2 == nil && appRej.Decision == ledger.DecisionPending {
+					if err := deps.Ledger.Decide(context.Background(), deps.RunID, "lane-rej", "bob", ledger.DecisionRejected); err == nil {
+						rejDecided = true
+					}
+				}
+			}
+		}
+	}()
+
+	report, err := run.ExecuteBatch(context.Background(), deps, []packet.Packet{p1, p2})
+	if err != nil {
+		t.Fatalf("ExecuteBatch() error = %v", err)
+	}
+	if !report.Released {
+		t.Errorf("report.Released = false, want true (all lanes reached terminal status)")
+	}
+	if len(report.Outcome.Integrate) != 1 || report.Outcome.Integrate[0] != "lane-fast" {
+		t.Errorf("report.Outcome.Integrate = %+v, want [lane-fast]", report.Outcome.Integrate)
+	}
+	if len(report.Outcome.Preserve) != 1 || report.Outcome.Preserve[0] != "lane-rej" {
+		t.Errorf("report.Outcome.Preserve = %+v, want [lane-rej]", report.Outcome.Preserve)
+	}
+	for _, r := range report.Lanes {
+		if r.LaneID == "lane-rej" && r.Status != lane.Blocked {
+			t.Errorf("lane-rej status = %v, want lane.Blocked", r.Status)
+		}
+	}
+}

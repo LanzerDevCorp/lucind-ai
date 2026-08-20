@@ -59,7 +59,11 @@ phases:
       cursor-agent cross-referenced spec scenarios per task and estimated 2x more conservative
       line count. 900-1800 lines total, well under the 2000-line single-pr budget -- no chaining.
   apply:
-    status: pending
+    status: done
+    note: |
+      Implemented schema v3 approvals table, approval wait gate in Execute, loopback-only
+      lucind-ai serve HTTP server with embedded static assets, and CLI serve command.
+      All tests passing under race detector.
   verify:
     status: pending
   archive:

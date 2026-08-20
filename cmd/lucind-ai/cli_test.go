@@ -379,11 +379,11 @@ func TestRunOverlappingAllowedPathsFailsBeforeCreateWorktree(t *testing.T) {
 	createCalled := false
 	origFactory := depsFactory
 	defer func() { depsFactory = origFactory }()
-	depsFactory = func(runID, primaryRoot string, ledg *ledger.Ledger, timeout time.Duration) lucindrun.Deps {
-		deps := origFactory(runID, primaryRoot, ledg, timeout)
+	depsFactory = func(runID, primaryRoot string, ledg *ledger.Ledger, timeout, approvalTimeout time.Duration) lucindrun.Deps {
+		deps := origFactory(runID, primaryRoot, ledg, timeout, approvalTimeout)
 		deps.CreateWorktree = func(ctx context.Context, primaryRoot, laneID string) (worktree.Worktree, error) {
 			createCalled = true
-			return origFactory(runID, primaryRoot, ledg, timeout).CreateWorktree(ctx, primaryRoot, laneID)
+			return origFactory(runID, primaryRoot, ledg, timeout, approvalTimeout).CreateWorktree(ctx, primaryRoot, laneID)
 		}
 		deps.PersistEnvelope = func(ctx context.Context, primaryRoot, laneID string, envelope *result.Envelope) error {
 			return nil
@@ -670,7 +670,7 @@ func TestProductionDepsWiresGitBackedInspectionFuncs(t *testing.T) {
 	}
 
 	primaryRoot := initRepo(t)
-	deps := productionDeps("test-run-id", primaryRoot, nil, 10*time.Minute)
+	deps := productionDeps("test-run-id", primaryRoot, nil, 10*time.Minute, 0)
 
 	if deps.HasUniqueLaneCommits == nil {
 		t.Fatal("productionDeps.HasUniqueLaneCommits is nil, want non-nil git-backed func")
@@ -738,7 +738,7 @@ func TestProductionDepsGitInspectionErrorPropagation(t *testing.T) {
 	}
 
 	invalidDir := t.TempDir()
-	deps := productionDeps("test-run-id", invalidDir, nil, 10*time.Minute)
+	deps := productionDeps("test-run-id", invalidDir, nil, 10*time.Minute, 0)
 
 	if deps.HasUniqueLaneCommits == nil {
 		t.Fatal("productionDeps.HasUniqueLaneCommits is nil, want non-nil git-backed func")
@@ -985,8 +985,8 @@ func TestRunSequentialInvocationsProduceDistinctRunIDs(t *testing.T) {
 
 	origFactory := depsFactory
 	defer func() { depsFactory = origFactory }()
-	depsFactory = func(runID, primaryRoot string, ledg *ledger.Ledger, timeout time.Duration) lucindrun.Deps {
-		deps := origFactory(runID, primaryRoot, ledg, timeout)
+	depsFactory = func(runID, primaryRoot string, ledg *ledger.Ledger, timeout, approvalTimeout time.Duration) lucindrun.Deps {
+		deps := origFactory(runID, primaryRoot, ledg, timeout, approvalTimeout)
 		deps.CreateWorktree = func(ctx context.Context, primaryRoot, laneID string) (worktree.Worktree, error) {
 			return worktree.Worktree{Path: t.TempDir(), Branch: "branch-" + laneID}, nil
 		}
@@ -1079,8 +1079,8 @@ func TestRunDispatchPersistsIntegratedLaneEnvelopeToPrimaryRoot(t *testing.T) {
 
 	origFactory := depsFactory
 	defer func() { depsFactory = origFactory }()
-	depsFactory = func(runID, primaryRoot string, ledg *ledger.Ledger, timeout time.Duration) lucindrun.Deps {
-		deps := origFactory(runID, primaryRoot, ledg, timeout)
+	depsFactory = func(runID, primaryRoot string, ledg *ledger.Ledger, timeout, approvalTimeout time.Duration) lucindrun.Deps {
+		deps := origFactory(runID, primaryRoot, ledg, timeout, approvalTimeout)
 		deps.CreateWorktree = func(ctx context.Context, primaryRoot, laneID string) (worktree.Worktree, error) {
 			return worktree.Worktree{Path: t.TempDir(), Branch: "branch-" + laneID}, nil
 		}
@@ -1296,9 +1296,9 @@ func overrideDispatchDeps(t *testing.T, exec executor.Executor) {
 	t.Helper()
 	origFactory := depsFactory
 	t.Cleanup(func() { depsFactory = origFactory })
-	depsFactory = func(runID, primaryRoot string, ledg *ledger.Ledger, timeout time.Duration) lucindrun.Deps {
-		deps := origFactory(runID, primaryRoot, ledg, timeout)
-		deps.CreateWorktree = origFactory(runID, primaryRoot, ledg, timeout).CreateWorktree
+	depsFactory = func(runID, primaryRoot string, ledg *ledger.Ledger, timeout, approvalTimeout time.Duration) lucindrun.Deps {
+		deps := origFactory(runID, primaryRoot, ledg, timeout, approvalTimeout)
+		deps.CreateWorktree = origFactory(runID, primaryRoot, ledg, timeout, approvalTimeout).CreateWorktree
 		deps.HasUniqueLaneCommits = func(ctx context.Context, worktreePath, baseSHA string) (bool, error) {
 			return true, nil
 		}
@@ -1808,5 +1808,44 @@ func TestFormatMechanicalLogHeader(t *testing.T) {
 	failLog := formatMechanicalLog(commitSHA, 1, 500*time.Millisecond, "FAIL\n")
 	if !strings.Contains(failLog, "Exit Code: 1\n") {
 		t.Errorf("failLog = %q, want 'Exit Code: 1\\n'", failLog)
+	}
+}
+
+func TestServeNonLoopbackAddrRejectedAtCLI(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := run(context.Background(), []string{"serve", "--addr", "0.0.0.0:7433"}, &stdout, &stderr)
+	if code == 0 {
+		t.Fatalf("serve with 0.0.0.0 exit code = 0, want non-zero")
+	}
+	if !strings.Contains(strings.ToLower(stderr.String()), "loopback") {
+		t.Fatalf("stderr = %q, want it to mention loopback error", stderr.String())
+	}
+}
+
+func TestServeFlagsAndSubcommandRecognized(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	// Invalid flag should fail with usage
+	code := run(context.Background(), []string{"serve", "--invalid-flag"}, &stdout, &stderr)
+	if code == 0 {
+		t.Fatalf("serve with invalid flag exit code = 0, want non-zero")
+	}
+}
+
+func TestDefaultApproverNotEmpty(t *testing.T) {
+	app := defaultApprover()
+	if app == "" {
+		t.Errorf("defaultApprover() returned empty string")
+	}
+}
+
+func TestRunAcceptsApprovalTimeoutFlag(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	// Missing packet but valid flags should fail with --packet required, not flag parse error
+	code := run(context.Background(), []string{"run", "--approval-timeout", "15m"}, &stdout, &stderr)
+	if code == 0 {
+		t.Fatalf("run without --packet exit code = 0, want non-zero")
+	}
+	if !strings.Contains(stderr.String(), "--packet is required") {
+		t.Fatalf("stderr = %q, want --packet is required", stderr.String())
 	}
 }
