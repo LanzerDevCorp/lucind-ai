@@ -2,6 +2,8 @@ package packet_test
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -254,3 +256,86 @@ func TestParseRejectsIncompletePackets(t *testing.T) {
 		})
 	}
 }
+
+func TestPacketTemplateAssetContract(t *testing.T) {
+	templatePath := filepath.Join("..", "..", "plugin", "claude-code", "skills", "lucind-ai", "assets", "packet-template.md")
+	data, err := os.ReadFile(templatePath)
+	if err != nil {
+		t.Fatalf("ReadFile(%s) error = %v", templatePath, err)
+	}
+	content := string(data)
+
+	// Example frontmatter must omit read_only (skeleton stays write-default).
+	parts := strings.SplitN(content, "---", 3)
+	if len(parts) < 3 {
+		t.Fatalf("packet-template.md missing frontmatter delimiters")
+	}
+	frontmatter := parts[1]
+	if strings.Contains(frontmatter, "read_only") {
+		t.Errorf("example frontmatter contains read_only, want skeleton to stay write-default")
+	}
+
+	// Criterion 2 still requires a commit for write packets.
+	if !strings.Contains(content, "**The work is committed.**") {
+		t.Errorf("packet-template.md missing mandatory criterion 2 'The work is committed.'")
+	}
+	if !strings.Contains(content, "`git status --porcelain` empty") || !strings.Contains(content, "`git log --oneline -1`") {
+		t.Errorf("packet-template.md missing write-packet commit evidence requirements")
+	}
+
+	// Read-only note must document swapping criterion 2 for unchanged tree evidence.
+	if !strings.Contains(content, "Read-only packets") {
+		t.Errorf("packet-template.md missing 'Read-only packets' note")
+	}
+	if !strings.Contains(content, "read_only: true") {
+		t.Errorf("packet-template.md note missing 'read_only: true' instruction")
+	}
+	if !strings.Contains(content, "git merge-base HEAD <primary HEAD>") {
+		t.Errorf("packet-template.md note missing merge-base check evidence")
+	}
+}
+
+func TestSkillAssetContract(t *testing.T) {
+	skillPath := filepath.Join("..", "..", "plugin", "claude-code", "skills", "lucind-ai", "SKILL.md")
+	data, err := os.ReadFile(skillPath)
+	if err != nil {
+		t.Fatalf("ReadFile(%s) error = %v", skillPath, err)
+	}
+	content := string(data)
+
+	// Explore is documented as dispatchable via lucind-ai run.
+	if !strings.Contains(content, "Dispatch via `lucind-ai run`") {
+		t.Errorf("SKILL.md does not document explore dispatch via lucind-ai run")
+	}
+
+	// Mandatory criterion 2 states the read-only exception.
+	if !strings.Contains(content, "*Mandatory criterion 2*") {
+		t.Errorf("SKILL.md missing mandatory criterion 2")
+	}
+	if !strings.Contains(content, "read_only: true") || !strings.Contains(content, "git merge-base HEAD <primary HEAD>") {
+		t.Errorf("SKILL.md mandatory criterion 2 missing read-only exception with merge-base check")
+	}
+
+	// Explore blocker row no longer says the exception is missing.
+	if strings.Contains(content, "Needs an explicit read-only-packet exception") {
+		t.Errorf("SKILL.md explore blocker row still states the exception is missing")
+	}
+
+	// Apply and verify blocker rows remain untouched.
+	if !strings.Contains(content, "Split `tasks.md` into independent packets and dispatch as a DAG") {
+		t.Errorf("SKILL.md apply row was modified or removed")
+	}
+	if !strings.Contains(content, "Dual-dispatch `agy` + `cursor-agent` for the *qualitative* half of verification") {
+		t.Errorf("SKILL.md verify row was modified or removed")
+	}
+
+	// Unrelated sections present from earlier in the session are preserved.
+	if !strings.Contains(content, "### Where to author packet files") {
+		t.Errorf("SKILL.md missing 'Where to author packet files' section")
+	}
+	if !strings.Contains(content, "### Keeping the Binary Current") {
+		t.Errorf("SKILL.md missing 'Keeping the Binary Current' section")
+	}
+}
+
+

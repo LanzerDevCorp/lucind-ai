@@ -1,8 +1,10 @@
 package result_test
 
 import (
+	"encoding/json"
 	"errors"
 	"io/fs"
+	"strings"
 	"testing"
 	"testing/fstest"
 
@@ -235,6 +237,16 @@ func TestReadSchemaViolations(t *testing.T) {
 			}`,
 		},
 		{
+			name: "read_only top-level property",
+			src: `{
+				"packet_id": "fix-auth",
+				"status": "done",
+				"summary": "Did the thing.",
+				"hard_stops": [],
+				"read_only": true
+			}`,
+		},
+		{
 			name: "status outside the enum",
 			src: `{
 				"packet_id": "fix-auth",
@@ -369,3 +381,52 @@ func TestReadMinimalEnvelopeMapsLaneStatus(t *testing.T) {
 		})
 	}
 }
+
+func TestEnvelopeCommitSchemaContract(t *testing.T) {
+	// A minimal envelope that omits commit still Reads successfully.
+	src := `{
+		"packet_id": "fix-auth",
+		"status": "done",
+		"summary": "Did the thing.",
+		"hard_stops": []
+	}`
+	fsys := fstest.MapFS{
+		"result.json": {Data: []byte(src)},
+	}
+	e, err := result.Read(fsys, "result.json")
+	if err != nil {
+		t.Fatalf("Read() error = %v, want nil", err)
+	}
+	if e.Commit != "" {
+		t.Errorf("Commit = %q, want empty", e.Commit)
+	}
+
+	// Schema assertions: commit is not required, and description documents read-only omission.
+	var doc struct {
+		Required   []string `json:"required"`
+		Properties map[string]struct {
+			Description string `json:"description"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(result.SchemaJSON(), &doc); err != nil {
+		t.Fatalf("Unmarshal(SchemaJSON()) error = %v", err)
+	}
+
+	for _, req := range doc.Required {
+		if req == "commit" {
+			t.Errorf("schema required fields contains %q, want commit to remain optional", req)
+		}
+	}
+
+	commitProp, ok := doc.Properties["commit"]
+	if !ok {
+		t.Fatal("schema properties missing 'commit'")
+	}
+	if !strings.Contains(strings.ToLower(commitProp.Description), "omitted on a read-only packet") {
+		t.Errorf("commit description %q does not mention read-only omission", commitProp.Description)
+	}
+	if !strings.Contains(commitProp.Description, "the binary does not trust this field for enforcement") {
+		t.Errorf("commit description %q does not mention binary enforcement", commitProp.Description)
+	}
+}
+
