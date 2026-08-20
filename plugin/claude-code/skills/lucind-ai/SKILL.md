@@ -39,6 +39,46 @@ Prefer this `executor:` value by SDD lifecycle phase when writing a packet. It i
 
 `validate` deliberately has no entry here. It is not a phase `lucind-ai` dispatches at all. Reviewing/validating a diff is `gentle-ai`'s RDD, run by a human from an `opencode` session with `gpt-5.6-sol` (`docs/prd.md` section 9) — outside this binary's dispatch model entirely, not a third executor choice.
 
+### Dual-executor SDD-phase dispatch (orchestrator pattern)
+
+A Claude Code orchestrator convention layered on top of the preference table above, exercised and
+verified twice (session 3, `approvals-web-ui`: propose, design). Not enforced by any code in this
+binary — like the preference table itself, a human/orchestrator decision applied packet by packet,
+not a default the binary forces.
+
+**Verified pattern (propose, design, specs, tasks):**
+
+1. Write one packet body per phase artifact. Dispatch to `agy` and `cursor-agent` in parallel with
+   `--packet` twice, each writing to a distinct draft path
+   (`openspec/changes/<change>/<artifact>-agy.md` / `-cursor-agent.md`, or a `<artifact>s-<executor>/`
+   subdirectory for multi-file artifacts like specs) so their branches never conflict.
+2. The orchestrator reads both drafts and synthesizes one canonical artifact — never picks one
+   draft wholesale — then merges both draft branches and the canonical file to `main` by hand
+   (`git merge` to `main` is classifier-gated in auto mode; ask the user once per merge round).
+3. Update `openspec/changes/<change>/state.yaml`'s phase entry with `status`, `engram_topic`, and a
+   short note on what each draft contributed.
+4. When the preference table above (or an explicit human instruction in conversation) names a
+   single executor for a phase — as happened for `design` in session 3 — skip the dual dispatch
+   and run that one executor only. Dual dispatch is the default for propose/design/specs/tasks,
+   not a hard rule.
+
+**Whether the double dispatch is worth the extra quota**: judge it per phase, not by default
+faith. Session 3's `propose` comparison (engram `sdd/approvals-web-ui/proposal`) found the two
+drafts converged almost completely but were still genuinely complementary — the canonical document
+pulled specific sentences from both (agy correctly named `Modified Capabilities: lane-execution`
+where cursor-agent's draft said "None"; cursor-agent's rollback plan and its explicit rejection of
+extending `lane.Status` to a 7th value were sharper). Neither draft alone was the final document.
+That is the bar for "worth it" — complementary specificity, not necessarily a contradiction to
+arbitrate.
+
+**Target direction, not yet built — do not attempt without addressing the named blocker:**
+
+| Phase | Target | Blocker |
+|---|---|---|
+| `explore` | Dispatch via `lucind-ai run`, not a local Claude subagent — matches this project's own identity (Claude Code orchestrates, `agy`/`cursor-agent` execute). | Explore is read-only; the packet template's mandatory done-criterion #2 ("the work is committed") assumes a file changed. Needs an explicit read-only-packet exception before this is safe to dispatch as-is. |
+| `apply` | Split `tasks.md` into independent packets and dispatch as a DAG (parallel where tasks share no file scope) via `lucind-ai run`, not `sdd-apply`'s own Read/Edit/Write. Not new engineering — bisection + `internal/resolve` (`docs/prd.md` §6 steps 6-8) already exist for exactly this. | Needs an orchestrator step that turns `tasks.md` into a DAG of packets with non-overlapping `allowed_paths`, dispatched in dependency order. Not built. |
+| `verify` | Dual-dispatch `agy` + `cursor-agent` for the *qualitative* half of verification (does the implementation satisfy the spec's intent, are there coverage gaps) — not the mechanical half. | Mechanical checks (`go test`, `go vet`, `lucind-checks.sh`) are deterministic; running them twice through two LLMs adds no information, only cost. Dispatch only the judgment portion twice, once tooling exists to run mechanical checks a single time and hand both executors the same result to judge independently. |
+
 ### Packet Structure
 
 1. **Goal**: One concise statement of what must be true upon completion (not how to do it).
