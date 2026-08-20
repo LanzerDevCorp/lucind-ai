@@ -130,3 +130,52 @@ func IsLinkedWorktree(path string) bool {
 
 	return strings.HasPrefix(string(data), "gitdir:")
 }
+
+// HasUniqueCommits reports whether the linked worktree at worktreePath has
+// unique commits not present in primaryRoot's history, determined by whether
+// worktree HEAD differs from git merge-base HEAD <primary HEAD>.
+func HasUniqueCommits(ctx context.Context, worktreePath, primaryRoot string) (bool, error) {
+	primaryHeadCmd := exec.CommandContext(ctx, "git", "-C", primaryRoot, "rev-parse", "HEAD")
+	var primaryStderr strings.Builder
+	primaryHeadCmd.Stderr = &primaryStderr
+	primaryHeadOut, err := primaryHeadCmd.Output()
+	if err != nil {
+		return false, fmt.Errorf("worktree: git rev-parse HEAD in primary root failed: %w: %s", err, strings.TrimSpace(primaryStderr.String()))
+	}
+	primaryHead := strings.TrimSpace(string(primaryHeadOut))
+
+	wtHeadCmd := exec.CommandContext(ctx, "git", "-C", worktreePath, "rev-parse", "HEAD")
+	var wtStderr strings.Builder
+	wtHeadCmd.Stderr = &wtStderr
+	wtHeadOut, err := wtHeadCmd.Output()
+	if err != nil {
+		return false, fmt.Errorf("worktree: git rev-parse HEAD in worktree failed: %w: %s", err, strings.TrimSpace(wtStderr.String()))
+	}
+	wtHead := strings.TrimSpace(string(wtHeadOut))
+
+	mergeBaseCmd := exec.CommandContext(ctx, "git", "-C", worktreePath, "merge-base", "HEAD", primaryHead)
+	var mergeBaseStderr strings.Builder
+	mergeBaseCmd.Stderr = &mergeBaseStderr
+	mergeBaseOut, err := mergeBaseCmd.Output()
+	if err != nil {
+		return false, fmt.Errorf("worktree: git merge-base failed: %w: %s", err, strings.TrimSpace(mergeBaseStderr.String()))
+	}
+	mergeBase := strings.TrimSpace(string(mergeBaseOut))
+
+	return wtHead != mergeBase, nil
+}
+
+// PorcelainEmpty reports whether git status --porcelain in the linked worktree
+// at worktreePath produces no output, using git's default ignore rules.
+func PorcelainEmpty(ctx context.Context, worktreePath string) (bool, error) {
+	cmd := exec.CommandContext(ctx, "git", "-C", worktreePath, "status", "--porcelain")
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		return false, fmt.Errorf("worktree: git status failed: %w: %s", err, strings.TrimSpace(stderr.String()))
+	}
+	return len(strings.TrimSpace(string(out))) == 0, nil
+}
+
+
