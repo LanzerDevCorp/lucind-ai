@@ -144,7 +144,22 @@ phases:
       synthesize with available evidence now rather than block on a fix; flagged as a future
       follow-up, not filed as a new SDD change in this session.
   verify:
-    status: pending
+    status: done
+    engram_topic: sdd/verify-dual-dispatch/verify
+    canonical: openspec/changes/verify-dual-dispatch/verify.md
+    note: |
+      Self-verify: the two-stage protocol this change built used, for the first time, to check
+      the change that built it -- the circularity that blocked this until apply merged is now
+      closed. Stage 1 lucind-ai check passed clean (commit cfee550, log committed). Stage 2: two
+      read_only:true packets dispatched to agy and cursor-agent in parallel, both done, both
+      PASS, both integrated, full envelopes persisted via fix-persist-lane-envelope. Three
+      non-blocking findings, all independently re-verified by the orchestrator against real code:
+      (1) this change's own design.md/tasks.md did not anticipate the envelope-persistence gap
+      -- already remediated by the sibling fix, outside this change's diff; (2) no pre-dispatch
+      gate rejects a verify packet missing read_only:true (confirmed: internal/packet/packet.go's
+      ReadOnly defaults to false on an absent key, protection is template discipline only); (3)
+      `check --out` on a failing script is implemented correctly but untested. None contradicts a
+      tested spec scenario. Full detail in verify.md.
   archive:
     status: pending
 notes: |
