@@ -139,7 +139,29 @@ phases:
       own `allowed_paths` -- easy to omit when allowed_paths is scoped to "the code
       directories" and the doc edit is mentioned only in prose.
   verify:
-    status: pending
+    status: done
+    engram_topic: sdd/apply-dag-dispatch-hardening/verify
+    canonical: openspec/changes/apply-dag-dispatch-hardening/verify.md
+    note: |
+      Two-stage verify, first full real run of this project's own new verify-dual-dispatch
+      mechanism against real (not self-verifying) work. Stage 1: lucind-ai check passed clean
+      (commit f84e085, log committed as verify-mechanical.log) -- binary was rebuilt via
+      `make install` first since this apply touched cmd/lucind-ai/cli.go and
+      internal/run/run.go, so the stale pre-apply binary would not have exercised the new
+      hardening at all. Stage 2: two read_only:true packets dispatched to agy and cursor-agent
+      in parallel, both done, both integrated cleanly with 0 reverted. Overall verdict PASSED
+      (unanimous done/done).
+
+      Independently re-verified (not accepted on the lanes' word alone) two real, non-blocking
+      test-quality findings cursor-agent raised: TestExecuteScopeCheckUsesRecordedBaseSHANotLivePrimaryHEAD
+      (run_test.go:2135) does not actually distinguish recorded-SHA from live-HEAD behavior --
+      its fixture commits an out-of-scope path, which would Deviate under either
+      implementation; and internal/run/run.go:506 has a leftover strings.TrimSpace call from
+      the pre-NUL parser era. Both confirmed real by direct file read; neither is a production
+      defect or a spec violation -- recorded as verify.md follow-ups, not blockers. Also
+      re-verified the design reconciliation's flagged regression risk (agy's design draft had
+      downgraded HasUniqueCommits to a plain SHA-equality check) did NOT make it into shipped
+      code -- worktree.go:165 still uses git merge-base, confirmed by direct read.
   archive:
     status: pending
 notes: |
