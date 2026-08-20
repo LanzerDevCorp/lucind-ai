@@ -4,6 +4,9 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -741,5 +744,101 @@ func TestExecuteBatchDispatchesDifferentExecutorsPerPacket(t *testing.T) {
 	}
 	if wantPath := root + "/lane-cursor"; cursorReqs[0].WorktreePath != wantPath {
 		t.Errorf("cursorExec worktree = %q, want %q", cursorReqs[0].WorktreePath, wantPath)
+	}
+}
+
+func runBatchGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+
+	cmd := exec.Command("git", append([]string{
+		"-c", "user.email=batch-test@example.com",
+		"-c", "user.name=batch-test",
+	}, args...)...)
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v error = %v, output = %s", args, err, out)
+	}
+}
+
+func TestExecuteBatchOutOfScopeUntrackedFileDeviatedExcludedFromIntegrate(t *testing.T) {
+	if testing.Short() {
+		t.Skip("shells out to real git")
+	}
+
+	primaryRoot := t.TempDir()
+	runBatchGit(t, primaryRoot, "init")
+	if err := os.WriteFile(filepath.Join(primaryRoot, "README.md"), []byte("seed\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(README.md) error = %v", err)
+	}
+	runBatchGit(t, primaryRoot, "add", "README.md")
+	runBatchGit(t, primaryRoot, "commit", "-m", "seed commit")
+
+	wtPathA := t.TempDir()
+	runBatchGit(t, primaryRoot, "worktree", "add", "-b", "lucind/lane-a", wtPathA)
+
+	wtPathB := t.TempDir()
+	runBatchGit(t, primaryRoot, "worktree", "add", "-b", "lucind/lane-b", wtPathB)
+
+	// lane-a has untracked file out of scope: internal/serve/server.go
+	serveDir := filepath.Join(wtPathA, "internal", "serve")
+	if err := os.MkdirAll(serveDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(serveDir, "server.go"), []byte("package serve\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile error = %v", err)
+	}
+
+	// lane-b has in-scope committed file: internal/serve/server.go
+	serveDirB := filepath.Join(wtPathB, "internal", "serve")
+	if err := os.MkdirAll(serveDirB, 0o755); err != nil {
+		t.Fatalf("MkdirAll error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(serveDirB, "server.go"), []byte("package serve\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile error = %v", err)
+	}
+	runBatchGit(t, wtPathB, "add", "internal/serve/server.go")
+	runBatchGit(t, wtPathB, "commit", "-m", "add server.go")
+
+	fe := newBatchFakeExecutor()
+	fe.outcomeFor[wtPathA] = executor.Outcome{ExitCode: 0}
+	fe.outcomeFor[wtPathB] = executor.Outcome{ExitCode: 0}
+
+	wtMap := map[string]string{"lane-a": wtPathA, "lane-b": wtPathB}
+	deps := newBatchTestDeps(t, func(laneID string) string {
+		return wtMap[laneID]
+	}, func(laneID string) []byte {
+		return []byte(laneEnvelopeJSON(laneID, "done"))
+	}, fe, nil)
+	deps.PrimaryRoot = primaryRoot
+
+	p1 := batchPacket("lane-a")
+	p1.AllowedPaths = []string{"internal/ledger/"}
+
+	p2 := batchPacket("lane-b")
+	p2.AllowedPaths = []string{"internal/serve/"}
+
+	report, err := run.ExecuteBatch(context.Background(), deps, []packet.Packet{p1, p2})
+	if err != nil {
+		t.Fatalf("ExecuteBatch() error = %v, want nil", err)
+	}
+
+	if !report.Released {
+		t.Errorf("report.Released = false, want true")
+	}
+
+	if len(report.Outcome.Integrate) != 1 || report.Outcome.Integrate[0] != "lane-b" {
+		t.Errorf("report.Outcome.Integrate = %v, want [lane-b]", report.Outcome.Integrate)
+	}
+	if len(report.Outcome.Preserve) != 1 || report.Outcome.Preserve[0] != "lane-a" {
+		t.Errorf("report.Outcome.Preserve = %v, want [lane-a]", report.Outcome.Preserve)
+	}
+
+	for _, l := range report.Lanes {
+		if l.LaneID == "lane-a" && l.Status != lane.Deviated {
+			t.Errorf("lane-a status = %v, want lane.Deviated", l.Status)
+		}
+		if l.LaneID == "lane-b" && l.Status != lane.Done {
+			t.Errorf("lane-b status = %v, want lane.Done", l.Status)
+		}
 	}
 }
