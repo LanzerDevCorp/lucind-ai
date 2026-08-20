@@ -14,24 +14,39 @@ phases:
       is a hard prerequisite for the future verify-dual-dispatch change).
     engram_topic: sdd/dual-executor-dispatch/explore
   proposal:
-    status: dispatched
+    status: done
+    engram_topic: sdd/read-only-packet-dispatch/proposal
     drafts:
       - openspec/changes/read-only-packet-dispatch/proposal-agy.md
       - openspec/changes/read-only-packet-dispatch/proposal-cursor-agent.md
+    canonical: openspec/changes/read-only-packet-dispatch/proposal.md
     note: |
       Dispatched via real lucind-ai run (agy + cursor-agent packets), not a Claude Code
       subagent -- first real use of the "explore via real dispatch" pattern's sibling,
       propose/design dual-dispatch, which is already verified working (approvals-web-ui
-      session 3). Dispatched in parallel with design (see below), not sequentially after it.
+      session 3). Both lanes done, merged to main cleanly. Drafts converged heavily; canonical
+      merges agy's Affected-Areas/Success-Criteria tables with cursor-agent's tighter
+      current-behavior evidence table and its sharper open-question #4 (whether write packets
+      gain a code-level commit gate).
   design:
-    status: dispatched
+    status: done
+    engram_topic: sdd/read-only-packet-dispatch/design
     drafts:
       - openspec/changes/read-only-packet-dispatch/design-agy.md
       - openspec/changes/read-only-packet-dispatch/design-cursor-agent.md
+    canonical: openspec/changes/read-only-packet-dispatch/design.md
     note: |
       Dispatched in parallel with proposal, not waiting on it -- explicit session decision,
       consistent with the approvals-web-ui precedent that propose and design are not
-      dependent phases in this project's workflow.
+      dependent phases in this project's workflow. Both lanes done, merged to main cleanly.
+      Both drafts converged on the same core architecture (read_only bool, runtime
+      enforcement) but diverged on WHERE/HOW: agy trusts the self-reported envelope
+      (Envelope.Commit/FilesChanged) inline in decideStatus; cursor-agent inspects git
+      directly via new Deps functions in a separate enforceCompletionMode step, and rejects
+      trusting self-reported fields as the same class of bug the project exists to catch.
+      Canonical design adopts cursor-agent's architecture for that reason; agy's proposed
+      integrate.go branch-filtering is rejected as an unnecessary optimization (already a
+      correct no-op).
   spec:
     status: pending
   tasks:

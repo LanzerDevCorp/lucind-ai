@@ -14,13 +14,19 @@ phases:
       bisection/resolve/combine). Does not depend on either sibling change.
     engram_topic: sdd/dual-executor-dispatch/explore
   proposal:
-    status: dispatched
+    status: done
+    engram_topic: sdd/apply-dag-dispatch/proposal
     drafts:
       - openspec/changes/apply-dag-dispatch/proposal-agy.md
       - openspec/changes/apply-dag-dispatch/proposal-cursor-agent.md
+    canonical: openspec/changes/apply-dag-dispatch/proposal.md
     note: |
       Dispatched via real lucind-ai run (agy + cursor-agent packets), not a Claude Code
       subagent. Dispatched in parallel with design (see below), not sequentially after it.
+      Both lanes done, merged to main cleanly. Both drafts strong; canonical merges agy's
+      Capabilities/Affected-Areas framing with cursor-agent's sharper risk table and its
+      explicit rollback-boundary exclusion (integrate.go/resolve.go/integrate.go stay out
+      of any future revert since they're reused, not changed).
   design:
     status: dispatched
     drafts:
