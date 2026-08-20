@@ -123,15 +123,7 @@ Reviewing returned evidence is a human/orchestrator judgment task:
 
 The `lucind-ai` CLI orchestrates worktrees, dispatches runners, records state, and evaluates batch barriers.
 
-### Keeping the Binary Current
-
 `lucind-ai -v` (or `--version`) prints the exact build (`git describe`) baked in at compile time.
-Check it before dispatching if the binary was built more than a few commits ago — a stale binary
-silently lacks recent features (e.g. a session once hit `unsupported executor "cursor-agent"`
-from a `$GOPATH/bin/lucind-ai` built before that executor landed). Run `make install` after any
-change touching the binary; it installs to `$GOPATH/bin` (already on `PATH`) with a real version
-string, so `lucind-ai -v` always reflects what was actually built — never build to an ad-hoc temp
-path and dispatch from there instead.
 
 ### Invocation
 
