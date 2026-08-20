@@ -44,7 +44,20 @@ phases:
       hand. Package name reconciled: proposal.md updated internal/server -> internal/serve to
       match design.md's more specific choice.
   tasks:
-    status: pending
+    status: done
+    engram_topic: sdd/approvals-web-ui/tasks
+    engram_id: 1808
+    drafts:
+      - openspec/changes/approvals-web-ui/tasks-agy.md
+      - openspec/changes/approvals-web-ui/tasks-cursor-agent.md
+    note: |
+      agy's first attempt failed on transient infra (Eligibility check / dial tcp timeout,
+      num_turns:0). Retrying the same packet id without cleanup caused a second failure
+      (status=failed) because the first attempt's worktree+branch already existed -- had to
+      `git worktree remove --force` + `git branch -D` before redispatch. Both drafts converged
+      structurally; agy gave concrete file names + a dedicated barrier-ordering test task,
+      cursor-agent cross-referenced spec scenarios per task and estimated 2x more conservative
+      line count. 900-1800 lines total, well under the 2000-line single-pr budget -- no chaining.
   apply:
     status: pending
   verify:
