@@ -48,7 +48,18 @@ phases:
       integrate.go branch-filtering is rejected as an unnecessary optimization (already a
       correct no-op).
   spec:
-    status: pending
+    status: done
+    engram_topic: sdd/read-only-packet-dispatch/spec
+    drafts:
+      - openspec/changes/read-only-packet-dispatch/specs-agy/
+      - openspec/changes/read-only-packet-dispatch/specs-cursor-agent/
+    canonical: openspec/changes/read-only-packet-dispatch/specs/
+    note: |
+      Dispatched via real lucind-ai run (agy + cursor-agent), both lanes done. cursor-agent's
+      commit carried the known Co-authored-by trailer bug (git commit-tree rewrite before
+      merge, same fix as prior session). Both drafts converged heavily, no contradictions
+      (unlike design) -- 3 canonical capability specs synthesized: read-only-packet-schema,
+      read-only-done-criterion, completion-mode-enforcement.
   tasks:
     status: pending
   apply:

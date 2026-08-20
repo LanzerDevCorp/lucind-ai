@@ -51,7 +51,18 @@ phases:
       minimal partial-failure fix (print integrated_ids/reverted_ids on stdout) over agy's
       larger --json-flag proposal.
   spec:
-    status: pending
+    status: done
+    engram_topic: sdd/apply-dag-dispatch/spec
+    drafts:
+      - openspec/changes/apply-dag-dispatch/specs-agy/
+      - openspec/changes/apply-dag-dispatch/specs-cursor-agent/
+    canonical: openspec/changes/apply-dag-dispatch/specs/
+    note: |
+      Dispatched via real lucind-ai run (agy + cursor-agent), both lanes done. cursor-agent's
+      commit carried the known Co-authored-by trailer bug (git commit-tree rewrite before
+      merge, same fix as prior session). Both drafts converged heavily, no contradictions
+      (unlike design) -- 3 canonical capability specs synthesized following cursor-agent's
+      split: apply-dag-dispatch, allowed-paths-enforcement, sdd-apply.
   tasks:
     status: pending
   apply:
