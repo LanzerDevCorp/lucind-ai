@@ -92,7 +92,7 @@ arbitrate.
 
 | Phase | Target | Blocker |
 |---|---|---|
-| `explore` | Dispatch via `lucind-ai run`, not a local Claude subagent — matches this project's own identity (Claude Code orchestrates, `agy`/`cursor-agent` execute). | Explore is read-only; the packet template's mandatory done-criterion #2 ("the work is committed") assumes a file changed. Needs an explicit read-only-packet exception before this is safe to dispatch as-is. |
+| `explore` | Dispatch via `lucind-ai run`, not a local Claude subagent — matches this project's own identity (Claude Code orchestrates, `agy`/`cursor-agent` execute). | Unblocked: frontmatter supports `read_only: true`; criterion 2 is replaced by `git status --porcelain` empty and `HEAD` equals `git merge-base HEAD <primary HEAD>`. |
 | `apply` | Split `tasks.md` into independent packets and dispatch as a DAG (parallel where tasks share no file scope) via `lucind-ai run`, not `sdd-apply`'s own Read/Edit/Write. Not new engineering — bisection + `internal/resolve` (`docs/prd.md` §6 steps 6-8) already exist for exactly this. | Needs an orchestrator step that turns `tasks.md` into a DAG of packets with non-overlapping `allowed_paths`, dispatched in dependency order. Not built. |
 | `verify` | Dual-dispatch `agy` + `cursor-agent` for the *qualitative* half of verification (does the implementation satisfy the spec's intent, are there coverage gaps) — not the mechanical half. | Mechanical checks (`go test`, `go vet`, `lucind-checks.sh`) are deterministic; running them twice through two LLMs adds no information, only cost. Dispatch only the judgment portion twice, once tooling exists to run mechanical checks a single time and hand both executors the same result to judge independently. |
 
@@ -110,7 +110,7 @@ arbitrate.
 
 - **Done criteria**: Verifiable, objective assertions checkable by someone who did not do the work. Each criterion requires concrete evidence (command output or `file:line`), not assertions of success.
   - *Mandatory criterion 1*: Every indirection introduced is demonstrably consumed by a terminal consumer (name the consumer and provide proof).
-  - *Mandatory criterion 2*: The work is committed with a conventional commit and no AI attribution (`git status --porcelain` empty and `git log --oneline -1`).
+  - *Mandatory criterion 2*: The work is committed with a conventional commit and no AI attribution (`git status --porcelain` empty and `git log --oneline -1`). For `read_only: true` packets, replaced by: `git status --porcelain` empty and `HEAD` equals `git merge-base HEAD <primary HEAD>`.
 - **Hard stops**: Explicit failure/boundary conditions that require stopping immediately with `status: blocked` rather than guessing. Every declared hard stop must be explicitly evaluated and reported in the result envelope whether or not it fired.
 
 ### Judging Returned Evidence

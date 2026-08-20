@@ -40,6 +40,8 @@ Two are mandatory in every packet:
 - [ ] **The work is committed.** Evidence: `git status --porcelain` empty and
       `git log --oneline -1`. Conventional commit, no AI attribution.
 
+*(Read-only packets: if frontmatter sets `read_only: true`, replace criterion 2 with: the worktree carries no unique commits and no working-tree changes relative to the lane's birth point. Evidence: `git status --porcelain` empty and `HEAD` equals `git merge-base HEAD <primary HEAD>`.)*
+
 Then the packet's own:
 
 - [ ] …

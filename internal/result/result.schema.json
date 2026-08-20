@@ -98,7 +98,7 @@
     },
     "commit": {
       "type": "string",
-      "description": "The commit that carries this work. Uncommitted work is not deliverable: a branch pointing at its base has nothing to merge."
+      "description": "The commit that carries this work. Omitted on a read-only packet; the binary does not trust this field for enforcement."
     },
     "questions": {
       "type": "array",
