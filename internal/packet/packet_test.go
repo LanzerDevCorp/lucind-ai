@@ -458,9 +458,11 @@ func TestSkillAssetContract(t *testing.T) {
 		t.Errorf("SKILL.md explore blocker row still states the exception is missing")
 	}
 
-	// Apply and verify blocker rows remain untouched.
-	if !strings.Contains(content, "Split `tasks.md` into independent packets and dispatch as a DAG") {
-		t.Errorf("SKILL.md apply row was modified or removed")
+	// Apply row now documents the built DAG-split loop (apply-dag-dispatch
+	// Phase 6); verify row remains untouched until verify-dual-dispatch's
+	// own SKILL.md documentation phase runs.
+	if !strings.Contains(content, "lucind-ai split --dag") {
+		t.Errorf("SKILL.md apply row does not document the built split loop")
 	}
 	if !strings.Contains(content, "Dual-dispatch `agy` + `cursor-agent` for the *qualitative* half of verification") {
 		t.Errorf("SKILL.md verify row was modified or removed")
