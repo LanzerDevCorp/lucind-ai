@@ -104,7 +104,7 @@ func newTestDeps(t *testing.T, wtPath string, fsys func(string) fs.FS, exec exec
 		},
 		WorktreeFS: fsys,
 		Now:        func() time.Time { return now },
-		HasUniqueLaneCommits: func(context.Context, string) (bool, error) {
+		HasUniqueLaneCommits: func(context.Context, string, string) (bool, error) {
 			return true, nil
 		},
 		PorcelainEmpty: func(context.Context, string) (bool, error) {
@@ -1131,7 +1131,7 @@ func TestExecuteWriteDoneWithoutUniqueCommitsFails(t *testing.T) {
 	deps := newTestDeps(t, wtPath, func(string) fs.FS {
 		return fstest.MapFS{".lucind/result.json": {Data: []byte(doneWithCommitJSON)}}
 	}, fe)
-	deps.HasUniqueLaneCommits = func(context.Context, string) (bool, error) {
+	deps.HasUniqueLaneCommits = func(context.Context, string, string) (bool, error) {
 		return false, nil
 	}
 
@@ -1164,7 +1164,7 @@ func TestExecuteWriteDoneWithDirtyWorktreeFails(t *testing.T) {
 	deps := newTestDeps(t, wtPath, func(string) fs.FS {
 		return fstest.MapFS{".lucind/result.json": {Data: []byte(doneEnvelopeJSON)}}
 	}, fe)
-	deps.HasUniqueLaneCommits = func(context.Context, string) (bool, error) {
+	deps.HasUniqueLaneCommits = func(context.Context, string, string) (bool, error) {
 		return true, nil
 	}
 	deps.PorcelainEmpty = func(context.Context, string) (bool, error) {
@@ -1200,7 +1200,7 @@ func TestExecuteReadOnlyDoneWithoutCommitsAndCleanTreeReachesDone(t *testing.T) 
 	deps := newTestDeps(t, wtPath, func(string) fs.FS {
 		return fstest.MapFS{".lucind/result.json": {Data: []byte(doneEnvelopeJSON)}}
 	}, fe)
-	deps.HasUniqueLaneCommits = func(context.Context, string) (bool, error) {
+	deps.HasUniqueLaneCommits = func(context.Context, string, string) (bool, error) {
 		return false, nil
 	}
 	deps.PorcelainEmpty = func(context.Context, string) (bool, error) {
@@ -1237,7 +1237,7 @@ func TestExecuteReadOnlyDoneWithUniqueCommitsFails(t *testing.T) {
 	deps := newTestDeps(t, wtPath, func(string) fs.FS {
 		return fstest.MapFS{".lucind/result.json": {Data: []byte(doneEnvelopeJSON)}}
 	}, fe)
-	deps.HasUniqueLaneCommits = func(context.Context, string) (bool, error) {
+	deps.HasUniqueLaneCommits = func(context.Context, string, string) (bool, error) {
 		return true, nil
 	}
 	deps.PorcelainEmpty = func(context.Context, string) (bool, error) {
@@ -1276,7 +1276,7 @@ func TestExecuteReadOnlyDoneWithDirtyWorktreeFails(t *testing.T) {
 	deps := newTestDeps(t, wtPath, func(string) fs.FS {
 		return fstest.MapFS{".lucind/result.json": {Data: []byte(doneEnvelopeJSON)}}
 	}, fe)
-	deps.HasUniqueLaneCommits = func(context.Context, string) (bool, error) {
+	deps.HasUniqueLaneCommits = func(context.Context, string, string) (bool, error) {
 		return false, nil
 	}
 	deps.PorcelainEmpty = func(context.Context, string) (bool, error) {
@@ -1367,7 +1367,7 @@ func TestExecuteNonDoneStatusBypassesGitInspection(t *testing.T) {
 				}
 				return fstest.MapFS{".lucind/result.json": {Data: []byte(tt.envelope)}}
 			}, fe)
-			deps.HasUniqueLaneCommits = func(context.Context, string) (bool, error) {
+			deps.HasUniqueLaneCommits = func(context.Context, string, string) (bool, error) {
 				commitsCalls++
 				return true, nil
 			}
@@ -1401,7 +1401,7 @@ func TestExecuteGitInspectionErrorFailsLaneWithLedgerNote(t *testing.T) {
 		deps := newTestDeps(t, wtPath, func(string) fs.FS {
 			return fstest.MapFS{".lucind/result.json": {Data: []byte(doneEnvelopeJSON)}}
 		}, fe)
-		deps.HasUniqueLaneCommits = func(context.Context, string) (bool, error) {
+		deps.HasUniqueLaneCommits = func(context.Context, string, string) (bool, error) {
 			return false, errors.New("git merge-base failed: bad object")
 		}
 
@@ -1434,7 +1434,7 @@ func TestExecuteGitInspectionErrorFailsLaneWithLedgerNote(t *testing.T) {
 		deps := newTestDeps(t, wtPath, func(string) fs.FS {
 			return fstest.MapFS{".lucind/result.json": {Data: []byte(doneEnvelopeJSON)}}
 		}, fe)
-		deps.HasUniqueLaneCommits = func(context.Context, string) (bool, error) {
+		deps.HasUniqueLaneCommits = func(context.Context, string, string) (bool, error) {
 			return true, nil
 		}
 		deps.PorcelainEmpty = func(context.Context, string) (bool, error) {
@@ -1932,7 +1932,7 @@ func TestExecuteScopeCheckForceAddedLucindFileExcludedFromUnion(t *testing.T) {
 	primaryRoot := initGitRepo(t)
 	wtPath, birthSHA := setupGitWorktree(t, primaryRoot, "lane-a")
 
-	// Force-add .lucind/result.json
+	// Force-add and commit .lucind/result.json
 	lucindPath := filepath.Join(wtPath, ".lucind")
 	if err := os.MkdirAll(lucindPath, 0o755); err != nil {
 		t.Fatalf("MkdirAll error = %v", err)
@@ -1942,6 +1942,12 @@ func TestExecuteScopeCheckForceAddedLucindFileExcludedFromUnion(t *testing.T) {
 	}
 	runGit(t, wtPath, "add", "-f", ".lucind/result.json")
 	runGit(t, wtPath, "commit", "-m", "force add .lucind/result.json")
+
+	// Also stage-only a .lucind/ note file without committing it
+	if err := os.WriteFile(filepath.Join(lucindPath, "extra.json"), []byte(`{"note":"staged"}`), 0o644); err != nil {
+		t.Fatalf("WriteFile error = %v", err)
+	}
+	runGit(t, wtPath, "add", "-f", ".lucind/extra.json")
 
 	fe := &fakeExecutor{outcome: executor.Outcome{ExitCode: 0}}
 	deps := newTestDeps(t, wtPath, func(string) fs.FS {
@@ -1970,20 +1976,221 @@ func TestExecuteScopeCheckForceAddedLucindFileExcludedFromUnion(t *testing.T) {
 	}
 }
 
+func TestExecuteScopeCheckStagedOnlyPathDetected(t *testing.T) {
+	if testing.Short() {
+		t.Skip("shells out to real git")
+	}
+
+	primaryRoot := initGitRepo(t)
+	wtPath, birthSHA := setupGitWorktree(t, primaryRoot, "lane-a")
+
+	// Stage an out-of-scope file and leave it uncommitted, matching the index
+	serveDir := filepath.Join(wtPath, "internal", "serve")
+	if err := os.MkdirAll(serveDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(serveDir, "staged.go"), []byte("package serve\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile error = %v", err)
+	}
+	runGit(t, wtPath, "add", "internal/serve/staged.go")
+
+	fe := &fakeExecutor{outcome: executor.Outcome{ExitCode: 0}}
+	deps := newTestDeps(t, wtPath, func(string) fs.FS {
+		return fstest.MapFS{".lucind/result.json": {Data: []byte(doneEnvelopeJSON)}}
+	}, fe, birthSHA)
+	deps.PrimaryRoot = primaryRoot
+	deps.PorcelainEmpty = worktree.PorcelainEmpty
+
+	p := testPacket()
+	p.AllowedPaths = []string{"internal/ledger/"}
+
+	report, err := run.Execute(context.Background(), deps, p)
+	if err != nil {
+		t.Fatalf("Execute() error = %v, want nil", err)
+	}
+
+	if report.Status != lane.Deviated {
+		t.Errorf("report.Status = %v, want %v (staged out-of-scope must demote to Deviated before completion mode)", report.Status, lane.Deviated)
+	}
+
+	states, err := deps.Ledger.LaneStates(context.Background(), "run-1")
+	if err != nil {
+		t.Fatalf("LaneStates() error = %v", err)
+	}
+	if len(states) != 1 || states[0].Status != lane.Deviated {
+		t.Errorf("LaneStates() = %+v, want lane.Deviated", states)
+	}
+
+	details := laneNoteDetails(t, deps.Ledger, "run-1")
+	if !anyContains(details, "internal/serve/staged.go") {
+		t.Errorf("ledger notes = %+v, want note naming internal/serve/staged.go", details)
+	}
+}
+
+func TestExecuteScopeCheckStagedOnlyInScopeReachesDone(t *testing.T) {
+	if testing.Short() {
+		t.Skip("shells out to real git")
+	}
+
+	primaryRoot := initGitRepo(t)
+	wtPath, birthSHA := setupGitWorktree(t, primaryRoot, "lane-a")
+
+	// Stage an in-scope file and leave it uncommitted, matching the index
+	ledgerDir := filepath.Join(wtPath, "internal", "ledger")
+	if err := os.MkdirAll(ledgerDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(ledgerDir, "staged.go"), []byte("package ledger\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile error = %v", err)
+	}
+	runGit(t, wtPath, "add", "internal/ledger/staged.go")
+
+	fe := &fakeExecutor{outcome: executor.Outcome{ExitCode: 0}}
+	deps := newTestDeps(t, wtPath, func(string) fs.FS {
+		return fstest.MapFS{".lucind/result.json": {Data: []byte(doneEnvelopeJSON)}}
+	}, fe, birthSHA)
+	deps.PrimaryRoot = primaryRoot
+	// Stub PorcelainEmpty=true so completion mode doesn't fail on uncommitted changes
+	deps.PorcelainEmpty = func(context.Context, string) (bool, error) { return true, nil }
+
+	p := testPacket()
+	p.AllowedPaths = []string{"internal/ledger/"}
+
+	report, err := run.Execute(context.Background(), deps, p)
+	if err != nil {
+		t.Fatalf("Execute() error = %v, want nil", err)
+	}
+
+	if report.Status != lane.Done {
+		t.Errorf("report.Status = %v, want %v", report.Status, lane.Done)
+	}
+
+	states, err := deps.Ledger.LaneStates(context.Background(), "run-1")
+	if err != nil {
+		t.Fatalf("LaneStates() error = %v", err)
+	}
+	if len(states) != 1 || states[0].Status != lane.Done {
+		t.Errorf("LaneStates() = %+v, want lane.Done", states)
+	}
+}
+
+func TestExecuteScopeCheckRenameSourceAndDestChecked(t *testing.T) {
+	if testing.Short() {
+		t.Skip("shells out to real git")
+	}
+
+	primaryRoot := initGitRepo(t)
+	wtPath, birthSHA := setupGitWorktree(t, primaryRoot, "lane-a")
+
+	// Create and commit an out-of-scope file first
+	serveDir := filepath.Join(wtPath, "internal", "serve")
+	if err := os.MkdirAll(serveDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(serveDir, "old.go"), []byte("package serve\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile error = %v", err)
+	}
+	runGit(t, wtPath, "add", "internal/serve/old.go")
+	runGit(t, wtPath, "commit", "-m", "add old.go")
+
+	// Rename out-of-scope internal/serve/old.go to in-scope internal/ledger/new.go
+	ledgerDir := filepath.Join(wtPath, "internal", "ledger")
+	if err := os.MkdirAll(ledgerDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll error = %v", err)
+	}
+	runGit(t, wtPath, "mv", "internal/serve/old.go", "internal/ledger/new.go")
+
+	fe := &fakeExecutor{outcome: executor.Outcome{ExitCode: 0}}
+	deps := newTestDeps(t, wtPath, func(string) fs.FS {
+		return fstest.MapFS{".lucind/result.json": {Data: []byte(doneEnvelopeJSON)}}
+	}, fe, birthSHA)
+	deps.PrimaryRoot = primaryRoot
+
+	p := testPacket()
+	p.AllowedPaths = []string{"internal/ledger/"}
+
+	report, err := run.Execute(context.Background(), deps, p)
+	if err != nil {
+		t.Fatalf("Execute() error = %v, want nil", err)
+	}
+
+	if report.Status != lane.Deviated {
+		t.Errorf("report.Status = %v, want %v (rename source is out-of-scope)", report.Status, lane.Deviated)
+	}
+
+	states, err := deps.Ledger.LaneStates(context.Background(), "run-1")
+	if err != nil {
+		t.Fatalf("LaneStates() error = %v", err)
+	}
+	if len(states) != 1 || states[0].Status != lane.Deviated {
+		t.Errorf("LaneStates() = %+v, want lane.Deviated", states)
+	}
+
+	details := laneNoteDetails(t, deps.Ledger, "run-1")
+	if !anyContains(details, "internal/serve/old.go") {
+		t.Errorf("ledger notes = %+v, want note naming rename source internal/serve/old.go", details)
+	}
+}
+
+func TestExecuteScopeCheckUsesRecordedBaseSHANotLivePrimaryHEAD(t *testing.T) {
+	if testing.Short() {
+		t.Skip("shells out to real git")
+	}
+
+	primaryRoot := initGitRepo(t)
+	wtPath, birthSHA := setupGitWorktree(t, primaryRoot, "lane-a")
+
+	// Commit out-of-scope path on the lane
+	serveDir := filepath.Join(wtPath, "internal", "serve")
+	if err := os.MkdirAll(serveDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(serveDir, "server.go"), []byte("package serve\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile error = %v", err)
+	}
+	runGit(t, wtPath, "add", "internal/serve/server.go")
+	runGit(t, wtPath, "commit", "-m", "lane commit out of scope")
+
+	// Advance primary HEAD with an unrelated commit
+	if err := os.WriteFile(filepath.Join(primaryRoot, "primary.txt"), []byte("primary work\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile error = %v", err)
+	}
+	runGit(t, primaryRoot, "add", "primary.txt")
+	runGit(t, primaryRoot, "commit", "-m", "primary advance")
+
+	fe := &fakeExecutor{outcome: executor.Outcome{ExitCode: 0}}
+	deps := newTestDeps(t, wtPath, func(string) fs.FS {
+		return fstest.MapFS{".lucind/result.json": {Data: []byte(doneEnvelopeJSON)}}
+	}, fe, birthSHA)
+	deps.PrimaryRoot = primaryRoot
+
+	p := testPacket()
+	p.AllowedPaths = []string{"internal/ledger/"}
+
+	report, err := run.Execute(context.Background(), deps, p)
+	if err != nil {
+		t.Fatalf("Execute() error = %v, want nil", err)
+	}
+
+	if report.Status != lane.Deviated {
+		t.Errorf("report.Status = %v, want %v", report.Status, lane.Deviated)
+	}
+}
+
 func TestExecuteScopeCheckGitFailureResolvesToBlocked(t *testing.T) {
 	if testing.Short() {
 		t.Skip("shells out to real git")
 	}
 
-	t.Run("primaryRoot is not a git repo", func(t *testing.T) {
-		invalidPrimaryRoot := t.TempDir()
-		wtPath := t.TempDir()
+	t.Run("worktree missing recorded base SHA", func(t *testing.T) {
+		primaryRoot := initGitRepo(t)
+		wtPath, _ := setupGitWorktree(t, primaryRoot, "lane-a")
 
 		fe := &fakeExecutor{outcome: executor.Outcome{ExitCode: 0}}
 		deps := newTestDeps(t, wtPath, func(string) fs.FS {
 			return fstest.MapFS{".lucind/result.json": {Data: []byte(doneEnvelopeJSON)}}
-		}, fe)
-		deps.PrimaryRoot = invalidPrimaryRoot
+		}, fe, "")
+		deps.PrimaryRoot = primaryRoot
 
 		p := testPacket()
 		p.AllowedPaths = []string{"internal/ledger/"}
@@ -2006,8 +2213,8 @@ func TestExecuteScopeCheckGitFailureResolvesToBlocked(t *testing.T) {
 		}
 
 		details := laneNoteDetails(t, deps.Ledger, "run-1")
-		if !anyContains(details, "git rev-parse HEAD in primary root failed") {
-			t.Errorf("ledger notes = %+v, want note diagnosing primary rev-parse failure", details)
+		if !anyContains(details, "base SHA") && !anyContains(details, "base sha") {
+			t.Errorf("ledger notes = %+v, want note diagnosing missing base SHA", details)
 		}
 	})
 
@@ -2018,7 +2225,7 @@ func TestExecuteScopeCheckGitFailureResolvesToBlocked(t *testing.T) {
 		fe := &fakeExecutor{outcome: executor.Outcome{ExitCode: 0}}
 		deps := newTestDeps(t, invalidWtPath, func(string) fs.FS {
 			return fstest.MapFS{".lucind/result.json": {Data: []byte(doneEnvelopeJSON)}}
-		}, fe)
+		}, fe, "dummy-base-sha-1234567890abcdef")
 		deps.PrimaryRoot = primaryRoot
 
 		p := testPacket()
@@ -2095,4 +2302,69 @@ func TestExecuteScopeCheckEmptyAllowedPathsArraySkipsGitAndStaysDone(t *testing.
 			}
 		})
 	}
+}
+
+func TestParseDiffNameStatusZ_EmbeddedNewlineAndRenamePair(t *testing.T) {
+	tests := []struct {
+		name  string
+		input []byte
+		want  []string
+	}{
+		{
+			name:  "rename pair R100",
+			input: []byte("R100\x00old path\x00new path\x00"),
+			want:  []string{"old path", "new path"},
+		},
+		{
+			name:  "ordinary modified M",
+			input: []byte("M\x00dir/file.go\x00"),
+			want:  []string{"dir/file.go"},
+		},
+		{
+			name:  "path with embedded newline",
+			input: []byte("M\x00dir/\nweird.go\x00"),
+			want:  []string{"dir/\nweird.go"},
+		},
+		{
+			name:  "copy pair C100",
+			input: []byte("C100\x00src\x00dst\x00"),
+			want:  []string{"src", "dst"},
+		},
+		{
+			name:  "multiple mixed entries",
+			input: []byte("M\x00a.go\x00R100\x00old.go\x00new.go\x00A\x00added.go\x00"),
+			want:  []string{"a.go", "old.go", "new.go", "added.go"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := run.ParseDiffNameStatusZ(tt.input)
+			if !slicesEqual(got, tt.want) {
+				t.Errorf("ParseDiffNameStatusZ() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseLSFilesZ(t *testing.T) {
+	input := []byte("a.go\x00file with spaces.txt\x00dir/\nweird.go\x00")
+	want := []string{"a.go", "file with spaces.txt", "dir/\nweird.go"}
+
+	got := run.ParseLSFilesZ(input)
+	if !slicesEqual(got, want) {
+		t.Errorf("ParseLSFilesZ() = %q, want %q", got, want)
+	}
+}
+
+func slicesEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }

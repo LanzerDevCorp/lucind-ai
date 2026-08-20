@@ -159,7 +159,7 @@ type Deps struct {
 	// deadline continues to mean.
 	LaneTimeout time.Duration
 
-	HasUniqueLaneCommits func(ctx context.Context, worktreePath string) (bool, error)
+	HasUniqueLaneCommits func(ctx context.Context, worktreePath, baseSHA string) (bool, error)
 	PorcelainEmpty       func(ctx context.Context, worktreePath string) (bool, error)
 
 	CombineTree        func(ctx context.Context, primaryRoot, runID string, branches []string) (worktreePath, branchName string, err error)
@@ -326,16 +326,16 @@ func Execute(ctx context.Context, deps Deps, p packet.Packet) (Report, error) {
 
 	status, envelope, reason := decideStatus(deps, wt.Path, outcome)
 
-	// Base-SHA three-way diff union, never `git diff --name-only HEAD~1`:
-	// HEAD~1 does not resolve for a zero-commit lane and misses earlier
-	// commits in a multi-commit lane, silently letting out-of-scope work
-	// through undetected.
+	// Base-SHA four-way diff union against recorded BaseSHA, never live
+	// primary HEAD (which has TOCTOU race if primary moves) and never
+	// `git diff --name-only HEAD~1` (which does not resolve for zero-commit
+	// lanes and misses earlier commits in multi-commit lanes).
 	if status == lane.Done && len(p.AllowedPaths) > 0 {
-		status, reason = enforceAllowedPaths(ctx, deps, wt.Path, p)
+		status, reason = enforceAllowedPaths(ctx, deps, wt.Path, wt.BaseSHA, p)
 	}
 
 	if status == lane.Done {
-		status, reason = enforceCompletionMode(ctx, deps, wt.Path, p)
+		status, reason = enforceCompletionMode(ctx, deps, wt.Path, wt.BaseSHA, p)
 	}
 
 	// diagnosis is empty exactly when reason is empty (the envelope
@@ -456,30 +456,25 @@ func decideStatus(deps Deps, worktreePath string, outcome executor.Outcome) (lan
 }
 
 // enforceAllowedPaths inspects the actual git diff of the worktree against
-// primaryRoot's HEAD using a three-way diff union (committed-since-base,
-// unstaged, and untracked). If any changed path is outside p.AllowedPaths,
+// its recorded BaseSHA using a four-way diff union (committed-since-base,
+// unstaged, staged, and untracked). If any changed path is outside p.AllowedPaths,
 // the lane is demoted to lane.Deviated with a reason listing the offending
-// paths. If any git command fails, the lane becomes lane.Blocked with a
-// diagnostic reason.
-func enforceAllowedPaths(ctx context.Context, deps Deps, worktreePath string, p packet.Packet) (lane.Status, string) {
-	primaryHeadCmd := exec.CommandContext(ctx, "git", "-C", deps.PrimaryRoot, "rev-parse", "HEAD")
-	var primaryStderr strings.Builder
-	primaryHeadCmd.Stderr = &primaryStderr
-	primaryHeadOut, err := primaryHeadCmd.Output()
-	if err != nil {
-		return lane.Blocked, fmt.Sprintf("git rev-parse HEAD in primary root failed: %v: %s", err, strings.TrimSpace(primaryStderr.String()))
+// paths. If any git command fails, or if baseSHA is empty, the lane becomes
+// lane.Blocked with a diagnostic reason.
+func enforceAllowedPaths(ctx context.Context, deps Deps, worktreePath, baseSHA string, p packet.Packet) (lane.Status, string) {
+	if strings.TrimSpace(baseSHA) == "" {
+		return lane.Blocked, "worktree missing recorded base SHA"
 	}
-	base := strings.TrimSpace(string(primaryHeadOut))
 
-	diffCmd := exec.CommandContext(ctx, "git", "-C", worktreePath, "diff", "--name-only", "--diff-filter=ACDMRT", base, "HEAD")
+	diffCmd := exec.CommandContext(ctx, "git", "-C", worktreePath, "diff", "--name-status", "-z", "--diff-filter=ACDMRT", "-M", baseSHA, "HEAD")
 	var diffStderr strings.Builder
 	diffCmd.Stderr = &diffStderr
 	diffOut, err := diffCmd.Output()
 	if err != nil {
-		return lane.Blocked, fmt.Sprintf("git diff %s HEAD in worktree failed: %v: %s", base, err, strings.TrimSpace(diffStderr.String()))
+		return lane.Blocked, fmt.Sprintf("git diff %s HEAD in worktree failed: %v: %s", baseSHA, err, strings.TrimSpace(diffStderr.String()))
 	}
 
-	unstagedCmd := exec.CommandContext(ctx, "git", "-C", worktreePath, "diff", "--name-only", "--diff-filter=ACDMRT")
+	unstagedCmd := exec.CommandContext(ctx, "git", "-C", worktreePath, "diff", "--name-status", "-z", "--diff-filter=ACDMRT", "-M")
 	var unstagedStderr strings.Builder
 	unstagedCmd.Stderr = &unstagedStderr
 	unstagedOut, err := unstagedCmd.Output()
@@ -487,7 +482,15 @@ func enforceAllowedPaths(ctx context.Context, deps Deps, worktreePath string, p 
 		return lane.Blocked, fmt.Sprintf("git diff unstaged in worktree failed: %v: %s", err, strings.TrimSpace(unstagedStderr.String()))
 	}
 
-	lsCmd := exec.CommandContext(ctx, "git", "-C", worktreePath, "ls-files", "-o", "--exclude-standard")
+	stagedCmd := exec.CommandContext(ctx, "git", "-C", worktreePath, "diff", "--cached", "--name-status", "-z", "--diff-filter=ACDMRT", "-M")
+	var stagedStderr strings.Builder
+	stagedCmd.Stderr = &stagedStderr
+	stagedOut, err := stagedCmd.Output()
+	if err != nil {
+		return lane.Blocked, fmt.Sprintf("git diff --cached in worktree failed: %v: %s", err, strings.TrimSpace(stagedStderr.String()))
+	}
+
+	lsCmd := exec.CommandContext(ctx, "git", "-C", worktreePath, "ls-files", "-z", "-o", "--exclude-standard")
 	var lsStderr strings.Builder
 	lsCmd.Stderr = &lsStderr
 	lsOut, err := lsCmd.Output()
@@ -498,26 +501,26 @@ func enforceAllowedPaths(ctx context.Context, deps Deps, worktreePath string, p 
 	seen := make(map[string]bool)
 	var changedPaths []string
 
-	addPaths := func(output []byte) {
-		lines := strings.Split(strings.TrimSpace(string(output)), "\n")
-		for _, line := range lines {
-			line = strings.TrimSpace(line)
-			if line == "" {
+	addPaths := func(paths []string) {
+		for _, path := range paths {
+			path = strings.TrimSpace(path)
+			if path == "" {
 				continue
 			}
-			if strings.HasPrefix(line, ".lucind/") || line == ".lucind" {
+			if strings.HasPrefix(path, ".lucind/") || path == ".lucind" {
 				continue
 			}
-			if !seen[line] {
-				seen[line] = true
-				changedPaths = append(changedPaths, line)
+			if !seen[path] {
+				seen[path] = true
+				changedPaths = append(changedPaths, path)
 			}
 		}
 	}
 
-	addPaths(diffOut)
-	addPaths(unstagedOut)
-	addPaths(lsOut)
+	addPaths(parseDiffNameStatusZ(diffOut))
+	addPaths(parseDiffNameStatusZ(unstagedOut))
+	addPaths(parseDiffNameStatusZ(stagedOut))
+	addPaths(parseLSFilesZ(lsOut))
 
 	var offending []string
 	for _, path := range changedPaths {
@@ -539,8 +542,8 @@ func enforceAllowedPaths(ctx context.Context, deps Deps, worktreePath string, p 
 // commits and a clean working tree. If git inspection fails or git state
 // violates the declared completion mode, the lane becomes lane.Failed with
 // an explanatory reason.
-func enforceCompletionMode(ctx context.Context, deps Deps, worktreePath string, p packet.Packet) (lane.Status, string) {
-	hasCommits, err := deps.HasUniqueLaneCommits(ctx, worktreePath)
+func enforceCompletionMode(ctx context.Context, deps Deps, worktreePath, baseSHA string, p packet.Packet) (lane.Status, string) {
+	hasCommits, err := deps.HasUniqueLaneCommits(ctx, worktreePath, baseSHA)
 	if err != nil {
 		return lane.Failed, fmt.Sprintf("check unique lane commits: %v", err)
 	}

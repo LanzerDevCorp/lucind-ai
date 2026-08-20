@@ -505,8 +505,8 @@ func productionDeps(runID, primaryRoot string, ledg *ledger.Ledger, timeout time
 		WorktreeFS:     os.DirFS,
 		Now:            time.Now,
 		LaneTimeout:    timeout,
-		HasUniqueLaneCommits: func(ctx context.Context, worktreePath string) (bool, error) {
-			return worktree.HasUniqueCommits(ctx, worktreePath, primaryRoot)
+		HasUniqueLaneCommits: func(ctx context.Context, worktreePath, baseSHA string) (bool, error) {
+			return worktree.HasUniqueCommits(ctx, worktreePath, baseSHA)
 		},
 		PorcelainEmpty: worktree.PorcelainEmpty,
 		CombineTree:    integrate.Combine,

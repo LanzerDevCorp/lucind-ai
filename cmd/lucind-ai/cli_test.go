@@ -684,8 +684,8 @@ func TestProductionDepsWiresGitBackedInspectionFuncs(t *testing.T) {
 		t.Fatalf("worktree.Create() error = %v, want nil", err)
 	}
 
-	// 1. HasUniqueLaneCommits: fresh worktree has no unique commits relative to primaryRoot.
-	hasCommits, err := deps.HasUniqueLaneCommits(context.Background(), wt.Path)
+	// 1. HasUniqueLaneCommits: fresh worktree has no unique commits relative to baseSHA.
+	hasCommits, err := deps.HasUniqueLaneCommits(context.Background(), wt.Path, wt.BaseSHA)
 	if err != nil {
 		t.Fatalf("HasUniqueLaneCommits() error = %v, want nil", err)
 	}
@@ -709,7 +709,7 @@ func TestProductionDepsWiresGitBackedInspectionFuncs(t *testing.T) {
 	runGit(t, wt.Path, "add", "feature.txt")
 	runGit(t, wt.Path, "commit", "-m", "lane commit")
 
-	hasCommits, err = deps.HasUniqueLaneCommits(context.Background(), wt.Path)
+	hasCommits, err = deps.HasUniqueLaneCommits(context.Background(), wt.Path, wt.BaseSHA)
 	if err != nil {
 		t.Fatalf("HasUniqueLaneCommits() error = %v, want nil", err)
 	}
@@ -747,7 +747,7 @@ func TestProductionDepsGitInspectionErrorPropagation(t *testing.T) {
 		t.Fatal("productionDeps.PorcelainEmpty is nil, want non-nil git-backed func")
 	}
 
-	_, err := deps.HasUniqueLaneCommits(context.Background(), invalidDir)
+	_, err := deps.HasUniqueLaneCommits(context.Background(), invalidDir, "dummy-base-sha-1234567890abcdef")
 	if err == nil {
 		t.Error("HasUniqueLaneCommits() error = nil, want non-nil for non-git directory")
 	}
@@ -990,7 +990,7 @@ func TestRunSequentialInvocationsProduceDistinctRunIDs(t *testing.T) {
 		deps.CreateWorktree = func(ctx context.Context, primaryRoot, laneID string) (worktree.Worktree, error) {
 			return worktree.Worktree{Path: t.TempDir(), Branch: "branch-" + laneID}, nil
 		}
-		deps.HasUniqueLaneCommits = func(ctx context.Context, worktreePath string) (bool, error) {
+		deps.HasUniqueLaneCommits = func(ctx context.Context, worktreePath, baseSHA string) (bool, error) {
 			return true, nil
 		}
 		deps.PorcelainEmpty = func(ctx context.Context, worktreePath string) (bool, error) {
@@ -1084,7 +1084,7 @@ func TestRunDispatchPersistsIntegratedLaneEnvelopeToPrimaryRoot(t *testing.T) {
 		deps.CreateWorktree = func(ctx context.Context, primaryRoot, laneID string) (worktree.Worktree, error) {
 			return worktree.Worktree{Path: t.TempDir(), Branch: "branch-" + laneID}, nil
 		}
-		deps.HasUniqueLaneCommits = func(ctx context.Context, worktreePath string) (bool, error) {
+		deps.HasUniqueLaneCommits = func(ctx context.Context, worktreePath, baseSHA string) (bool, error) {
 			return true, nil
 		}
 		deps.PorcelainEmpty = func(ctx context.Context, worktreePath string) (bool, error) {
@@ -1299,7 +1299,7 @@ func overrideDispatchDeps(t *testing.T, exec executor.Executor) {
 	depsFactory = func(runID, primaryRoot string, ledg *ledger.Ledger, timeout time.Duration) lucindrun.Deps {
 		deps := origFactory(runID, primaryRoot, ledg, timeout)
 		deps.CreateWorktree = origFactory(runID, primaryRoot, ledg, timeout).CreateWorktree
-		deps.HasUniqueLaneCommits = func(ctx context.Context, worktreePath string) (bool, error) {
+		deps.HasUniqueLaneCommits = func(ctx context.Context, worktreePath, baseSHA string) (bool, error) {
 			return true, nil
 		}
 		deps.PorcelainEmpty = func(ctx context.Context, worktreePath string) (bool, error) {

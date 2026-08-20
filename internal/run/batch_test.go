@@ -149,7 +149,7 @@ func (f *batchFakeExecutor) KnownModels() []string {
 // each lane's fake executor outcome and result envelope independently), and
 // a pinned clock. failWorktreeFor, if non-nil, names lane IDs whose
 // CreateWorktree call should fail instead of succeeding.
-func newBatchTestDeps(t *testing.T, worktreeRoot func(laneID string) string, envelopeFor func(laneID string) []byte, exec executor.Executor, failWorktreeFor map[string]bool) run.Deps {
+func newBatchTestDeps(t *testing.T, worktreeRoot func(laneID string) string, envelopeFor func(laneID string) []byte, execEnv executor.Executor, failWorktreeFor map[string]bool) run.Deps {
 	t.Helper()
 
 	l, err := ledger.Open(context.Background(), t.TempDir())
@@ -164,13 +164,21 @@ func newBatchTestDeps(t *testing.T, worktreeRoot func(laneID string) string, env
 		RunID:  "run-1",
 		Ledger: l,
 		LookupExecutor: func(name string) (executor.Executor, error) {
-			return exec, nil
+			return execEnv, nil
 		},
 		CreateWorktree: func(_ context.Context, _, laneID string) (worktree.Worktree, error) {
 			if failWorktreeFor[laneID] {
 				return worktree.Worktree{}, fmt.Errorf("git worktree add: boom for %s", laneID)
 			}
-			return worktree.Worktree{Path: worktreeRoot(laneID), Branch: "lucind/" + laneID}, nil
+			wtPath := worktreeRoot(laneID)
+			var baseSHA string
+			if wtPath != "" {
+				cmd := exec.Command("git", "-C", wtPath, "rev-parse", "HEAD")
+				if out, err := cmd.Output(); err == nil {
+					baseSHA = strings.TrimSpace(string(out))
+				}
+			}
+			return worktree.Worktree{Path: wtPath, Branch: "lucind/" + laneID, BaseSHA: baseSHA}, nil
 		},
 		WorktreeFS: func(path string) fs.FS {
 			// Derive the lane ID from the worktree path suffix, which
@@ -184,7 +192,7 @@ func newBatchTestDeps(t *testing.T, worktreeRoot func(laneID string) string, env
 			return fstest.MapFS{".lucind/result.json": {Data: data}}
 		},
 		Now: func() time.Time { return now },
-		HasUniqueLaneCommits: func(context.Context, string) (bool, error) {
+		HasUniqueLaneCommits: func(context.Context, string, string) (bool, error) {
 			return true, nil
 		},
 		PorcelainEmpty: func(context.Context, string) (bool, error) {
