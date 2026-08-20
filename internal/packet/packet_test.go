@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -39,6 +40,9 @@ func TestParseSeparatesFrontmatterFromBody(t *testing.T) {
 	wantBody := "## Goal\n\nSession cookies must survive a restart.\n"
 	if p.Body != wantBody {
 		t.Errorf("Body = %q, want %q", p.Body, wantBody)
+	}
+	if len(p.AllowedPaths) != 0 {
+		t.Errorf("AllowedPaths = %v, want empty", p.AllowedPaths)
 	}
 }
 
@@ -154,6 +158,139 @@ func TestParseReadOnlyFrontmatter(t *testing.T) {
 			}
 			if p.ReadOnly != tt.wantReadOnly {
 				t.Errorf("ReadOnly = %v, want %v", p.ReadOnly, tt.wantReadOnly)
+			}
+		})
+	}
+}
+
+func TestParseAllowedPathsFrontmatter(t *testing.T) {
+	tests := []struct {
+		name             string
+		src              string
+		wantAllowedPaths []string
+		wantErr          error
+	}{
+		{
+			name: "valid JSON array with multiple paths",
+			src: "---\n" +
+				"id: fix-auth\n" +
+				"executor: agy\n" +
+				"routed_by: touches auth, Tier A verification required\n" +
+				"allowed_paths: [\"internal/ledger/\", \"cmd/lucind-ai/cli.go\"]\n" +
+				"---\n\n" +
+				"## Goal\n",
+			wantAllowedPaths: []string{"internal/ledger/", "cmd/lucind-ai/cli.go"},
+		},
+		{
+			name: "valid empty JSON array",
+			src: "---\n" +
+				"id: fix-auth\n" +
+				"executor: agy\n" +
+				"routed_by: touches auth, Tier A verification required\n" +
+				"allowed_paths: []\n" +
+				"---\n\n" +
+				"## Goal\n",
+			wantAllowedPaths: []string{},
+		},
+		{
+			name: "omitted key leaves AllowedPaths empty",
+			src: "---\n" +
+				"id: fix-auth\n" +
+				"executor: agy\n" +
+				"routed_by: touches auth, Tier A verification required\n" +
+				"---\n\n" +
+				"## Goal\n",
+			wantAllowedPaths: nil,
+		},
+		{
+			name: "bare YAML list is rejected as invalid JSON",
+			src: "---\n" +
+				"id: fix-auth\n" +
+				"executor: agy\n" +
+				"routed_by: touches auth, Tier A verification required\n" +
+				"allowed_paths:\n" +
+				"  - internal/ledger/\n" +
+				"---\n\n" +
+				"## Goal\n",
+			wantErr: packet.ErrInvalidAllowedPaths,
+		},
+		{
+			name: "opening brace only is rejected as invalid JSON",
+			src: "---\n" +
+				"id: fix-auth\n" +
+				"executor: agy\n" +
+				"routed_by: touches auth, Tier A verification required\n" +
+				"allowed_paths: {\n" +
+				"---\n\n" +
+				"## Goal\n",
+			wantErr: packet.ErrInvalidAllowedPaths,
+		},
+		{
+			name: "bare string is rejected as invalid JSON",
+			src: "---\n" +
+				"id: fix-auth\n" +
+				"executor: agy\n" +
+				"routed_by: touches auth, Tier A verification required\n" +
+				"allowed_paths: internal/ledger/\n" +
+				"---\n\n" +
+				"## Goal\n",
+			wantErr: packet.ErrInvalidAllowedPaths,
+		},
+		{
+			name: "JSON object is rejected as invalid type",
+			src: "---\n" +
+				"id: fix-auth\n" +
+				"executor: agy\n" +
+				"routed_by: touches auth, Tier A verification required\n" +
+				"allowed_paths: {\"path\": \"internal/ledger/\"}\n" +
+				"---\n\n" +
+				"## Goal\n",
+			wantErr: packet.ErrInvalidAllowedPaths,
+		},
+		{
+			name: "JSON number array is rejected as invalid type",
+			src: "---\n" +
+				"id: fix-auth\n" +
+				"executor: agy\n" +
+				"routed_by: touches auth, Tier A verification required\n" +
+				"allowed_paths: [123, 456]\n" +
+				"---\n\n" +
+				"## Goal\n",
+			wantErr: packet.ErrInvalidAllowedPaths,
+		},
+		{
+			name: "empty value is rejected as invalid JSON",
+			src: "---\n" +
+				"id: fix-auth\n" +
+				"executor: agy\n" +
+				"routed_by: touches auth, Tier A verification required\n" +
+				"allowed_paths:\n" +
+				"---\n\n" +
+				"## Goal\n",
+			wantErr: packet.ErrInvalidAllowedPaths,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p, err := packet.Parse(strings.NewReader(tt.src))
+			if tt.wantErr != nil {
+				if err == nil {
+					t.Fatalf("Parse() error = nil, want %v", tt.wantErr)
+				}
+				if !errors.Is(err, tt.wantErr) {
+					t.Errorf("Parse() error = %v, want %v", err, tt.wantErr)
+				}
+				if p.ID != "" || p.Executor != "" || len(p.AllowedPaths) != 0 {
+					t.Errorf("Parse() returned non-empty packet %v on error", p)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Parse() error = %v, want nil", err)
+			}
+			if !slices.Equal(p.AllowedPaths, tt.wantAllowedPaths) && !(len(p.AllowedPaths) == 0 && len(tt.wantAllowedPaths) == 0) {
+				t.Errorf("AllowedPaths = %v, want %v", p.AllowedPaths, tt.wantAllowedPaths)
 			}
 		})
 	}

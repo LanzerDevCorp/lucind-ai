@@ -5,6 +5,7 @@ package packet
 
 import (
 	"bufio"
+	"encoding/json"
 	"errors"
 	"io"
 	"strings"
@@ -24,6 +25,7 @@ var (
 	ErrMissingRoutedBy = errors.New("packet: frontmatter is missing a non-empty routed_by")
 	ErrEmptyBody       = errors.New("packet: body is empty, there is no prompt to dispatch")
 	ErrInvalidReadOnly = errors.New("packet: frontmatter read_only must be a boolean (true or false)")
+	ErrInvalidAllowedPaths = errors.New("packet: frontmatter allowed_paths must be a JSON array of strings")
 )
 
 // Packet is one unit of delegated work.
@@ -47,6 +49,10 @@ type Packet struct {
 	// produce no commits and leave a clean worktree. When absent, it
 	// defaults to false (write packet).
 	ReadOnly bool
+	// AllowedPaths restricts the repository-relative paths this packet is
+	// permitted to touch. When omitted or empty, the packet is undeclared
+	// and path checks are skipped.
+	AllowedPaths []string
 	// Body is the Markdown prompt, passed to the executor unchanged.
 	Body string
 }
@@ -86,6 +92,13 @@ func Parse(r io.Reader) (Packet, error) {
 			default:
 				return Packet{}, ErrInvalidReadOnly
 			}
+		case "allowed_paths":
+			trimmed := strings.TrimSpace(value)
+			var paths []string
+			if err := json.Unmarshal([]byte(trimmed), &paths); err != nil {
+				return Packet{}, ErrInvalidAllowedPaths
+			}
+			p.AllowedPaths = paths
 		}
 	}
 
