@@ -4,12 +4,15 @@ import (
 	"bytes"
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/LanzerDevCorp/lucind-ai/internal/lane"
 	lucindrun "github.com/LanzerDevCorp/lucind-ai/internal/run"
+	"github.com/LanzerDevCorp/lucind-ai/internal/worktree"
 )
 
 // These tests cover the CLI's own wiring and failure paths only. Every
@@ -380,3 +383,132 @@ func TestPrintReportOmitsDiagnosisBlockForDoneLane(t *testing.T) {
 		t.Errorf("printReport output = %q, want no diagnosis block for a lane.Done report", out)
 	}
 }
+
+// initRepo creates a throwaway git repository in t.TempDir() with one
+// commit, so "git worktree add" has a HEAD to branch from. It works on a
+// machine with no configured git identity by passing user.email/user.name
+// directly to each command.
+func initRepo(t *testing.T) string {
+	t.Helper()
+
+	root := t.TempDir()
+	runGit(t, root, "init")
+	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("seed\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(README.md) error = %v", err)
+	}
+	runGit(t, root, "add", "README.md")
+	runGit(t, root, "commit", "-m", "seed commit")
+
+	return root
+}
+
+func runGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+
+	cmd := exec.Command("git", append([]string{
+		"-c", "user.email=cli-test@example.com",
+		"-c", "user.name=cli-test",
+	}, args...)...)
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v error = %v, output = %s", args, err, out)
+	}
+}
+
+// TestProductionDepsWiresGitBackedInspectionFuncs proves that productionDeps
+// assigns non-nil, git-backed HasUniqueLaneCommits and PorcelainEmpty
+// closures, and that HasUniqueLaneCommits closes over primaryRoot.
+func TestProductionDepsWiresGitBackedInspectionFuncs(t *testing.T) {
+	if testing.Short() {
+		t.Skip("shells out to real git")
+	}
+
+	primaryRoot := initRepo(t)
+	deps := productionDeps("test-run-id", primaryRoot, nil, 10*time.Minute)
+
+	if deps.HasUniqueLaneCommits == nil {
+		t.Fatal("productionDeps.HasUniqueLaneCommits is nil, want non-nil git-backed func")
+	}
+	if deps.PorcelainEmpty == nil {
+		t.Fatal("productionDeps.PorcelainEmpty is nil, want non-nil git-backed func")
+	}
+
+	wt, err := worktree.Create(context.Background(), primaryRoot, "lane1")
+	if err != nil {
+		t.Fatalf("worktree.Create() error = %v, want nil", err)
+	}
+
+	// 1. HasUniqueLaneCommits: fresh worktree has no unique commits relative to primaryRoot.
+	hasCommits, err := deps.HasUniqueLaneCommits(context.Background(), wt.Path)
+	if err != nil {
+		t.Fatalf("HasUniqueLaneCommits() error = %v, want nil", err)
+	}
+	if hasCommits {
+		t.Errorf("HasUniqueLaneCommits() = true, want false for a fresh worktree")
+	}
+
+	// 2. PorcelainEmpty: fresh worktree is clean.
+	clean, err := deps.PorcelainEmpty(context.Background(), wt.Path)
+	if err != nil {
+		t.Fatalf("PorcelainEmpty() error = %v, want nil", err)
+	}
+	if !clean {
+		t.Errorf("PorcelainEmpty() = false, want true for a fresh worktree")
+	}
+
+	// 3. Adding a commit in the worktree causes HasUniqueLaneCommits to report true.
+	if err := os.WriteFile(filepath.Join(wt.Path, "feature.txt"), []byte("feature\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(feature.txt) error = %v", err)
+	}
+	runGit(t, wt.Path, "add", "feature.txt")
+	runGit(t, wt.Path, "commit", "-m", "lane commit")
+
+	hasCommits, err = deps.HasUniqueLaneCommits(context.Background(), wt.Path)
+	if err != nil {
+		t.Fatalf("HasUniqueLaneCommits() error = %v, want nil", err)
+	}
+	if !hasCommits {
+		t.Errorf("HasUniqueLaneCommits() = false, want true after committing in worktree")
+	}
+
+	// 4. Adding an untracked file causes PorcelainEmpty to report false.
+	if err := os.WriteFile(filepath.Join(wt.Path, "dirty.txt"), []byte("dirty\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(dirty.txt) error = %v", err)
+	}
+	clean, err = deps.PorcelainEmpty(context.Background(), wt.Path)
+	if err != nil {
+		t.Fatalf("PorcelainEmpty() error = %v, want nil", err)
+	}
+	if clean {
+		t.Errorf("PorcelainEmpty() = true, want false when untracked file exists")
+	}
+}
+
+// TestProductionDepsGitInspectionErrorPropagation proves that git failure on
+// invalid paths propagates as an error from both inspection funcs.
+func TestProductionDepsGitInspectionErrorPropagation(t *testing.T) {
+	if testing.Short() {
+		t.Skip("shells out to real git")
+	}
+
+	invalidDir := t.TempDir()
+	deps := productionDeps("test-run-id", invalidDir, nil, 10*time.Minute)
+
+	if deps.HasUniqueLaneCommits == nil {
+		t.Fatal("productionDeps.HasUniqueLaneCommits is nil, want non-nil git-backed func")
+	}
+	if deps.PorcelainEmpty == nil {
+		t.Fatal("productionDeps.PorcelainEmpty is nil, want non-nil git-backed func")
+	}
+
+	_, err := deps.HasUniqueLaneCommits(context.Background(), invalidDir)
+	if err == nil {
+		t.Error("HasUniqueLaneCommits() error = nil, want non-nil for non-git directory")
+	}
+
+	_, err = deps.PorcelainEmpty(context.Background(), invalidDir)
+	if err == nil {
+		t.Error("PorcelainEmpty() error = nil, want non-nil for non-git directory")
+	}
+}
+
