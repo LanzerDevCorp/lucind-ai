@@ -1,0 +1,54 @@
+change: read-only-packet-dispatch
+created: 2026-08-19
+artifact_store: hybrid
+execution_mode: auto
+delivery_strategy: single-pr
+review_budget_lines: 2000
+phases:
+  explore:
+    status: done
+    note: |
+      Inherited from the umbrella exploration covering all three dual-executor-dispatch
+      directions (engram sdd/dual-executor-dispatch/explore). This change is the "small,
+      prerequisite" direction (read-only packet dispatch, unblocks explore-phase dispatch and
+      is a hard prerequisite for the future verify-dual-dispatch change).
+    engram_topic: sdd/dual-executor-dispatch/explore
+  proposal:
+    status: dispatched
+    drafts:
+      - openspec/changes/read-only-packet-dispatch/proposal-agy.md
+      - openspec/changes/read-only-packet-dispatch/proposal-cursor-agent.md
+    note: |
+      Dispatched via real lucind-ai run (agy + cursor-agent packets), not a Claude Code
+      subagent -- first real use of the "explore via real dispatch" pattern's sibling,
+      propose/design dual-dispatch, which is already verified working (approvals-web-ui
+      session 3). Dispatched in parallel with design (see below), not sequentially after it.
+  design:
+    status: dispatched
+    drafts:
+      - openspec/changes/read-only-packet-dispatch/design-agy.md
+      - openspec/changes/read-only-packet-dispatch/design-cursor-agent.md
+    note: |
+      Dispatched in parallel with proposal, not waiting on it -- explicit session decision,
+      consistent with the approvals-web-ui precedent that propose and design are not
+      dependent phases in this project's workflow.
+  spec:
+    status: pending
+  tasks:
+    status: pending
+  apply:
+    status: pending
+  verify:
+    status: pending
+  archive:
+    status: pending
+notes: |
+  One of three sibling changes split from a single umbrella exploration
+  (sdd/dual-executor-dispatch/explore): read-only-packet-dispatch (this one, small),
+  apply-dag-dispatch (large, independent), verify-dual-dispatch (small, depends on this one).
+  Planning-only session per explicit user instruction -- no apply phase until the user asks.
+  Dual-executor SDD phase experiment: propose/design phases author their content via lucind-ai
+  packets dispatched to agy AND cursor-agent in parallel, per
+  plugin/claude-code/skills/lucind-ai/SKILL.md's routing preference table. The orchestrator
+  (this Claude Code session) synthesizes/selects from parallel outputs and owns the canonical
+  artifact in openspec/ + engram.
