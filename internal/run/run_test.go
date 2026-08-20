@@ -105,6 +105,9 @@ func newTestDeps(t *testing.T, wtPath string, fsys func(string) fs.FS, exec exec
 		PorcelainEmpty: func(context.Context, string) (bool, error) {
 			return true, nil
 		},
+		PersistEnvelope: func(context.Context, string, string, *result.Envelope) error {
+			return nil
+		},
 	}
 }
 

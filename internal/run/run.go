@@ -167,6 +167,13 @@ type Deps struct {
 	PromoteTarget      func(ctx context.Context, primaryRoot, integrationBranch string) error
 	DiscardCombined    func(ctx context.Context, primaryRoot, worktreePath, branchName string) error
 	RemoveLaneWorktree func(ctx context.Context, primaryRoot, worktreePath, branch string) error
+	// PersistEnvelope durably records one integrated lane's full result
+	// envelope in the primary repository before its worktree is removed
+	// -- see completeIntegration. Without this, Envelope.Findings (every
+	// structured qualitative-judgment citation a read-only verify lane
+	// produces) is permanently lost the moment the lane integrates, since
+	// RemoveLaneWorktree deletes the only copy of .lucind/result.json.
+	PersistEnvelope func(ctx context.Context, primaryRoot, laneID string, envelope *result.Envelope) error
 }
 
 // Report is the outcome of running exactly one lane through Execute.

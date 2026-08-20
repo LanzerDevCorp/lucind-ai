@@ -7,6 +7,7 @@ import (
 
 	"github.com/LanzerDevCorp/lucind-ai/internal/lane"
 	"github.com/LanzerDevCorp/lucind-ai/internal/ledger"
+	"github.com/LanzerDevCorp/lucind-ai/internal/result"
 	"github.com/LanzerDevCorp/lucind-ai/internal/worktree"
 )
 
@@ -149,12 +150,15 @@ func handleRedBatch(ctx context.Context, deps Deps, batch BatchReport, triggerRe
 
 func completeIntegration(ctx context.Context, deps Deps, batch BatchReport, integrateIDs, revertIDs []string, now time.Time) (IntegrateReport, error) {
 	laneWorktrees := make(map[string]string, len(batch.Lanes))
+	laneEnvelopes := make(map[string]*result.Envelope, len(batch.Lanes))
 	for _, l := range batch.Lanes {
 		laneWorktrees[l.LaneID] = l.Worktree
+		laneEnvelopes[l.LaneID] = l.Envelope
 	}
 
 	for _, id := range integrateIDs {
 		wtPath := laneWorktrees[id]
+		_ = deps.PersistEnvelope(ctx, deps.PrimaryRoot, id, laneEnvelopes[id])
 		_ = deps.RemoveLaneWorktree(ctx, deps.PrimaryRoot, wtPath, worktree.BranchFor(id))
 		_ = deps.Ledger.SetWorktreePreserved(ctx, deps.RunID, id, false)
 	}
