@@ -10,7 +10,7 @@ import (
 // Split is the mechanical consumer for apply-dag.yaml:
 // 1. Parses the sidecar DAG artifact at dagPath (verifying schema and body_path existence).
 // 2. Validates semantic rules (unique IDs, non-empty allowed_paths).
-// 3. Groups packets into waves via Kahn's algorithm and verifies same-wave path disjointness.
+// 3. Groups packets into waves via Kahn's algorithm and verifies global overlap via ValidateGlobalOverlap (transitive reachability) before Emit.
 // 4. Emits one packet file per node into outDir with generated frontmatter and verbatim body.
 // 5. Prints one copy-pasteable "lucind-ai run" command per wave to stdout in dependency order.
 //

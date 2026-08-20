@@ -2,8 +2,6 @@ package dag
 
 import (
 	"errors"
-
-	"github.com/LanzerDevCorp/lucind-ai/internal/packet"
 )
 
 var (
@@ -13,8 +11,8 @@ var (
 // Waves computes the execution waves of a DAG using Kahn's algorithm.
 // Each wave contains packets whose dependencies were satisfied in earlier waves.
 // YAML declaration order is preserved within each wave.
-// After grouping, each wave is checked for pairwise disjoint allowed_paths via
-// packet.DisjointAllowedPaths; same-wave path overlap returns an error.
+// After grouping, global path overlap is verified via ValidateGlobalOverlap;
+// unordered overlap across or within waves returns an error.
 func Waves(d DAG) ([][]Node, error) {
 	if err := Validate(d); err != nil {
 		return nil, err
@@ -61,19 +59,14 @@ func Waves(d DAG) ([][]Node, error) {
 			}
 		}
 
-		// Check pairwise disjoint allowed_paths within this wave
-		ps := make([]packet.Packet, len(currentWave))
-		for i, n := range currentWave {
-			ps[i] = packet.Packet{
-				ID:           n.ID,
-				AllowedPaths: n.AllowedPaths,
-			}
-		}
-		if err := packet.DisjointAllowedPaths(ps); err != nil {
-			return nil, err
-		}
-
 		waves = append(waves, currentWave)
+	}
+
+	// Validate global path overlap across the entire DAG. The per-wave
+	// DisjointAllowedPaths loop was removed because same-wave overlap is
+	// unordered overlap by construction.
+	if err := ValidateGlobalOverlap(d); err != nil {
+		return nil, err
 	}
 
 	return waves, nil

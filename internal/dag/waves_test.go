@@ -1,6 +1,7 @@
 package dag_test
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -239,3 +240,154 @@ func packetIDs(nodes []dag.Node) []string {
 	}
 	return ids
 }
+
+func TestWaves_CrossWaveOverlapWithoutEdgeRejected(t *testing.T) {
+	tests := []struct {
+		name    string
+		dag     dag.DAG
+		wantIDs []string
+	}{
+		{
+			name: "unordered overlap across unrelated waves rejected (3 packets)",
+			dag: dag.DAG{
+				Change: "test-cross-wave-unordered",
+				Packets: []dag.Node{
+					{
+						ID:           "A",
+						Executor:     "agy",
+						RoutedBy:     "test",
+						AllowedPaths: []string{"internal/foo/"},
+						DependsOn:    []string{},
+						BodyPath:     "bodies/a.md",
+					},
+					{
+						ID:           "B",
+						Executor:     "agy",
+						RoutedBy:     "test",
+						AllowedPaths: []string{"internal/bar/"},
+						DependsOn:    []string{},
+						BodyPath:     "bodies/b.md",
+					},
+					{
+						ID:           "C",
+						Executor:     "agy",
+						RoutedBy:     "test",
+						AllowedPaths: []string{"internal/foo/bar.go"},
+						DependsOn:    []string{"B"},
+						BodyPath:     "bodies/c.md",
+					},
+				},
+			},
+			wantIDs: []string{"A", "C"},
+		},
+		{
+			name: "diamond with overlap between independent branches (4 packets)",
+			dag: dag.DAG{
+				Change: "test-diamond-overlap",
+				Packets: []dag.Node{
+					{
+						ID:           "A",
+						Executor:     "agy",
+						RoutedBy:     "test",
+						AllowedPaths: []string{"internal/a/"},
+						DependsOn:    []string{},
+						BodyPath:     "bodies/a.md",
+					},
+					{
+						ID:           "B",
+						Executor:     "agy",
+						RoutedBy:     "test",
+						AllowedPaths: []string{"internal/b/"},
+						DependsOn:    []string{},
+						BodyPath:     "bodies/b.md",
+					},
+					{
+						ID:           "C",
+						Executor:     "agy",
+						RoutedBy:     "test",
+						AllowedPaths: []string{"internal/common/"},
+						DependsOn:    []string{"A"},
+						BodyPath:     "bodies/c.md",
+					},
+					{
+						ID:           "D",
+						Executor:     "agy",
+						RoutedBy:     "test",
+						AllowedPaths: []string{"internal/common/sub.go"},
+						DependsOn:    []string{"B"},
+						BodyPath:     "bodies/d.md",
+					},
+				},
+			},
+			wantIDs: []string{"C", "D"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := dag.Waves(tt.dag)
+			if err == nil {
+				t.Fatal("expected error, got nil")
+			}
+			if !errors.Is(err, dag.ErrUnorderedOverlap) {
+				t.Fatalf("expected ErrUnorderedOverlap, got: %v", err)
+			}
+			for _, id := range tt.wantIDs {
+				if !strings.Contains(err.Error(), id) {
+					t.Errorf("expected error message to contain packet ID %q, got: %v", id, err)
+				}
+			}
+		})
+	}
+}
+
+func TestWaves_CrossWaveOverlapAllowedWithTransitiveEdge(t *testing.T) {
+	// A -> B -> C: C depends on B, B depends on A. A and C overlap on internal/foo/
+	d := dag.DAG{
+		Change: "test-transitive-overlap",
+		Packets: []dag.Node{
+			{
+				ID:           "A",
+				Executor:     "agy",
+				RoutedBy:     "test",
+				AllowedPaths: []string{"internal/foo/"},
+				DependsOn:    []string{},
+				BodyPath:     "bodies/a.md",
+			},
+			{
+				ID:           "B",
+				Executor:     "agy",
+				RoutedBy:     "test",
+				AllowedPaths: []string{"internal/bar/"},
+				DependsOn:    []string{"A"},
+				BodyPath:     "bodies/b.md",
+			},
+			{
+				ID:           "C",
+				Executor:     "agy",
+				RoutedBy:     "test",
+				AllowedPaths: []string{"internal/foo/bar.go"},
+				DependsOn:    []string{"B"},
+				BodyPath:     "bodies/c.md",
+			},
+		},
+	}
+
+	waves, err := dag.Waves(d)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(waves) != 3 {
+		t.Fatalf("expected 3 waves, got %d", len(waves))
+	}
+	if len(waves[0]) != 1 || waves[0][0].ID != "A" {
+		t.Errorf("expected wave 0 to have [A], got: %v", packetIDs(waves[0]))
+	}
+	if len(waves[1]) != 1 || waves[1][0].ID != "B" {
+		t.Errorf("expected wave 1 to have [B], got: %v", packetIDs(waves[1]))
+	}
+	if len(waves[2]) != 1 || waves[2][0].ID != "C" {
+		t.Errorf("expected wave 2 to have [C], got: %v", packetIDs(waves[2]))
+	}
+}
+

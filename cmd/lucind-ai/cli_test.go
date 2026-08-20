@@ -884,6 +884,29 @@ packets:
     depends_on: []
     body_path: bodies/p1.md`,
 		},
+		{
+			name: "unordered cross-wave overlap",
+			yaml: `change: test
+packets:
+  - id: A
+    executor: agy
+    routed_by: test
+    allowed_paths: [internal/foo/]
+    depends_on: []
+    body_path: bodies/A.md
+  - id: B
+    executor: agy
+    routed_by: test
+    allowed_paths: [internal/bar/]
+    depends_on: []
+    body_path: bodies/B.md
+  - id: C
+    executor: agy
+    routed_by: test
+    allowed_paths: [internal/foo/bar.go]
+    depends_on: [B]
+    body_path: bodies/C.md`,
+		},
 	}
 
 	for _, tc := range tests {
@@ -893,7 +916,7 @@ packets:
 			if err := os.MkdirAll(bodiesDir, 0o755); err != nil {
 				t.Fatal(err)
 			}
-			for _, id := range []string{"dup", "p1", "p2"} {
+			for _, id := range []string{"dup", "p1", "p2", "A", "B", "C"} {
 				if err := os.WriteFile(filepath.Join(bodiesDir, id+".md"), []byte("# Goal\nGoal\n"), 0o644); err != nil {
 					t.Fatal(err)
 				}
