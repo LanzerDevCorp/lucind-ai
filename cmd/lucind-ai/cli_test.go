@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,6 +14,7 @@ import (
 	"github.com/LanzerDevCorp/lucind-ai/internal/executor"
 	"github.com/LanzerDevCorp/lucind-ai/internal/lane"
 	"github.com/LanzerDevCorp/lucind-ai/internal/ledger"
+	"github.com/LanzerDevCorp/lucind-ai/internal/result"
 	lucindrun "github.com/LanzerDevCorp/lucind-ai/internal/run"
 	"github.com/LanzerDevCorp/lucind-ai/internal/worktree"
 )
@@ -382,6 +384,9 @@ func TestRunOverlappingAllowedPathsFailsBeforeCreateWorktree(t *testing.T) {
 		deps.CreateWorktree = func(ctx context.Context, primaryRoot, laneID string) (worktree.Worktree, error) {
 			createCalled = true
 			return origFactory(runID, primaryRoot, ledg, timeout).CreateWorktree(ctx, primaryRoot, laneID)
+		}
+		deps.PersistEnvelope = func(ctx context.Context, primaryRoot, laneID string, envelope *result.Envelope) error {
+			return nil
 		}
 		return deps
 	}
@@ -986,6 +991,9 @@ func TestRunSequentialInvocationsProduceDistinctRunIDs(t *testing.T) {
 		deps.RemoveLaneWorktree = func(ctx context.Context, primaryRoot, worktreePath, branch string) error {
 			return nil
 		}
+		deps.PersistEnvelope = func(ctx context.Context, primaryRoot, laneID string, envelope *result.Envelope) error {
+			return nil
+		}
 		return deps
 	}
 
@@ -1025,6 +1033,106 @@ func TestRunSequentialInvocationsProduceDistinctRunIDs(t *testing.T) {
 	}
 }
 
+const persistEnvelopeFinding = "integrated lane Findings must survive worktree removal"
+
+// TestRunDispatchPersistsIntegratedLaneEnvelopeToPrimaryRoot proves that
+// after a real run --packet dispatch integrates a lane, the full result
+// envelope (including Findings, not just Summary) is written to
+// .lucind/results/<lane-id>.json in the primary root and advertised on
+// stdout via an envelope: line.
+func TestRunDispatchPersistsIntegratedLaneEnvelopeToPrimaryRoot(t *testing.T) {
+	primaryRoot := initRepo(t)
+
+	p1 := filepath.Join(primaryRoot, "packet-1.md")
+	p1Content := "---\n" +
+		"id: lane-1\n" +
+		"executor: agy\n" +
+		"routed_by: test\n" +
+		"---\n" +
+		"Task 1\n"
+	if err := os.WriteFile(p1, []byte(p1Content), 0o644); err != nil {
+		t.Fatalf("write packet 1: %v", err)
+	}
+
+	origFactory := depsFactory
+	defer func() { depsFactory = origFactory }()
+	depsFactory = func(runID, primaryRoot string, ledg *ledger.Ledger, timeout time.Duration) lucindrun.Deps {
+		deps := origFactory(runID, primaryRoot, ledg, timeout)
+		deps.CreateWorktree = func(ctx context.Context, primaryRoot, laneID string) (worktree.Worktree, error) {
+			return worktree.Worktree{Path: t.TempDir(), Branch: "branch-" + laneID}, nil
+		}
+		deps.HasUniqueLaneCommits = func(ctx context.Context, worktreePath string) (bool, error) {
+			return true, nil
+		}
+		deps.PorcelainEmpty = func(ctx context.Context, worktreePath string) (bool, error) {
+			return true, nil
+		}
+		deps.LookupExecutor = func(name string) (executor.Executor, error) {
+			return testDoneExecutorWithFindings{}, nil
+		}
+		deps.CombineTree = func(ctx context.Context, primaryRoot, runID string, branches []string) (string, string, error) {
+			return t.TempDir(), "integration-branch", nil
+		}
+		deps.RunChecks = func(ctx context.Context, worktreePath string) (bool, string, error) {
+			return true, "", nil
+		}
+		deps.PromoteTarget = func(ctx context.Context, primaryRoot, integrationBranch string) error {
+			return nil
+		}
+		deps.DiscardCombined = func(ctx context.Context, primaryRoot, worktreePath, branchName string) error {
+			return nil
+		}
+		deps.RemoveLaneWorktree = func(ctx context.Context, primaryRoot, worktreePath, branch string) error {
+			return nil
+		}
+		return deps
+	}
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(primaryRoot); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(cwd)
+
+	var stdout, stderr bytes.Buffer
+	code := run(context.Background(), []string{"run", "--packet", p1}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run exit code = %d, want 0; stderr = %q stdout = %q", code, stderr.String(), stdout.String())
+	}
+
+	wantLine := "envelope:  .lucind/results/lane-1.json"
+	if !strings.Contains(stdout.String(), wantLine) {
+		t.Fatalf("stdout = %q, want it to contain %q", stdout.String(), wantLine)
+	}
+
+	envelopePath := filepath.Join(primaryRoot, ".lucind", "results", "lane-1.json")
+	data, err := os.ReadFile(envelopePath)
+	if err != nil {
+		t.Fatalf("ReadFile(%s) error = %v, want the persisted envelope on disk", envelopePath, err)
+	}
+
+	var env result.Envelope
+	if err := json.Unmarshal(data, &env); err != nil {
+		t.Fatalf("Unmarshal(%s) error = %v; content = %s", envelopePath, err, data)
+	}
+	found := false
+	for _, f := range env.Findings {
+		if f.Finding == persistEnvelopeFinding {
+			found = true
+			if f.Evidence == "" || f.Affects == "" {
+				t.Errorf("persisted finding missing evidence or affects: %+v", f)
+			}
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("persisted envelope Findings = %+v, want finding %q", env.Findings, persistEnvelopeFinding)
+	}
+}
+
 type testDoneExecutor struct {
 	exitCode int
 	envelope string
@@ -1047,6 +1155,25 @@ func (testDoneExecutor) DefaultModel() string {
 
 func (testDoneExecutor) KnownModels() []string {
 	return []string{"test-model"}
+}
+
+type testDoneExecutorWithFindings struct {
+	testDoneExecutor
+}
+
+func (e testDoneExecutorWithFindings) Run(ctx context.Context, req executor.Request) (executor.Outcome, error) {
+	e.envelope = `{
+	"packet_id": "lane-1",
+	"status": "done",
+	"summary": "done",
+	"hard_stops": [],
+	"findings": [{
+		"finding": "` + persistEnvelopeFinding + `",
+		"evidence": "internal/run/integrate.go:158",
+		"affects": "verify-dual-dispatch Stage 3 file:line check"
+	}]
+}`
+	return e.testDoneExecutor.Run(ctx, req)
 }
 
 func extractRunID(stdout string) string {
@@ -1171,6 +1298,9 @@ func overrideDispatchDeps(t *testing.T, exec executor.Executor) {
 			return nil
 		}
 		deps.RemoveLaneWorktree = func(ctx context.Context, primaryRoot, worktreePath, branch string) error {
+			return nil
+		}
+		deps.PersistEnvelope = func(ctx context.Context, primaryRoot, laneID string, envelope *result.Envelope) error {
 			return nil
 		}
 		return deps

@@ -18,6 +18,7 @@ import (
 	"github.com/LanzerDevCorp/lucind-ai/internal/lane"
 	"github.com/LanzerDevCorp/lucind-ai/internal/ledger"
 	"github.com/LanzerDevCorp/lucind-ai/internal/packet"
+	"github.com/LanzerDevCorp/lucind-ai/internal/result"
 	"github.com/LanzerDevCorp/lucind-ai/internal/run"
 	"github.com/LanzerDevCorp/lucind-ai/internal/worktree"
 )
@@ -188,6 +189,9 @@ func newBatchTestDeps(t *testing.T, worktreeRoot func(laneID string) string, env
 		},
 		PorcelainEmpty: func(context.Context, string) (bool, error) {
 			return true, nil
+		},
+		PersistEnvelope: func(context.Context, string, string, *result.Envelope) error {
+			return nil
 		},
 	}
 }
@@ -503,6 +507,9 @@ func TestExecuteBatchRejectsEmptyBatchBeforeAnySideEffect(t *testing.T) {
 		},
 		WorktreeFS: func(string) fs.FS { return fstest.MapFS{} },
 		Now:        func() time.Time { return time.Now() },
+		PersistEnvelope: func(context.Context, string, string, *result.Envelope) error {
+			return nil
+		},
 	}
 
 	_, err = run.ExecuteBatch(context.Background(), deps, nil)
@@ -545,6 +552,9 @@ func TestExecuteBatchRejectsDuplicateLaneIDsBeforeAnySideEffect(t *testing.T) {
 		},
 		WorktreeFS: func(string) fs.FS { return fstest.MapFS{} },
 		Now:        func() time.Time { return time.Now() },
+		PersistEnvelope: func(context.Context, string, string, *result.Envelope) error {
+			return nil
+		},
 	}
 
 	ps := []packet.Packet{batchPacket("lane-dup"), batchPacket("lane-dup")}

@@ -10,6 +10,7 @@ import (
 	"github.com/LanzerDevCorp/lucind-ai/internal/barrier"
 	"github.com/LanzerDevCorp/lucind-ai/internal/lane"
 	"github.com/LanzerDevCorp/lucind-ai/internal/ledger"
+	"github.com/LanzerDevCorp/lucind-ai/internal/result"
 	"github.com/LanzerDevCorp/lucind-ai/internal/run"
 )
 
@@ -54,6 +55,12 @@ type integrateRecorder struct {
 	}
 	removeFunc func(primaryRoot, worktreePath, branch string) error
 	removeErr  error
+
+	persistCalls []struct {
+		PrimaryRoot string
+		LaneID      string
+		Envelope    *result.Envelope
+	}
 }
 
 func newIntegrateTestDeps(t *testing.T, rec *integrateRecorder) (run.Deps, *ledger.Ledger) {
@@ -150,6 +157,16 @@ func newIntegrateTestDeps(t *testing.T, rec *integrateRecorder) (run.Deps, *ledg
 			err := rec.removeErr
 			rec.mu.Unlock()
 			return err
+		},
+		PersistEnvelope: func(_ context.Context, primaryRoot, laneID string, envelope *result.Envelope) error {
+			rec.mu.Lock()
+			rec.persistCalls = append(rec.persistCalls, struct {
+				PrimaryRoot string
+				LaneID      string
+				Envelope    *result.Envelope
+			}{PrimaryRoot: primaryRoot, LaneID: laneID, Envelope: envelope})
+			rec.mu.Unlock()
+			return nil
 		},
 	}
 
@@ -369,6 +386,88 @@ func TestIntegrateGreenPath(t *testing.T) {
 	}
 	if !foundSummary {
 		t.Errorf("Events() did not include run-scoped EventLaneNote summary event: %+v", events)
+	}
+}
+
+func TestCompleteIntegrationPersistsEnvelopeForEveryIntegratedLane(t *testing.T) {
+	rec := &integrateRecorder{
+		combineRetPath:   "/wt/integrate-run-1",
+		combineRetBranch: "lucind/integrate-run-1",
+		checkRetPassed:   true,
+	}
+	deps, l := newIntegrateTestDeps(t, rec)
+
+	registerTestLane(t, l, "run-1", "lane-a", lane.Done, "/wt/lane-a", true)
+	registerTestLane(t, l, "run-1", "lane-b", lane.Done, "/wt/lane-b", true)
+
+	envA := &result.Envelope{
+		PacketID: "lane-a",
+		Status:   "done",
+		Summary:  "lane a summary",
+		Findings: []result.Finding{{
+			Finding:  "finding A",
+			Evidence: "file-a.go:10",
+			Affects:  "verify A",
+		}},
+	}
+	envB := &result.Envelope{
+		PacketID: "lane-b",
+		Status:   "done",
+		Summary:  "lane b summary",
+		Findings: []result.Finding{{
+			Finding:  "finding B",
+			Evidence: "file-b.go:20",
+			Affects:  "verify B",
+		}},
+	}
+
+	batch := run.BatchReport{
+		RunID:    "run-1",
+		Released: true,
+		Outcome: barrier.Outcome{
+			Released:  true,
+			Integrate: []string{"lane-a", "lane-b"},
+		},
+		Lanes: []run.Report{
+			{LaneID: "lane-a", Status: lane.Done, Worktree: "/wt/lane-a", Envelope: envA},
+			{LaneID: "lane-b", Status: lane.Done, Worktree: "/wt/lane-b", Envelope: envB},
+		},
+	}
+
+	report, err := run.Integrate(context.Background(), deps, batch)
+	if err != nil {
+		t.Fatalf("Integrate() error = %v, want nil", err)
+	}
+	if len(report.Integrated) != 2 || report.Integrated[0] != "lane-a" || report.Integrated[1] != "lane-b" {
+		t.Fatalf("report.Integrated = %v, want [lane-a, lane-b]", report.Integrated)
+	}
+
+	if len(rec.persistCalls) != 2 {
+		t.Fatalf("PersistEnvelope calls = %d, want 2 (once per integrated lane)", len(rec.persistCalls))
+	}
+	if rec.persistCalls[0].LaneID != "lane-a" || rec.persistCalls[0].Envelope != envA {
+		t.Errorf("persistCalls[0] LaneID=%s Envelope=%p, want lane-a and envA (%p)", rec.persistCalls[0].LaneID, rec.persistCalls[0].Envelope, envA)
+	}
+	if rec.persistCalls[1].LaneID != "lane-b" || rec.persistCalls[1].Envelope != envB {
+		t.Errorf("persistCalls[1] LaneID=%s Envelope=%p, want lane-b and envB (%p)", rec.persistCalls[1].LaneID, rec.persistCalls[1].Envelope, envB)
+	}
+	if rec.persistCalls[0].Envelope == nil || rec.persistCalls[1].Envelope == nil {
+		t.Errorf("PersistEnvelope received a nil envelope")
+	}
+	if rec.persistCalls[0].Envelope == envB {
+		t.Errorf("persistCalls[0] received lane-b's envelope, want lane-a's")
+	}
+	if rec.persistCalls[1].Envelope == envA {
+		t.Errorf("persistCalls[1] received lane-a's envelope, want lane-b's")
+	}
+
+	if len(rec.removeCalls) != len(rec.persistCalls) {
+		t.Errorf("PersistEnvelope calls = %d, RemoveLaneWorktree calls = %d, want one-for-one with integrateIDs", len(rec.persistCalls), len(rec.removeCalls))
+	}
+	for i, id := range report.Integrated {
+		if rec.persistCalls[i].LaneID != id {
+			t.Errorf("persistCalls[%d].LaneID = %s, want %s (integrateIDs order)", i, rec.persistCalls[i].LaneID, id)
+		}
 	}
 }
 

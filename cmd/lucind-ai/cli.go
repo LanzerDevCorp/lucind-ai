@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -21,6 +22,7 @@ import (
 	"github.com/LanzerDevCorp/lucind-ai/internal/lane"
 	"github.com/LanzerDevCorp/lucind-ai/internal/ledger"
 	"github.com/LanzerDevCorp/lucind-ai/internal/packet"
+	"github.com/LanzerDevCorp/lucind-ai/internal/result"
 	lucindrun "github.com/LanzerDevCorp/lucind-ai/internal/run"
 	"github.com/LanzerDevCorp/lucind-ai/internal/worktree"
 )
@@ -39,7 +41,6 @@ const defaultTimeout = 20 * time.Minute
 // invocation that works rather than a stack trace. --packet is repeatable:
 // each occurrence adds one more lane to the batch.
 const usage = "usage: lucind-ai run --packet <path> [--packet <path> ...] [--timeout <duration>]\n       lucind-ai split --dag <path> --out <dir>\n       lucind-ai check [--out <path>]\n       lucind-ai --version"
-
 
 // depsFactory constructs run.Deps for runDispatch. In production it is
 // productionDeps; tests may override it to inject test doubles or observe dependency calls.
@@ -240,8 +241,16 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 		return 1
 	}
 
+	integrated := make(map[string]bool, len(integrateReport.Integrated))
+	for _, id := range integrateReport.Integrated {
+		integrated[id] = true
+	}
+
 	for _, r := range batch.Lanes {
 		printReport(stdout, r)
+		if integrated[r.LaneID] {
+			fmt.Fprintf(stdout, "envelope:  .lucind/results/%s.json\n", r.LaneID)
+		}
 	}
 	fmt.Fprintf(stdout, "released:  %t\n", batch.Released)
 
@@ -386,7 +395,6 @@ func formatMechanicalLog(commitSHA string, exitCode int, duration time.Duration,
 	return sb.String()
 }
 
-
 // resolveCommitSHA runs "git rev-parse HEAD" in dir and returns the trimmed commit SHA.
 func resolveCommitSHA(ctx context.Context, dir string) string {
 	cmd := exec.CommandContext(ctx, "git", "rev-parse", "HEAD")
@@ -397,8 +405,6 @@ func resolveCommitSHA(ctx context.Context, dir string) string {
 	}
 	return strings.TrimSpace(string(out))
 }
-
-
 
 // printReport prints a short, human-readable summary of one lane's run.
 // A lane that did not reach lane.Done gets a visually unmissable banner so
@@ -518,6 +524,19 @@ func productionDeps(runID, primaryRoot string, ledg *ledger.Ledger, timeout time
 			}
 			return worktree.DeleteBranch(ctx, primaryRoot, branch)
 		},
+		PersistEnvelope: func(ctx context.Context, primaryRoot, laneID string, envelope *result.Envelope) error {
+			if envelope == nil {
+				return nil
+			}
+			data, err := json.MarshalIndent(envelope, "", "  ")
+			if err != nil {
+				return err
+			}
+			dir := filepath.Join(primaryRoot, ".lucind", "results")
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				return err
+			}
+			return os.WriteFile(filepath.Join(dir, laneID+".json"), data, 0o644)
+		},
 	}
 }
-
