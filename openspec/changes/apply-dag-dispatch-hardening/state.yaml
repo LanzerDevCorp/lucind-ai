@@ -1,0 +1,40 @@
+change: apply-dag-dispatch-hardening
+created: 2026-08-20
+artifact_store: hybrid
+execution_mode: auto
+delivery_strategy: single-pr
+review_budget_lines: 10000
+phases:
+  explore:
+    status: done
+    engram_topic: sdd/apply-dag-dispatch-hardening/explore
+    canonical: openspec/changes/apply-dag-dispatch-hardening/explore.md
+    note: |
+      Dispatched via real lucind-ai run (single cursor-agent packet, read_only: true) --
+      first phase of this change run through the project's own plugin/skill
+      (lucind-ai@lucind-ai, installed this session as scope:local so future sessions load it
+      automatically). Confirmed both named gaps (per-wave-only disjointness in
+      internal/dag/waves.go; three-way diff union in internal/run/run.go missing the
+      staged-but-uncommitted leg) and evaluated five candidate hardening items (transitive
+      overlap ordering, staged-only detection, NUL-delimited git output, both rename
+      endpoints, recorded base SHA vs mutable HEAD). All file:line cited, envelope persisted
+      at .lucind/results/explore-apply-dag-dispatch-hardening.json. Lane done, clean
+      worktree, integrated with 0 reverted.
+  proposal:
+    status: pending
+  design:
+    status: pending
+  spec:
+    status: pending
+  tasks:
+    status: pending
+  apply:
+    status: pending
+  verify:
+    status: pending
+  archive:
+    status: pending
+notes: |
+  Prerequisite hardening change, named inside openspec/changes/feature-parent-integration/tasks.md,
+  to land before feature-parent-integration begins. Session preflight: execution_mode=auto,
+  artifact_store=hybrid, delivery_strategy=single-pr, review_budget_lines=10000.
