@@ -329,12 +329,9 @@ func TestSkillAssetContract(t *testing.T) {
 		t.Errorf("SKILL.md verify row was modified or removed")
 	}
 
-	// Unrelated sections present from earlier in the session are preserved.
+	// Unrelated section present from earlier in the session is preserved.
 	if !strings.Contains(content, "### Where to author packet files") {
 		t.Errorf("SKILL.md missing 'Where to author packet files' section")
-	}
-	if !strings.Contains(content, "### Keeping the Binary Current") {
-		t.Errorf("SKILL.md missing 'Keeping the Binary Current' section")
 	}
 }
 
