@@ -62,7 +62,26 @@ phases:
       agent's design as the base, folding in agy's independently-useful framing (reachability.go
       as one acceptable file-placement option).
   spec:
-    status: pending
+    status: done
+    engram_topic: sdd/apply-dag-dispatch-hardening/spec
+    drafts:
+      - openspec/changes/apply-dag-dispatch-hardening/specs-agy/
+      - openspec/changes/apply-dag-dispatch-hardening/specs-cursor-agent/
+    canonical: openspec/changes/apply-dag-dispatch-hardening/specs/
+    note: |
+      Dispatched via real lucind-ai run (agy + cursor-agent), both lanes done, merged to main
+      cleanly (0 reverted), no AI-attribution trailer. Delta specs against
+      openspec/specs/apply-dag-dispatch/spec.md and openspec/specs/allowed-paths-enforcement/
+      spec.md: RENAMED+MODIFIED "Cross-Wave Overlap Requires a Dependency Edge" ->
+      "...Requires Transitive Dependency Ordering"; RENAMED+MODIFIED "Base-SHA Three-Way Diff
+      Union..." -> "...Four-Way Diff Union..."; MODIFIED "Post-Execution Scope Check Demotes
+      Done to Deviated" and "Git Inspection Failure Blocks, Never Guesses" under their existing
+      titles. Drafts converged almost completely on requirement text and scenario intent.
+      One real gap found in cursor-agent's draft: it never demonstrated the positive transitive
+      case (an indirect multi-hop depends_on chain actually authorizing overlap) -- only the
+      direct-edge-allowed and no-path-rejected cases. agy's draft included that missing
+      "Transitive dependency ordering authorizes overlap" scenario; canonical adopts it,
+      otherwise follows cursor-agent's tighter prose and file:line citation style.
   tasks:
     status: pending
   apply:
