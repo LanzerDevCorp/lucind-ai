@@ -132,7 +132,12 @@ phases:
       contradicts a tested spec scenario; both are real gaps worth future hardening. Full detail
       in verify.md.
   archive:
-    status: pending
+    status: done
+    note: |
+      Delta specs (apply-dag-dispatch, allowed-paths-enforcement, sdd-apply) merged into
+      openspec/specs/. Change folder archived to openspec/changes/archive/2026-08-20-apply-dag-dispatch/.
+      Tasks reconciled: all 79 implementation checkboxes marked complete (apply status: done,
+      verify status: done PASSED, no CRITICAL issues). SDD cycle complete.
 notes: |
   One of three sibling changes split from a single umbrella exploration
   (sdd/dual-executor-dispatch/explore): read-only-packet-dispatch (small, independent),
