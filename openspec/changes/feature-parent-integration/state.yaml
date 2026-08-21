@@ -158,14 +158,17 @@ phases:
           needed this time, but do not rely on this: keep the primary root untouched for the
           full lifetime of any in-flight lane, not just at dispatch time.
   verify:
-    status: pending
+    status: done
     note: |
-      One two-stage verify pass (mechanical + qualitative) per apply unit, plus a final
-      full-change verify before archive. Originally planned as dual agy+cursor-agent
-      qualitative dispatch (the project's established two-stage verify protocol); switched
-      to cursor-agent only per user instruction -- agy is out of quota for today. Every
-      remaining lucind-ai dispatch for this change (verify included) goes to cursor-agent
-      exclusively until noted otherwise.
+      Two-stage verify (mechanical + qualitative) run once over the whole change (not per
+      apply unit as originally planned -- the incremental per-wave qualitative step was
+      skipped in practice during apply, orchestrator caught this before archive and ran one
+      thorough pass instead). Qualitative stage split into 3 phase-scoped read-only packets
+      (agy: phase1-2, phase3; cursor-agent: phase4) per user-approved 80/20 split -- agy
+      quota was confirmed available again after an earlier instruction to go cursor-agent
+      only. First phase3 attempt hit an agy OAuth timeout, cleanly redispatched to agy on
+      user instruction, succeeded. 16 total findings across 3 lanes, 0 blocking. Full detail:
+      openspec/changes/feature-parent-integration/verify.md. Verdict: PASSED.
   archive:
     status: pending
 notes: |
