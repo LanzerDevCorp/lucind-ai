@@ -68,7 +68,16 @@ const doneEnvelopeJSON = `{
 // which matches the ledger schema's CHECK constraint on the executor
 // column.
 func testPacket() packet.Packet {
-	return packet.Packet{ID: "lane-a", Executor: "agy", RoutedBy: "touches config, Tier A audit mandatory", Body: "do the thing"}
+	return packet.Packet{
+		ID:                "lane-a",
+		Executor:          "agy",
+		RoutedBy:          "touches config, Tier A audit mandatory",
+		Feature:           "feat-lane-a",
+		ParentRef:         "refs/heads/main",
+		BaseSHA:           "b000000000000000000000000000000000000000",
+		ExpectedParentSHA: "b000000000000000000000000000000000000000",
+		Body:              "do the thing",
+	}
 }
 
 // newTestDeps builds a run.Deps wired to a real on-disk ledger (never

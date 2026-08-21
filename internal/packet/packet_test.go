@@ -693,3 +693,155 @@ func TestHumanPacketTemplateUntouched(t *testing.T) {
 		t.Errorf("human-packet-template.md must match git HEAD (this packet does not touch it):\n%s", out)
 	}
 }
+
+func TestParseFeatureTargetFrontmatter(t *testing.T) {
+	tests := []struct {
+		name                   string
+		src                    string
+		wantFeature            string
+		wantParentRef          string
+		wantBaseSHA            string
+		wantExpectedParentSHA  string
+	}{
+		{
+			name: "all four target fields present",
+			src: "---\n" +
+				"id: feat-auth-1\n" +
+				"executor: agy\n" +
+				"routed_by: touches auth, Tier A verification required\n" +
+				"feature: user-auth\n" +
+				"parent_ref: refs/heads/feature/user-auth\n" +
+				"base_sha: 1111111111111111111111111111111111111111\n" +
+				"expected_parent_sha: 2222222222222222222222222222222222222222\n" +
+				"---\n\n" +
+				"## Goal\n",
+			wantFeature:           "user-auth",
+			wantParentRef:         "refs/heads/feature/user-auth",
+			wantBaseSHA:           "1111111111111111111111111111111111111111",
+			wantExpectedParentSHA: "2222222222222222222222222222222222222222",
+		},
+		{
+			name: "all four target fields omitted default to empty string",
+			src: "---\n" +
+				"id: feat-auth-1\n" +
+				"executor: agy\n" +
+				"routed_by: touches auth, Tier A verification required\n" +
+				"---\n\n" +
+				"## Goal\n",
+			wantFeature:           "",
+			wantParentRef:         "",
+			wantBaseSHA:           "",
+			wantExpectedParentSHA: "",
+		},
+		{
+			name: "partial target fields with whitespace trimming",
+			src: "---\n" +
+				"id: feat-auth-1\n" +
+				"executor: agy\n" +
+				"routed_by: touches auth, Tier A verification required\n" +
+				"feature:   user-auth   \n" +
+				"parent_ref: refs/heads/main \n" +
+				"---\n\n" +
+				"## Goal\n",
+			wantFeature:           "user-auth",
+			wantParentRef:         "refs/heads/main",
+			wantBaseSHA:           "",
+			wantExpectedParentSHA: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p, err := packet.Parse(strings.NewReader(tt.src))
+			if err != nil {
+				t.Fatalf("Parse() error = %v, want nil", err)
+			}
+			if p.Feature != tt.wantFeature {
+				t.Errorf("Feature = %q, want %q", p.Feature, tt.wantFeature)
+			}
+			if p.ParentRef != tt.wantParentRef {
+				t.Errorf("ParentRef = %q, want %q", p.ParentRef, tt.wantParentRef)
+			}
+			if p.BaseSHA != tt.wantBaseSHA {
+				t.Errorf("BaseSHA = %q, want %q", p.BaseSHA, tt.wantBaseSHA)
+			}
+			if p.ExpectedParentSHA != tt.wantExpectedParentSHA {
+				t.Errorf("ExpectedParentSHA = %q, want %q", p.ExpectedParentSHA, tt.wantExpectedParentSHA)
+			}
+		})
+	}
+}
+
+func TestParseLegacyMainFrontmatter(t *testing.T) {
+	tests := []struct {
+		name           string
+		src            string
+		wantLegacyMain bool
+		wantErr        error
+	}{
+		{
+			name: "explicit legacy_main true",
+			src: "---\n" +
+				"id: fix-auth\n" +
+				"executor: agy\n" +
+				"routed_by: touches auth\n" +
+				"legacy_main: true\n" +
+				"---\n\n" +
+				"## Goal\n",
+			wantLegacyMain: true,
+		},
+		{
+			name: "explicit legacy_main false",
+			src: "---\n" +
+				"id: fix-auth\n" +
+				"executor: agy\n" +
+				"routed_by: touches auth\n" +
+				"legacy_main: false\n" +
+				"---\n\n" +
+				"## Goal\n",
+			wantLegacyMain: false,
+		},
+		{
+			name: "omitted legacy_main defaults to false",
+			src: "---\n" +
+				"id: fix-auth\n" +
+				"executor: agy\n" +
+				"routed_by: touches auth\n" +
+				"---\n\n" +
+				"## Goal\n",
+			wantLegacyMain: false,
+		},
+		{
+			name: "invalid legacy_main is rejected",
+			src: "---\n" +
+				"id: fix-auth\n" +
+				"executor: agy\n" +
+				"routed_by: touches auth\n" +
+				"legacy_main: invalid\n" +
+				"---\n\n" +
+				"## Goal\n",
+			wantErr: packet.ErrInvalidLegacyMain,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p, err := packet.Parse(strings.NewReader(tt.src))
+			if tt.wantErr != nil {
+				if err == nil {
+					t.Fatalf("Parse() error = nil, want %v", tt.wantErr)
+				}
+				if !errors.Is(err, tt.wantErr) {
+					t.Errorf("Parse() error = %v, want %v", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Parse() error = %v, want nil", err)
+			}
+			if p.LegacyMain != tt.wantLegacyMain {
+				t.Errorf("LegacyMain = %v, want %v", p.LegacyMain, tt.wantLegacyMain)
+			}
+		})
+	}
+}

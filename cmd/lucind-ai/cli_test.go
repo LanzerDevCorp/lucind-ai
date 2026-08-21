@@ -977,6 +977,10 @@ func TestRunSequentialInvocationsProduceDistinctRunIDs(t *testing.T) {
 		"id: lane-1\n" +
 		"executor: agy\n" +
 		"routed_by: test\n" +
+		"feature: feat-1\n" +
+		"parent_ref: refs/heads/main\n" +
+		"base_sha: 1111111111111111111111111111111111111111\n" +
+		"expected_parent_sha: 1111111111111111111111111111111111111111\n" +
 		"---\n" +
 		"Task 1\n"
 	if err := os.WriteFile(p1, []byte(p1Content), 0o644); err != nil {
@@ -1071,6 +1075,10 @@ func TestRunDispatchPersistsIntegratedLaneEnvelopeToPrimaryRoot(t *testing.T) {
 		"id: lane-1\n" +
 		"executor: agy\n" +
 		"routed_by: test\n" +
+		"feature: feat-1\n" +
+		"parent_ref: refs/heads/main\n" +
+		"base_sha: 1111111111111111111111111111111111111111\n" +
+		"expected_parent_sha: 1111111111111111111111111111111111111111\n" +
 		"---\n" +
 		"Task 1\n"
 	if err := os.WriteFile(p1, []byte(p1Content), 0o644); err != nil {
@@ -1240,6 +1248,10 @@ packets:
   - id: apply-root
     executor: agy
     routed_by: root has no dependencies
+    feature: apply-dag-dispatch
+    parent_ref: refs/heads/main
+    base_sha: 1111111111111111111111111111111111111111
+    expected_parent_sha: 1111111111111111111111111111111111111111
     allowed_paths:
       - internal/root/
     depends_on: []
@@ -1247,6 +1259,10 @@ packets:
   - id: apply-leaf
     executor: agy
     routed_by: leaf depends on root
+    feature: apply-dag-dispatch
+    parent_ref: refs/heads/main
+    base_sha: 1111111111111111111111111111111111111111
+    expected_parent_sha: 1111111111111111111111111111111111111111
     allowed_paths:
       - internal/leaf/
     depends_on:
@@ -1848,4 +1864,117 @@ func TestRunAcceptsApprovalTimeoutFlag(t *testing.T) {
 	if !strings.Contains(stderr.String(), "--packet is required") {
 		t.Fatalf("stderr = %q, want --packet is required", stderr.String())
 	}
+}
+
+func TestRunLegacyModeDispatch(t *testing.T) {
+	t.Run("legacy packet without legacy flag fails admission", func(t *testing.T) {
+		primaryRoot := initRepo(t)
+		overrideDispatchDeps(t, testDoneExecutor{})
+
+		p := filepath.Join(primaryRoot, "legacy-packet.md")
+		content := "---\n" +
+			"id: legacy-lane\n" +
+			"executor: agy\n" +
+			"routed_by: legacy dispatch\n" +
+			"---\n" +
+			"Legacy task\n"
+		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		cwd, err := os.Getwd()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chdir(primaryRoot); err != nil {
+			t.Fatal(err)
+		}
+		defer os.Chdir(cwd)
+
+		var stdout, stderr bytes.Buffer
+		code := run(context.Background(), []string{"run", "--packet", p}, &stdout, &stderr)
+		if code == 0 {
+			t.Fatalf("expected non-zero exit code for legacy packet without --legacy-main, got 0; stdout = %q", stdout.String())
+		}
+		if !strings.Contains(stdout.String(), "status:    failed") {
+			t.Errorf("expected status: failed in stdout, got:\n%s", stdout.String())
+		}
+	})
+
+	t.Run("legacy packet with legacy-main and expected-parent-sha succeeds", func(t *testing.T) {
+		primaryRoot := initRepo(t)
+		overrideDispatchDeps(t, testDoneExecutor{})
+
+		p := filepath.Join(primaryRoot, "legacy-packet.md")
+		content := "---\n" +
+			"id: legacy-lane\n" +
+			"executor: agy\n" +
+			"routed_by: legacy dispatch\n" +
+			"---\n" +
+			"Legacy task\n"
+		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		cwd, err := os.Getwd()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chdir(primaryRoot); err != nil {
+			t.Fatal(err)
+		}
+		defer os.Chdir(cwd)
+
+		var stdout, stderr bytes.Buffer
+		code := run(context.Background(), []string{
+			"run",
+			"--packet", p,
+			"--legacy-main",
+			"--expected-parent-sha", "1111111111111111111111111111111111111111",
+		}, &stdout, &stderr)
+		if code != 0 {
+			t.Fatalf("expected exit code 0 with --legacy-main and --expected-parent-sha, got %d; stderr = %q; stdout = %q", code, stderr.String(), stdout.String())
+		}
+		if !strings.Contains(stdout.String(), "status:    done") {
+			t.Errorf("expected status: done in stdout, got:\n%s", stdout.String())
+		}
+	})
+
+	t.Run("legacy packet with legacy-main but missing expected-parent-sha fails", func(t *testing.T) {
+		primaryRoot := initRepo(t)
+		overrideDispatchDeps(t, testDoneExecutor{})
+
+		p := filepath.Join(primaryRoot, "legacy-packet.md")
+		content := "---\n" +
+			"id: legacy-lane\n" +
+			"executor: agy\n" +
+			"routed_by: legacy dispatch\n" +
+			"---\n" +
+			"Legacy task\n"
+		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		cwd, err := os.Getwd()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chdir(primaryRoot); err != nil {
+			t.Fatal(err)
+		}
+		defer os.Chdir(cwd)
+
+		var stdout, stderr bytes.Buffer
+		code := run(context.Background(), []string{
+			"run",
+			"--packet", p,
+			"--legacy-main",
+		}, &stdout, &stderr)
+		if code == 0 {
+			t.Fatalf("expected non-zero exit code with --legacy-main without --expected-parent-sha, got 0; stdout = %q", stdout.String())
+		}
+		if !strings.Contains(stderr.String(), "--expected-parent-sha") {
+			t.Errorf("expected stderr to mention --expected-parent-sha, got: %q", stderr.String())
+		}
+	})
 }

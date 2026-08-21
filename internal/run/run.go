@@ -39,6 +39,11 @@ import (
 // reason survives even though Execute itself still returns successfully.
 var ErrEnvelopeUnreadable = errors.New("run: dispatch exited 0 but the result envelope could not be read or is schema-invalid")
 
+// ErrMissingFeatureTarget marks a packet that omits required target fields
+// (feature, parent_ref, base_sha, expected_parent_sha) and does not declare
+// explicit legacy mode.
+var ErrMissingFeatureTarget = errors.New("run: packet is missing required target fields (feature, parent_ref, base_sha, expected_parent_sha) without explicit legacy mode")
+
 // lucindDir is the directory, relative to a worktree's root, that carries
 // the schema agy validates against and the envelope it writes back.
 const lucindDir = ".lucind"
@@ -230,12 +235,36 @@ type Report struct {
 // over every lane in a batch, not a concept a single lane can own by
 // itself.
 //
+// validatePacketAdmission verifies that a packet carries an explicit feature target
+// (feature, parent_ref, base_sha, expected_parent_sha) or declares explicit legacy mode
+// (legacy_main: true with expected_parent_sha), resolving the effective parent ref.
+func validatePacketAdmission(p *packet.Packet) error {
+	if p.LegacyMain {
+		if p.ExpectedParentSHA == "" {
+			return ErrMissingFeatureTarget
+		}
+		if p.ParentRef == "" {
+			p.ParentRef = "main"
+		}
+		return nil
+	}
+
+	if p.Feature == "" || p.ParentRef == "" || p.BaseSHA == "" || p.ExpectedParentSHA == "" {
+		return ErrMissingFeatureTarget
+	}
+	return nil
+}
+
 // Execute returns a non-nil error only when the flow itself could not
 // complete — worktree creation failed, a ledger write failed, or the
 // executor never ran the dispatch at all. A lane that ran and ended
 // blocked, deviated, or failed is not one of those: it is a successful
 // Execute call carrying a Report that says so.
 func Execute(ctx context.Context, deps Deps, p packet.Packet) (Report, error) {
+	if err := validatePacketAdmission(&p); err != nil {
+		return Report{}, fmt.Errorf("run: admit lane %q: %w", p.ID, err)
+	}
+
 	now := deps.Now()
 
 	wt, err := deps.CreateWorktree(ctx, deps.PrimaryRoot, p.ID)

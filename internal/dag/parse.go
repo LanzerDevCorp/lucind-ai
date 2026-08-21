@@ -20,13 +20,18 @@ var (
 
 // Node is one packet declaration inside apply-dag.yaml.
 type Node struct {
-	ID           string   `yaml:"id"`
-	Executor     string   `yaml:"executor"`
-	RoutedBy     string   `yaml:"routed_by"`
-	Model        string   `yaml:"model,omitempty"`
-	AllowedPaths []string `yaml:"allowed_paths"`
-	DependsOn    []string `yaml:"depends_on"`
-	BodyPath     string   `yaml:"body_path"`
+	ID                string   `yaml:"id"`
+	Executor          string   `yaml:"executor"`
+	RoutedBy          string   `yaml:"routed_by"`
+	Model             string   `yaml:"model,omitempty"`
+	Feature           string   `yaml:"feature,omitempty"`
+	ParentRef         string   `yaml:"parent_ref,omitempty"`
+	BaseSHA           string   `yaml:"base_sha,omitempty"`
+	ExpectedParentSHA string   `yaml:"expected_parent_sha,omitempty"`
+	LegacyMain        bool     `yaml:"legacy_main,omitempty"`
+	AllowedPaths      []string `yaml:"allowed_paths"`
+	DependsOn         []string `yaml:"depends_on"`
+	BodyPath          string   `yaml:"body_path"`
 }
 
 // DAG represents the top-level apply-dag.yaml sidecar structure.

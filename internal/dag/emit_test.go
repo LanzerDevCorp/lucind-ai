@@ -117,3 +117,60 @@ func TestEmit_SuccessfulSplitWritesPackets(t *testing.T) {
 		t.Errorf("pServe body mismatch: got %q, want %q", pServe.Body, body2)
 	}
 }
+
+func TestEmit_FeatureTargetFieldsRoundTrip(t *testing.T) {
+	tempDir := t.TempDir()
+	bodiesDir := filepath.Join(tempDir, "bodies")
+	if err := os.MkdirAll(bodiesDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	body := "## Goal\n\nFeature auth implementation\n"
+	if err := os.WriteFile(filepath.Join(bodiesDir, "apply-auth.md"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	node := dag.Node{
+		ID:                "apply-auth",
+		Executor:          "agy",
+		RoutedBy:          "touches auth, Tier A verification required",
+		Model:             "gemini-3.7-flash-high",
+		Feature:           "user-auth",
+		ParentRef:         "refs/heads/feature/user-auth",
+		BaseSHA:           "1111111111111111111111111111111111111111",
+		ExpectedParentSHA: "2222222222222222222222222222222222222222",
+		LegacyMain:        false,
+		AllowedPaths:      []string{"internal/auth/"},
+		DependsOn:         []string{},
+		BodyPath:          "bodies/apply-auth.md",
+	}
+
+	content, err := dag.EmitPacketContent(node, tempDir)
+	if err != nil {
+		t.Fatalf("EmitPacketContent failed: %v", err)
+	}
+
+	// Verify frontmatter strings
+	if !strings.Contains(content, "feature: user-auth\n") {
+		t.Errorf("content missing 'feature: user-auth', got:\n%s", content)
+	}
+	if !strings.Contains(content, "parent_ref: refs/heads/feature/user-auth\n") {
+		t.Errorf("content missing 'parent_ref: refs/heads/feature/user-auth', got:\n%s", content)
+	}
+	if !strings.Contains(content, "base_sha: 1111111111111111111111111111111111111111\n") {
+		t.Errorf("content missing base_sha, got:\n%s", content)
+	}
+	if !strings.Contains(content, "expected_parent_sha: 2222222222222222222222222222222222222222\n") {
+		t.Errorf("content missing expected_parent_sha, got:\n%s", content)
+	}
+
+	// Round-trip proof through packet.Parse
+	p, err := packet.Parse(strings.NewReader(content))
+	if err != nil {
+		t.Fatalf("packet.Parse failed on emitted content: %v", err)
+	}
+	if p.ID != node.ID || p.Feature != node.Feature || p.ParentRef != node.ParentRef ||
+		p.BaseSHA != node.BaseSHA || p.ExpectedParentSHA != node.ExpectedParentSHA || p.LegacyMain != node.LegacyMain {
+		t.Errorf("round-trip packet mismatch: got %+v, want %+v", p, node)
+	}
+}
