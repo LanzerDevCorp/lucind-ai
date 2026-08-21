@@ -23,6 +23,7 @@ import (
 	"github.com/LanzerDevCorp/lucind-ai/internal/executor"
 	"github.com/LanzerDevCorp/lucind-ai/internal/lane"
 	"github.com/LanzerDevCorp/lucind-ai/internal/ledger"
+	"github.com/LanzerDevCorp/lucind-ai/internal/overlap"
 	"github.com/LanzerDevCorp/lucind-ai/internal/packet"
 	"github.com/LanzerDevCorp/lucind-ai/internal/result"
 	"github.com/LanzerDevCorp/lucind-ai/internal/worktree"
@@ -192,6 +193,7 @@ type Deps struct {
 	PromoteCAS          func(ctx context.Context, primaryRoot, parentRef, candidateSHA, expectedSHA string) error
 	ResolveRefSHA       func(ctx context.Context, primaryRoot, ref string) (string, error)
 	ResolveCandidateSHA func(ctx context.Context, primaryRoot, worktreePath, branch string) (string, error)
+	EvaluateOverlap     func(ctx context.Context, repoDir, baseSHA, shaA, shaB string, opts ...overlap.EvaluateOption) (*overlap.Evidence, error)
 	FeatureLeaseTTL     time.Duration
 }
 

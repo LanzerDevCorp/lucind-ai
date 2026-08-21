@@ -1269,3 +1269,100 @@ func (l *Ledger) UpdateReconciliationCandidate(ctx context.Context, cand Reconci
 	}
 	return nil
 }
+
+// FeatureRow represents one row of the features table.
+type FeatureRow struct {
+	ID                string
+	ParentRef         string
+	BaseSHA           string
+	ExpectedParentSHA string
+	Status            string
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+}
+
+// ActiveFeatures returns all active features from the features table ordered by created_at.
+func (l *Ledger) ActiveFeatures(ctx context.Context) ([]FeatureRow, error) {
+	rows, err := l.db.QueryContext(ctx, `
+		SELECT id, parent_ref, base_sha, expected_parent_sha, status, created_at, updated_at
+		FROM features WHERE status = 'active' ORDER BY created_at ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("ledger: query active features: %w", err)
+	}
+	defer rows.Close()
+
+	var out []FeatureRow
+	for rows.Next() {
+		var (
+			f                    FeatureRow
+			createdAt, updatedAt string
+		)
+		if err := rows.Scan(&f.ID, &f.ParentRef, &f.BaseSHA, &f.ExpectedParentSHA, &f.Status, &createdAt, &updatedAt); err != nil {
+			return nil, fmt.Errorf("ledger: scan feature row: %w", err)
+		}
+		if t, err := time.Parse(time.RFC3339Nano, createdAt); err == nil {
+			f.CreatedAt = t
+		} else if t, err := time.Parse(time.RFC3339, createdAt); err == nil {
+			f.CreatedAt = t
+		}
+		if t, err := time.Parse(time.RFC3339Nano, updatedAt); err == nil {
+			f.UpdatedAt = t
+		} else if t, err := time.Parse(time.RFC3339, updatedAt); err == nil {
+			f.UpdatedAt = t
+		}
+		out = append(out, f)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("ledger: iterate feature rows: %w", err)
+	}
+	return out, nil
+}
+
+// AllReconciliationRequests returns all reconciliation_requests rows ordered by created_at.
+func (l *Ledger) AllReconciliationRequests(ctx context.Context) ([]ReconciliationRequestRow, error) {
+	rows, err := l.db.QueryContext(ctx, `
+		SELECT id, feature_id, direction, status, actor, evidence_version,
+		       evidence_hash, source_sha, target_sha, expires_at, created_at, updated_at
+		FROM reconciliation_requests ORDER BY created_at ASC`,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("ledger: query all reconciliation requests: %w", err)
+	}
+	defer rows.Close()
+
+	var out []ReconciliationRequestRow
+	for rows.Next() {
+		var (
+			req                  ReconciliationRequestRow
+			expiresAt            sql.NullString
+			createdAt, updatedAt string
+		)
+		if err := rows.Scan(
+			&req.ID, &req.FeatureID, &req.Direction, &req.Status, &req.Actor, &req.EvidenceVersion,
+			&req.EvidenceHash, &req.SourceSHA, &req.TargetSHA, &expiresAt, &createdAt, &updatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("ledger: scan reconciliation request row: %w", err)
+		}
+		if t, err := parseNullableTimestamp(expiresAt); err != nil {
+			return nil, err
+		} else {
+			req.ExpiresAt = t
+		}
+		if t, err := time.Parse(time.RFC3339Nano, createdAt); err == nil {
+			req.CreatedAt = t
+		} else if t, err := time.Parse(time.RFC3339, createdAt); err == nil {
+			req.CreatedAt = t
+		}
+		if t, err := time.Parse(time.RFC3339Nano, updatedAt); err == nil {
+			req.UpdatedAt = t
+		} else if t, err := time.Parse(time.RFC3339, updatedAt); err == nil {
+			req.UpdatedAt = t
+		}
+		out = append(out, req)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("ledger: iterate reconciliation request rows: %w", err)
+	}
+	return out, nil
+}
+
