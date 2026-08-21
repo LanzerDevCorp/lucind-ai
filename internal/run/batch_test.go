@@ -417,6 +417,104 @@ func TestExecuteBatchRecordingFailureKeepsBothCausesOnReport(t *testing.T) {
 	}
 }
 
+// TestExecuteBatchPostWorktreeFailureReportCarriesWorktree proves the
+// operator-facing lane report names the directory when Execute created a
+// worktree and then failed later — here at RegisterLane, the observed
+// incident, not at admission. printReport already prints Report.Worktree
+// on the `worktree:` line a human scans mid-batch; today that line is
+// blank, same as an admission rejection, so the operator cannot tell
+// whether to open a directory. Status failed is true of both paths and
+// proves nothing.
+func TestExecuteBatchPostWorktreeFailureReportCarriesWorktree(t *testing.T) {
+	root := t.TempDir()
+	wantPath := root + "/lane-post-wt"
+	createCalls := 0
+	fe := newBatchFakeExecutor()
+	deps := newBatchTestDeps(t, func(id string) string { return root + "/" + id }, func(id string) []byte {
+		return []byte(laneEnvelopeJSON(id, "done"))
+	}, fe, nil)
+	innerCreate := deps.CreateWorktree
+	deps.CreateWorktree = func(ctx context.Context, primaryRoot, laneID string) (worktree.Worktree, error) {
+		createCalls++
+		return innerCreate(ctx, primaryRoot, laneID)
+	}
+
+	p := batchPacket("lane-post-wt")
+	p.Executor = "not-an-executor"
+
+	report, err := run.ExecuteBatch(context.Background(), deps, []packet.Packet{p})
+	if err != nil {
+		t.Fatalf("ExecuteBatch() error = %v, want nil", err)
+	}
+	if len(report.Lanes) != 1 {
+		t.Fatalf("len(report.Lanes) = %d, want 1", len(report.Lanes))
+	}
+	if createCalls == 0 {
+		t.Fatal("CreateWorktree was not called: this must fail after a worktree exists, not at admission")
+	}
+
+	got := report.Lanes[0]
+	if got.Status != lane.Failed {
+		t.Errorf("status = %v, want failed", got.Status)
+	}
+	if got.Worktree != wantPath {
+		t.Errorf("Worktree = %q, want %q — the created path must appear on the report so the operator can open it", got.Worktree, wantPath)
+	}
+	if strings.Contains(got.Diagnosis, "admit lane") || strings.Contains(got.Diagnosis, "no worktree created") {
+		t.Errorf("Diagnosis = %q, this path must not be an admission rejection", got.Diagnosis)
+	}
+}
+
+// TestExecuteBatchAdmissionRejectionReportSaysNoWorktree proves the other
+// half of the same scan: when validatePacketAdmission rejects the packet
+// before CreateWorktree, the report's worktree line stays empty AND
+// Diagnosis says so in words. printReport already prints Diagnosis under
+// the failure banner; without that sentence an empty `worktree:` line is
+// the same blank the post-worktree path used to print. Status failed is
+// true of both and proves nothing.
+func TestExecuteBatchAdmissionRejectionReportSaysNoWorktree(t *testing.T) {
+	root := t.TempDir()
+	createCalls := 0
+	fe := newBatchFakeExecutor()
+	deps := newBatchTestDeps(t, func(id string) string { return root + "/" + id }, func(id string) []byte {
+		return []byte(laneEnvelopeJSON(id, "done"))
+	}, fe, nil)
+	innerCreate := deps.CreateWorktree
+	deps.CreateWorktree = func(ctx context.Context, primaryRoot, laneID string) (worktree.Worktree, error) {
+		createCalls++
+		return innerCreate(ctx, primaryRoot, laneID)
+	}
+
+	p := packet.Packet{
+		ID:       "lane-admit",
+		Executor: "agy",
+		RoutedBy: "touches config, Tier A audit mandatory",
+		Body:     "do the thing",
+	}
+
+	report, err := run.ExecuteBatch(context.Background(), deps, []packet.Packet{p})
+	if err != nil {
+		t.Fatalf("ExecuteBatch() error = %v, want nil", err)
+	}
+	if len(report.Lanes) != 1 {
+		t.Fatalf("len(report.Lanes) = %d, want 1", len(report.Lanes))
+	}
+	if createCalls != 0 {
+		t.Fatalf("CreateWorktree was called %d time(s), want 0: admission must fail before a worktree exists", createCalls)
+	}
+
+	got := report.Lanes[0]
+	if got.Status != lane.Failed {
+		t.Errorf("status = %v, want failed", got.Status)
+	}
+	if got.Worktree != "" {
+		t.Errorf("Worktree = %q, want empty — no directory was created", got.Worktree)
+	}
+	if !strings.Contains(got.Diagnosis, "admission rejected, no worktree created") {
+		t.Errorf("Diagnosis = %q, want it to tell the operator admission rejected the packet and no worktree exists", got.Diagnosis)
+	}
+}
+
 // TestExecuteBatchRunsLanesConcurrentlyNotSequentially proves lanes run
 // concurrently by deterministic synchronization, never by wall-clock timing
 // (sleeping and hoping the scheduler interleaves the way you expect is

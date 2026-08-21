@@ -204,8 +204,14 @@ type Deps struct {
 // Status is not, by itself, evidence of anything about the batch it may be
 // part of.
 type Report struct {
-	LaneID   string
-	Status   lane.Status
+	LaneID string
+	Status lane.Status
+	// Worktree is the directory Execute created for this lane. It is
+	// empty when admission rejected the packet (or CreateWorktree itself
+	// failed): nothing exists on disk. After CreateWorktree succeeds it
+	// is the real path even if Execute later returns an error — so a
+	// caller that never queries the ledger, including printReport's
+	// `worktree:` line, can tell the two failures apart.
 	Worktree string
 	Envelope *result.Envelope // nil when the lane produced no readable envelope
 	// OutputCaptureIncomplete is true when the dispatch's captured
@@ -270,20 +276,22 @@ func validatePacketAdmission(p *packet.Packet) error {
 // blocked, deviated, or failed is not one of those: it is a successful
 // Execute call carrying a Report that says so.
 func Execute(ctx context.Context, deps Deps, p packet.Packet) (Report, error) {
+	report := Report{LaneID: p.ID}
 	if err := validatePacketAdmission(&p); err != nil {
-		return Report{}, fmt.Errorf("run: admit lane %q: %w", p.ID, err)
+		return report, fmt.Errorf("run: admit lane %q: admission rejected, no worktree created: %w", p.ID, err)
 	}
 
 	now := deps.Now()
 
 	wt, err := deps.CreateWorktree(ctx, deps.PrimaryRoot, p.ID)
 	if err != nil {
-		return Report{}, fmt.Errorf("run: create worktree for lane %q: %w", p.ID, err)
+		return report, fmt.Errorf("run: create worktree for lane %q: %w", p.ID, err)
 	}
+	report.Worktree = wt.Path
 
 	schemaPath, err := writeResultSchema(wt.Path)
 	if err != nil {
-		return Report{}, fmt.Errorf("run: write result schema for lane %q: %w", p.ID, err)
+		return report, fmt.Errorf("run: write result schema for lane %q: %w", p.ID, err)
 	}
 
 	// routingCondition is the reason this lane was routed to its
@@ -304,7 +312,7 @@ func Execute(ctx context.Context, deps Deps, p packet.Packet) (Report, error) {
 		Status:           lane.Pending,
 		WorktreePath:     wt.Path,
 	}); err != nil {
-		return Report{}, fmt.Errorf("run: register lane %q: %w", p.ID, err)
+		return report, fmt.Errorf("run: register lane %q: %w", p.ID, err)
 	}
 	if err := deps.Ledger.AppendEvent(ctx, ledger.Event{
 		RunID:  deps.RunID,
@@ -314,17 +322,17 @@ func Execute(ctx context.Context, deps Deps, p packet.Packet) (Report, error) {
 		At:     now,
 	}); err != nil {
 		cause := fmt.Errorf("run: append lane_registered event for %q: %w", p.ID, err)
-		return Report{}, recordLaneFailure(ctx, deps, p.ID, now, cause)
+		return report, recordLaneFailure(ctx, deps, p.ID, now, cause)
 	}
 	if err := deps.Ledger.SetStatus(ctx, deps.RunID, p.ID, lane.Running, now); err != nil {
 		cause := fmt.Errorf("run: set lane %q running: %w", p.ID, err)
-		return Report{}, recordLaneFailure(ctx, deps, p.ID, now, cause)
+		return report, recordLaneFailure(ctx, deps, p.ID, now, cause)
 	}
 
 	exec, err := deps.LookupExecutor(p.Executor)
 	if err != nil {
 		cause := fmt.Errorf("run: resolve executor %q for lane %q: %w", p.Executor, p.ID, err)
-		return Report{}, recordLaneFailure(ctx, deps, p.ID, now, cause)
+		return report, recordLaneFailure(ctx, deps, p.ID, now, cause)
 	}
 
 	// packet.Model stays authoritative when named. When the packet omits
@@ -367,7 +375,7 @@ func Execute(ctx context.Context, deps Deps, p packet.Packet) (Report, error) {
 		// leaving it there would report a lane as running forever when
 		// nothing is running; recordLaneFailure closes that gap.
 		cause := fmt.Errorf("run: dispatch lane %q: %w", p.ID, err)
-		return Report{}, recordLaneFailure(persistCtx, deps, p.ID, now, cause)
+		return report, recordLaneFailure(persistCtx, deps, p.ID, now, cause)
 	}
 
 	status, envelope, reason := decideStatus(deps, wt.Path, outcome)
@@ -401,7 +409,7 @@ func Execute(ctx context.Context, deps Deps, p packet.Packet) (Report, error) {
 			At:     now,
 		}); err != nil {
 			cause := fmt.Errorf("run: append reason event for %q: %w", p.ID, err)
-			return Report{}, recordLaneFailure(persistCtx, deps, p.ID, now, cause)
+			return report, recordLaneFailure(persistCtx, deps, p.ID, now, cause)
 		}
 	}
 
@@ -436,7 +444,7 @@ func Execute(ctx context.Context, deps Deps, p packet.Packet) (Report, error) {
 		}
 		if err := deps.Ledger.RequestApproval(persistCtx, app); err != nil {
 			cause := fmt.Errorf("run: request approval for %q: %w", p.ID, err)
-			return Report{}, recordLaneFailure(persistCtx, deps, p.ID, now, cause)
+			return report, recordLaneFailure(persistCtx, deps, p.ID, now, cause)
 		}
 
 		waitCtx, cancel := context.WithTimeout(persistCtx, deps.ApprovalTimeout)
@@ -450,7 +458,7 @@ func Execute(ctx context.Context, deps Deps, p packet.Packet) (Report, error) {
 
 	if err := deps.Ledger.SetStatus(persistCtx, deps.RunID, p.ID, status, now); err != nil {
 		cause := fmt.Errorf("run: set lane %q terminal status: %w", p.ID, err)
-		return Report{}, recordLaneFailure(persistCtx, deps, p.ID, now, cause)
+		return report, recordLaneFailure(persistCtx, deps, p.ID, now, cause)
 	}
 
 	// A truncated capture is recorded as its own ledger event so the
@@ -465,7 +473,7 @@ func Execute(ctx context.Context, deps Deps, p packet.Packet) (Report, error) {
 			At:     now,
 		}); err != nil {
 			cause := fmt.Errorf("run: append output-truncated event for %q: %w", p.ID, err)
-			return Report{}, recordLaneFailure(persistCtx, deps, p.ID, now, cause)
+			return report, recordLaneFailure(persistCtx, deps, p.ID, now, cause)
 		}
 	}
 
