@@ -56,6 +56,15 @@ var (
 	// into a loud, first-cycle failure instead of a silent SQLITE_BUSY
 	// later.
 	ErrPragmaNotApplied = errors.New("ledger: pragma did not take effect")
+
+	// ErrReconciliationRequestNotFound is returned when a reconciliation request is not found.
+	ErrReconciliationRequestNotFound = errors.New("ledger: reconciliation request not found")
+
+	// ErrReconciliationCandidateNotFound is returned when a reconciliation candidate is not found.
+	ErrReconciliationCandidateNotFound = errors.New("ledger: reconciliation candidate not found")
+
+	// ErrOverlapEvidenceNotFound is returned when overlap evidence is not found.
+	ErrOverlapEvidenceNotFound = errors.New("ledger: overlap evidence not found")
 )
 
 const (
@@ -850,3 +859,413 @@ func (l *Ledger) IntegrationEvents(ctx context.Context, featureID string) ([]Int
 	return out, nil
 }
 
+// OverlapEvidenceRow represents one row of the overlap_evidence table.
+type OverlapEvidenceRow struct {
+	ID            int64
+	FeatureID     string
+	Version       string
+	EvidenceHash  string
+	EvidenceClass string
+	EvidenceJSON  string
+	CreatedAt     time.Time
+}
+
+// InsertOverlapEvidence inserts a new overlap_evidence row and returns its generated ID.
+func (l *Ledger) InsertOverlapEvidence(ctx context.Context, row OverlapEvidenceRow) (int64, error) {
+	at := row.CreatedAt
+	if at.IsZero() {
+		at = time.Now().UTC()
+	}
+	res, err := l.db.ExecContext(ctx, `
+		INSERT INTO overlap_evidence (feature_id, version, evidence_hash, evidence_class, evidence_json, created_at)
+		VALUES (?, ?, ?, ?, ?, ?)`,
+		row.FeatureID, row.Version, row.EvidenceHash, row.EvidenceClass, row.EvidenceJSON, at.UTC().Format(time.RFC3339),
+	)
+	if err != nil {
+		return 0, fmt.Errorf("ledger: insert overlap evidence: %w", err)
+	}
+	return res.LastInsertId()
+}
+
+// OverlapEvidence retrieves an overlap_evidence row by featureID and evidenceHash.
+func (l *Ledger) OverlapEvidence(ctx context.Context, featureID, evidenceHash string) (OverlapEvidenceRow, error) {
+	var (
+		row       OverlapEvidenceRow
+		createdAt string
+	)
+	err := l.db.QueryRowContext(ctx, `
+		SELECT id, feature_id, version, evidence_hash, evidence_class, evidence_json, created_at
+		FROM overlap_evidence WHERE feature_id = ? AND evidence_hash = ? ORDER BY id DESC LIMIT 1`,
+		featureID, evidenceHash,
+	).Scan(&row.ID, &row.FeatureID, &row.Version, &row.EvidenceHash, &row.EvidenceClass, &row.EvidenceJSON, &createdAt)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return OverlapEvidenceRow{}, ErrOverlapEvidenceNotFound
+		}
+		return OverlapEvidenceRow{}, fmt.Errorf("ledger: query overlap evidence: %w", err)
+	}
+	parsed, err := time.Parse(time.RFC3339, createdAt)
+	if err != nil {
+		return OverlapEvidenceRow{}, fmt.Errorf("ledger: parse overlap evidence created_at %q: %w", createdAt, err)
+	}
+	row.CreatedAt = parsed
+	return row, nil
+}
+
+// OverlapEvidenceByHash retrieves an overlap_evidence row by evidenceHash across any feature.
+func (l *Ledger) OverlapEvidenceByHash(ctx context.Context, evidenceHash string) (OverlapEvidenceRow, error) {
+	var (
+		row       OverlapEvidenceRow
+		createdAt string
+	)
+	err := l.db.QueryRowContext(ctx, `
+		SELECT id, feature_id, version, evidence_hash, evidence_class, evidence_json, created_at
+		FROM overlap_evidence WHERE evidence_hash = ? ORDER BY id DESC LIMIT 1`,
+		evidenceHash,
+	).Scan(&row.ID, &row.FeatureID, &row.Version, &row.EvidenceHash, &row.EvidenceClass, &row.EvidenceJSON, &createdAt)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return OverlapEvidenceRow{}, ErrOverlapEvidenceNotFound
+		}
+		return OverlapEvidenceRow{}, fmt.Errorf("ledger: query overlap evidence by hash: %w", err)
+	}
+	parsed, err := time.Parse(time.RFC3339, createdAt)
+	if err != nil {
+		return OverlapEvidenceRow{}, fmt.Errorf("ledger: parse overlap evidence created_at %q: %w", createdAt, err)
+	}
+	row.CreatedAt = parsed
+	return row, nil
+}
+
+// ReconciliationRequestRow represents one row of the reconciliation_requests table.
+type ReconciliationRequestRow struct {
+	ID              string
+	FeatureID       string
+	Direction       string
+	Status          string
+	Actor           string
+	EvidenceVersion string
+	EvidenceHash    string
+	SourceSHA       string
+	TargetSHA       string
+	ExpiresAt       *time.Time
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+}
+
+// InsertReconciliationRequest inserts a new reconciliation_requests row.
+func (l *Ledger) InsertReconciliationRequest(ctx context.Context, req ReconciliationRequestRow) error {
+	cAt := req.CreatedAt
+	if cAt.IsZero() {
+		cAt = time.Now().UTC()
+	}
+	uAt := req.UpdatedAt
+	if uAt.IsZero() {
+		uAt = cAt
+	}
+	_, err := l.db.ExecContext(ctx, `
+		INSERT INTO reconciliation_requests (
+			id, feature_id, direction, status, actor, evidence_version,
+			evidence_hash, source_sha, target_sha, expires_at, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		req.ID, req.FeatureID, req.Direction, req.Status, req.Actor, req.EvidenceVersion,
+		req.EvidenceHash, req.SourceSHA, req.TargetSHA, formatNullableTimestamp(req.ExpiresAt),
+		cAt.UTC().Format(time.RFC3339), uAt.UTC().Format(time.RFC3339),
+	)
+	if err != nil {
+		return fmt.Errorf("ledger: insert reconciliation request: %w", err)
+	}
+	return nil
+}
+
+// ReconciliationRequest retrieves a single reconciliation_requests row by ID.
+func (l *Ledger) ReconciliationRequest(ctx context.Context, id string) (ReconciliationRequestRow, error) {
+	var (
+		req                  ReconciliationRequestRow
+		expiresAt            sql.NullString
+		createdAt, updatedAt string
+	)
+	err := l.db.QueryRowContext(ctx, `
+		SELECT id, feature_id, direction, status, actor, evidence_version,
+		       evidence_hash, source_sha, target_sha, expires_at, created_at, updated_at
+		FROM reconciliation_requests WHERE id = ?`, id,
+	).Scan(
+		&req.ID, &req.FeatureID, &req.Direction, &req.Status, &req.Actor, &req.EvidenceVersion,
+		&req.EvidenceHash, &req.SourceSHA, &req.TargetSHA, &expiresAt, &createdAt, &updatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ReconciliationRequestRow{}, ErrReconciliationRequestNotFound
+		}
+		return ReconciliationRequestRow{}, fmt.Errorf("ledger: query reconciliation request %q: %w", id, err)
+	}
+	if t, err := parseNullableTimestamp(expiresAt); err != nil {
+		return ReconciliationRequestRow{}, err
+	} else {
+		req.ExpiresAt = t
+	}
+	if t, err := time.Parse(time.RFC3339, createdAt); err != nil {
+		return ReconciliationRequestRow{}, fmt.Errorf("ledger: parse request created_at %q: %w", createdAt, err)
+	} else {
+		req.CreatedAt = t
+	}
+	if t, err := time.Parse(time.RFC3339, updatedAt); err != nil {
+		return ReconciliationRequestRow{}, fmt.Errorf("ledger: parse request updated_at %q: %w", updatedAt, err)
+	} else {
+		req.UpdatedAt = t
+	}
+	return req, nil
+}
+
+// ReconciliationRequests retrieves all reconciliation_requests rows for a featureID ordered by created_at.
+func (l *Ledger) ReconciliationRequests(ctx context.Context, featureID string) ([]ReconciliationRequestRow, error) {
+	rows, err := l.db.QueryContext(ctx, `
+		SELECT id, feature_id, direction, status, actor, evidence_version,
+		       evidence_hash, source_sha, target_sha, expires_at, created_at, updated_at
+		FROM reconciliation_requests WHERE feature_id = ? ORDER BY created_at ASC`, featureID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("ledger: query reconciliation requests: %w", err)
+	}
+	defer rows.Close()
+
+	var out []ReconciliationRequestRow
+	for rows.Next() {
+		var (
+			req                  ReconciliationRequestRow
+			expiresAt            sql.NullString
+			createdAt, updatedAt string
+		)
+		if err := rows.Scan(
+			&req.ID, &req.FeatureID, &req.Direction, &req.Status, &req.Actor, &req.EvidenceVersion,
+			&req.EvidenceHash, &req.SourceSHA, &req.TargetSHA, &expiresAt, &createdAt, &updatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("ledger: scan reconciliation request row: %w", err)
+		}
+		if t, err := parseNullableTimestamp(expiresAt); err != nil {
+			return nil, err
+		} else {
+			req.ExpiresAt = t
+		}
+		if t, err := time.Parse(time.RFC3339, createdAt); err != nil {
+			return nil, fmt.Errorf("ledger: parse request created_at %q: %w", createdAt, err)
+		} else {
+			req.CreatedAt = t
+		}
+		if t, err := time.Parse(time.RFC3339, updatedAt); err != nil {
+			return nil, fmt.Errorf("ledger: parse request updated_at %q: %w", updatedAt, err)
+		} else {
+			req.UpdatedAt = t
+		}
+		out = append(out, req)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("ledger: iterate reconciliation request rows: %w", err)
+	}
+	return out, nil
+}
+
+// UpdateReconciliationRequest updates mutable fields of an existing reconciliation_requests row.
+func (l *Ledger) UpdateReconciliationRequest(ctx context.Context, req ReconciliationRequestRow) error {
+	uAt := req.UpdatedAt
+	if uAt.IsZero() {
+		uAt = time.Now().UTC()
+	}
+	res, err := l.db.ExecContext(ctx, `
+		UPDATE reconciliation_requests
+		SET direction = ?, status = ?, actor = ?, evidence_version = ?,
+		    evidence_hash = ?, source_sha = ?, target_sha = ?, expires_at = ?, updated_at = ?
+		WHERE id = ?`,
+		req.Direction, req.Status, req.Actor, req.EvidenceVersion,
+		req.EvidenceHash, req.SourceSHA, req.TargetSHA, formatNullableTimestamp(req.ExpiresAt),
+		uAt.UTC().Format(time.RFC3339), req.ID,
+	)
+	if err != nil {
+		return fmt.Errorf("ledger: update reconciliation request: %w", err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("ledger: read rows affected: %w", err)
+	}
+	if affected == 0 {
+		return ErrReconciliationRequestNotFound
+	}
+	return nil
+}
+
+// ReconciliationCandidateRow represents one row of the reconciliation_candidates table.
+type ReconciliationCandidateRow struct {
+	ID            string
+	RequestID     string
+	Status        string
+	AllowedPaths  string
+	Model         string
+	Config        string
+	Output        string
+	Checks        string
+	CandidateSHA  string
+	FailureReason string
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+}
+
+// InsertReconciliationCandidate inserts a new reconciliation_candidates row.
+func (l *Ledger) InsertReconciliationCandidate(ctx context.Context, cand ReconciliationCandidateRow) error {
+	cAt := cand.CreatedAt
+	if cAt.IsZero() {
+		cAt = time.Now().UTC()
+	}
+	uAt := cand.UpdatedAt
+	if uAt.IsZero() {
+		uAt = cAt
+	}
+	_, err := l.db.ExecContext(ctx, `
+		INSERT INTO reconciliation_candidates (
+			id, request_id, status, allowed_paths, model, config,
+			output, checks, candidate_sha, failure_reason, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		cand.ID, cand.RequestID, cand.Status, cand.AllowedPaths, cand.Model, cand.Config,
+		cand.Output, cand.Checks, cand.CandidateSHA, cand.FailureReason,
+		cAt.UTC().Format(time.RFC3339), uAt.UTC().Format(time.RFC3339),
+	)
+	if err != nil {
+		return fmt.Errorf("ledger: insert reconciliation candidate: %w", err)
+	}
+	return nil
+}
+
+// ReconciliationCandidate retrieves a reconciliation_candidates row by ID.
+func (l *Ledger) ReconciliationCandidate(ctx context.Context, id string) (ReconciliationCandidateRow, error) {
+	var (
+		cand                 ReconciliationCandidateRow
+		createdAt, updatedAt string
+	)
+	err := l.db.QueryRowContext(ctx, `
+		SELECT id, request_id, status, allowed_paths, model, config,
+		       output, checks, candidate_sha, failure_reason, created_at, updated_at
+		FROM reconciliation_candidates WHERE id = ?`, id,
+	).Scan(
+		&cand.ID, &cand.RequestID, &cand.Status, &cand.AllowedPaths, &cand.Model, &cand.Config,
+		&cand.Output, &cand.Checks, &cand.CandidateSHA, &cand.FailureReason, &createdAt, &updatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ReconciliationCandidateRow{}, ErrReconciliationCandidateNotFound
+		}
+		return ReconciliationCandidateRow{}, fmt.Errorf("ledger: query reconciliation candidate %q: %w", id, err)
+	}
+	if t, err := time.Parse(time.RFC3339, createdAt); err != nil {
+		return ReconciliationCandidateRow{}, fmt.Errorf("ledger: parse candidate created_at %q: %w", createdAt, err)
+	} else {
+		cand.CreatedAt = t
+	}
+	if t, err := time.Parse(time.RFC3339, updatedAt); err != nil {
+		return ReconciliationCandidateRow{}, fmt.Errorf("ledger: parse candidate updated_at %q: %w", updatedAt, err)
+	} else {
+		cand.UpdatedAt = t
+	}
+	return cand, nil
+}
+
+// ReconciliationCandidateByRequest retrieves the most recent reconciliation_candidates row for a given requestID.
+func (l *Ledger) ReconciliationCandidateByRequest(ctx context.Context, requestID string) (ReconciliationCandidateRow, error) {
+	var (
+		cand                 ReconciliationCandidateRow
+		createdAt, updatedAt string
+	)
+	err := l.db.QueryRowContext(ctx, `
+		SELECT id, request_id, status, allowed_paths, model, config,
+		       output, checks, candidate_sha, failure_reason, created_at, updated_at
+		FROM reconciliation_candidates WHERE request_id = ? ORDER BY created_at DESC LIMIT 1`, requestID,
+	).Scan(
+		&cand.ID, &cand.RequestID, &cand.Status, &cand.AllowedPaths, &cand.Model, &cand.Config,
+		&cand.Output, &cand.Checks, &cand.CandidateSHA, &cand.FailureReason, &createdAt, &updatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ReconciliationCandidateRow{}, ErrReconciliationCandidateNotFound
+		}
+		return ReconciliationCandidateRow{}, fmt.Errorf("ledger: query reconciliation candidate for request %q: %w", requestID, err)
+	}
+	if t, err := time.Parse(time.RFC3339, createdAt); err != nil {
+		return ReconciliationCandidateRow{}, fmt.Errorf("ledger: parse candidate created_at %q: %w", createdAt, err)
+	} else {
+		cand.CreatedAt = t
+	}
+	if t, err := time.Parse(time.RFC3339, updatedAt); err != nil {
+		return ReconciliationCandidateRow{}, fmt.Errorf("ledger: parse candidate updated_at %q: %w", updatedAt, err)
+	} else {
+		cand.UpdatedAt = t
+	}
+	return cand, nil
+}
+
+// ReconciliationCandidates retrieves all reconciliation_candidates rows for a requestID ordered by created_at.
+func (l *Ledger) ReconciliationCandidates(ctx context.Context, requestID string) ([]ReconciliationCandidateRow, error) {
+	rows, err := l.db.QueryContext(ctx, `
+		SELECT id, request_id, status, allowed_paths, model, config,
+		       output, checks, candidate_sha, failure_reason, created_at, updated_at
+		FROM reconciliation_candidates WHERE request_id = ? ORDER BY created_at ASC`, requestID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("ledger: query reconciliation candidates: %w", err)
+	}
+	defer rows.Close()
+
+	var out []ReconciliationCandidateRow
+	for rows.Next() {
+		var (
+			cand                 ReconciliationCandidateRow
+			createdAt, updatedAt string
+		)
+		if err := rows.Scan(
+			&cand.ID, &cand.RequestID, &cand.Status, &cand.AllowedPaths, &cand.Model, &cand.Config,
+			&cand.Output, &cand.Checks, &cand.CandidateSHA, &cand.FailureReason, &createdAt, &updatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("ledger: scan reconciliation candidate row: %w", err)
+		}
+		if t, err := time.Parse(time.RFC3339, createdAt); err != nil {
+			return nil, fmt.Errorf("ledger: parse candidate created_at %q: %w", createdAt, err)
+		} else {
+			cand.CreatedAt = t
+		}
+		if t, err := time.Parse(time.RFC3339, updatedAt); err != nil {
+			return nil, fmt.Errorf("ledger: parse candidate updated_at %q: %w", updatedAt, err)
+		} else {
+			cand.UpdatedAt = t
+		}
+		out = append(out, cand)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("ledger: iterate reconciliation candidate rows: %w", err)
+	}
+	return out, nil
+}
+
+// UpdateReconciliationCandidate updates mutable fields of an existing reconciliation_candidates row.
+func (l *Ledger) UpdateReconciliationCandidate(ctx context.Context, cand ReconciliationCandidateRow) error {
+	uAt := cand.UpdatedAt
+	if uAt.IsZero() {
+		uAt = time.Now().UTC()
+	}
+	res, err := l.db.ExecContext(ctx, `
+		UPDATE reconciliation_candidates
+		SET status = ?, allowed_paths = ?, model = ?, config = ?,
+		    output = ?, checks = ?, candidate_sha = ?, failure_reason = ?, updated_at = ?
+		WHERE id = ?`,
+		cand.Status, cand.AllowedPaths, cand.Model, cand.Config,
+		cand.Output, cand.Checks, cand.CandidateSHA, cand.FailureReason,
+		uAt.UTC().Format(time.RFC3339), cand.ID,
+	)
+	if err != nil {
+		return fmt.Errorf("ledger: update reconciliation candidate: %w", err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("ledger: read rows affected: %w", err)
+	}
+	if affected == 0 {
+		return ErrReconciliationCandidateNotFound
+	}
+	return nil
+}
