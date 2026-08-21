@@ -132,7 +132,7 @@ phases:
       dispatch. Lens C owns the Review Workload Forecast, whose four guard lines must
       appear verbatim because a downstream guard matches them literally.
   apply:
-    status: in-progress
+    status: done
     packet: .lucind/packets/apply-sdd-fan-out-lens.md
     note: |
       DAG SIDECAR AUTHORED THEN DELIBERATELY NOT USED. openspec/changes/sdd-fan-out-lens/
@@ -160,7 +160,37 @@ phases:
       This matches the repository's own precedent -- apply-dag-dispatch-hardening also
       declined the DAG split for an ordering reason and used a single packet.
   verify:
-    status: pending
+    status: blocked
+    canonical: openspec/changes/sdd-fan-out-lens/verify.md
+    note: |
+      Stage 1 mechanical check passed on 6abd702. Stage 2 dual dispatch: both lanes
+      done, integrated 2, reverted 0.
+
+      BLOCKED on one confirmed violation of an accepted requirement. spec.md:53 and its
+      scenario at :57-60 require every planning template to set legacy_main: true or the
+      four feature-target fields; all eight new templates set neither, and tasks.md:25,28
+      are checked while claiming otherwise.
+
+      Root cause is orchestrator error. The apply packet told the agent to omit every
+      feature-parent field, after the lucind-dag agent's authoring convention was adopted
+      mid-cycle. The binding spec was never re-checked before the convention changed. The
+      implementing agent followed its packet correctly.
+
+      Resolution direction: amend the spec, not the templates. Baking legacy_main: true
+      into a reusable template silently targets main even on feature-branch SDD work, and
+      the next change is already planned for feature mode. SKILL.md:150 already documents
+      --legacy-main at dispatch as an equivalent admission path.
+
+      ONLY cursor-agent caught it. agy examined the same divergence, checked it against
+      tasks.md instead of the spec, and classified it as stale checklist text. Same
+      evidence, different reference document, opposite verdicts -- exactly the case the
+      dual dispatch exists for.
+
+      Three confirmed non-blocking findings: ## Architecture Divergence is copy residue in
+      both new synthesizer templates; SKILL.md:173,192 generalize the design-specific
+      anchor and spine to every planning phase; and contract-test depth is thin
+      (forbidStrings declared but empty, near-tautological CLI substring checks, no
+      negative disjointness case).
   archive:
     status: pending
 notes: |
