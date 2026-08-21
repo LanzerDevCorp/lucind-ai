@@ -140,8 +140,9 @@ phases:
         tasks: [3.4]
         commit: fff3bf2
       W6:
-        status: pending
+        status: done
         tasks: [4.2]
+        commit: 48ffb26
       W7:
         status: pending
         tasks: [4.3]

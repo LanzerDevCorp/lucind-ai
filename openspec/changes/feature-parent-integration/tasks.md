@@ -55,5 +55,5 @@ Non-executable; paths add safety edges: W1 `1.1`; W2 `1.2 + 2.1`; W3 `1.3 + 2.2 
 ## Phase 4: Operations
 
 - [x] 4.1 `internal/serve/model.go`: **RED** shell-free status/audit DTOs; **GREEN** adapter. DTO. **Deps:** 3.3. U5.
-- [ ] 4.2 `cmd/lucind-ai/cli.go`, `internal/{run,ledger}`: **RED** feature/reconciliation outputs, idempotency/audit; **GREEN** wiring. Git/SQLite CLI. **Deps:** 1.1, 1.2, 1.3, 2.1, 2.2, 2.3, 3.1, 3.2, 3.3, 3.4, 4.1. U5.
+- [x] 4.2 `cmd/lucind-ai/cli.go`, `internal/{run,ledger}`: **RED** feature/reconciliation outputs, idempotency/audit; **GREEN** wiring. Git/SQLite CLI. **Deps:** 1.1, 1.2, 1.3, 2.1, 2.2, 2.3, 3.1, 3.2, 3.3, 3.4, 4.1. U5.
 - [ ] 4.3 `README.md` or `docs/feature-parent-integration.md`: **RED** migration/rollback/no-main/closure; **GREEN** operator/probe notes. Docs review. **Deps:** 4.2. U5.
