@@ -1,3 +1,18 @@
+# DO NOT DISPATCH. This sidecar is a record, not a plan.
+#
+# It is a faithful transcription of tasks.md -- four nodes, a RED root and three
+# GREEN dependants, individually named paths, correct executors -- and
+# `lucind-ai split` parses it and emits the two expected wave commands. It was
+# never run, and running it now would fail.
+#
+# Reason: Integrate gates every batch on lucind-checks.sh
+# (internal/run/integrate.go:50-59), so wave 1 -- whose accepted done criterion
+# is that its new assertions FAIL -- is reverted by bisection before wave 2 can
+# turn them green. Strict-TDD wave splitting is incompatible with that gate.
+#
+# The change shipped instead as one sequential lane with TDD internal to it.
+# See state.yaml's apply note and archive-report.md follow-up 9.
+
 change: sdd-fan-out-lens
 packets:
   - id: sdd-fan-out-lens-contract-tests
