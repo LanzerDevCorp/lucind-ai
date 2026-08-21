@@ -160,7 +160,7 @@ phases:
       This matches the repository's own precedent -- apply-dag-dispatch-hardening also
       declined the DAG split for an ordering reason and used a single packet.
   verify:
-    status: blocked
+    status: done
     canonical: openspec/changes/sdd-fan-out-lens/verify.md
     note: |
       Stage 1 mechanical check passed on 6abd702. Stage 2 dual dispatch: both lanes
@@ -191,6 +191,24 @@ phases:
       anchor and spine to every planning phase; and contract-test depth is thin
       (forbidStrings declared but empty, near-tautological CLI substring checks, no
       negative disjointness case).
+
+      ROUND 2 after remediation e08f6e2: both lanes done, both asked directly whether the
+      amendment was legitimate or a spec bent to fit the implementation, both concluded
+      legitimate on the same grounds. cursor-agent -- the lane that blocked in round 1 --
+      was explicit that it is a correction to the already-shipped admission contract.
+
+      Round 2 surfaced three further defects, all confirmed against internal/run/run.go and
+      cmd/lucind-ai/cli.go and all fixed in 54a90fe: (1) the amendment's prose said the
+      orchestrator supplies the target with --legacy-main OR --expected-parent-sha when the
+      binary requires both, contradicting the amendment's own pinning scenario; (2)
+      SKILL.md's fan-out dispatch recipe passed only --expected-parent-sha and so fails
+      closed against the target-less templates this change ships -- the change broke its own
+      documented recipe; (3) the explore and propose contract tests never asserted the
+      absence of a dispatch target, so reintroducing legacy_main: true would have passed
+      every existing assertion. Fix 3 was mutation-verified rather than assumed: adding the
+      field fails the new assertion with a specific message, removing it passes.
+
+      Final verdict PASSED on 047c5b88.
   archive:
     status: pending
 notes: |

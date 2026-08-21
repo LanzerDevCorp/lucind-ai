@@ -1,88 +1,58 @@
 # Verify: sdd-fan-out-lens
 
-**Overall verdict: BLOCKED**
+**Overall verdict: PASSED**
 
-One confirmed violation of an accepted requirement. Three confirmed non-blocking findings. Mechanical checks passed.
+Two rounds. Round 1 blocked on a confirmed requirement violation; round 2 confirmed the remediation was legitimate and surfaced three further defects, all now fixed. Three non-blocking findings remain open as follow-ups.
 
 ## Stage 1 — Mechanical check
 
-`lucind-ai check` on candidate `6abd702`: **passed**, 22.18s, exit 0. Every package green under `go build ./... && go test ./... -race -count=1`. Frozen transcript: `verify-mechanical.log`. Judgment lanes did not re-run it.
+Final run on `047c5b88`: **passed**, 23.73s, exit 0, every package green under `go build ./... && go test ./... -race -count=1`. Frozen transcript: `verify-mechanical.log`. Judgment lanes did not re-run it.
 
-## Stage 2 — Dual qualitative dispatch
+## Stage 2 — Dual qualitative dispatch, two rounds
 
-| Lane | Status |
-|---|---|
-| `verify-sdd-fan-out-lens-agy` | done |
-| `verify-sdd-fan-out-lens-cursor-agent` | done |
+| Round | Candidate | agy | cursor-agent |
+|---|---|---|---|
+| 1 | `6abd702` | done, no blocker raised | done, **blocker raised** |
+| 2 | `e08f6e2` | done | done |
 
-Both integrated cleanly, 0 reverted. Both reported `done`, but their findings diverged materially on the one issue that decides this gate.
+All four lanes integrated cleanly, 0 reverted.
 
-## BLOCKING — Templates violate the Planning Fan-Out Template Assets requirement
+## Round 1 — BLOCKED, and where the dual dispatch paid for itself
 
-**Raised by**: `cursor-agent` only. `agy` inspected the same divergence and classified it as stale checklist text, missing that the binding spec — not just `tasks.md` — carries the requirement.
+`specs/sdd-planning-fan-out/spec.md` required every planning template to set `legacy_main: true` or the four feature-target fields. All eight new templates set neither.
 
-**Independently confirmed by the orchestrator** against the spec text and the assets.
+Both lanes examined that divergence. `agy` checked it against `tasks.md`, concluded the checklist was stale, and did not block. `cursor-agent` checked it against the binding spec and found a live requirement violation. Same evidence, different reference document, opposite verdicts — and only one of them gates the change. A single-lane verify that drew `agy` would have passed this.
 
-`specs/sdd-planning-fan-out/spec.md:53` states:
+**Root cause was orchestrator error.** The apply packet instructed the agent to omit every feature-parent field, after the `lucind-dag` authoring convention was adopted mid-cycle. The binding spec was never re-checked before the convention changed. The implementing agent followed its packet correctly.
 
-> Each MUST parse under `packet.Parse`, **MUST set `legacy_main: true` or the four feature-target fields**, and MUST assign mutually disjoint draft paths for parallel lens lanes.
+## Remediation — the spec was wrong, not the templates
 
-Its scenario at `:57-60` repeats it:
+Amended in `e08f6e2`. A reusable template cannot know where a dispatch lands; baking `legacy_main: true` targets `main` even when the change runs against a named feature parent. The requirement now admits three paths and names the target-less one as the default for a template, with two scenarios pinning the dispatch-time path and the feature-parent reuse it protects.
 
-> THEN parsing MUST succeed, **`Packet.LegacyMain` MUST be true or feature-target fields MUST be set**, and declared draft paths MUST be pairwise disjoint
+Both round-2 lanes were asked directly whether this was a legitimate correction or a spec bent to fit an implementation. Both concluded legitimate, on the same grounds: the amendment removed a coupling without weakening the parse, disjointness, or compression constraints. `cursor-agent` — the lane that blocked in round 1 — was explicit: *"a legitimate correction to the already-shipped admission contract, not a spec bent to fit the templates."*
 
-All eight new templates set neither. Verified: zero occurrences of `legacy_main` across `assets/explore-*.md` and `assets/propose-*.md`.
+## Round 2 — three further defects, all confirmed and all fixed
 
-`tasks.md:25,28` are checked as done while stating the templates were created "with ... `legacy_main: true`". Those two checkboxes are factually false.
+Raised by `cursor-agent`; independently confirmed by the orchestrator against `internal/run/run.go` and `cmd/lucind-ai/cli.go`. Fixed in `54a90fe`.
 
-### Root cause is orchestrator error, not implementation error
+1. **The amendment contradicted its own scenario.** Requirement prose said the orchestrator supplies the target with `--legacy-main` *or* `--expected-parent-sha`; both are required. `validatePacketAdmission` rejects legacy mode without an expected SHA (`run.go:251-253`), and an expected SHA without legacy mode falls through to the four-field branch and fails there (`run.go:261`). The pinning scenario already used both flags.
 
-The apply packet instructed the agent to omit every feature-parent field. That instruction came from adopting the `lucind-dag` agent's authoring convention mid-cycle, after the spec was already accepted. The binding contract was never re-checked before the convention changed. The implementing agent followed the packet correctly.
+2. **`SKILL.md`'s fan-out dispatch recipe was broken by this change.** It passed only `--expected-parent-sha`, which worked while templates baked `legacy_main: true`. Against the target-less templates this change ships, following the skill's own recipe fails closed.
 
-### The implementation is right and the spec is wrong
+3. **The contract tests could not catch a regression of the amendment's distinctive claim.** `TestExplorePacketTemplatesContract` and `TestProposePacketTemplatesContract` parsed, checked ids, executors, paths and substrings, and asserted disjointness — but never asserted the absence of a dispatch target. Reintroducing `legacy_main: true` would have passed every existing assertion.
 
-Remediation is to amend the spec, not the templates. A reusable template that bakes `legacy_main: true` silently targets `main` even on feature-branch SDD work — and the next SDD change is already planned to run in feature mode, so the templates would be wrong from their first use. `SKILL.md:150` already documents `--legacy-main` at dispatch as an equivalent admission path.
+The fix for 3 was **mutation-verified**, not assumed: adding `legacy_main: true` to one template fails the new assertion with a specific message, removing it passes, and the template ends with no diff. A passing test is not evidence that its assertion fires.
 
-### Remediation
+## Non-blocking findings — confirmed, open as follow-ups
 
-1. Amend the `Planning Fan-Out Template Assets` requirement and its `Fan-out templates parse as valid packets` scenario to permit a third path: a template declaring neither, with the legacy declaration supplied at dispatch as `--legacy-main`. Follow the MODIFIED workflow — copy the complete existing requirement with every scenario before editing, or archive silently deletes the untouched ones.
-2. Correct the text of `tasks.md:25,28` so the checked boxes describe what was actually built.
-3. Re-run verify.
+1. `## Architecture Divergence` is copy residue in both new synthesizer templates. Explore arbitrates problem boundaries; propose arbitrates a chosen candidate. Neither divergence is architectural, and the explore template hedges it inline as "(or approach divergence)".
+2. `SKILL.md:173,192` generalize the design-specific `## Assumed architecture` anchor and the eight-item design spine to every planning phase, which explore's and propose's own canonical artifacts contradict.
+3. Contract-test depth: `forbidStrings` declared in three tables and left empty, near-tautological `strings.Contains` CLI assertions, and no negative overlapping-path case.
 
-## Non-blocking findings — all independently confirmed
+## Assessed and accepted
 
-### 1. `## Architecture Divergence` is copy residue in both new synthesizer templates
+**Forecast miss.** `tasks.md` forecast 120–250 lines at `400-line budget risk: Low`; actual was 1616 insertions and 114 deletions across 10 files. Both lanes and the orchestrator independently agreed: planning error, not scope creep. Every addition is in scope, no production Go, no extra phases. Inside this session's 5000-line budget, but High against the skill's nominal 400 — had the preflight been 400, a chaining decision would have been required and never requested.
 
-`explore-synthesis-packet-template.md:62,111` and `propose-synthesis-packet-template.md:61,112` both use the design phase's heading. Explore arbitrates problem boundaries and candidate viability; propose arbitrates a chosen candidate. Neither divergence is architectural. The explore template even hedges inline — "`## Architecture Divergence` (or approach divergence)" — which is the copy showing through.
+**Unrunnable sidecar.** `apply-dag.yaml` and `apply-bodies/` are committed and must never be dispatched; `state.yaml` explains why. The sidecar file itself still carries no marker, and it is the file `lucind-ai split` consumes. Open as a follow-up.
 
-Raised by `cursor-agent`. Not raised by `agy`, whose finding said all eight templates "strictly mirror" the design models — true, and that is precisely the defect.
-
-### 2. `SKILL.md` generalizes design-specific structure to every planning phase
-
-`SKILL.md:173` describes `## Assumed architecture` as the anchor for all phases, hedged as "(or approach)". `SKILL.md:192` presents the eight-item **design** spine — architecture decisions, flow and invariants, file changes, threat matrix, rollback — as "this repository's actual phase spine" for every phase. Explore and propose have entirely different spines, as their own canonical artifacts in this change demonstrate.
-
-### 3. Contract test depth
-
-- `forbidStrings` is declared in three test tables (`packet_test.go:939,1064,1189`) and iterated (`:1037,:1162`) but left empty, so design-model leftovers such as finding 1 would not fail a test.
-- The `SKILL.md` CLI assertions use a bare `strings.Contains(content, cmd)` for `serve`, `feature`, `reconcile`, `renew` — near-tautological given how often those words appear in the document.
-- Disjointness is asserted only among the three wave-1 lenses, never as a negative overlapping-path case on these assets.
-
-## Forecast miss — assessed, not a defect
-
-Both lanes independently reached the same conclusion, and the orchestrator agrees: the ~7× line-count miss is a planning error, not scope creep.
-
-`tasks.md:7-19` forecasts 120–250 lines at `400-line budget risk: Low`. Actual: 1616 insertions, 114 deletions across 10 files. Every addition is in scope — eight templates at ~127–162 lines each, 427 lines of contract tests, and the `SKILL.md` changes. No production Go, no extra phases, no generator. It stays inside this session's 5000-line budget.
-
-Against the skill's nominal 400-line rule the risk was High, not Low. Had the preflight budget been 400, a chaining decision would have been required and never requested. Future fan-out template work should forecast ~150 lines per template.
-
-## Unrunnable sidecar — accepted with a caveat
-
-`apply-dag.yaml` and `apply-bodies/` are committed and must never be dispatched. `state.yaml:137-161` explains this fully. Both lanes agreed `state.yaml` is clear; `cursor-agent` correctly noted the sidecar file itself carries no marker, and it is the file `lucind-ai split` actually consumes. A reader starting there can emit and run both wave commands.
-
-Recommended with remediation, not blocking: add a header comment to `apply-dag.yaml` stating it must not be dispatched, and why.
-
-## Where the dual dispatch earned its cost
-
-`agy` and `cursor-agent` examined the same `legacy_main` divergence. `agy` checked it against `tasks.md` and called the checklist stale. `cursor-agent` checked it against `specs/sdd-planning-fan-out/spec.md` and found a live requirement violation.
-
-Same evidence, different reference document, opposite verdicts — and only one of them gates the change. This is the case the dual dispatch exists for.
+**Design templates still bake `legacy_main: true`.** Compliant via path 1, pinned by `TestDesignPacketTemplatesContract`, out of scope to rewrite. They now use a path the amended spec names as not the default. Open as a follow-up.
