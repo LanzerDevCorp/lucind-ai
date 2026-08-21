@@ -34,10 +34,14 @@ Lens A owns the architecture decision and is running concurrently, so you do not
 
 Read these before writing a single line. This lens is scoped to failure, proof, and reversal — not to rationale or signatures:
 
-1. `openspec/changes/<change-id>/proposal.md` and `openspec/changes/<change-id>/specs/`.
-2. The existing test files for the packages in scope. Read how this repository actually tests: what it asserts on, what it fakes, what it refuses to mock.
-3. The injection seams that already exist — runner interfaces, `Deps`-style structs, function fields, existing fakes and stubs. Name them by `file:line`.
-4. The threat-matrix table in `## Context` of this packet. Do not fetch it from outside the repository.
+1. `~/.claude/skills/sdd-design/SKILL.md` — the real `gentle-ai` design skill. It is the phase
+   contract this draft feeds; read it rather than trusting this packet's paraphrase of it.
+2. `openspec/changes/<change-id>/proposal.md` and `openspec/changes/<change-id>/specs/`.
+3. The existing test files for the packages in scope. Read how this repository actually tests: what it asserts on, what it fakes, what it refuses to mock.
+4. The injection seams that already exist — runner interfaces, `Deps`-style structs, function fields, existing fakes and stubs. Name them by `file:line`.
+5. The threat-matrix table in `## Context` of this packet, and
+   `~/.claude/skills/sdd-design/references/threat-matrix.md` behind it. The embedded copy is the
+   frozen evidence; the reference is the authority. Report any drift between them.
 
 Never guess at a test seam. A seam you cannot cite does not exist yet, and saying so is the useful answer.
 
@@ -100,7 +104,7 @@ deferral owns it.>
 
 ## Size budget
 
-`design-lens-c.md` MUST be under 700 words. Tables over prose. The threat matrix rows count toward the budget — keep the reasons to one clause.
+`design-lens-c.md` MUST be under 1000 words. Tables over prose. The threat matrix rows count toward the budget — keep the reasons to one clause.
 
 ## Out of scope
 
@@ -117,13 +121,16 @@ Rollback is yours even though it is shaped like an architecture decision. Everyt
 
 ## Allowed paths outside the repository
 
-None.
+**Read-only**: `~/.claude/skills/sdd-design/` — the real `gentle-ai` design skill and its
+`references/`. Read the contract as written, not as this packet paraphrases it; where the two
+disagree, the skill wins and the disagreement belongs in `## Open Questions`. Write nothing
+outside this repository, so there is nothing to revert.
 
 ## Done criteria
 
 - [ ] **Every named test seam carries a `file:line` citation that points at real code in this worktree**, or is explicitly marked "new seam required".
 - [ ] **Every threat-matrix row is marked `Applicable` or `N/A` with a reason**, and every applicable row names a planned RED test.
-- [ ] **`design-lens-c.md` exists, is under 700 words, and carries every skeleton section including `## Assumed architecture`.**
+- [ ] **`design-lens-c.md` exists, is under 1000 words, and carries every skeleton section including `## Assumed architecture`.**
 - [ ] **The work is committed with a conventional commit and no AI attribution** (`git status --porcelain` empty and `git log --oneline -1`).
 
 ## Hard stops
@@ -132,7 +139,7 @@ Stop and return `status: blocked` — do not guess. Declare every one of these i
 
 - A behavior the specs require cannot be tested through any existing or proposed seam.
 - Whether a format delta is additive cannot be determined from the specs, so the rollback decision would be a guess.
-- The threat matrix is missing from `## Context` and you would have to reach outside the repository for it.
+- The threat matrix is missing from both `## Context` and the skill reference.
 - Satisfying one instruction in this packet would require violating another.
 
 ## Context
@@ -142,7 +149,7 @@ Stop and return `status: blocked` — do not guess. Declare every one of these i
 <Embed the applicability-driven threat matrix verbatim here — boundary rows for
 documentation-like paths, git repository selection, commit state, push state,
 and PR commands, with the "Applicable / N/A: reason" column. The lane must not
-read it from outside the repository.>
+read it only from the skill reference above.>
 
 ### Ground truth
 

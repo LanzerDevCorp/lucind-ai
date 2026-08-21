@@ -31,10 +31,12 @@ The proposal and specs for `<change-id>` are accepted and frozen. Lens B and len
 
 Read these before writing a single line. This lens is scoped to structure, not to signatures or tests:
 
-1. `openspec/changes/<change-id>/proposal.md` and `openspec/changes/<change-id>/specs/`.
-2. The entry points and module structure of the packages the change lands in.
-3. The existing patterns and conventions those packages already follow — how comparable problems were already solved in this repository.
-4. `openspec/changes/archive/` for a prior change that solved a structurally similar problem, if one exists.
+1. `~/.claude/skills/sdd-design/SKILL.md` — the real `gentle-ai` design skill. It is the phase
+   contract this draft feeds; read it rather than trusting this packet's paraphrase of it.
+2. `openspec/changes/<change-id>/proposal.md` and `openspec/changes/<change-id>/specs/`.
+3. The entry points and module structure of the packages the change lands in.
+4. The existing patterns and conventions those packages already follow — how comparable problems were already solved in this repository.
+5. `openspec/changes/archive/` for a prior change that solved a structurally similar problem, if one exists.
 
 Never guess at code. Every claim about existing structure carries a `file:line` citation.
 
@@ -76,7 +78,7 @@ is not a decision, it is speculation.>
 
 ## Size budget
 
-`design-lens-a.md` MUST be under 700 words. Decisions as compact blocks, not essays. Code snippets only for a non-obvious pattern, never to restate code the reader can open.
+`design-lens-a.md` MUST be under 1000 words. Decisions as compact blocks, not essays. Code snippets only for a non-obvious pattern, never to restate code the reader can open.
 
 ## Out of scope
 
@@ -93,12 +95,15 @@ Do not write a rollback decision here even though it is shaped like a decision. 
 
 ## Allowed paths outside the repository
 
-None.
+**Read-only**: `~/.claude/skills/sdd-design/` — the real `gentle-ai` design skill and its
+`references/`. Read the contract as written, not as this packet paraphrases it; where the two
+disagree, the skill wins and the disagreement belongs in `## Open Questions`. Write nothing
+outside this repository, so there is nothing to revert.
 
 ## Done criteria
 
 - [ ] **Every decision names a terminal consumer with a `file:line` citation**, and that citation points at real code in this worktree.
-- [ ] **`design-lens-a.md` exists, is under 700 words, and carries every skeleton section including `## Assumed architecture`.**
+- [ ] **`design-lens-a.md` exists, is under 1000 words, and carries every skeleton section including `## Assumed architecture`.**
 - [ ] **The work is committed with a conventional commit and no AI attribution** (`git status --porcelain` empty and `git log --oneline -1`).
 
 ## Hard stops

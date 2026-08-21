@@ -175,12 +175,30 @@ The alternative — lens A alone in wave 1, B and C in wave 2 branched from it �
 `lucind-ai run` invocation and buys cleaner drafts. Switching to it is a scheduling change only:
 dispatch A alone first, then B and C together. Take it if a pilot shows B and C drifting.
 
-**Budgets.** Each lens draft is capped under 700 words; the canonical `design.md` under 1200. The
-gap is the point. Roughly 2100 words of feedstock compressed to 1200 forces the synthesizer to
-arbitrate and cut. A synthesis that lands near 2100 words has concatenated rather than
-synthesized, and is a failed run even if every sentence in it is true. For calibration, archived designs in this repo run
-774–2969 words; the two that respected `sdd-design`'s nominal 800-word budget are the outliers, not
-the norm.
+**Budgets — and why there is one.** Each lens draft is capped under 1000 words; the canonical
+`design.md` under 1800.
+
+The gap between them is the entire mechanism. If the synthesizer's output budget were as large as
+the sum of its inputs, "synthesize" could be satisfied by stapling three drafts together and
+nothing would force a choice. Roughly 3000 words of feedstock compressed to 1800 makes arbitration
+mandatory. A synthesis that lands near 3000 words concatenated rather than synthesized, and is a
+failed run even if every sentence in it is true. **The one number that must never invert: the
+canonical budget stays below the sum of the lens budgets.** Raise them together or not at all.
+
+The second reason for a cap is downstream cost: `design.md` is re-read by tasks, apply, verify, and
+every judgment lane, so its length is a tax multiplied by every consumer. The third is scope — a
+design document is a decision record, not a spec. Requirements live in `specs/`, the checklist in
+`tasks.md`, behavior in code. Long designs are usually long because they restate code the reader
+could open.
+
+For calibration, archived designs in this repo run 774–2969 words. `sdd-design`'s nominal budget is
+800; only two of six respected it, which is why 1800 rather than 800 is the realistic ceiling here.
+
+**Reading the real contract.** All four packets grant read-only access to
+`~/.claude/skills/sdd-design/` so the lanes read the `gentle-ai` phase contract as written instead
+of trusting a packet's paraphrase of it. Where a packet and the skill disagree, the skill wins and
+the lane reports the drift under `## Open Questions`. Nothing outside the repository is ever
+written, so no revert command is needed.
 
 **What the orchestrator reads.** `design-synthesis-notes.md`, and only that: `## Unresolved
 Contradictions`, `## Coverage Gaps`, `## Dropped Citations`, `## Architecture Divergence`. The

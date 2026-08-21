@@ -33,10 +33,12 @@ Lens A owns the architecture decision and is running concurrently, so you do not
 
 Read these before writing a single line. This lens is scoped to surfaces and formats, not to rationale or tests:
 
-1. `openspec/changes/<change-id>/proposal.md` and `openspec/changes/<change-id>/specs/`.
-2. The exact type, struct, and interface declarations the change touches — read the declarations, not summaries of them.
-3. Every persisted or wire format in scope: JSON schemas, YAML sidecar structs, packet frontmatter parsing, ledger rows, result envelopes.
-4. The CLI flag and argument surface in `cmd/` for anything the change exposes to an operator.
+1. `~/.claude/skills/sdd-design/SKILL.md` — the real `gentle-ai` design skill. It is the phase
+   contract this draft feeds; read it rather than trusting this packet's paraphrase of it.
+2. `openspec/changes/<change-id>/proposal.md` and `openspec/changes/<change-id>/specs/`.
+3. The exact type, struct, and interface declarations the change touches — read the declarations, not summaries of them.
+4. Every persisted or wire format in scope: JSON schemas, YAML sidecar structs, packet frontmatter parsing, ledger rows, result envelopes.
+5. The CLI flag and argument surface in `cmd/` for anything the change exposes to an operator.
 
 Never guess at a signature. Every row in your tables carries a `file:line` citation to real code in this worktree.
 
@@ -87,7 +89,7 @@ where it already exists.>
 
 ## Size budget
 
-`design-lens-b.md` MUST be under 700 words. Tables over prose. Do not restate code the reader can open; cite it.
+`design-lens-b.md` MUST be under 1000 words. Tables over prose. Do not restate code the reader can open; cite it.
 
 ## Out of scope
 
@@ -106,12 +108,15 @@ Do not assess whether the change is additively revertible. You supply the format
 
 ## Allowed paths outside the repository
 
-None.
+**Read-only**: `~/.claude/skills/sdd-design/` — the real `gentle-ai` design skill and its
+`references/`. Read the contract as written, not as this packet paraphrases it; where the two
+disagree, the skill wins and the disagreement belongs in `## Open Questions`. Write nothing
+outside this repository, so there is nothing to revert.
 
 ## Done criteria
 
 - [ ] **Every `Surface Deltas` and `File Changes` row carries a `file:line` citation that points at real code in this worktree**, and every `File Changes` row names a terminal consumer.
-- [ ] **`design-lens-b.md` exists, is under 700 words, and carries every skeleton section including `## Assumed architecture`.**
+- [ ] **`design-lens-b.md` exists, is under 1000 words, and carries every skeleton section including `## Assumed architecture`.**
 - [ ] **The work is committed with a conventional commit and no AI attribution** (`git status --porcelain` empty and `git log --oneline -1`).
 
 ## Hard stops

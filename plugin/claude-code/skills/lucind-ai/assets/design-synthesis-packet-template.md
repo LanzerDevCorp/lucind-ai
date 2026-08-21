@@ -65,7 +65,7 @@ The three drafts each opened with `## Assumed architecture`. Compare them.
 
 ### 4. Compress — do not concatenate
 
-`design.md` MUST be under 1200 words. The three drafts total roughly 2100. Cutting is the job: merge overlapping statements, drop restatement, keep the specific sentence over the general one. A concatenation of three drafts is a failed synthesis even if every word in it is true.
+`design.md` MUST be under 1800 words. The three drafts total roughly 3000. Cutting is the job: merge overlapping statements, drop restatement, keep the specific sentence over the general one. A concatenation of three drafts is a failed synthesis even if every word in it is true.
 
 ### 5. Coverage check
 
@@ -86,7 +86,7 @@ Section headings may follow the change's own vocabulary — archived designs var
 
 ### `openspec/changes/<change-id>/design.md`
 
-The canonical design. Under 1200 words. Covers all eight spine items. Contains only claims whose citations you verified in step 2 and which survive lens A's architecture.
+The canonical design. Under 1800 words. Covers all eight spine items. Contains only claims whose citations you verified in step 2 and which survive lens A's architecture.
 
 ### `openspec/changes/<change-id>/design-synthesis-notes.md`
 
@@ -130,12 +130,13 @@ that is the case.>
 
 ## Allowed paths outside the repository
 
-None.
+**Read-only**: `~/.claude/skills/sdd-design/` — the real `gentle-ai` design skill. Check the
+canonical document against the contract as written. Write nothing outside this repository.
 
 ## Done criteria
 
 - [ ] **Every `file:line` citation surviving into `design.md` was opened and confirmed in this worktree**, and every dropped claim is listed under `## Dropped Citations`.
-- [ ] **`design.md` exists, is under 1200 words, and substantively covers all eight spine items**, with anything missing reported under `## Coverage Gaps`.
+- [ ] **`design.md` exists, is under 1800 words, and substantively covers all eight spine items**, with anything missing reported under `## Coverage Gaps`.
 - [ ] **`design-synthesis-notes.md` exists with exactly the four required sections**, each either populated or explicitly "None".
 - [ ] **The work is committed with a conventional commit and no AI attribution** (`git status --porcelain` empty and `git log --oneline -1`).
 
@@ -146,7 +147,7 @@ Stop and return `status: blocked` — do not guess. Declare every one of these i
 - The three `## Assumed architecture` blocks are mutually irreconcilable and the proposal and specs do not choose between them. Write the notes file, leave `design.md` uncreated, and block.
 - Lens A's architecture is refuted by code you verified. Do not substitute your own.
 - One or more lens drafts is missing from this worktree.
-- Covering all eight spine items honestly would require exceeding 1200 words. Report which item forces it rather than silently overrunning or silently cutting.
+- Covering all eight spine items honestly would require exceeding 1800 words. Report which item forces it rather than silently overrunning or silently cutting.
 - Satisfying one instruction in this packet would require violating another.
 
 ## Context
