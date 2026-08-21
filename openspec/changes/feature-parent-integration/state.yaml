@@ -89,9 +89,20 @@ phases:
       (see chain_note). DAG sidecar: .lucind/packets/feature-parent-integration-apply-dag.yaml
       (gitignored, not committed). `lucind-ai split` succeeded, producing exactly 7 waves:
       W1 {2-1,3-1}, W2 {2-2,3-3}, W3 {2-3,4-1}, W4 {3-2}, W5 {3-4}, W6 {4-2}, W7 {4-3}. Emitted
-      packets at .lucind/packets/feature-parent-integration-dag-out/. Not yet dispatched --
-      each wave's own two-stage verify (mechanical + dual qualitative) runs after that wave
-      integrates, before the next wave dispatches.
+      packets at .lucind/packets/feature-parent-integration-dag-out/. Each wave's own
+      two-stage verify (mechanical + dual qualitative) runs after that wave integrates,
+      before the next wave dispatches.
+
+      Third incident: Wave 2 (2.2, 3.3) failed both lanes on first dispatch, status=failed,
+      no worktree created -- Wave 1's own task 2.1 had just shipped the "Explicit Feature
+      Target" admission gate, and every packet dispatched without feature/parent_ref/
+      base_sha/expected_parent_sha now fails closed unless legacy mode is declared. The
+      remaining wave packets were authored before 2.1 existed and never anticipated this.
+      Not a bug -- 2.1 working exactly as specced -- but it means every remaining
+      `lucind-ai run` invocation for this change needs `--legacy-main --expected-parent-sha
+      <current main HEAD>` appended (this change dispatches against plain `main`, not a
+      named parent ref; the feature that would let it use its own real target model isn't
+      finished yet). Redispatched Wave 2 with those flags, succeeded clean.
     units:
       U1:
         status: done
@@ -113,8 +124,9 @@ phases:
         tasks: [2.1, 3.1]
         commit: f249463
       W2:
-        status: pending
+        status: done
         tasks: [2.2, 3.3]
+        commit: 8732399
       W3:
         status: pending
         tasks: [2.3, 4.1]
