@@ -55,7 +55,7 @@ phases:
       confirmed current; not re-dispatched. Prerequisite apply-dag-dispatch-hardening
       (named inside this tasks.md as a prerequisite for Phase 2) is done and archived.
   apply:
-    status: in_progress
+    status: done
     note: |
       Unit 1 (tasks 1.1-1.3) dispatched as a single packet to agy, per the original
       phase-per-unit plan (superseded below for U2-U5). Real incident during this dispatch:
@@ -144,8 +144,19 @@ phases:
         tasks: [4.2]
         commit: 48ffb26
       W7:
-        status: pending
+        status: done
         tasks: [4.3]
+        commit: d7aff55
+        note: |
+          Dispatched while main had already advanced one commit past this lane's base (a
+          docs(sdd) commit made mid-flight -- should not have happened, primary root should
+          stay untouched while any lane is running, not just before dispatching a new one).
+          Expected this to break auto-integrate's fast-forward the way Unit 1's dirty-root
+          revert did. It did not: integrated cleanly as a real merge commit, not a bare
+          ff-only against the raw lane branch -- Combine's own merge step absorbs a
+          non-conflicting divergence before Promote's ff-only runs. No manual recovery
+          needed this time, but do not rely on this: keep the primary root untouched for the
+          full lifetime of any in-flight lane, not just at dispatch time.
   verify:
     status: pending
     note: |
