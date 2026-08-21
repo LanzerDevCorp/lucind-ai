@@ -186,6 +186,13 @@ type Deps struct {
 	// produces) is permanently lost the moment the lane integrates, since
 	// RemoveLaneWorktree deletes the only copy of .lucind/result.json.
 	PersistEnvelope func(ctx context.Context, primaryRoot, laneID string, envelope *result.Envelope) error
+
+	// Attempt state machine and Git/CAS hooks
+	GitRunner           worktree.GitRunner
+	PromoteCAS          func(ctx context.Context, primaryRoot, parentRef, candidateSHA, expectedSHA string) error
+	ResolveRefSHA       func(ctx context.Context, primaryRoot, ref string) (string, error)
+	ResolveCandidateSHA func(ctx context.Context, primaryRoot, worktreePath, branch string) (string, error)
+	FeatureLeaseTTL     time.Duration
 }
 
 // Report is the outcome of running exactly one lane through Execute.
