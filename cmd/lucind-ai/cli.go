@@ -19,10 +19,12 @@ import (
 
 	"github.com/LanzerDevCorp/lucind-ai/internal/dag"
 	"github.com/LanzerDevCorp/lucind-ai/internal/executor"
+	"github.com/LanzerDevCorp/lucind-ai/internal/feature"
 	"github.com/LanzerDevCorp/lucind-ai/internal/integrate"
 	"github.com/LanzerDevCorp/lucind-ai/internal/lane"
 	"github.com/LanzerDevCorp/lucind-ai/internal/ledger"
 	"github.com/LanzerDevCorp/lucind-ai/internal/packet"
+	"github.com/LanzerDevCorp/lucind-ai/internal/reconcile"
 	"github.com/LanzerDevCorp/lucind-ai/internal/result"
 	lucindrun "github.com/LanzerDevCorp/lucind-ai/internal/run"
 	"github.com/LanzerDevCorp/lucind-ai/internal/serve"
@@ -42,7 +44,7 @@ const defaultTimeout = 20 * time.Minute
 // error, so a person driving the binary from a terminal always sees the one
 // invocation that works rather than a stack trace. --packet is repeatable:
 // each occurrence adds one more lane to the batch.
-const usage = "usage: lucind-ai run --packet <path> [--packet <path> ...] [--timeout <duration>] [--approval-timeout <duration>] [--legacy-main] [--expected-parent-sha <sha>]\n       lucind-ai split --dag <path> --out <dir>\n       lucind-ai check [--out <path>]\n       lucind-ai serve [--addr <addr>] [--approver <name>] [--approval-timeout <duration>]\n       lucind-ai --version"
+const usage = "usage: lucind-ai run --packet <path> [--packet <path> ...] [--timeout <duration>] [--approval-timeout <duration>] [--legacy-main] [--expected-parent-sha <sha>]\n       lucind-ai split --dag <path> --out <dir>\n       lucind-ai check [--out <path>]\n       lucind-ai serve [--addr <addr>] [--approver <name>] [--approval-timeout <duration>]\n       lucind-ai feature create --id <id> --parent <ref> --base-sha <sha> [--expected-parent-sha <sha>]\n       lucind-ai feature status [--id <id>]\n       lucind-ai feature recover --attempt <id>\n       lucind-ai reconcile approve --request <id> --source <feature> --target <feature> [--actor <name>]\n       lucind-ai reconcile decline --request <id> [--actor <name>] [--reason <reason>]\n       lucind-ai reconcile cancel --request <id> [--actor <name>] [--reason <reason>]\n       lucind-ai reconcile renew --request <id> [--base-sha <sha>] [--source-sha <sha>] [--target-sha <sha>]\n       lucind-ai --version"
 
 // depsFactory constructs run.Deps for runDispatch. In production it is
 // productionDeps; tests may override it to inject test doubles or observe dependency calls.
@@ -99,6 +101,12 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return runCheck(ctx, args[1:], stdout, stderr)
 	case "serve":
 		return serveDispatch(ctx, args[1:], stdout, stderr)
+	case "feature":
+		return featureDispatch(ctx, args[1:], stdout, stderr)
+	case "reconcile":
+		return reconcileDispatch(ctx, args[1:], stdout, stderr)
+	case "renew":
+		return runReconcileRenew(ctx, args[1:], stdout, stderr)
 	case "--version", "-v":
 		fmt.Fprintf(stdout, "lucind-ai %s (%s, %s/%s)\n", version, runtime.Version(), runtime.GOOS, runtime.GOARCH)
 		return 0
@@ -629,3 +637,570 @@ func serveDispatch(ctx context.Context, args []string, stdout, stderr io.Writer)
 
 	return 0
 }
+
+// featureDispatch dispatches feature subcommands (create, status, recover).
+func featureDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	_ = reconcile.ErrInvalidDirection
+	if len(args) == 0 {
+		fmt.Fprintln(stderr, "lucind-ai: feature subcommand requires an action (create, status, recover)")
+		fmt.Fprintln(stderr, usage)
+		return 1
+	}
+
+	switch args[0] {
+	case "create":
+		return runFeatureCreate(ctx, args[1:], stdout, stderr)
+	case "status":
+		return runFeatureStatus(ctx, args[1:], stdout, stderr)
+	case "recover":
+		return runFeatureRecover(ctx, args[1:], stdout, stderr)
+	default:
+		fmt.Fprintf(stderr, "lucind-ai: unknown feature subcommand %q\n%s\n", args[0], usage)
+		return 1
+	}
+}
+
+// runFeatureCreate implements "lucind-ai feature create": creates a new feature in the ledger.
+func runFeatureCreate(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("feature create", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	fs.Usage = func() {
+		fmt.Fprintln(stderr, "usage: lucind-ai feature create --id <id> --parent <ref> --base-sha <sha> [--expected-parent-sha <sha>]")
+		fs.PrintDefaults()
+	}
+
+	id := fs.String("id", "", "feature identifier")
+	parent := fs.String("parent", "", "parent branch ref (e.g. refs/heads/feature-foo)")
+	parentRef := fs.String("parent-ref", "", "alias for --parent")
+	baseSHA := fs.String("base-sha", "", "immutable base commit SHA")
+	expectedParentSHA := fs.String("expected-parent-sha", "", "expected parent commit SHA")
+
+	if err := fs.Parse(args); err != nil {
+		return 1
+	}
+
+	parentVal := *parent
+	if parentVal == "" && *parentRef != "" {
+		parentVal = *parentRef
+	}
+
+	if strings.TrimSpace(*id) == "" {
+		fmt.Fprintln(stderr, "lucind-ai: --id is required")
+		fs.Usage()
+		return 1
+	}
+	if strings.TrimSpace(parentVal) == "" {
+		fmt.Fprintln(stderr, "lucind-ai: --parent is required")
+		fs.Usage()
+		return 1
+	}
+	if strings.TrimSpace(*baseSHA) == "" {
+		fmt.Fprintln(stderr, "lucind-ai: --base-sha is required")
+		fs.Usage()
+		return 1
+	}
+
+	primaryRoot, err := resolvePrimaryRoot(ctx)
+	if err != nil {
+		fmt.Fprintf(stderr, "lucind-ai: resolve primary repository root: %v\n", err)
+		return 1
+	}
+
+	if worktree.IsLinkedWorktree(primaryRoot) {
+		fmt.Fprintf(stderr, "lucind-ai: refusing to run from inside a linked worktree (%s); run from the primary repository instead\n", primaryRoot)
+		return 1
+	}
+
+	ledg, err := ledger.Open(ctx, primaryRoot)
+	if err != nil {
+		fmt.Fprintf(stderr, "lucind-ai: open ledger: %v\n", err)
+		return 1
+	}
+	defer ledg.Close()
+
+	featSvc := feature.NewService(ledg)
+	feat, err := featSvc.Create(ctx, *id, parentVal, *baseSHA, *expectedParentSHA)
+	if err != nil {
+		fmt.Fprintf(stderr, "lucind-ai: %v\n", err)
+		return 1
+	}
+
+	fmt.Fprintf(stdout, "feature:  %s\nparent:   %s\nbase_sha: %s\nstatus:   %s\n", feat.ID, feat.ParentRef, feat.BaseSHA, feat.Status)
+	return 0
+}
+
+// runFeatureStatus implements "lucind-ai feature status": queries feature, attempt, and lease state via serve.Model.
+func runFeatureStatus(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("feature status", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	fs.Usage = func() {
+		fmt.Fprintln(stderr, "usage: lucind-ai feature status [--id <id>]")
+		fs.PrintDefaults()
+	}
+
+	id := fs.String("id", "", "feature identifier to query")
+	if err := fs.Parse(args); err != nil {
+		return 1
+	}
+
+	primaryRoot, err := resolvePrimaryRoot(ctx)
+	if err != nil {
+		fmt.Fprintf(stderr, "lucind-ai: resolve primary repository root: %v\n", err)
+		return 1
+	}
+
+	if worktree.IsLinkedWorktree(primaryRoot) {
+		fmt.Fprintf(stderr, "lucind-ai: refusing to run from inside a linked worktree (%s); run from the primary repository instead\n", primaryRoot)
+		return 1
+	}
+
+	ledg, err := ledger.Open(ctx, primaryRoot)
+	if err != nil {
+		fmt.Fprintf(stderr, "lucind-ai: open ledger: %v\n", err)
+		return 1
+	}
+	defer ledg.Close()
+
+	model := serve.NewModel(ledg)
+
+	if *id != "" {
+		feat, err := model.GetFeature(ctx, *id)
+		if err != nil {
+			fmt.Fprintf(stderr, "lucind-ai: %v\n", err)
+			return 1
+		}
+
+		fmt.Fprintf(stdout, "feature:              %s\n", feat.ID)
+		fmt.Fprintf(stdout, "parent_ref:           %s\n", feat.ParentRef)
+		fmt.Fprintf(stdout, "base_sha:             %s\n", feat.BaseSHA)
+		if feat.ExpectedParentSHA != "" {
+			fmt.Fprintf(stdout, "expected_parent_sha:  %s\n", feat.ExpectedParentSHA)
+		}
+		fmt.Fprintf(stdout, "status:               %s\n", feat.Status)
+		fmt.Fprintf(stdout, "created_at:           %s\n", feat.CreatedAt.Format(time.RFC3339))
+		fmt.Fprintf(stdout, "updated_at:           %s\n", feat.UpdatedAt.Format(time.RFC3339))
+
+		lease, err := model.GetLease(ctx, *id)
+		if err == nil {
+			fmt.Fprintf(stdout, "lease:                owner=%s fence=%d expires_at=%s\n", lease.Owner, lease.Fence, lease.ExpiresAt.Format(time.RFC3339))
+		} else {
+			fmt.Fprintf(stdout, "lease:                none\n")
+		}
+
+		attempts, err := model.ListAttempts(ctx, *id)
+		if err == nil && len(attempts) > 0 {
+			fmt.Fprintln(stdout, "attempts:")
+			for _, att := range attempts {
+				fmt.Fprintf(stdout, "  - id=%s status=%s owner=%s fence=%d candidate_sha=%s failure_reason=%s\n",
+					att.ID, att.Status, att.Owner, att.Fence, att.CandidateSHA, att.FailureReason)
+			}
+		}
+
+		return 0
+	}
+
+	features, err := model.ListFeatures(ctx)
+	if err != nil {
+		fmt.Fprintf(stderr, "lucind-ai: list features: %v\n", err)
+		return 1
+	}
+
+	leases, _ := model.ListLeases(ctx)
+	leaseByFeature := make(map[string]serve.Lease, len(leases))
+	for _, l := range leases {
+		leaseByFeature[l.FeatureID] = l
+	}
+
+	if len(features) == 0 {
+		fmt.Fprintln(stdout, "no features registered")
+		return 0
+	}
+
+	for _, f := range features {
+		fmt.Fprintf(stdout, "feature: %s  status: %s  parent_ref: %s  base_sha: %s\n", f.ID, f.Status, f.ParentRef, f.BaseSHA)
+		if l, ok := leaseByFeature[f.ID]; ok {
+			fmt.Fprintf(stdout, "  lease: owner=%s fence=%d expires_at=%s\n", l.Owner, l.Fence, l.ExpiresAt.Format(time.RFC3339))
+		}
+	}
+
+	return 0
+}
+
+// runFeatureRecover implements "lucind-ai feature recover": invokes attempt recovery.
+func runFeatureRecover(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("feature recover", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	fs.Usage = func() {
+		fmt.Fprintln(stderr, "usage: lucind-ai feature recover --attempt <id>")
+		fs.PrintDefaults()
+	}
+
+	attemptID := fs.String("attempt", "", "integration attempt identifier to recover")
+	if err := fs.Parse(args); err != nil {
+		return 1
+	}
+
+	if strings.TrimSpace(*attemptID) == "" {
+		fmt.Fprintln(stderr, "lucind-ai: --attempt is required")
+		fs.Usage()
+		return 1
+	}
+
+	primaryRoot, err := resolvePrimaryRoot(ctx)
+	if err != nil {
+		fmt.Fprintf(stderr, "lucind-ai: resolve primary repository root: %v\n", err)
+		return 1
+	}
+
+	if worktree.IsLinkedWorktree(primaryRoot) {
+		fmt.Fprintf(stderr, "lucind-ai: refusing to run from inside a linked worktree (%s); run from the primary repository instead\n", primaryRoot)
+		return 1
+	}
+
+	ledg, err := ledger.Open(ctx, primaryRoot)
+	if err != nil {
+		fmt.Fprintf(stderr, "lucind-ai: open ledger: %v\n", err)
+		return 1
+	}
+	defer ledg.Close()
+
+	deps := depsFactory(uuid.NewString(), primaryRoot, ledg, defaultTimeout, 0)
+	att, err := lucindrun.RecoverAttempt(ctx, deps, *attemptID)
+	if err != nil {
+		fmt.Fprintf(stderr, "lucind-ai: recover attempt %q: %v\n", *attemptID, err)
+		return 1
+	}
+
+	switch att.Status {
+	case lucindrun.AttemptStatusPromoted:
+		fmt.Fprintf(stdout, "resumed: attempt %s promoted (candidate_sha=%s)\n", att.ID, att.CandidateSHA)
+		return 0
+	case lucindrun.AttemptStatusBlocked:
+		fmt.Fprintf(stderr, "blocked: attempt %s blocked, needs human intervention (reason: %s)\n", att.ID, att.FailureReason)
+		return 2
+	default:
+		fmt.Fprintf(stderr, "attempt %s ended with status: %s (reason: %s)\n", att.ID, att.Status, att.FailureReason)
+		return 1
+	}
+}
+
+// reconcileDispatch dispatches reconcile subcommands (approve, decline, cancel, renew).
+func reconcileDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	if len(args) == 0 {
+		fmt.Fprintln(stderr, "lucind-ai: reconcile subcommand requires an action (approve, decline, cancel, renew)")
+		fmt.Fprintln(stderr, usage)
+		return 1
+	}
+
+	switch args[0] {
+	case "approve":
+		return runReconcileApprove(ctx, args[1:], stdout, stderr)
+	case "decline":
+		return runReconcileDecline(ctx, args[1:], stdout, stderr)
+	case "cancel":
+		return runReconcileCancel(ctx, args[1:], stdout, stderr)
+	case "renew":
+		return runReconcileRenew(ctx, args[1:], stdout, stderr)
+	default:
+		fmt.Fprintf(stderr, "lucind-ai: unknown reconcile subcommand %q\n%s\n", args[0], usage)
+		return 1
+	}
+}
+
+// runReconcileApprove implements "lucind-ai reconcile approve": binds exact direction and authorizes candidate.
+func runReconcileApprove(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("reconcile approve", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	fs.Usage = func() {
+		fmt.Fprintln(stderr, "usage: lucind-ai reconcile approve --request <id> --source <feature> --target <feature> [--actor <name>] [--allowed-paths <paths>]")
+		fs.PrintDefaults()
+	}
+
+	requestID := fs.String("request", "", "reconciliation request identifier")
+	source := fs.String("source", "", "source feature identifier (direction source)")
+	target := fs.String("target", "", "target feature identifier (direction target)")
+	actor := fs.String("actor", defaultApprover(), "actor identity recording the decision")
+	allowedPaths := fs.String("allowed-paths", "", "comma-separated allowed paths override")
+
+	if err := fs.Parse(args); err != nil {
+		return 1
+	}
+
+	if strings.TrimSpace(*requestID) == "" {
+		fmt.Fprintln(stderr, "lucind-ai: --request is required")
+		fs.Usage()
+		return 1
+	}
+	if strings.TrimSpace(*source) == "" {
+		fmt.Fprintln(stderr, "lucind-ai: --source is required")
+		fs.Usage()
+		return 1
+	}
+	if strings.TrimSpace(*target) == "" {
+		fmt.Fprintln(stderr, "lucind-ai: --target is required")
+		fs.Usage()
+		return 1
+	}
+
+	primaryRoot, err := resolvePrimaryRoot(ctx)
+	if err != nil {
+		fmt.Fprintf(stderr, "lucind-ai: resolve primary repository root: %v\n", err)
+		return 1
+	}
+
+	if worktree.IsLinkedWorktree(primaryRoot) {
+		fmt.Fprintf(stderr, "lucind-ai: refusing to run from inside a linked worktree (%s); run from the primary repository instead\n", primaryRoot)
+		return 1
+	}
+
+	ledg, err := ledger.Open(ctx, primaryRoot)
+	if err != nil {
+		fmt.Fprintf(stderr, "lucind-ai: open ledger: %v\n", err)
+		return 1
+	}
+	defer ledg.Close()
+
+	reconcileSvc := reconcile.NewService(ledg)
+	req, err := reconcileSvc.GetRequest(ctx, *requestID)
+	if err != nil {
+		fmt.Fprintf(stderr, "lucind-ai: %v\n", err)
+		return 1
+	}
+
+	// Idempotency: if already approved with matching direction, return original result
+	if req.Status == reconcile.RequestStatusApproved {
+		if req.SourceFeature == *source && req.TargetFeature == *target {
+			cand, err := ledg.ReconciliationCandidateByRequest(ctx, req.ID)
+			if err == nil {
+				fmt.Fprintf(stdout, "request:   %s\nstatus:    approved\ndirection: %s\ncandidate: %s\nactor:     %s\n", req.ID, req.Direction, cand.ID, req.Actor)
+				return 0
+			}
+		}
+		fmt.Fprintf(stderr, "lucind-ai: %v\n", reconcile.ErrInvalidDirection)
+		return 1
+	}
+
+	if req.Status != reconcile.RequestStatusAwaiting {
+		fmt.Fprintf(stderr, "lucind-ai: %v\n", reconcile.ErrRequestNotAwaiting)
+		return 1
+	}
+
+	if req.SourceFeature != *source || req.TargetFeature != *target {
+		fmt.Fprintf(stderr, "lucind-ai: %v\n", reconcile.ErrInvalidDirection)
+		return 1
+	}
+
+	var paths []string
+	if strings.TrimSpace(*allowedPaths) != "" {
+		for _, p := range strings.Split(*allowedPaths, ",") {
+			p = strings.TrimSpace(p)
+			if p != "" {
+				paths = append(paths, p)
+			}
+		}
+	}
+
+	act := strings.TrimSpace(*actor)
+	if act == "" {
+		act = defaultApprover()
+	}
+
+	appReq, cand, err := reconcileSvc.Approve(ctx, reconcile.ApproveParams{
+		RequestID:     *requestID,
+		SourceFeature: *source,
+		TargetFeature: *target,
+		Actor:         act,
+		AllowedPaths:  paths,
+	})
+	if err != nil {
+		fmt.Fprintf(stderr, "lucind-ai: %v\n", err)
+		return 1
+	}
+
+	fmt.Fprintf(stdout, "request:   %s\nstatus:    approved\ndirection: %s\ncandidate: %s\nactor:     %s\n", appReq.ID, appReq.Direction, cand.ID, appReq.Actor)
+	return 0
+}
+
+// runReconcileDecline implements "lucind-ai reconcile decline": declines an awaiting reconciliation request.
+func runReconcileDecline(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("reconcile decline", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	fs.Usage = func() {
+		fmt.Fprintln(stderr, "usage: lucind-ai reconcile decline --request <id> [--actor <name>] [--reason <reason>]")
+		fs.PrintDefaults()
+	}
+
+	requestID := fs.String("request", "", "reconciliation request identifier")
+	actor := fs.String("actor", defaultApprover(), "actor recording the decline")
+	reason := fs.String("reason", "", "optional reason for decline")
+
+	if err := fs.Parse(args); err != nil {
+		return 1
+	}
+
+	if strings.TrimSpace(*requestID) == "" {
+		fmt.Fprintln(stderr, "lucind-ai: --request is required")
+		fs.Usage()
+		return 1
+	}
+
+	primaryRoot, err := resolvePrimaryRoot(ctx)
+	if err != nil {
+		fmt.Fprintf(stderr, "lucind-ai: resolve primary repository root: %v\n", err)
+		return 1
+	}
+
+	if worktree.IsLinkedWorktree(primaryRoot) {
+		fmt.Fprintf(stderr, "lucind-ai: refusing to run from inside a linked worktree (%s); run from the primary repository instead\n", primaryRoot)
+		return 1
+	}
+
+	ledg, err := ledger.Open(ctx, primaryRoot)
+	if err != nil {
+		fmt.Fprintf(stderr, "lucind-ai: open ledger: %v\n", err)
+		return 1
+	}
+	defer ledg.Close()
+
+	act := strings.TrimSpace(*actor)
+	if act == "" {
+		act = defaultApprover()
+	}
+
+	reconcileSvc := reconcile.NewService(ledg)
+	req, err := reconcileSvc.Decline(ctx, *requestID, act, *reason)
+	if err != nil {
+		fmt.Fprintf(stderr, "lucind-ai: %v\n", err)
+		return 1
+	}
+
+	fmt.Fprintf(stdout, "request:   %s\nstatus:    %s\nactor:     %s\n", req.ID, req.Status, req.Actor)
+	return 0
+}
+
+// runReconcileCancel implements "lucind-ai reconcile cancel": cancels an awaiting reconciliation request.
+func runReconcileCancel(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("reconcile cancel", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	fs.Usage = func() {
+		fmt.Fprintln(stderr, "usage: lucind-ai reconcile cancel --request <id> [--actor <name>] [--reason <reason>]")
+		fs.PrintDefaults()
+	}
+
+	requestID := fs.String("request", "", "reconciliation request identifier")
+	actor := fs.String("actor", defaultApprover(), "actor recording the cancellation")
+	reason := fs.String("reason", "", "optional reason for cancellation")
+
+	if err := fs.Parse(args); err != nil {
+		return 1
+	}
+
+	if strings.TrimSpace(*requestID) == "" {
+		fmt.Fprintln(stderr, "lucind-ai: --request is required")
+		fs.Usage()
+		return 1
+	}
+
+	primaryRoot, err := resolvePrimaryRoot(ctx)
+	if err != nil {
+		fmt.Fprintf(stderr, "lucind-ai: resolve primary repository root: %v\n", err)
+		return 1
+	}
+
+	if worktree.IsLinkedWorktree(primaryRoot) {
+		fmt.Fprintf(stderr, "lucind-ai: refusing to run from inside a linked worktree (%s); run from the primary repository instead\n", primaryRoot)
+		return 1
+	}
+
+	ledg, err := ledger.Open(ctx, primaryRoot)
+	if err != nil {
+		fmt.Fprintf(stderr, "lucind-ai: open ledger: %v\n", err)
+		return 1
+	}
+	defer ledg.Close()
+
+	act := strings.TrimSpace(*actor)
+	if act == "" {
+		act = defaultApprover()
+	}
+
+	reconcileSvc := reconcile.NewService(ledg)
+	req, err := reconcileSvc.Cancel(ctx, *requestID, act, *reason)
+	if err != nil {
+		fmt.Fprintf(stderr, "lucind-ai: %v\n", err)
+		return 1
+	}
+
+	fmt.Fprintf(stdout, "request:   %s\nstatus:    %s\nactor:     %s\n", req.ID, req.Status, req.Actor)
+	return 0
+}
+
+// runReconcileRenew implements "lucind-ai reconcile renew" and top-level "lucind-ai renew": renews an expired or awaiting reconciliation request with fresh evidence.
+func runReconcileRenew(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("reconcile renew", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	fs.Usage = func() {
+		fmt.Fprintln(stderr, "usage: lucind-ai reconcile renew --request <id> [--base-sha <sha>] [--source-sha <sha>] [--target-sha <sha>] [--ttl <duration>]")
+		fs.PrintDefaults()
+	}
+
+	requestID := fs.String("request", "", "reconciliation request identifier to renew")
+	baseSHA := fs.String("base-sha", "", "base commit SHA override")
+	sourceSHA := fs.String("source-sha", "", "source commit SHA override")
+	targetSHA := fs.String("target-sha", "", "target commit SHA override")
+	ttl := fs.Duration("ttl", 15*time.Minute, "time-to-live budget for new request")
+
+	if err := fs.Parse(args); err != nil {
+		return 1
+	}
+
+	if strings.TrimSpace(*requestID) == "" {
+		fmt.Fprintln(stderr, "lucind-ai: --request is required")
+		fs.Usage()
+		return 1
+	}
+
+	primaryRoot, err := resolvePrimaryRoot(ctx)
+	if err != nil {
+		fmt.Fprintf(stderr, "lucind-ai: resolve primary repository root: %v\n", err)
+		return 1
+	}
+
+	if worktree.IsLinkedWorktree(primaryRoot) {
+		fmt.Fprintf(stderr, "lucind-ai: refusing to run from inside a linked worktree (%s); run from the primary repository instead\n", primaryRoot)
+		return 1
+	}
+
+	ledg, err := ledger.Open(ctx, primaryRoot)
+	if err != nil {
+		fmt.Fprintf(stderr, "lucind-ai: open ledger: %v\n", err)
+		return 1
+	}
+	defer ledg.Close()
+
+	deps := depsFactory(uuid.NewString(), primaryRoot, ledg, defaultTimeout, 0)
+	var opts []reconcile.ServiceOption
+	if deps.EvaluateOverlap != nil {
+		opts = append(opts, reconcile.WithOverlapEvaluator(deps.EvaluateOverlap))
+	}
+
+	reconcileSvc := reconcile.NewService(ledg, opts...)
+	newReq, err := reconcileSvc.Renew(ctx, reconcile.RenewParams{
+		OldRequestID:     *requestID,
+		RepoDir:          primaryRoot,
+		BaseSHA:          *baseSHA,
+		CurrentSourceSHA: *sourceSHA,
+		CurrentTargetSHA: *targetSHA,
+		TTL:              *ttl,
+	})
+	if err != nil {
+		fmt.Fprintf(stderr, "lucind-ai: %v\n", err)
+		return 1
+	}
+
+	fmt.Fprintf(stdout, "request:   %s\nstatus:    %s\nrenewed:   from %s\ndirection: %s\nexpires:   %s\n",
+		newReq.ID, newReq.Status, *requestID, newReq.Direction, newReq.ExpiresAt.Format(time.RFC3339))
+	return 0
+}
+
+
