@@ -513,6 +513,48 @@ func TestSkillAssetContract(t *testing.T) {
 	if !strings.Contains(content, "### Where to author packet files") {
 		t.Errorf("SKILL.md missing 'Where to author packet files' section")
 	}
+
+	// Frontmatter table documents the five feature-target keys (2.1-RED).
+	for _, key := range []string{"`feature`", "`parent_ref`", "`base_sha`", "`expected_parent_sha`", "`legacy_main`"} {
+		if !strings.Contains(content, key) {
+			t.Errorf("SKILL.md frontmatter table missing key %s", key)
+		}
+	}
+
+	// Planning fan-out convention (2.2-RED).
+	for _, phase := range []string{"explore", "propose", "design", "specs", "tasks"} {
+		if !strings.Contains(content, phase) {
+			t.Errorf("SKILL.md planning fan-out convention missing phase %q", phase)
+		}
+	}
+	if !strings.Contains(content, "canonical budget stays below the sum of the lens budgets") &&
+		!strings.Contains(content, "canonical ceiling stays strictly below the sum") &&
+		!strings.Contains(content, "canonical artifact word budget MUST stay strictly below") &&
+		!strings.Contains(content, "canonical budget stays strictly below the sum") {
+		t.Errorf("SKILL.md missing strict compression ceiling relation")
+	}
+
+	// Feature-branch ownership (2.3-RED).
+	if !strings.Contains(content, "feature create") {
+		t.Errorf("SKILL.md missing feature create orchestration guidance")
+	}
+	if !strings.Contains(content, "Lanes do not create or move parent refs") &&
+		!strings.Contains(content, "lanes do not create or move parent refs") &&
+		!strings.Contains(content, "Lanes do not create or move parent references") {
+		t.Errorf("SKILL.md missing feature-branch lane immutability rule")
+	}
+
+	// Shipped subcommands and run flags (2.5-RED).
+	for _, cmd := range []string{"serve", "feature", "reconcile", "renew"} {
+		if !strings.Contains(content, "lucind-ai "+cmd) && !strings.Contains(content, "`"+cmd+"`") && !strings.Contains(content, cmd) {
+			t.Errorf("SKILL.md invocation/CLI section missing subcommand %q", cmd)
+		}
+	}
+	for _, flag := range []string{"--approval-timeout", "--legacy-main", "--expected-parent-sha"} {
+		if !strings.Contains(content, flag) {
+			t.Errorf("SKILL.md invocation/CLI section missing run flag %q", flag)
+		}
+	}
 }
 
 func TestVerifyPacketTemplateAssetStructure(t *testing.T) {
