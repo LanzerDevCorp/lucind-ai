@@ -54,6 +54,24 @@ turning a should-be-automatic merge into manual per-lane recovery work every tim
 under `.lucind/packets/` instead avoids this failure mode entirely; no other packet content or
 dispatch step changes.
 
+### Where `.lucind/` ends and the change folder begins
+
+Packet files go under `.lucind/packets/` for the reason in **Where to author packet files**. That
+rule is one use of a larger split: `.lucind/` is runtime state, ignored on purpose;
+`openspec/changes/<id>/` is the change's history, tracked.
+
+| Location | Tracked? | Holds | Why this side exists |
+|---|---|---|---|
+| `.lucind/` | No (`.gitignore:2`) | In-flight packets, `.lucind/result.json`, the ledger, other worktree-local runtime files | Every lane writes `.lucind/result.json`. If `.lucind/` were tracked, that file would dirty `git status --porcelain`, so `enforceCompletionMode` would fail both write and read-only packets (`internal/run/run.go:628-661`). `Integrate` would refuse to promote while the primary root is dirty (`internal/integrate/integrate.go:25,112-126`). The same paths would fail the allowed-paths scope check, so the changed-path union skips `.lucind/` (`internal/run/run.go:599-601`). |
+| `openspec/changes/<id>/` | Yes | Canonical phase artifacts, `apply-dag.yaml` when a DAG is wanted, and packet bodies copied in after a phase closes | These are the change. `lucind-ai split --dag` reads the sidecar from here; later phases, verify, and archive read the canonical files. |
+
+**What the ignore costs, and the remedy.** Packet files are the instructions that produced the
+work. They stay ignored while a batch runs for the reason above — which is why a sidecar authored
+only under `.lucind/` never appears in git history, and reads as "never used" when the truth is
+"used, never committed". Nothing stops copying a phase's packets into the change folder once that
+phase closes. Worked precedent: `openspec/changes/archive/2026-08-21-sdd-fan-out-lens/apply-bodies/`
+— packet bodies, tracked, archived, breaking nothing.
+
 ### Executor preference by SDD phase
 
 Prefer this `executor:` value by SDD lifecycle phase when writing a packet. It is a preference the author applies by hand, not a rule enforced by any code — `executor` stays a value a human writes by hand (`docs/prd.md` section 6 step 1), and there is and will remain no code-level routing. It is a second, complementary lens to the aptitude map in `docs/prd.md` section 5 (sweeps-vs-precision); a packet author may weigh both when they point in different directions.
@@ -175,7 +193,15 @@ itself needs no edit either way, which is the property the target-less default e
 
 The second invocation is **not optional and not merely sequencing**. Lens worktrees cannot see each other; the synthesis worktree is branched from the integrated result, which is the only point where all three drafts exist in one tree.
 
-**The dependency this design accepts on purpose.** Lens B and lens C are downstream of lens A's choices, but run before it completes. Each opens its draft with `## Assumed architecture` (or approach), and the synthesizer treats lens A's as authoritative, recording what B or C assumed instead under `## Architecture Divergence`. Independent convergence on the same choice is corroboration and is recorded as such; divergence means the decision was underdetermined, which is signal worth having.
+**The dependency this design accepts on purpose.** Lens B and lens C are downstream of lens A's choices, but run before it completes. The opening declaration is named for what lens A owns in that phase — not a hedged `## Assumed architecture` for every phase:
+
+| Phase | Lens A owns | What B and C declare they are assuming |
+|---|---|---|
+| `explore` | problem space, candidate approaches, initial recommendations (`assets/explore-lens-a-packet-template.md`) | assumed problem and candidates |
+| `propose` | selected candidate, technical approach, conceptual changes (`assets/propose-lens-a-packet-template.md`) | assumed candidate and approach |
+| `design` | architecture decisions (`assets/design-lens-a-packet-template.md`) | `## Assumed architecture` |
+
+The synthesizer treats lens A's declaration as authoritative, recording what B or C assumed instead under `## Architecture Divergence`. Independent convergence on the same choice is corroboration and is recorded as such; divergence means the decision was underdetermined, which is signal worth having.
 
 **Budgets — and why there is one.** Each lens draft is capped under 1000 words; the canonical document under 1800 words.
 
@@ -194,8 +220,19 @@ The distinction is load-bearing because phase skills describe one sub-agent writ
 
 **The risk this moves rather than removes.** In the dual pattern the orchestrator independently verified every `file:line` before accepting it. Here the synthesizer does that, in a worktree with the real code — which it can do, and which the template makes a done-criterion. But it is now the single place where a hallucinated citation can pass. If the citation-verification pass or the `## Dropped Citations` section is ever weakened, the fan-out loses the property that made it safe.
 
-**Coverage checklist.** The synthesizer checks the canonical document against this repository's actual phase spine: technical approach, architecture decisions with alternatives and rationale, flow and invariants, file changes with terminal consumers, testing strategy and test seams, threat matrix with every row `Applicable` or `N/A: reason`, rollback and additivity, open questions and out of scope. Headings vary by change, but all required spine items must be substantively present.
+**Coverage checklist — per phase.** The synthesizer checks the canonical document against that phase's spine, not against the design spine. The eight-item design list is one instance. Headings may follow the change's own vocabulary; every spine item must be substantively present. Explore and propose below are the sections of the archived canonical artifacts (`openspec/changes/archive/2026-08-21-sdd-fan-out-lens/explore.md`, `proposal.md`); design is the list `assets/design-synthesis-packet-template.md` already checks. The explore and propose synthesizer templates encode the same concerns in lens-slice vocabulary. `specs` and `tasks` have no template spine yet — do not apply the design list to them.
 
+| Phase | Spine |
+|---|---|
+| `explore` | What exists today; Built versus convention; Constraints and hard blockers; Candidate scopes (buys, costs, forecloses, would-touch); Prior art; The deciding question; Open questions |
+| `propose` | Intent; Scope (in / out); Capabilities (new / modified); Approach; Affected Areas; Risks; Rollback Plan; Dependencies; Success Criteria; Review burden; Rejected alternatives; Open questions left to design |
+| `design` | Technical approach; architecture decisions with alternatives and rationale; flow and invariants; file changes with terminal consumers; testing strategy and test seams; threat matrix with every row `Applicable` or `N/A: reason`; rollback and additivity; open questions and out of scope |
+
+**Tasks fan-out — every wave must survive `Integrate`.** Path disjointness and ordered dependencies are not enough. `Integrate` runs `lucind-checks.sh` on the combined tree (`internal/run/integrate.go:50-59`; `internal/integrate/integrate.go:83-91`) and bisects a failing batch (`internal/run/integrate.go:28-30,83-84`). A wave whose accepted done criterion is that tests fail is reverted before its successor can turn them green.
+
+A partition is viable only when every wave can pass those checks on the combined tree by itself. Strict-TDD wave splitting is incompatible with that gate: RED and GREEN for one unit belong in one lane. Repository precedent: `openspec/changes/archive/2026-08-20-apply-dag-dispatch-hardening/tasks.md` declined a DAG split (a two-node DAG was possible; Unit 1 was too small to pay for sidecar orchestration) and used a single packet.
+
+**Size forecast for template work.** Forecast fan-out template work at roughly 150 lines per template. The `sdd-fan-out-lens` tasks lens C forecast 120–250 changed lines against an actual 1730, and neither sibling lens nor the synthesizer challenged it, with eight ~150-line templates already visible in the existing design set.
 
 ### Packet Structure
 
