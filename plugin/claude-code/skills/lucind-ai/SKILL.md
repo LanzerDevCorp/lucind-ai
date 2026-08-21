@@ -158,14 +158,25 @@ The standard planning fan-out convention across SDD planning phases (`explore`, 
 | `explore` | Problem & Candidates (`explore-lens-a.md`) | Capabilities & Scenarios (`explore-lens-b.md`) | Risks, Trade-offs & Spikes (`explore-lens-c.md`) | `explore.md` + `explore-synthesis-notes.md` |
 | `propose` | Candidate & Approach (`propose-lens-a.md`) | Capability Impact & Specs (`propose-lens-b.md`) | Risks, Rollback & Test Impact (`propose-lens-c.md`) | `proposal.md` + `proposal-synthesis-notes.md` |
 | `design` | Technical approach & decisions (`design-lens-a.md`) | Flow, invariants, deltas & file changes (`design-lens-b.md`) | Testing, threat matrix & rollback (`design-lens-c.md`) | `design.md` + `design-synthesis-notes.md` |
-| `specs` | Delta specs lens A | Delta specs lens B | Delta specs lens C | Canonical specs + synthesis notes |
-| `tasks` | Tasks lens A | Tasks lens B | Tasks lens C | Canonical `tasks.md` + synthesis notes |
+| `specs` | Capabilities & Requirements (`spec-lens-a.md`) | Scenarios & Coverage (`spec-lens-b.md`) | Live-Spec Conflicts & Migration (`spec-lens-c.md`) | `specs/<capability>/spec.md` + `spec-synthesis-notes.md` |
+| `tasks` | Decomposition & Ordering (`tasks-lens-a.md`) | Partition & Dispatch Shape (`tasks-lens-b.md`) | Proof & Review Burden (`tasks-lens-c.md`) | `tasks.md` + `tasks-synthesis-notes.md` |
 
-Templates: `assets/explore-lens-{a,b,c}-packet-template.md`, `assets/explore-synthesis-packet-template.md`, `assets/propose-lens-{a,b,c}-packet-template.md`, `assets/propose-synthesis-packet-template.md`, `assets/design-lens-{a,b,c}-packet-template.md`, and `assets/design-synthesis-packet-template.md`.
+Templates: `assets/<phase>-lens-{a,b,c}-packet-template.md` and `assets/<phase>-synthesis-packet-template.md` for each of `explore`, `propose`, `design`, `spec`, and `tasks` — twenty files. The template basename for the `specs` phase is singular (`spec-lens-a-packet-template.md`), matching its draft paths; the phase itself is named `specs` everywhere else.
 
 **Dispatch — two invocations, no sidecar.** These are hand-authored write packets; `lucind-ai split` and `apply-dag.yaml` are not involved and sidecars are not required.
 
-**Feature-branch ownership.** The orchestrator runs `lucind-ai feature create` before dispatch to initialize feature records in the ledger. Packets declare `feature`, `parent_ref`, `base_sha`, and `expected_parent_sha`, or declare legacy mode with `legacy_main: true` (or dispatch with `--legacy-main`). Lanes do not create or move parent refs.
+**`specs` and `design` are siblings, not a sequence.** Both consume the accepted proposal and nothing else, so they can run as two concurrent fan-outs. This is not a local convention — the real `gentle-ai` design skill marks its spec input `optional — may not exist if running in parallel with sdd-spec` (`~/.claude/skills/sdd-design/SKILL.md:43`). Running `specs` first out of habit costs a full phase's wall clock for nothing.
+
+Concurrently means one wave-1 invocation with six lens packets (`spec-lens-{a,b,c}` plus `design-lens-{a,b,c}`) and one wave-2 invocation with both synthesizers. Draft paths are already pairwise disjoint across the two phases, so the overlap check passes as written.
+
+Two consequences to write into the packets when they run this way:
+
+- Each design lens's `## Context` must state that `openspec/changes/<change-id>/specs/` does not exist yet. Its preconditions already admit that case; leaving it unsaid makes a lane hunt for a directory that is being written next to it.
+- Design lenses then reason from the proposal's Capabilities section, not from requirement ids. A design that cites `specs/` requirement names it never read is citing something it invented.
+
+`tasks` is the one planning phase that is genuinely downstream: it needs both the delta specs and the design, so it runs after both synthesizers integrate.
+
+**Feature-branch ownership.** The orchestrator creates the parent branch in git *and* runs `lucind-ai feature create --id … --parent … --base-sha …` before dispatch to initialize the ledger record — the command writes the row, it does not create the branch. It then checks that branch out in the primary repository, because integration promotes into the current checkout rather than into `parent_ref`; see **Multi-feature orchestration** below for what that does and does not buy. Packets declare `feature`, `parent_ref`, `base_sha`, and `expected_parent_sha`, or declare legacy mode with `legacy_main: true` (or dispatch with `--legacy-main`). Lanes do not create or move parent refs.
 
 Dispatch supplies the target at run time, because the templates declare none. Against `main` that
 means **both** flags, not either one: admission rejects legacy mode without an expected SHA, and an
@@ -200,14 +211,20 @@ The second invocation is **not optional and not merely sequencing**. Lens worktr
 | `explore` | problem space, candidate approaches, initial recommendations (`assets/explore-lens-a-packet-template.md`) | assumed problem and candidates |
 | `propose` | selected candidate, technical approach, conceptual changes (`assets/propose-lens-a-packet-template.md`) | assumed candidate and approach |
 | `design` | architecture decisions (`assets/design-lens-a-packet-template.md`) | `## Assumed architecture` |
+| `specs` | the capability map and every requirement statement (`assets/spec-lens-a-packet-template.md`) | `## Assumed requirements` |
+| `tasks` | the phased checklist and its dependency order (`assets/tasks-lens-a-packet-template.md`) | `## Assumed decomposition` |
 
-The synthesizer treats lens A's declaration as authoritative, recording what B or C assumed instead under `## Architecture Divergence`. Independent convergence on the same choice is corroboration and is recorded as such; divergence means the decision was underdetermined, which is signal worth having.
+The synthesizer treats lens A's declaration as authoritative, recording what B or C assumed instead under that phase's divergence section — `## Architecture Divergence` for design, `## Approach Divergence` for explore, `## Scope Divergence` for propose, `## Requirement Divergence` for specs, `## Decomposition Divergence` for tasks. Independent convergence on the same choice is corroboration and is recorded as such; divergence means the decision was underdetermined, which is signal worth having.
+
+**One deliberate exception to lens A's authority.** In `specs`, lens C's live-spec evidence outranks lens A on *classification only*: if lens A called a requirement `ADDED` and lens C found the live requirement it contradicts, it is `MODIFIED`. Lens C is the lane that opened `openspec/specs/`; lens A read only the index. Lens A still owns the requirement set and its text. Everywhere else, and for everything else in `specs`, lens A is authoritative without exception.
 
 **Budgets — and why there is one.** Each lens draft is capped under 1000 words; the canonical document under 1800 words.
 
 The gap between them is the entire mechanism. If the synthesizer's output budget were as large as the sum of its inputs, "synthesize" could be satisfied by stapling three drafts together and nothing would force a choice. Roughly 3000 words of feedstock compressed to 1800 makes arbitration mandatory. A synthesis that lands near 3000 words concatenated rather than synthesized, and is a failed run even if every sentence in it is true. **The one number that must never invert: the canonical budget stays below the sum of the lens budgets.** Raise them together or not at all. Go binary does not parse or enforce word counts.
 
 The second reason for a cap is downstream cost: planning artifacts are re-read by subsequent phases, apply, verify, and every judgment lane, so length is a tax multiplied by every consumer.
+
+**The one budget exception, and why it is not a loophole.** In `specs`, both lens C's cap and the synthesizer's cap exclude scenarios copied verbatim from a live spec inside a `MODIFIED` block. Archive replaces the live requirement with exactly what the delta says, so a scenario trimmed to hit a word count is deleted from the capability — a silent regression with no failing test behind it. The exclusion covers copied evidence only; every word either lane writes itself still counts, so the compression gap that forces arbitration is untouched.
 
 **Reading the real contract, and who wins.** All planning packets grant read-only access to `~/.claude/skills/sdd-*/` so the lanes read the `gentle-ai` phase contract as written instead of trusting a packet's paraphrase of it. Precedence between the two is deliberately **asymmetric**, and getting it backwards breaks the fan-out:
 
@@ -216,23 +233,91 @@ The second reason for a cap is downstream cost: planning artifacts are re-read b
 
 The distinction is load-bearing because phase skills describe one sub-agent writing a whole document alone. Read as blanket authority it would tell every lens to write the complete document, persist it to Engram, and return the phase summary block — which would collapse three lenses back into three redundant full documents. Lanes follow the packet on execution topology and record conflicts in notes. Nothing outside the repository is ever written.
 
-**What the orchestrator reads.** `<phase>-synthesis-notes.md`, and only that: `## Unresolved Contradictions`, `## Coverage Gaps`, `## Dropped Citations`, `## Architecture Divergence`. The synthesizer is instructed to escalate contradictions rather than pick, so a populated first section is a decision waiting for a human, not a defect.
+**What the orchestrator reads.** `<phase>-synthesis-notes.md`, and only that: `## Unresolved Contradictions`, `## Coverage Gaps`, `## Dropped Citations`, and that phase's divergence section. The synthesizer is instructed to escalate contradictions rather than pick, so a populated first section is a decision waiting for a human, not a defect.
 
 **The risk this moves rather than removes.** In the dual pattern the orchestrator independently verified every `file:line` before accepting it. Here the synthesizer does that, in a worktree with the real code — which it can do, and which the template makes a done-criterion. But it is now the single place where a hallucinated citation can pass. If the citation-verification pass or the `## Dropped Citations` section is ever weakened, the fan-out loses the property that made it safe.
 
-**Coverage checklist — per phase.** The synthesizer checks the canonical document against that phase's spine, not against the design spine. The eight-item design list is one instance. Headings may follow the change's own vocabulary; every spine item must be substantively present. Explore and propose below are the sections of the archived canonical artifacts (`openspec/changes/archive/2026-08-21-sdd-fan-out-lens/explore.md`, `proposal.md`); design is the list `assets/design-synthesis-packet-template.md` already checks. The explore and propose synthesizer templates encode the same concerns in lens-slice vocabulary. `specs` and `tasks` have no template spine yet — do not apply the design list to them.
+**Coverage checklist — per phase.** The synthesizer checks the canonical document against that phase's spine, not against the design spine. The eight-item design list is one instance. Headings may follow the change's own vocabulary; every spine item must be substantively present. Explore and propose below are the sections of the archived canonical artifacts (`openspec/changes/archive/2026-08-21-sdd-fan-out-lens/explore.md`, `proposal.md`); design is the list `assets/design-synthesis-packet-template.md` already checks. The explore and propose synthesizer templates encode the same concerns in lens-slice vocabulary. The `specs` and `tasks` spines below are the lists `assets/spec-synthesis-packet-template.md` and `assets/tasks-synthesis-packet-template.md` check; both are derived from the real `gentle-ai` skills rather than from an archived artifact, because no archived change in this repository ran either phase as a fan-out yet.
 
 | Phase | Spine |
 |---|---|
 | `explore` | What exists today; Built versus convention; Constraints and hard blockers; Candidate scopes (buys, costs, forecloses, would-touch); Prior art; The deciding question; Open questions |
 | `propose` | Intent; Scope (in / out); Capabilities (new / modified); Approach; Affected Areas; Risks; Rollback Plan; Dependencies; Success Criteria; Review burden; Rejected alternatives; Open questions left to design |
 | `design` | Technical approach; architecture decisions with alternatives and rationale; flow and invariants; file changes with terminal consumers; testing strategy and test seams; threat matrix with every row `Applicable` or `N/A: reason`; rollback and additivity; open questions and out of scope |
+| `specs` | Every capability the proposal names has a file at the right path (new full spec versus delta); every requirement classified `ADDED` / `MODIFIED` / `REMOVED` / `RENAMED`; an RFC 2119 keyword in every requirement; at least one scenario per requirement; happy-path and edge-case scenarios in GIVEN / WHEN / THEN; every `MODIFIED` block the complete live block; Reason and Migration on every removal and rename; no implementation detail |
+| `tasks` | Review Workload Forecast with every field populated; Suggested Work Units, each a standalone deliverable with a rollback boundary; a phased checklist whose tasks are specific, actionable, verifiable and small; a RED-test task before its production task for every threat-matrix row the design marked `Applicable` and none for an `N/A` row; explicit dependency order; every wave green on its own under `Integrate` and every same-wave unit pair path-disjoint; an executor named per unit where a DAG is intended; every requirement traced to at least one task |
 
 **Tasks fan-out — every wave must survive `Integrate`.** Path disjointness and ordered dependencies are not enough. `Integrate` runs `lucind-checks.sh` on the combined tree (`internal/run/integrate.go:50-59`; `internal/integrate/integrate.go:83-91`) and bisects a failing batch (`internal/run/integrate.go:28-30,83-84`). A wave whose accepted done criterion is that tests fail is reverted before its successor can turn them green.
 
 A partition is viable only when every wave can pass those checks on the combined tree by itself. Strict-TDD wave splitting is incompatible with that gate: RED and GREEN for one unit belong in one lane. Repository precedent: `openspec/changes/archive/2026-08-20-apply-dag-dispatch-hardening/tasks.md` declined a DAG split (a two-node DAG was possible; Unit 1 was too small to pay for sidecar orchestration) and used a single packet.
 
 **Size forecast for template work.** Forecast fan-out template work at roughly 150 lines per template. The `sdd-fan-out-lens` tasks lens C forecast 120–250 changed lines against an actual 1730, and neither sibling lens nor the synthesizer challenged it, with eight ~150-line templates already visible in the existing design set.
+
+### Multi-feature orchestration — what is wired and what is not
+
+Read this before planning two features at once. The ledger carries a full cross-feature
+machinery — features, expiring leases with fencing tokens, integration attempts, overlap
+evidence, reconciliation requests — and most of it is **not on the `lucind-ai run` path**. Treating
+it as active is the failure mode this section exists to prevent.
+
+**What `lucind-ai run` actually does with a feature target.** Admission checks the target fields
+and nothing downstream reads them. `validatePacketAdmission` requires either all four of `feature`,
+`parent_ref`, `base_sha`, `expected_parent_sha`, or `legacy_main` plus an expected SHA
+(`internal/run/run.go:250-268`); on the legacy branch it sets `p.ParentRef = "main"` and stops
+there. Integration then promotes with `git merge --ff-only <integration branch>` into whatever
+branch the **primary checkout currently has checked out** (`internal/integrate/integrate.go:129`,
+wired at `cmd/lucind-ai/cli.go:571`). It never consults `parent_ref`.
+
+So targeting a feature parent today means one thing operationally: check that branch out in the
+primary repository before dispatching. The frontmatter fields are an admission contract and a
+record, not a routing instruction.
+
+**What is not wired.** The lease acquisition, the integration-attempt state machine, the overlap
+gate, and reconciliation-request creation all live in `run.ExecuteAttempt`
+(`internal/run/attempt.go:217`). Nothing in `cmd/lucind-ai/` calls it — `lucind-ai run` goes to
+`ExecuteBatch` then `Integrate` (`cmd/lucind-ai/cli.go:285,294`), and no other code path reaches
+it. `ExecuteAttempt` has test callers only.
+
+The consequence is specific and worth stating plainly: **the cross-feature collision gate does not
+fire during a normal dispatch.** Two features touching the same file produce no overlap evidence,
+no reconciliation request, and no block. Whatever `git merge --ff-only` does is what happens.
+
+**What that leaves reachable from the CLI:**
+
+| Surface | Reachable | Notes |
+|---|---|---|
+| `feature create` | Yes | Writes the `features` row. Does **not** create the git branch — you do. `validateParentRef` rejects an empty ref, `main`, and the Lucind temp namespace (`internal/feature/feature.go:99`). |
+| `feature status` | Yes | Reads `features` and `integration_attempts`. |
+| `serve` | Yes | Read-only web views over the same rows. |
+| `feature recover --attempt <id>` | Only with an attempt row | `RecoverAttempt` resumes an existing attempt; only `ExecuteAttempt` creates one, so there is nothing to recover today. |
+| `reconcile approve\|decline\|cancel\|renew --request <id>` | Only with a request row | Only the overlap gate creates one, so likewise. |
+
+**Running two features in parallel, honestly.** From a single clone it is not supported. `Integrate`
+ff-merges into the primary checkout's current branch, the binary refuses to run from a linked
+worktree, and the ledger is one SQLite file in the primary root — two concurrent invocations would
+promote into the same branch. Two features in parallel means two clones, each with its own primary
+root, its own `.lucind/lucind.db`, and its own checked-out parent.
+
+That also means the two ledgers cannot see each other, so nothing detects a collision between them
+even in principle. Keeping two features from colliding is currently the same discipline as keeping
+two lanes in one wave from colliding: **disjoint paths, decided by the orchestrator before
+dispatch, and checked by hand.** The `allowed_paths` component-boundary prefix rule
+(`internal/packet/disjoint.go`) is the tool for it — but it only runs within one batch, so across
+two features it is a convention you apply, not a gate that protects you.
+
+**What the gate would do once wired**, so the intent is not lost: `evaluateOverlapGate`
+(`internal/run/attempt.go:623`) compares the candidate against every other active feature and
+classifies (`internal/overlap/overlap.go:623-678`). `required` — a predicted merge conflict, a
+rename/delete collision, a shared binary, intersecting or nearby hunks, or a hotspot weight over
+threshold — blocks promotion, releases the lease, and creates one awaiting reconciliation request
+per feature pair, deduplicated across retries. `warning` — merely shared paths, or a hotspot over
+the lower threshold — records evidence and does not block. `informational` is a no-op.
+
+**Do not present any of this as working before it has run once.** Every one of these tables is
+empty in this repository. The `opencode` executor was in exactly this position — built, specified,
+and tested — and three stacked defects appeared on its first real dispatch, each only reachable
+after fixing the one before it. Wiring `ExecuteAttempt` into the dispatch path and running two real
+features is the evidence; the test suite is not.
 
 ### Packet Structure
 
@@ -271,12 +356,18 @@ Run from the primary repository root (the binary refuses to run from inside a li
 lucind-ai run --packet <path> [--packet <path> ...] [--timeout <duration>] [--approval-timeout <duration>] [--legacy-main] [--expected-parent-sha <sha>]
 lucind-ai split --dag <path> --out <dir>
 lucind-ai check [--out <path>]
-lucind-ai serve [--addr <addr>]
-lucind-ai feature create <id>
-lucind-ai reconcile
-lucind-ai renew
+lucind-ai serve [--addr <addr>] [--approver <name>] [--approval-timeout <duration>]
+lucind-ai feature create --id <id> --parent <ref> --base-sha <sha> [--expected-parent-sha <sha>]
+lucind-ai feature status [--id <id>]
+lucind-ai feature recover --attempt <id>
+lucind-ai reconcile approve --request <id> --source <feature> --target <feature> [--actor <name>]
+lucind-ai reconcile decline --request <id> [--actor <name>] [--reason <reason>]
+lucind-ai reconcile cancel --request <id> [--actor <name>] [--reason <reason>]
+lucind-ai reconcile renew --request <id> [--base-sha <sha>] [--source-sha <sha>] [--target-sha <sha>]
 lucind-ai --version
 ```
+
+This block mirrors the binary's own `usage` string (`cmd/lucind-ai/cli.go:48`). `feature recover` and every `reconcile` action need a row that only the unwired attempt path creates — see **Multi-feature orchestration** above before reaching for either.
 
 ### Subcommands
 
@@ -284,9 +375,9 @@ lucind-ai --version
 - `lucind-ai split`: Split an `apply-dag.yaml` sidecar into per-lane packets and print wave dispatch commands.
 - `lucind-ai check`: Run repository checks once via `lucind-checks.sh` (`internal/integrate.Check`).
 - `lucind-ai serve`: Start the HTTP API/web server for approvals and status monitoring (`--addr`).
-- `lucind-ai feature`: Manage feature branches and parent integration in the ledger (`feature create <id>`, etc.).
+- `lucind-ai feature create|status|recover`: Ledger-side feature records. `create` writes the `features` row from `--id`, `--parent`, `--base-sha` — it does **not** create the git branch. `status` reads features and integration attempts. `recover --attempt <id>` resumes an existing integration attempt.
 - `lucind-ai reconcile approve|decline|cancel|renew --request <id>`: human decision on an overlap request between two feature parents. `approve` names `--source` and `--target` features; `renew` re-anchors a stale request to current SHAs. It does not reconcile ledger state against worktrees or git refs (`cmd/lucind-ai/cli.go:48`).
-- `lucind-ai renew`: Renew active lane leases or approvals in the ledger.
+- `lucind-ai renew`: an undocumented top-level alias for `reconcile renew` — same handler, same flags (`cmd/lucind-ai/cli.go:110`, `runReconcileRenew`). It does not renew lane leases; nothing on the CLI does. Prefer the `reconcile renew` spelling.
 
 ### `run` Flags
 
