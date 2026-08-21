@@ -148,7 +148,13 @@ phases:
         tasks: [4.3]
   verify:
     status: pending
-    note: One two-stage verify pass (mechanical + dual qualitative) per apply unit, plus a final full-change verify before archive.
+    note: |
+      One two-stage verify pass (mechanical + qualitative) per apply unit, plus a final
+      full-change verify before archive. Originally planned as dual agy+cursor-agent
+      qualitative dispatch (the project's established two-stage verify protocol); switched
+      to cursor-agent only per user instruction -- agy is out of quota for today. Every
+      remaining lucind-ai dispatch for this change (verify included) goes to cursor-agent
+      exclusively until noted otherwise.
   archive:
     status: pending
 notes: |
