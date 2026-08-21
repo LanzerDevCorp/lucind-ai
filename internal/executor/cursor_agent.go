@@ -35,18 +35,15 @@ func (c CursorAgent) DefaultModel() string {
 }
 
 // KnownModels returns every model a packet may deliberately request for
-// CursorAgent. cursor-grok-4.6-high is the default (billed against
-// Cursor's included "Cursor Models" quota); claude-opus-4-8-high is a
-// deliberately-tested escalation for non-trivial logic (billed against
-// Cursor's separate "Other Models" quota -- a real cost tradeoff, not a
-// mistake, when named on purpose). Extend this list only for a model
-// actually verified against the real cursor-agent CLI -- see
-// internal/executor.Executor.KnownModels's doc comment for why this is
-// not free text. In particular, never add a gemini- model here: that is
-// agy's provider family, and naming one for cursor-agent is exactly the
-// copy-paste mistake this method exists to catch.
+// CursorAgent. cursor-grok-4.6-high, CursorAgent's own default, is the only
+// entry: CursorAgent must run strictly on grok, never escalate to another
+// provider's model -- Claude's opus included -- so provider identity and
+// billing stay unambiguous. Extend this list only for a model actually
+// verified against the real cursor-agent CLI, and never with another
+// provider's model -- see internal/executor.Executor.KnownModels's doc
+// comment for why this is not free text.
 func (c CursorAgent) KnownModels() []string {
-	return []string{"cursor-grok-4.6-high", "claude-opus-4-8-high"}
+	return []string{"cursor-grok-4.6-high"}
 }
 
 // Run execs cursor-agent with req.Prompt, in req.WorktreePath, bounded by ctx.

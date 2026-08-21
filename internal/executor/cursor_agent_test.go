@@ -289,26 +289,11 @@ func TestCursorAgentRunAlwaysPassesMandatoryFlags(t *testing.T) {
 	}
 }
 
-func TestCursorAgentKnownModelsIncludesDefaultAndTestedEscalation(t *testing.T) {
+func TestCursorAgentKnownModelsIsGrokOnly(t *testing.T) {
 	c := executor.CursorAgent{}
 	known := c.KnownModels()
-	if len(known) == 0 {
-		t.Fatalf("KnownModels() = %v, want at least one model", known)
-	}
-	wantDefault, wantEscalation := false, false
-	for _, m := range known {
-		if m == c.DefaultModel() {
-			wantDefault = true
-		}
-		if m == "claude-opus-4-8-high" {
-			wantEscalation = true
-		}
-	}
-	if !wantDefault {
-		t.Errorf("KnownModels() = %v, want it to include DefaultModel() %q", known, c.DefaultModel())
-	}
-	if !wantEscalation {
-		t.Errorf("KnownModels() = %v, want it to include the deliberately-tested escalation model %q (see TestCursorAgentRunIncludesModelFlagWhenSet)", known, "claude-opus-4-8-high")
+	if len(known) != 1 || known[0] != c.DefaultModel() {
+		t.Errorf("KnownModels() = %v, want exactly [%q] -- cursor-agent must never escalate to another provider's model", known, c.DefaultModel())
 	}
 }
 
@@ -317,7 +302,10 @@ func TestCursorAgentKnownModelsExcludesOtherProviderFamilies(t *testing.T) {
 	known := c.KnownModels()
 	for _, m := range known {
 		if strings.HasPrefix(m, "gemini-") {
-			t.Errorf("KnownModels() = %v, want no gemini- model -- that is agy's provider family, not cursor-agent's; this is the exact mismatch that silently billed against Cursor's Other Models quota", known)
+			t.Errorf("KnownModels() = %v, want no gemini- model -- that is agy's provider family, not cursor-agent's", known)
+		}
+		if strings.HasPrefix(m, "claude-") {
+			t.Errorf("KnownModels() = %v, want no claude- model -- cursor-agent must run strictly on grok, never escalate to another provider's model", known)
 		}
 	}
 }
@@ -344,11 +332,11 @@ func TestCursorAgentRunIncludesModelFlagWhenSet(t *testing.T) {
 	argv := captureCursorArgv(t, executor.Request{
 		Prompt:       "do the thing",
 		WorktreePath: t.TempDir(),
-		Model:        "claude-opus-4-8-high",
+		Model:        "cursor-grok-4.6-high",
 	})
 
-	if got, ok := flagValue(argv, "--model"); !ok || got != "claude-opus-4-8-high" {
-		t.Errorf("--model = (%q, %v), want (%q, true)", got, ok, "claude-opus-4-8-high")
+	if got, ok := flagValue(argv, "--model"); !ok || got != "cursor-grok-4.6-high" {
+		t.Errorf("--model = (%q, %v), want (%q, true)", got, ok, "cursor-grok-4.6-high")
 	}
 }
 
