@@ -226,3 +226,61 @@ packets:
 		})
 	}
 }
+
+func TestParse_FeatureTargetFields(t *testing.T) {
+	dir := t.TempDir()
+	bodiesDir := filepath.Join(dir, "bodies")
+	if err := os.MkdirAll(bodiesDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(filepath.Join(bodiesDir, "apply-feat.md"), []byte("# Goal\nFeat work"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	yamlContent := `change: feature-parent-integration
+packets:
+  - id: apply-feat
+    executor: agy
+    routed_by: explicit feature target
+    feature: user-auth
+    parent_ref: refs/heads/feature/user-auth
+    base_sha: 1111111111111111111111111111111111111111
+    expected_parent_sha: 2222222222222222222222222222222222222222
+    legacy_main: false
+    allowed_paths:
+      - internal/auth/
+    depends_on: []
+    body_path: bodies/apply-feat.md
+`
+	dagPath := filepath.Join(dir, "apply-dag.yaml")
+	if err := os.WriteFile(dagPath, []byte(yamlContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	d, err := dag.Parse(dagPath)
+	if err != nil {
+		t.Fatalf("unexpected error parsing valid sidecar with target fields: %v", err)
+	}
+
+	if len(d.Packets) != 1 {
+		t.Fatalf("expected 1 packet, got %d", len(d.Packets))
+	}
+
+	p := d.Packets[0]
+	if p.Feature != "user-auth" {
+		t.Errorf("Feature = %q, want %q", p.Feature, "user-auth")
+	}
+	if p.ParentRef != "refs/heads/feature/user-auth" {
+		t.Errorf("ParentRef = %q, want %q", p.ParentRef, "refs/heads/feature/user-auth")
+	}
+	if p.BaseSHA != "1111111111111111111111111111111111111111" {
+		t.Errorf("BaseSHA = %q, want %q", p.BaseSHA, "1111111111111111111111111111111111111111")
+	}
+	if p.ExpectedParentSHA != "2222222222222222222222222222222222222222" {
+		t.Errorf("ExpectedParentSHA = %q, want %q", p.ExpectedParentSHA, "2222222222222222222222222222222222222222")
+	}
+	if p.LegacyMain != false {
+		t.Errorf("LegacyMain = %v, want false", p.LegacyMain)
+	}
+}

@@ -25,6 +25,7 @@ var (
 	ErrMissingRoutedBy = errors.New("packet: frontmatter is missing a non-empty routed_by")
 	ErrEmptyBody       = errors.New("packet: body is empty, there is no prompt to dispatch")
 	ErrInvalidReadOnly = errors.New("packet: frontmatter read_only must be a boolean (true or false)")
+	ErrInvalidLegacyMain = errors.New("packet: frontmatter legacy_main must be a boolean (true or false)")
 	ErrInvalidAllowedPaths = errors.New("packet: frontmatter allowed_paths must be a JSON array of strings")
 )
 
@@ -53,6 +54,16 @@ type Packet struct {
 	// permitted to touch. When omitted or empty, the packet is undeclared
 	// and path checks are skipped.
 	AllowedPaths []string
+	// Feature identifies the target feature for parent integration.
+	Feature string
+	// ParentRef is the target parent git reference (e.g. refs/heads/feature/foo).
+	ParentRef string
+	// BaseSHA is the immutable commit SHA where the feature was branched.
+	BaseSHA string
+	// ExpectedParentSHA is the expected commit SHA of ParentRef before promotion.
+	ExpectedParentSHA string
+	// LegacyMain indicates legacy mode dispatch targeting main.
+	LegacyMain bool
 	// Body is the Markdown prompt, passed to the executor unchanged.
 	Body string
 }
@@ -91,6 +102,23 @@ func Parse(r io.Reader) (Packet, error) {
 				p.ReadOnly = false
 			default:
 				return Packet{}, ErrInvalidReadOnly
+			}
+		case "feature":
+			p.Feature = strings.TrimSpace(value)
+		case "parent_ref":
+			p.ParentRef = strings.TrimSpace(value)
+		case "base_sha":
+			p.BaseSHA = strings.TrimSpace(value)
+		case "expected_parent_sha":
+			p.ExpectedParentSHA = strings.TrimSpace(value)
+		case "legacy_main":
+			switch strings.TrimSpace(value) {
+			case "true":
+				p.LegacyMain = true
+			case "false":
+				p.LegacyMain = false
+			default:
+				return Packet{}, ErrInvalidLegacyMain
 			}
 		case "allowed_paths":
 			trimmed := strings.TrimSpace(value)

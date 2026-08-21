@@ -27,7 +27,16 @@ import (
 // testPacket's shape (executor "agy", a non-empty routed_by, matching the
 // ledger schema's CHECK constraint and packet.Parse's own requirements).
 func batchPacket(id string) packet.Packet {
-	return packet.Packet{ID: id, Executor: "agy", RoutedBy: "touches config, Tier A audit mandatory", Body: "do the thing"}
+	return packet.Packet{
+		ID:                id,
+		Executor:          "agy",
+		RoutedBy:          "touches config, Tier A audit mandatory",
+		Feature:           "feat-" + id,
+		ParentRef:         "refs/heads/main",
+		BaseSHA:           "b000000000000000000000000000000000000000",
+		ExpectedParentSHA: "b000000000000000000000000000000000000000",
+		Body:              "do the thing",
+	}
 }
 
 // laneEnvelopeJSON returns a minimal envelope satisfying result.schema.json
@@ -705,16 +714,24 @@ func TestExecuteBatchDispatchesDifferentExecutorsPerPacket(t *testing.T) {
 	cursorExec := &recordingFakeExecutor{}
 
 	p1 := packet.Packet{
-		ID:       "lane-agy",
-		Executor: "agy",
-		RoutedBy: "rule agy",
-		Body:     "prompt for agy",
+		ID:                "lane-agy",
+		Executor:          "agy",
+		RoutedBy:          "rule agy",
+		Feature:           "feat-lane-agy",
+		ParentRef:         "refs/heads/main",
+		BaseSHA:           "b000000000000000000000000000000000000000",
+		ExpectedParentSHA: "b000000000000000000000000000000000000000",
+		Body:              "prompt for agy",
 	}
 	p2 := packet.Packet{
-		ID:       "lane-cursor",
-		Executor: "cursor-agent",
-		RoutedBy: "rule cursor",
-		Body:     "prompt for cursor",
+		ID:                "lane-cursor",
+		Executor:          "cursor-agent",
+		RoutedBy:          "rule cursor",
+		Feature:           "feat-lane-cursor",
+		ParentRef:         "refs/heads/main",
+		BaseSHA:           "b000000000000000000000000000000000000000",
+		ExpectedParentSHA: "b000000000000000000000000000000000000000",
+		Body:              "prompt for cursor",
 	}
 
 	deps := newBatchTestDeps(t, func(id string) string {

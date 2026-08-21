@@ -42,7 +42,7 @@ const defaultTimeout = 20 * time.Minute
 // error, so a person driving the binary from a terminal always sees the one
 // invocation that works rather than a stack trace. --packet is repeatable:
 // each occurrence adds one more lane to the batch.
-const usage = "usage: lucind-ai run --packet <path> [--packet <path> ...] [--timeout <duration>] [--approval-timeout <duration>]\n       lucind-ai split --dag <path> --out <dir>\n       lucind-ai check [--out <path>]\n       lucind-ai serve [--addr <addr>] [--approver <name>] [--approval-timeout <duration>]\n       lucind-ai --version"
+const usage = "usage: lucind-ai run --packet <path> [--packet <path> ...] [--timeout <duration>] [--approval-timeout <duration>] [--legacy-main] [--expected-parent-sha <sha>]\n       lucind-ai split --dag <path> --out <dir>\n       lucind-ai check [--out <path>]\n       lucind-ai serve [--addr <addr>] [--approver <name>] [--approval-timeout <duration>]\n       lucind-ai --version"
 
 // depsFactory constructs run.Deps for runDispatch. In production it is
 // productionDeps; tests may override it to inject test doubles or observe dependency calls.
@@ -123,6 +123,8 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 	fs.Var(&packetFlags, "packet", "path to a dispatch packet (repeatable: one lane per occurrence)")
 	timeout := fs.Duration("timeout", defaultTimeout, "wall clock budget granted to each lane")
 	approvalTimeout := fs.Duration("approval-timeout", 0, "approval timeout budget granted to lane gates (0 = no wait / bypass)")
+	legacyMain := fs.Bool("legacy-main", false, "declare legacy mode (dispatches against main)")
+	expectedParentSHA := fs.String("expected-parent-sha", "", "expected parent commit SHA for legacy mode")
 
 	if err := fs.Parse(args); err != nil {
 		// flag.ContinueOnError already invoked fs.Usage() on a parse
@@ -150,6 +152,24 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 			return 1
 		}
 		ps = append(ps, p)
+	}
+
+	if *legacyMain && *expectedParentSHA == "" {
+		for i, p := range ps {
+			if p.ExpectedParentSHA == "" {
+				fmt.Fprintf(stderr, "lucind-ai: packet %q in legacy mode requires --expected-parent-sha or frontmatter expected_parent_sha\n", packetFlags[i])
+				return 1
+			}
+		}
+	}
+
+	for i := range ps {
+		if *legacyMain {
+			ps[i].LegacyMain = true
+		}
+		if *expectedParentSHA != "" && ps[i].ExpectedParentSHA == "" {
+			ps[i].ExpectedParentSHA = *expectedParentSHA
+		}
 	}
 
 	// Every packet in this batch must name a supported executor --

@@ -26,6 +26,21 @@ func EmitPacketContent(node Node, baseDir string) (string, error) {
 	if node.Model != "" {
 		b.WriteString(fmt.Sprintf("model: %s\n", node.Model))
 	}
+	if node.Feature != "" {
+		b.WriteString(fmt.Sprintf("feature: %s\n", node.Feature))
+	}
+	if node.ParentRef != "" {
+		b.WriteString(fmt.Sprintf("parent_ref: %s\n", node.ParentRef))
+	}
+	if node.BaseSHA != "" {
+		b.WriteString(fmt.Sprintf("base_sha: %s\n", node.BaseSHA))
+	}
+	if node.ExpectedParentSHA != "" {
+		b.WriteString(fmt.Sprintf("expected_parent_sha: %s\n", node.ExpectedParentSHA))
+	}
+	if node.LegacyMain {
+		b.WriteString("legacy_main: true\n")
+	}
 	pathsJSON, err := json.Marshal(node.AllowedPaths)
 	if err != nil {
 		return "", fmt.Errorf("dag: failed to marshal allowed_paths for %q: %w", node.ID, err)
