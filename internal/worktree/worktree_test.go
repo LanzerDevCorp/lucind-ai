@@ -678,5 +678,359 @@ func TestLinkedWorktreeInheritsCommittedMechanicalLog(t *testing.T) {
 	}
 }
 
+func TestCreateWithParentExplicitSHA(t *testing.T) {
+	if testing.Short() {
+		t.Skip("shells out to real git")
+	}
+
+	primaryRoot := initRepo(t)
+
+	// Seed commit is the initial commit
+	seedSHAOut := bytes.Buffer{}
+	cmd := exec.Command("git", "rev-parse", "HEAD")
+	cmd.Dir = primaryRoot
+	cmd.Stdout = &seedSHAOut
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("git rev-parse HEAD error = %v", err)
+	}
+	seedSHA := strings.TrimSpace(seedSHAOut.String())
+
+	// Advance main with a second commit
+	if err := os.WriteFile(filepath.Join(primaryRoot, "file2.txt"), []byte("second commit\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(file2.txt) error = %v", err)
+	}
+	runGit(t, primaryRoot, "add", "file2.txt")
+	runGit(t, primaryRoot, "commit", "-m", "second commit on main")
+
+	mainHeadOut := bytes.Buffer{}
+	cmd = exec.Command("git", "rev-parse", "HEAD")
+	cmd.Dir = primaryRoot
+	cmd.Stdout = &mainHeadOut
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("git rev-parse HEAD error = %v", err)
+	}
+	mainHeadSHA := strings.TrimSpace(mainHeadOut.String())
+
+	if seedSHA == mainHeadSHA {
+		t.Fatalf("seedSHA (%s) unexpectedly equals mainHeadSHA (%s)", seedSHA, mainHeadSHA)
+	}
+
+	// Create feature parent branch pointing at seedSHA
+	runGit(t, primaryRoot, "branch", "feature-alpha", seedSHA)
+
+	// Create worktree with explicit parent and base SHA pointing to seedSHA
+	wt, err := worktree.CreateWithParent(context.Background(), primaryRoot, "lane-explicit", "refs/heads/feature-alpha", seedSHA)
+	if err != nil {
+		t.Fatalf("CreateWithParent() error = %v, want nil", err)
+	}
+
+	if wt.BaseSHA != seedSHA {
+		t.Errorf("BaseSHA = %q, want %q", wt.BaseSHA, seedSHA)
+	}
+
+	// Verify via git -C <path> rev-parse HEAD that the worktree HEAD equals seedSHA, not mainHeadSHA
+	wtHeadOut := bytes.Buffer{}
+	cmd = exec.Command("git", "-C", wt.Path, "rev-parse", "HEAD")
+	cmd.Stdout = &wtHeadOut
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("git -C wt.Path rev-parse HEAD error = %v", err)
+	}
+	wtHeadSHA := strings.TrimSpace(wtHeadOut.String())
+
+	if wtHeadSHA != seedSHA {
+		t.Errorf("worktree HEAD = %q, want explicit seedSHA %q (not %q)", wtHeadSHA, seedSHA, mainHeadSHA)
+	}
+
+	// Verify legacy Create still starts at primaryRoot checkout (mainHeadSHA)
+	legacyWT, err := worktree.Create(context.Background(), primaryRoot, "lane-legacy")
+	if err != nil {
+		t.Fatalf("Create() error = %v, want nil", err)
+	}
+	if legacyWT.BaseSHA != mainHeadSHA {
+		t.Errorf("legacy Create BaseSHA = %q, want mainHeadSHA %q", legacyWT.BaseSHA, mainHeadSHA)
+	}
+}
+
+func TestCreateWithParentRejectsInvalidParentRef(t *testing.T) {
+	if testing.Short() {
+		t.Skip("shells out to real git")
+	}
+
+	primaryRoot := initRepo(t)
+	seedSHA := strings.TrimSpace(runGitOutput(t, primaryRoot, "rev-parse", "HEAD"))
+
+	testCases := []struct {
+		name      string
+		parentRef string
+	}{
+		{name: "empty parent ref", parentRef: ""},
+		{name: "whitespace only", parentRef: "   "},
+		{name: "bare main", parentRef: "main"},
+		{name: "canonical main", parentRef: "refs/heads/main"},
+		{name: "bare lucind", parentRef: "lucind"},
+		{name: "canonical lucind", parentRef: "refs/heads/lucind"},
+		{name: "lucind temp namespace branch", parentRef: "lucind/lane-123"},
+		{name: "canonical lucind temp namespace", parentRef: "refs/heads/lucind/lane-123"},
+		{name: "double dot in ref", parentRef: "feature..invalid"},
+		{name: "space in ref", parentRef: "feature name"},
+		{name: "starts with dash", parentRef: "-bad-ref"},
+		{name: "tilde in ref", parentRef: "feature~1"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			laneID := "lane-" + strings.ReplaceAll(tc.name, " ", "-")
+			_, err := worktree.CreateWithParent(context.Background(), primaryRoot, laneID, tc.parentRef, seedSHA)
+			if err == nil {
+				t.Fatalf("CreateWithParent(parentRef=%q) error = nil, want ErrInvalidParentRef", tc.parentRef)
+			}
+			if !errors.Is(err, worktree.ErrInvalidParentRef) {
+				t.Errorf("CreateWithParent(parentRef=%q) error = %v, want errors.Is(..., worktree.ErrInvalidParentRef)", tc.parentRef, err)
+			}
+
+			// Ensure no worktree path was created
+			expectedPath := filepath.Join(filepath.Dir(primaryRoot), filepath.Base(primaryRoot)+"-worktrees", laneID)
+			if _, statErr := os.Stat(expectedPath); statErr == nil {
+				t.Errorf("worktree directory %q was created despite invalid parent ref", expectedPath)
+			}
+		})
+	}
+}
+
+func TestCreateWithParentRejectsInvalidBaseSHA(t *testing.T) {
+	if testing.Short() {
+		t.Skip("shells out to real git")
+	}
+
+	primaryRoot := initRepo(t)
+
+	// Create a blob in git object database so we have a valid object that is NOT a commit
+	blobSHA := strings.TrimSpace(runGitOutput(t, primaryRoot, "hash-object", "-w", "README.md"))
+
+	testCases := []struct {
+		name    string
+		baseSHA string
+	}{
+		{name: "empty base sha", baseSHA: ""},
+		{name: "whitespace base sha", baseSHA: "   "},
+		{name: "non existent sha", baseSHA: "0123456789abcdef0123456789abcdef01234567"},
+		{name: "blob object not a commit", baseSHA: blobSHA},
+		{name: "garbage sha string", baseSHA: "not-a-sha-at-all"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			laneID := "lane-sha-" + strings.ReplaceAll(tc.name, " ", "-")
+			_, err := worktree.CreateWithParent(context.Background(), primaryRoot, laneID, "refs/heads/feature-alpha", tc.baseSHA)
+			if err == nil {
+				t.Fatalf("CreateWithParent(baseSHA=%q) error = nil, want ErrInvalidBaseSHA", tc.baseSHA)
+			}
+			if !errors.Is(err, worktree.ErrInvalidBaseSHA) {
+				t.Errorf("CreateWithParent(baseSHA=%q) error = %v, want errors.Is(..., worktree.ErrInvalidBaseSHA)", tc.baseSHA, err)
+			}
+
+			// Ensure no worktree path was created
+			expectedPath := filepath.Join(filepath.Dir(primaryRoot), filepath.Base(primaryRoot)+"-worktrees", laneID)
+			if _, statErr := os.Stat(expectedPath); statErr == nil {
+				t.Errorf("worktree directory %q was created despite invalid base SHA", expectedPath)
+			}
+		})
+	}
+}
+
+func TestCreateWithParentAncestryCheck(t *testing.T) {
+	if testing.Short() {
+		t.Skip("shells out to real git")
+	}
+
+	primaryRoot := initRepo(t)
+
+	initialBranch := strings.TrimSpace(runGitOutput(t, primaryRoot, "rev-parse", "--abbrev-ref", "HEAD"))
+
+	// Commit 1 (seed)
+	seedSHA := strings.TrimSpace(runGitOutput(t, primaryRoot, "rev-parse", "HEAD"))
+
+	// Commit 2 on initial branch
+	if err := os.WriteFile(filepath.Join(primaryRoot, "file2.txt"), []byte("commit 2\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(file2.txt) error = %v", err)
+	}
+	runGit(t, primaryRoot, "add", "file2.txt")
+	runGit(t, primaryRoot, "commit", "-m", "commit 2")
+	commit2SHA := strings.TrimSpace(runGitOutput(t, primaryRoot, "rev-parse", "HEAD"))
+
+	// Branch feature-parent points to commit 2
+	runGit(t, primaryRoot, "branch", "feature-parent", commit2SHA)
+
+	// An unrelated orphan branch
+	runGit(t, primaryRoot, "checkout", "--orphan", "orphan-branch")
+	if err := os.WriteFile(filepath.Join(primaryRoot, "orphan.txt"), []byte("orphan content\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(orphan.txt) error = %v", err)
+	}
+	runGit(t, primaryRoot, "add", "orphan.txt")
+	runGit(t, primaryRoot, "commit", "-m", "orphan commit")
+	orphanSHA := strings.TrimSpace(runGitOutput(t, primaryRoot, "rev-parse", "HEAD"))
+
+	// Return to initial branch
+	runGit(t, primaryRoot, "checkout", initialBranch)
+
+	// 1. seedSHA is an ancestor of feature-parent (at commit2) -> should succeed
+	wt, err := worktree.CreateWithParent(context.Background(), primaryRoot, "lane-anc-ok", "refs/heads/feature-parent", seedSHA)
+	if err != nil {
+		t.Fatalf("CreateWithParent() ancestor error = %v, want nil", err)
+	}
+	if wt.BaseSHA != seedSHA {
+		t.Errorf("BaseSHA = %q, want %q", wt.BaseSHA, seedSHA)
+	}
+
+	// 2. orphanSHA is NOT an ancestor of feature-parent -> should fail
+	_, err = worktree.CreateWithParent(context.Background(), primaryRoot, "lane-anc-fail", "refs/heads/feature-parent", orphanSHA)
+	if err == nil {
+		t.Fatalf("CreateWithParent() non-ancestor error = nil, want ErrInvalidBaseSHA")
+	}
+	if !errors.Is(err, worktree.ErrInvalidBaseSHA) {
+		t.Errorf("CreateWithParent() non-ancestor error = %v, want errors.Is(..., worktree.ErrInvalidBaseSHA)", err)
+	}
+}
+
+func TestValidateParentRef(t *testing.T) {
+	ctx := context.Background()
+
+	validRefs := []string{
+		"feature/auth",
+		"refs/heads/feature/auth",
+		"feature-123",
+		"refs/heads/feature-123",
+		"user/jane/work",
+	}
+	for _, ref := range validRefs {
+		if err := worktree.ValidateParentRef(ctx, nil, ref); err != nil {
+			t.Errorf("ValidateParentRef(%q) err = %v, want nil", ref, err)
+		}
+	}
+
+	invalidRefs := []string{
+		"",
+		"   ",
+		"main",
+		"refs/heads/main",
+		"lucind",
+		"refs/heads/lucind",
+		"lucind/lane-1",
+		"refs/heads/lucind/lane-1",
+		"feature..invalid",
+		"feature space",
+		"-bad",
+	}
+	for _, ref := range invalidRefs {
+		if err := worktree.ValidateParentRef(ctx, nil, ref); !errors.Is(err, worktree.ErrInvalidParentRef) {
+			t.Errorf("ValidateParentRef(%q) err = %v, want ErrInvalidParentRef", ref, err)
+		}
+	}
+}
+
+func TestCanonicalizeRef(t *testing.T) {
+	if got := worktree.CanonicalizeRef("feature/auth"); got != "refs/heads/feature/auth" {
+		t.Errorf("CanonicalizeRef(feature/auth) = %q, want refs/heads/feature/auth", got)
+	}
+	if got := worktree.CanonicalizeRef("refs/heads/feature/auth"); got != "refs/heads/feature/auth" {
+		t.Errorf("CanonicalizeRef(refs/heads/feature/auth) = %q, want refs/heads/feature/auth", got)
+	}
+}
+
+func TestResolveCommitSHA(t *testing.T) {
+	if testing.Short() {
+		t.Skip("shells out to real git")
+	}
+
+	primaryRoot := initRepo(t)
+	seedSHA := strings.TrimSpace(runGitOutput(t, primaryRoot, "rev-parse", "HEAD"))
+
+	// Valid commit
+	sha, err := worktree.ResolveCommitSHA(context.Background(), nil, primaryRoot, seedSHA)
+	if err != nil {
+		t.Fatalf("ResolveCommitSHA(seedSHA) error = %v, want nil", err)
+	}
+	if sha != seedSHA {
+		t.Errorf("ResolveCommitSHA(seedSHA) = %q, want %q", sha, seedSHA)
+	}
+
+	// Short SHA
+	shortSHA := seedSHA[:7]
+	sha, err = worktree.ResolveCommitSHA(context.Background(), nil, primaryRoot, shortSHA)
+	if err != nil {
+		t.Fatalf("ResolveCommitSHA(shortSHA) error = %v, want nil", err)
+	}
+	if sha != seedSHA {
+		t.Errorf("ResolveCommitSHA(shortSHA) = %q, want %q", sha, seedSHA)
+	}
+
+	// Invalid SHA
+	_, err = worktree.ResolveCommitSHA(context.Background(), nil, primaryRoot, "0000000000000000000000000000000000000000")
+	if !errors.Is(err, worktree.ErrInvalidBaseSHA) {
+		t.Errorf("ResolveCommitSHA(invalid) err = %v, want ErrInvalidBaseSHA", err)
+	}
+}
+
+func TestGitRunnerSeam(t *testing.T) {
+	fakeCalled := false
+	fakeRunner := &mockGitRunner{
+		runFn: func(ctx context.Context, dir string, args ...string) ([]byte, error) {
+			fakeCalled = true
+			if len(args) > 0 && args[0] == "check-ref-format" {
+				return []byte("feature-test\n"), nil
+			}
+			if len(args) > 0 && args[0] == "rev-parse" {
+				return []byte("1111222233334444555566667777888899990000\n"), nil
+			}
+			if len(args) > 0 && args[0] == "merge-base" {
+				return []byte(""), nil
+			}
+			if len(args) > 0 && args[0] == "worktree" && args[1] == "add" {
+				return []byte(""), nil
+			}
+			return []byte("1111222233334444555566667777888899990000\n"), nil
+		},
+	}
+
+	primaryRoot := t.TempDir()
+	wt, err := worktree.CreateWithRunner(context.Background(), fakeRunner, primaryRoot, "lane-mock", "refs/heads/feature-test", "1111222233334444555566667777888899990000")
+	if err != nil {
+		t.Fatalf("CreateWithRunner() error = %v", err)
+	}
+	if !fakeCalled {
+		t.Errorf("fake runner was not invoked")
+	}
+	if wt.BaseSHA != "1111222233334444555566667777888899990000" {
+		t.Errorf("wt.BaseSHA = %q, want mocked SHA", wt.BaseSHA)
+	}
+}
+
+type mockGitRunner struct {
+	runFn func(ctx context.Context, dir string, args ...string) ([]byte, error)
+}
+
+func (m *mockGitRunner) Run(ctx context.Context, dir string, args ...string) ([]byte, error) {
+	if m.runFn != nil {
+		return m.runFn(ctx, dir, args...)
+	}
+	return nil, nil
+}
+
+func runGitOutput(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+
+	cmd := exec.Command("git", append([]string{
+		"-c", "user.email=worktree-test@example.com",
+		"-c", "user.name=worktree-test",
+	}, args...)...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v error = %v, output = %s", args, err, out)
+	}
+	return string(out)
+}
+
+
 
 

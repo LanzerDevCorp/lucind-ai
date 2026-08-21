@@ -24,6 +24,17 @@ var ErrMergeConflict = errors.New("integrate: merge conflict")
 // root has uncommitted changes.
 var ErrPrimaryRootDirty = errors.New("integrate: primary root has uncommitted changes")
 
+// ErrStaleCAS is returned by PromoteCAS when the parent ref's current SHA
+// does not match the expected SHA (compare-and-swap mismatch).
+var ErrStaleCAS = errors.New("integrate: stale expected sha in cas promotion")
+
+// ErrInvalidParentRef is returned by PromoteCAS when the parent ref is invalid,
+// equals main, or belongs to a Lucind temporary branch namespace.
+var ErrInvalidParentRef = errors.New("integrate: invalid parent ref")
+
+// ErrEmptySHA is returned by PromoteCAS when candidateSHA or expectedSHA is empty.
+var ErrEmptySHA = errors.New("integrate: candidate sha and expected sha must not be empty")
+
 // Combine creates a temporary linked worktree for runID off primaryRoot,
 // merges each branch in branches in order via "git merge --no-ff", and
 // returns the worktree path and branch name on success.
@@ -125,3 +136,39 @@ func Promote(ctx context.Context, primaryRoot, integrationBranch string) error {
 
 	return nil
 }
+
+// PromoteCAS atomically advances parentRef to candidateSHA in primaryRoot if and only if
+// parentRef currently points to expectedSHA, using git update-ref.
+// It does not check out, merge into, or otherwise mutate primaryRoot's working tree or HEAD branch.
+func PromoteCAS(ctx context.Context, primaryRoot, parentRef, candidateSHA, expectedSHA string) error {
+	return PromoteCASWithRunner(ctx, worktree.DefaultGitRunner, primaryRoot, parentRef, candidateSHA, expectedSHA)
+}
+
+// PromoteRef is an alias for PromoteCAS.
+var PromoteRef = PromoteCAS
+
+// PromoteCASWithRunner performs compare-and-swap promotion using the injected GitRunner.
+func PromoteCASWithRunner(ctx context.Context, runner worktree.GitRunner, primaryRoot, parentRef, candidateSHA, expectedSHA string) error {
+	if runner == nil {
+		runner = worktree.DefaultGitRunner
+	}
+
+	if err := worktree.ValidateParentRef(ctx, runner, parentRef); err != nil {
+		return ErrInvalidParentRef
+	}
+
+	candidate := strings.TrimSpace(candidateSHA)
+	expected := strings.TrimSpace(expectedSHA)
+	if candidate == "" || expected == "" {
+		return ErrEmptySHA
+	}
+
+	canonicalRef := worktree.CanonicalizeRef(parentRef)
+
+	if _, err := runner.Run(ctx, primaryRoot, "update-ref", canonicalRef, candidate, expected); err != nil {
+		return fmt.Errorf("%w: %w", ErrStaleCAS, err)
+	}
+
+	return nil
+}
+

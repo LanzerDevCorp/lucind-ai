@@ -542,3 +542,282 @@ func TestPromoteMergeFailure(t *testing.T) {
 		t.Errorf("Promote() error = %q, want it to wrap git merge --ff-only failure", err)
 	}
 }
+
+func TestPromoteCASHappyPath(t *testing.T) {
+	if testing.Short() {
+		t.Skip("shells out to real git")
+	}
+
+	primaryRoot := initRepo(t)
+	shaA := runGit(t, primaryRoot, "rev-parse", "HEAD")
+
+	// Create feature branch pointing at shaA
+	runGit(t, primaryRoot, "branch", "feature-alpha", shaA)
+
+	// Create candidate commit on a temporary branch
+	runGit(t, primaryRoot, "checkout", "-b", "temp-candidate")
+	if err := os.WriteFile(filepath.Join(primaryRoot, "feature_file.txt"), []byte("feature content\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile error = %v", err)
+	}
+	runGit(t, primaryRoot, "add", "feature_file.txt")
+	runGit(t, primaryRoot, "commit", "-m", "feature commit")
+	shaCandidate := runGit(t, primaryRoot, "rev-parse", "HEAD")
+
+	// Switch back to main
+	runGit(t, primaryRoot, "checkout", "main")
+	mainHeadBefore := runGit(t, primaryRoot, "rev-parse", "HEAD")
+	mainSymRefBefore := runGit(t, primaryRoot, "symbolic-ref", "HEAD")
+
+	// Promote using CAS
+	err := integrate.PromoteCAS(context.Background(), primaryRoot, "refs/heads/feature-alpha", shaCandidate, shaA)
+	if err != nil {
+		t.Fatalf("PromoteCAS() error = %v, want nil", err)
+	}
+
+	// Verify feature-alpha updated to candidate
+	featureAlphaHead := runGit(t, primaryRoot, "rev-parse", "refs/heads/feature-alpha")
+	if featureAlphaHead != shaCandidate {
+		t.Errorf("feature-alpha HEAD = %q, want %q", featureAlphaHead, shaCandidate)
+	}
+
+	// Verify primaryRoot HEAD and symbolic-ref were not mutated
+	mainHeadAfter := runGit(t, primaryRoot, "rev-parse", "HEAD")
+	mainSymRefAfter := runGit(t, primaryRoot, "symbolic-ref", "HEAD")
+	if mainHeadAfter != mainHeadBefore {
+		t.Errorf("primaryRoot HEAD moved from %q to %q", mainHeadBefore, mainHeadAfter)
+	}
+	if mainSymRefAfter != mainSymRefBefore {
+		t.Errorf("primaryRoot symbolic-ref changed from %q to %q", mainSymRefBefore, mainSymRefAfter)
+	}
+}
+
+func TestPromoteCASStaleExpectedSHAFails(t *testing.T) {
+	if testing.Short() {
+		t.Skip("shells out to real git")
+	}
+
+	primaryRoot := initRepo(t)
+	shaA := runGit(t, primaryRoot, "rev-parse", "HEAD")
+
+	// Create feature branch pointing at shaA
+	runGit(t, primaryRoot, "branch", "feature-alpha", shaA)
+
+	// Create candidate commit
+	runGit(t, primaryRoot, "checkout", "-b", "candidate-branch")
+	if err := os.WriteFile(filepath.Join(primaryRoot, "candidate.txt"), []byte("candidate\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile error = %v", err)
+	}
+	runGit(t, primaryRoot, "add", "candidate.txt")
+	runGit(t, primaryRoot, "commit", "-m", "candidate commit")
+	shaCandidate := runGit(t, primaryRoot, "rev-parse", "HEAD")
+
+	// Switch back to main
+	runGit(t, primaryRoot, "checkout", "main")
+
+	// Advance feature-alpha out from under us to an advanced commit
+	runGit(t, primaryRoot, "checkout", "-b", "advanced-branch")
+	if err := os.WriteFile(filepath.Join(primaryRoot, "advanced.txt"), []byte("advanced\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile error = %v", err)
+	}
+	runGit(t, primaryRoot, "add", "advanced.txt")
+	runGit(t, primaryRoot, "commit", "-m", "advanced commit")
+	shaAdvanced := runGit(t, primaryRoot, "rev-parse", "HEAD")
+
+	runGit(t, primaryRoot, "checkout", "main")
+	runGit(t, primaryRoot, "update-ref", "refs/heads/feature-alpha", shaAdvanced, shaA)
+
+	// Attempt CAS promotion with stale expected SHA (shaA instead of shaAdvanced)
+	err := integrate.PromoteCAS(context.Background(), primaryRoot, "refs/heads/feature-alpha", shaCandidate, shaA)
+	if err == nil {
+		t.Fatalf("PromoteCAS() with stale expected SHA error = nil, want non-nil ErrStaleCAS")
+	}
+	if !errors.Is(err, integrate.ErrStaleCAS) {
+		t.Errorf("PromoteCAS() error = %v, want errors.Is(..., integrate.ErrStaleCAS)", err)
+	}
+
+	// Verify feature-alpha remains unchanged at shaAdvanced
+	featureAlphaHead := runGit(t, primaryRoot, "rev-parse", "refs/heads/feature-alpha")
+	if featureAlphaHead != shaAdvanced {
+		t.Errorf("feature-alpha ref was mutated to %q, want %q", featureAlphaHead, shaAdvanced)
+	}
+}
+
+func TestPromoteCASDoesNotMutateWorkingTreeOrPrimaryCheckout(t *testing.T) {
+	if testing.Short() {
+		t.Skip("shells out to real git")
+	}
+
+	primaryRoot := initRepo(t)
+	shaA := runGit(t, primaryRoot, "rev-parse", "HEAD")
+
+	// Create feature branch
+	runGit(t, primaryRoot, "branch", "feature-beta", shaA)
+
+	// Create candidate commit
+	runGit(t, primaryRoot, "checkout", "-b", "cand-b")
+	if err := os.WriteFile(filepath.Join(primaryRoot, "b.txt"), []byte("b\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile error = %v", err)
+	}
+	runGit(t, primaryRoot, "add", "b.txt")
+	runGit(t, primaryRoot, "commit", "-m", "cand b")
+	shaCandidate := runGit(t, primaryRoot, "rev-parse", "HEAD")
+
+	// Switch to main and dirty the working tree with an uncommitted change
+	runGit(t, primaryRoot, "checkout", "main")
+	dirtyFilePath := filepath.Join(primaryRoot, "uncommitted_work.txt")
+	if err := os.WriteFile(dirtyFilePath, []byte("uncommitted working tree data\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile error = %v", err)
+	}
+
+	headBefore := runGit(t, primaryRoot, "rev-parse", "HEAD")
+	symRefBefore := runGit(t, primaryRoot, "symbolic-ref", "HEAD")
+
+	// Call PromoteCAS - should succeed without checking out or merging anything in primaryRoot
+	err := integrate.PromoteCAS(context.Background(), primaryRoot, "feature-beta", shaCandidate, shaA)
+	if err != nil {
+		t.Fatalf("PromoteCAS() error = %v, want nil", err)
+	}
+
+	// Verify working tree file is still untouched
+	data, err := os.ReadFile(dirtyFilePath)
+	if err != nil {
+		t.Fatalf("ReadFile(uncommitted_work.txt) error = %v", err)
+	}
+	if string(data) != "uncommitted working tree data\n" {
+		t.Errorf("dirty file content modified = %q", string(data))
+	}
+
+	// Verify primaryRoot HEAD & ref are unchanged
+	headAfter := runGit(t, primaryRoot, "rev-parse", "HEAD")
+	symRefAfter := runGit(t, primaryRoot, "symbolic-ref", "HEAD")
+	if headAfter != headBefore {
+		t.Errorf("HEAD changed: %q -> %q", headBefore, headAfter)
+	}
+	if symRefAfter != symRefBefore {
+		t.Errorf("symbolic-ref changed: %q -> %q", symRefBefore, symRefAfter)
+	}
+
+	// Verify the feature ref was indeed updated
+	featHead := runGit(t, primaryRoot, "rev-parse", "refs/heads/feature-beta")
+	if featHead != shaCandidate {
+		t.Errorf("feature-beta ref = %q, want %q", featHead, shaCandidate)
+	}
+}
+
+func TestPromoteCASRejectsInvalidParentRef(t *testing.T) {
+	if testing.Short() {
+		t.Skip("shells out to real git")
+	}
+
+	primaryRoot := initRepo(t)
+	shaA := runGit(t, primaryRoot, "rev-parse", "HEAD")
+
+	testCases := []struct {
+		name      string
+		parentRef string
+	}{
+		{name: "empty parent ref", parentRef: ""},
+		{name: "whitespace parent ref", parentRef: "   "},
+		{name: "bare main", parentRef: "main"},
+		{name: "canonical main", parentRef: "refs/heads/main"},
+		{name: "bare lucind", parentRef: "lucind"},
+		{name: "canonical lucind", parentRef: "refs/heads/lucind"},
+		{name: "lucind temp namespace", parentRef: "lucind/lane-123"},
+		{name: "canonical lucind temp namespace", parentRef: "refs/heads/lucind/lane-123"},
+		{name: "double dot in ref", parentRef: "feature..invalid"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := integrate.PromoteCAS(context.Background(), primaryRoot, tc.parentRef, shaA, shaA)
+			if err == nil {
+				t.Fatalf("PromoteCAS(parentRef=%q) error = nil, want ErrInvalidParentRef", tc.parentRef)
+			}
+			if !errors.Is(err, integrate.ErrInvalidParentRef) {
+				t.Errorf("PromoteCAS(parentRef=%q) error = %v, want errors.Is(..., integrate.ErrInvalidParentRef)", tc.parentRef, err)
+			}
+		})
+	}
+}
+
+func TestPromoteCASRejectsEmptySHAs(t *testing.T) {
+	primaryRoot := t.TempDir()
+
+	err := integrate.PromoteCAS(context.Background(), primaryRoot, "refs/heads/feature-alpha", "", "1111222233334444555566667777888899990000")
+	if !errors.Is(err, integrate.ErrEmptySHA) {
+		t.Errorf("PromoteCAS with empty candidate error = %v, want ErrEmptySHA", err)
+	}
+
+	err = integrate.PromoteCAS(context.Background(), primaryRoot, "refs/heads/feature-alpha", "1111222233334444555566667777888899990000", "")
+	if !errors.Is(err, integrate.ErrEmptySHA) {
+		t.Errorf("PromoteCAS with empty expected error = %v, want ErrEmptySHA", err)
+	}
+}
+
+func TestPromoteCASWithRunnerSeam(t *testing.T) {
+	fakeCalled := false
+	fakeRunner := &mockGitRunner{
+		runFn: func(ctx context.Context, dir string, args ...string) ([]byte, error) {
+			fakeCalled = true
+			if len(args) > 0 && args[0] == "check-ref-format" {
+				return []byte("feature-test\n"), nil
+			}
+			if len(args) > 0 && args[0] == "update-ref" {
+				return []byte(""), nil
+			}
+			return nil, nil
+		},
+	}
+
+	primaryRoot := t.TempDir()
+	err := integrate.PromoteCASWithRunner(context.Background(), fakeRunner, primaryRoot, "refs/heads/feature-test", "2222222222222222222222222222222222222222", "1111111111111111111111111111111111111111")
+	if err != nil {
+		t.Fatalf("PromoteCASWithRunner error = %v", err)
+	}
+	if !fakeCalled {
+		t.Errorf("fake runner was not invoked")
+	}
+}
+
+func TestPromoteRefAlias(t *testing.T) {
+	if testing.Short() {
+		t.Skip("shells out to real git")
+	}
+
+	primaryRoot := initRepo(t)
+	shaA := runGit(t, primaryRoot, "rev-parse", "HEAD")
+
+	runGit(t, primaryRoot, "branch", "feature-alias", shaA)
+
+	runGit(t, primaryRoot, "checkout", "-b", "alias-cand")
+	if err := os.WriteFile(filepath.Join(primaryRoot, "alias.txt"), []byte("alias\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile error = %v", err)
+	}
+	runGit(t, primaryRoot, "add", "alias.txt")
+	runGit(t, primaryRoot, "commit", "-m", "alias commit")
+	shaCandidate := runGit(t, primaryRoot, "rev-parse", "HEAD")
+
+	runGit(t, primaryRoot, "checkout", "main")
+
+	err := integrate.PromoteRef(context.Background(), primaryRoot, "refs/heads/feature-alias", shaCandidate, shaA)
+	if err != nil {
+		t.Fatalf("PromoteRef() error = %v, want nil", err)
+	}
+
+	featureHead := runGit(t, primaryRoot, "rev-parse", "refs/heads/feature-alias")
+	if featureHead != shaCandidate {
+		t.Errorf("feature-alias ref = %q, want %q", featureHead, shaCandidate)
+	}
+}
+
+type mockGitRunner struct {
+	runFn func(ctx context.Context, dir string, args ...string) ([]byte, error)
+}
+
+func (m *mockGitRunner) Run(ctx context.Context, dir string, args ...string) ([]byte, error) {
+	if m.runFn != nil {
+		return m.runFn(ctx, dir, args...)
+	}
+	return nil, nil
+}
+
