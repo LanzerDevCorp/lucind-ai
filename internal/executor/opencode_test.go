@@ -265,6 +265,34 @@ func captureOpencodeArgv(t *testing.T, req executor.Request) []string {
 	return strings.Split(strings.TrimSpace(string(raw)), "\n")
 }
 
+// TestOpencodeRunAlwaysPassesRunSubcommandFirst is a regression test for a
+// real defect: opencode's default bare command starts the interactive TUI
+// (`opencode [project]`), not a dispatch -- only `opencode run [message..]`
+// accepts --model/--agent/--format/--dir/--auto (verified against
+// `opencode run --help`, v1.18.19). Omitting "run" makes every one of those
+// flags unknown to the default command, which exits 1 printing top-level
+// usage before any real dispatch happens. This asserts the subcommand's
+// exact position, not merely that flags are present somewhere in argv --
+// the prior version of this test asserted argv[0] was the prompt itself,
+// which is what let the missing-subcommand bug ship unnoticed.
+func TestOpencodeRunAlwaysPassesRunSubcommandFirst(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping subprocess test in -short mode")
+	}
+
+	argv := captureOpencodeArgv(t, executor.Request{
+		Prompt:       "do the thing",
+		WorktreePath: t.TempDir(),
+	})
+
+	if len(argv) == 0 || argv[0] != "run" {
+		t.Fatalf("argv[0] = %v, want the \"run\" subcommand first", argv)
+	}
+	if len(argv) < 2 || argv[1] != "do the thing" {
+		t.Errorf("argv[1] = %v, want the prompt as run's first positional argument %q", argv, "do the thing")
+	}
+}
+
 func TestOpencodeRunAlwaysPassesMandatoryFlags(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping subprocess test in -short mode")
@@ -275,9 +303,6 @@ func TestOpencodeRunAlwaysPassesMandatoryFlags(t *testing.T) {
 		WorktreePath: t.TempDir(),
 	})
 
-	if len(argv) == 0 || argv[0] != "do the thing" {
-		t.Errorf("argv[0] = %v, want the prompt as the first positional argument %q", argv, "do the thing")
-	}
 	for _, want := range []string{"--auto"} {
 		if !containsFlag(argv, want) {
 			t.Errorf("argv = %v, want it to contain %q", argv, want)

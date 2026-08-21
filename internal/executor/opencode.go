@@ -95,7 +95,15 @@ func (o Opencode) Run(ctx context.Context, req Request) (Outcome, error) {
 		binary = defaultOpencodeBinary
 	}
 
+	// "run" is a required subcommand, not implied by passing a message:
+	// opencode's bare default command starts the interactive TUI (`opencode
+	// [project]`), and --model/--agent/--format/--dir/--auto only exist on
+	// `opencode run` (verified against `opencode run --help`, v1.18.19).
+	// Omitting it makes every one of those flags unknown to the default
+	// command, which exits 1 printing top-level usage instead of ever
+	// reaching a real dispatch.
 	args := []string{
+		"run",
 		req.Prompt,
 		"--format", "json",
 		"--auto",
