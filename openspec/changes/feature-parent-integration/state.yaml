@@ -97,10 +97,21 @@ phases:
         status: done
         tasks: [1.1, 1.2, 1.3]
         commit: e50dd47
+    executor_note: |
+      Default executor for every DAG-wave task is agy per SKILL.md's apply->agy preference
+      (broad mechanical multi-file execution). Reassigned to cursor-agent on user request for
+      tasks that better match its "single-piece precision on a bounded artifact" strength:
+      4.1 (internal/serve/model.go, one bounded new file: shell-free DTOs) and 4.3
+      (README.md/docs, pure editorial). 2.2, 2.3, 3.2, 3.3, 3.4, 4.2 stay agy (broad/multi-file
+      or state-machine work). Nothing in the binary enforces this -- supportedExecutors
+      (cmd/lucind-ai/cli.go) treats agy and cursor-agent identically; it is a per-DAG-node
+      choice in the apply-dag.yaml sidecar, re-split after editing to regenerate consistent
+      packet frontmatter.
     waves:
       W1:
-        status: pending
+        status: done
         tasks: [2.1, 3.1]
+        commit: f249463
       W2:
         status: pending
         tasks: [2.2, 3.3]

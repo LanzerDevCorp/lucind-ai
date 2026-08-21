@@ -41,13 +41,13 @@ Non-executable; paths add safety edges: W1 `1.1`; W2 `1.2 + 2.1`; W3 `1.3 + 2.2 
 
 ## Phase 2: Targets and Git
 
-- [ ] 2.1 `internal/{packet,dag,run}`, `cmd/lucind-ai/cli.go`: **RED** four fields/legacy rejection; **GREEN** adapter/dispatch-only flag. Package. **Deps:** 1.1. U2.
+- [x] 2.1 `internal/{packet,dag,run}`, `cmd/lucind-ai/cli.go`: **RED** four fields/legacy rejection; **GREEN** adapter/dispatch-only flag. Package. **Deps:** 1.1. U2.
 - [ ] 2.2 `internal/{worktree,integrate}`: **RED** roots, refs/starts, stale CAS; **GREEN** `GitRunner`, worktree, CAS. Temp Git. **Deps:** 2.1. U2.
 - [ ] 2.3 `internal/{run,integrate}`: **RED** replay, resume/block, bisection/promotion; **GREEN** attempt machine/parent. Faults. **Deps:** 1.1, 1.2, 1.3, 2.1, 2.2. U3.
 
 ## Phase 3: Reconciliation
 
-- [ ] 3.1 `internal/overlap`: **RED** evidence/labels/thresholds/structural omission; **GREEN** normalize. Table/Git fixtures. **Deps:** 1.2. U4.
+- [x] 3.1 `internal/overlap`: **RED** evidence/labels/thresholds/structural omission; **GREEN** normalize. Table/Git fixtures. **Deps:** 1.2. U4.
 - [ ] 3.2 `internal/{run,integrate,ledger}`: **RED** required blocks both promotions; warnings dispatch; **GREEN** gate. Two-parent integration. **Deps:** 2.3, 3.1. U4.
 - [ ] 3.3 `internal/reconcile`, `internal/ledger`: **RED** direction binding, decline/cancel/expiry/renewal; **GREEN** audit/candidate. State. **Deps:** 3.1. U4.
 - [ ] 3.4 `internal/{resolve,integrate}`: **RED** leakage/index/markers/ambiguity/checks/timeout/limit/stale refs preserve evidence; **GREEN** resolver/CAS. Git faults. **Deps:** 2.3, 3.2, 3.3. U4.
