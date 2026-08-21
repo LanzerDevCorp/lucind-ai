@@ -1,0 +1,46 @@
+change: sdd-fan-out-lens
+created: 2026-08-21
+artifact_store: hybrid
+execution_mode: auto
+delivery_strategy: single-pr
+review_budget_lines: 5000
+phases:
+  explore:
+    status: in-progress
+    engram_topic: sdd/sdd-fan-out-lens/explore
+    drafts:
+      - openspec/changes/sdd-fan-out-lens/explore-lens-a.md
+      - openspec/changes/sdd-fan-out-lens/explore-lens-b.md
+      - openspec/changes/sdd-fan-out-lens/explore-lens-c.md
+    canonical: openspec/changes/sdd-fan-out-lens/explore.md
+    note: |
+      First phase run through the three-lens fan-out itself: three agy lenses write
+      disjoint draft slices, cursor-agent synthesizes the canonical document. Exercised
+      here on explore -- a cheap, non-durable artifact -- before betting the design
+      phase on the same topology.
+
+      Deviation from the archived explore precedent (single read_only cursor-agent lane):
+      the lens lanes are WRITE packets. A read-only lane writes only .lucind/result.json,
+      which is gitignored and per-worktree, so nothing integrates and the synthesis lane
+      -- branched from main after wave 1 -- would find no drafts to read. Sibling
+      worktrees cannot see each other; integration is the only channel between waves.
+  proposal:
+    status: pending
+  design:
+    status: pending
+  spec:
+    status: pending
+  tasks:
+    status: pending
+  apply:
+    status: pending
+  verify:
+    status: pending
+  archive:
+    status: pending
+notes: |
+  Formalizes the three-lens SDD fan-out: three agy lenses per phase plus a cursor-agent
+  synthesizer. The convention and its four design packet templates already exist on main
+  (10c69d8, e8a67dd, 805167c); this change determines what, if anything, the binary itself
+  must grow to support it. Session preflight: execution_mode=auto, artifact_store=hybrid,
+  delivery_strategy=single-pr, review_budget_lines=5000.
