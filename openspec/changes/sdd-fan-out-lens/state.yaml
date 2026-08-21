@@ -54,7 +54,7 @@ phases:
       citations and stripped eight altitude leaks (function names, argv, and
       file-change tables that belong to design). Zero unresolved contradictions.
   design:
-    status: in-progress
+    status: done
     engram_topic: sdd/sdd-fan-out-lens/design
     drafts:
       - openspec/changes/sdd-fan-out-lens/design-lens-a.md
@@ -70,6 +70,20 @@ phases:
       questions the proposal deferred to design, so design starts knowing which two are
       genuinely open (shared vs phase-specific template family; operator copy when a
       wave-1 lens fails) and which two the spec already bounded.
+
+      Wave 1 done/done/done (962/921/891 words against a 1000 cap -- the tightest
+      margins of the cycle, so the budget was binding rather than decorative). Wave 2
+      canonical 1426 words, fifteen citations dropped, zero contradictions, all three
+      assumed architectures converged on Candidate 1.
+
+      Architecture Divergence did real work: three pieces of B and C content did not
+      survive A's architecture. B wanted the four existing design templates marked
+      Modify; A and C treat them as the pattern to copy and they already carry
+      legacy_main: true, so the canonical leaves them alone. C added a test driving
+      lucind-ai run admission rejection plus runDispatch/depsFactory seams; A confines
+      new tests to internal/packet/packet_test.go. C also restated the two
+      proposal-deferred questions as open, with recommendations matching A -- the
+      synthesizer reclassified them as Decisions 1 and 2 rather than open questions.
   spec:
     status: done
     engram_topic: sdd/sdd-fan-out-lens/spec
@@ -102,7 +116,21 @@ phases:
       Zero unresolved contradictions. All six named specs confirmed unchanged, so no
       MODIFIED/REMOVED/RENAMED block.
   tasks:
-    status: pending
+    status: in-progress
+    engram_topic: sdd/sdd-fan-out-lens/tasks
+    drafts:
+      - openspec/changes/sdd-fan-out-lens/tasks-lens-a.md
+      - openspec/changes/sdd-fan-out-lens/tasks-lens-b.md
+      - openspec/changes/sdd-fan-out-lens/tasks-lens-c.md
+    canonical: openspec/changes/sdd-fan-out-lens/tasks.md
+    note: |
+      Lens B owns the path partition and DAG shape specifically so the downstream
+      opencode lucind-dag agent has real boundaries to turn into apply-dag.yaml.
+      The synthesizer re-verifies B's disjointness claim against the assembled task
+      list rather than trusting it: two same-wave tasks touching one path make the
+      whole dispatch reject upfront, and that is cheaper to catch here than at
+      dispatch. Lens C owns the Review Workload Forecast, whose four guard lines must
+      appear verbatim because a downstream guard matches them literally.
   apply:
     status: pending
   verify:
