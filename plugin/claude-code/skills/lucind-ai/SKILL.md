@@ -154,11 +154,32 @@ Templates: `assets/design-lens-{a,b,c}-packet-template.md` and
 the verify dual dispatch; `lucind-ai split` and `apply-dag.yaml` are not involved, so the sidecar's
 missing `read_only` field (`internal/dag/parse.go`) is not a blocker here.
 
-1. `lucind-ai run --packet .lucind/packets/design-<id>-lens-a.md --packet .lucind/packets/design-<id>-lens-b.md --packet .lucind/packets/design-<id>-lens-c.md`
+Since `feature-parent-integration`, every packet must either name all four of `feature`,
+`parent_ref`, `base_sha`, and `expected_parent_sha`, or declare legacy mode — admission fails
+closed otherwise (`run.ErrMissingFeatureTarget`). The four templates therefore carry
+`legacy_main: true`, and dispatch supplies the expected SHA, which is computed at run time rather
+than pasted into frontmatter where it would go stale:
+
+1. ```
+   lucind-ai run --expected-parent-sha "$(git rev-parse refs/heads/main)" \
+     --packet .lucind/packets/design-<id>-lens-a.md \
+     --packet .lucind/packets/design-<id>-lens-b.md \
+     --packet .lucind/packets/design-<id>-lens-c.md
+   ```
    Three lanes in parallel, each writing one distinct draft path, so the overlap check passes and
    no lane races another. The barrier joins when all three reach terminal status.
-2. Confirm all three integrated, then
-   `lucind-ai run --packet .lucind/packets/design-<id>-synthesis.md`.
+2. Confirm all three integrated, then dispatch the synthesizer the same way, recomputing the SHA —
+   `main` moved when wave 1 integrated:
+   ```
+   lucind-ai run --expected-parent-sha "$(git rev-parse refs/heads/main)" \
+     --packet .lucind/packets/design-<id>-synthesis.md
+   ```
+
+**When admission fails, it fails silently.** A packet missing its target fields produces
+`status: failed` with an *empty* worktree path and no reason printed on stdout or stderr — the
+lane never reaches an executor, so there is nothing to inspect and no quota is spent. An empty
+worktree path in a lane report means admission rejected the packet, not that the agent failed.
+Check the frontmatter before looking anywhere else.
 
 The second invocation is **not optional and not merely sequencing**. Lens worktrees cannot see
 each other; the synthesis worktree is branched from the integrated result, which is the only point
