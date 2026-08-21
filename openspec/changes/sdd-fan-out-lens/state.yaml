@@ -54,9 +54,24 @@ phases:
       citations and stripped eight altitude leaks (function names, argv, and
       file-change tables that belong to design). Zero unresolved contradictions.
   design:
-    status: pending
-  spec:
     status: in-progress
+    engram_topic: sdd/sdd-fan-out-lens/design
+    drafts:
+      - openspec/changes/sdd-fan-out-lens/design-lens-a.md
+      - openspec/changes/sdd-fan-out-lens/design-lens-b.md
+      - openspec/changes/sdd-fan-out-lens/design-lens-c.md
+    canonical: openspec/changes/sdd-fan-out-lens/design.md
+    note: |
+      The phase the three-lens fan-out was originally built for, and the first to run
+      from the committed templates under assets/ rather than hand-authored packets.
+      Design is a sibling of spec, not its successor -- both read only the proposal and
+      both feed tasks -- so running spec first was orchestrator ordering, not a
+      dependency. One benefit fell out of that ordering: spec lens C classified the four
+      questions the proposal deferred to design, so design starts knowing which two are
+      genuinely open (shared vs phase-specific template family; operator copy when a
+      wave-1 lens fails) and which two the spec already bounded.
+  spec:
+    status: done
     engram_topic: sdd/sdd-fan-out-lens/spec
     drafts:
       - openspec/changes/sdd-fan-out-lens/specs-lens-a/
@@ -69,6 +84,23 @@ phases:
       skill text and templates verifiable -- and a requirement a test enforces is what
       a specification exists to record. "No delta, and here is why" is an accepted
       outcome; the packet forbids manufacturing requirements to have something to write.
+
+      FIRST REAL DIVERGENCE OF THE CYCLE, and the one that justifies the anchor.
+      Lens A returned Delta under a new capability sdd-planning-fan-out with five ADDED
+      requirements; lenses B and C both independently assumed "none -- no delta", reading
+      the proposal's Capabilities: None literally. A's verdict is authoritative and was
+      assembled; B/C divergence recorded. Without the anchor that disagreement would have
+      entered the canonical document invisibly -- edge scenarios written for requirements
+      their author believed did not exist, and a traceability matrix auditing coverage
+      against an empty set.
+
+      Canonical 835 words, five requirements, eleven scenarios. Nine of B's edge scenarios
+      attached to A's requirements; two landed as orphans. The synthesizer diagnosed the
+      orphans better than the packet anticipated: they are not a missed requirement but B
+      correctly verifying that allowed-paths-enforcement and completion-mode-enforcement do
+      not move, so the scenarios belong to those unchanged specs rather than to this delta.
+      Zero unresolved contradictions. All six named specs confirmed unchanged, so no
+      MODIFIED/REMOVED/RENAMED block.
   tasks:
     status: pending
   apply:
