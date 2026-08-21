@@ -170,7 +170,13 @@ phases:
       user instruction, succeeded. 16 total findings across 3 lanes, 0 blocking. Full detail:
       openspec/changes/feature-parent-integration/verify.md. Verdict: PASSED.
   archive:
-    status: pending
+    status: done
+    note: |
+      Archived 2026-08-20. Merged delta specs into main capability specs
+      (openspec/specs/parent-feature-integration/spec.md,
+      openspec/specs/reconciliation-approval/spec.md). All 13 implementation
+      tasks complete, verify verdict: PASSED (16 findings, 0 blocking).
+      Change folder moved to openspec/changes/archive/2026-08-20-feature-parent-integration/.
 notes: |
   This change was originally drafted (explore/proposal/design/tasks/specs) outside the
   lucind-ai dual-executor dispatch pattern established this session for
