@@ -116,7 +116,7 @@ phases:
       Zero unresolved contradictions. All six named specs confirmed unchanged, so no
       MODIFIED/REMOVED/RENAMED block.
   tasks:
-    status: in-progress
+    status: done
     engram_topic: sdd/sdd-fan-out-lens/tasks
     drafts:
       - openspec/changes/sdd-fan-out-lens/tasks-lens-a.md
@@ -132,7 +132,33 @@ phases:
       dispatch. Lens C owns the Review Workload Forecast, whose four guard lines must
       appear verbatim because a downstream guard matches them literally.
   apply:
-    status: pending
+    status: in-progress
+    packet: .lucind/packets/apply-sdd-fan-out-lens.md
+    note: |
+      DAG SIDECAR AUTHORED THEN DELIBERATELY NOT USED. openspec/changes/sdd-fan-out-lens/
+      apply-dag.yaml and apply-bodies/ were written by the opencode lucind-dag agent and
+      are a faithful transcription of tasks.md: four nodes, RED root plus three GREEN
+      dependants, individually named paths, correct executors. `lucind-ai split` parses it
+      and emits exactly the two expected wave commands. It is kept as the record of that
+      phase and as this repository's first committed sidecar example -- but it MUST NOT be
+      dispatched.
+
+      Reason: strict-TDD wave splitting is incompatible with the integrate gate. Integrate
+      runs lucind-checks.sh (go build ./... && go test ./... -race -count=1) over the
+      combined tree (internal/run/integrate.go:50-59), so wave 1 -- whose accepted done
+      criterion is that the new assertions FAIL -- would be reverted by bisection before
+      wave 2 could turn anything green. The lane would report done and integrate would
+      undo it.
+
+      Neither the three tasks lenses nor the synthesizer caught this. Lens A ordered
+      dependencies, lens B proved path disjointness, lens C paired RED tests, and the
+      synthesizer re-verified disjointness -- but no lens owned the question "does this
+      partition survive the integration gate?". That is a real gap in the tasks lens
+      partition and is recorded as a follow-up.
+
+      Resolution: one sequential lane, TDD internal, four units each committed green.
+      This matches the repository's own precedent -- apply-dag-dispatch-hardening also
+      declined the DAG split for an ordering reason and used a single packet.
   verify:
     status: pending
   archive:
