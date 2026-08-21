@@ -1597,3 +1597,86 @@ func TestLedgerReconciliationCandidateCRUD(t *testing.T) {
 		t.Errorf("expected ErrReconciliationCandidateNotFound, got %v", err)
 	}
 }
+
+func TestLedgerActiveFeatures(t *testing.T) {
+	ctx := context.Background()
+	l := openTestLedger(t)
+
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	// Insert features with various statuses
+	_, err := l.DB().ExecContext(ctx, `
+		INSERT INTO features (id, parent_ref, base_sha, expected_parent_sha, status, created_at, updated_at)
+		VALUES
+			('feat-active-1', 'refs/heads/f1', 'base-1', 'exp-1', 'active', ?, ?),
+			('feat-created', 'refs/heads/f2', 'base-2', 'exp-2', 'created', ?, ?),
+			('feat-active-2', 'refs/heads/f3', 'base-3', 'exp-3', 'active', ?, ?),
+			('feat-disabled', 'refs/heads/f4', 'base-4', 'exp-4', 'disabled', ?, ?)`,
+		now, now, now, now, now, now, now, now,
+	)
+	if err != nil {
+		t.Fatalf("insert features: %v", err)
+	}
+
+	active, err := l.ActiveFeatures(ctx)
+	if err != nil {
+		t.Fatalf("ActiveFeatures: %v", err)
+	}
+	if len(active) != 2 {
+		t.Fatalf("ActiveFeatures count = %d, want 2", len(active))
+	}
+	if active[0].ID != "feat-active-1" || active[1].ID != "feat-active-2" {
+		t.Errorf("ActiveFeatures = %+v, want [feat-active-1, feat-active-2]", active)
+	}
+}
+
+func TestLedgerAllReconciliationRequests(t *testing.T) {
+	ctx := context.Background()
+	l := openTestLedger(t)
+
+	now := time.Now().UTC()
+	req1 := ReconciliationRequestRow{
+		ID:              "req-all-1",
+		FeatureID:       "feat-1",
+		Direction:       "feat-1 -> feat-2",
+		Status:          "awaiting",
+		Actor:           "actor-1",
+		EvidenceVersion: "v1",
+		EvidenceHash:    "hash-1",
+		SourceSHA:       "sha-1",
+		TargetSHA:       "sha-2",
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}
+	req2 := ReconciliationRequestRow{
+		ID:              "req-all-2",
+		FeatureID:       "feat-2",
+		Direction:       "feat-2 -> feat-3",
+		Status:          "approved",
+		Actor:           "actor-2",
+		EvidenceVersion: "v1",
+		EvidenceHash:    "hash-2",
+		SourceSHA:       "sha-3",
+		TargetSHA:       "sha-4",
+		CreatedAt:       now.Add(1 * time.Minute),
+		UpdatedAt:       now.Add(1 * time.Minute),
+	}
+
+	if err := l.InsertReconciliationRequest(ctx, req1); err != nil {
+		t.Fatalf("InsertReconciliationRequest(1): %v", err)
+	}
+	if err := l.InsertReconciliationRequest(ctx, req2); err != nil {
+		t.Fatalf("InsertReconciliationRequest(2): %v", err)
+	}
+
+	all, err := l.AllReconciliationRequests(ctx)
+	if err != nil {
+		t.Fatalf("AllReconciliationRequests: %v", err)
+	}
+	if len(all) != 2 {
+		t.Fatalf("AllReconciliationRequests count = %d, want 2", len(all))
+	}
+	if all[0].ID != "req-all-1" || all[1].ID != "req-all-2" {
+		t.Errorf("AllReconciliationRequests = %+v, want [req-all-1, req-all-2]", all)
+	}
+}
+

@@ -11,6 +11,8 @@ import (
 	"github.com/LanzerDevCorp/lucind-ai/internal/feature"
 	"github.com/LanzerDevCorp/lucind-ai/internal/integrate"
 	"github.com/LanzerDevCorp/lucind-ai/internal/ledger"
+	"github.com/LanzerDevCorp/lucind-ai/internal/overlap"
+	"github.com/LanzerDevCorp/lucind-ai/internal/reconcile"
 	"github.com/LanzerDevCorp/lucind-ai/internal/worktree"
 )
 
@@ -427,6 +429,15 @@ func driveAttemptFromLeased(ctx context.Context, deps Deps, att Attempt, featSvc
 		return att, nil
 	}
 
+	// 5b. REQUIRED OVERLAP PROMOTION GATE
+	blocked, blockedAtt, err := evaluateOverlapGate(ctx, deps, att, featSvc, req.ParentRef, req.BaseSHA)
+	if err != nil {
+		return att, fmt.Errorf("run: evaluate overlap gate: %w", err)
+	}
+	if blocked {
+		return blockedAtt, nil
+	}
+
 	// 6. CAS PROMOTION
 	return performCASPromotion(ctx, deps, att, featSvc, req.ParentRef, req.ExpectedParentSHA, wtPath, branchName)
 }
@@ -572,7 +583,14 @@ func recoverAttemptInternal(ctx context.Context, deps Deps, att Attempt) (Attemp
 		att.Owner = lease.Owner
 
 		if att.Status == AttemptStatusCASPending {
-			// CAS definitely never ran! Execute CAS
+			// CAS definitely never ran! Check gate and execute CAS
+			blocked, blockedAtt, err := evaluateOverlapGate(ctx, deps, att, featSvc, feat.ParentRef, feat.BaseSHA)
+			if err != nil {
+				return att, fmt.Errorf("run: recovery evaluate overlap gate: %w", err)
+			}
+			if blocked {
+				return blockedAtt, nil
+			}
 			return performCASPromotion(ctx, deps, att, featSvc, feat.ParentRef, feat.ExpectedParentSHA, "", "")
 		}
 
@@ -598,3 +616,139 @@ func recoverAttemptInternal(ctx context.Context, deps Deps, att Attempt) (Attemp
 	_ = updateAttemptWithAudit(ctx, deps.Ledger, att, "attempt_blocked", att.FailureReason)
 	return att, nil
 }
+
+// evaluateOverlapGate evaluates deterministic overlap signals between the current feature attempt
+// and all other active features. Required overlap creates an awaiting reconciliation request (if none exists)
+// and blocks promotion; warning overlap records evidence without blocking; informational overlap is a no-op.
+func evaluateOverlapGate(ctx context.Context, deps Deps, att Attempt, featSvc *feature.Service, parentRef, baseSHA string) (bool, Attempt, error) {
+	activeFeatures, err := deps.Ledger.ActiveFeatures(ctx)
+	if err != nil {
+		return false, att, fmt.Errorf("query active features for overlap gate: %w", err)
+	}
+
+	evalFunc := deps.EvaluateOverlap
+	if evalFunc == nil {
+		evalFunc = overlap.Evaluate
+	}
+
+	reconcileSvc := reconcile.NewService(deps.Ledger, reconcile.WithClock(func() time.Time { return updateNow(deps) }))
+
+	for _, otherFeat := range activeFeatures {
+		if otherFeat.ID == att.FeatureID {
+			continue
+		}
+
+		var otherSHA string
+		if deps.ResolveRefSHA != nil {
+			otherSHA, _ = deps.ResolveRefSHA(ctx, deps.PrimaryRoot, otherFeat.ParentRef)
+		} else if deps.GitRunner != nil {
+			canonicalRef := worktree.CanonicalizeRef(otherFeat.ParentRef)
+			out, rErr := deps.GitRunner.Run(ctx, deps.PrimaryRoot, "rev-parse", "--verify", canonicalRef+"^{commit}")
+			if rErr == nil {
+				otherSHA = strings.TrimSpace(string(out))
+			}
+		} else {
+			otherSHA, _ = worktree.ResolveCommitSHA(ctx, worktree.DefaultGitRunner, deps.PrimaryRoot, otherFeat.ParentRef)
+		}
+		if otherSHA == "" {
+			otherSHA = otherFeat.ExpectedParentSHA
+		}
+		if otherSHA == "" {
+			otherSHA = otherFeat.BaseSHA
+		}
+		if otherSHA == "" {
+			continue
+		}
+
+		commonBase := ""
+		if baseSHA != "" && baseSHA == otherFeat.BaseSHA {
+			commonBase = baseSHA
+		}
+
+		ev, err := evalFunc(ctx, deps.PrimaryRoot, commonBase, att.CandidateSHA, otherSHA)
+		if err != nil {
+			if errors.Is(err, overlap.ErrNoMergeBase) {
+				continue
+			}
+			return false, att, fmt.Errorf("evaluate overlap between %s and %s: %w", att.FeatureID, otherFeat.ID, err)
+		}
+		if ev == nil {
+			continue
+		}
+
+		evJSON, err := ev.JSON()
+		if err != nil {
+			return false, att, fmt.Errorf("marshal overlap evidence: %w", err)
+		}
+		evHash := ev.Hash
+		if evHash == "" {
+			evHash, err = ev.ComputeHash()
+			if err != nil {
+				return false, att, fmt.Errorf("compute overlap evidence hash: %w", err)
+			}
+		}
+
+		switch ev.Class {
+		case overlap.ClassWarning:
+			_, _ = deps.Ledger.InsertOverlapEvidence(ctx, ledger.OverlapEvidenceRow{
+				FeatureID:     att.FeatureID,
+				Version:       ev.Version,
+				EvidenceHash:  evHash,
+				EvidenceClass: string(ev.Class),
+				EvidenceJSON:  evJSON,
+				CreatedAt:     updateNow(deps),
+			})
+
+		case overlap.ClassRequired:
+			existingRequests, err := deps.Ledger.AllReconciliationRequests(ctx)
+			if err != nil {
+				return false, att, fmt.Errorf("query existing reconciliation requests: %w", err)
+			}
+
+			alreadyRequested := false
+			for _, reqRow := range existingRequests {
+				if reqRow.Status != string(reconcile.RequestStatusAwaiting) && reqRow.Status != string(reconcile.RequestStatusApproved) {
+					continue
+				}
+				src, _, tgt, _ := reconcile.ParseDirection(reqRow.Direction)
+				if (src == att.FeatureID && tgt == otherFeat.ID) || (src == otherFeat.ID && tgt == att.FeatureID) {
+					alreadyRequested = true
+					break
+				}
+			}
+
+			if !alreadyRequested {
+				_, err = reconcileSvc.CreateRequest(ctx, reconcile.CreateRequestParams{
+					FeatureID:     att.FeatureID,
+					SourceFeature: att.FeatureID,
+					SourceParent:  parentRef,
+					TargetFeature: otherFeat.ID,
+					TargetParent:  otherFeat.ParentRef,
+					SourceSHA:     att.CandidateSHA,
+					TargetSHA:     otherSHA,
+					Evidence:      ev,
+					TTL:           15 * time.Minute,
+				})
+				if err != nil {
+					return false, att, fmt.Errorf("create reconciliation request: %w", err)
+				}
+			}
+
+			now := updateNow(deps)
+			att.Status = AttemptStatusBlocked
+			att.FailureReason = fmt.Sprintf("promotion blocked: reconciliation-required overlap with feature %s", otherFeat.ID)
+			att.UpdatedAt = now
+			if err := updateAttemptWithAudit(ctx, deps.Ledger, att, "attempt_blocked", att.FailureReason); err != nil {
+				return false, att, fmt.Errorf("update attempt blocked status: %w", err)
+			}
+			_ = featSvc.ReleaseLease(ctx, att.FeatureID, att.Owner, att.Fence)
+			return true, att, nil
+
+		case overlap.ClassInformational:
+			// Informational evidence does not block
+		}
+	}
+
+	return false, att, nil
+}
+
