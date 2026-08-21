@@ -58,7 +58,7 @@ A lens draft is evidence, not authority. You have the code; use it.
 Compare the technical approaches and delta specs across drafts.
 
 - Lens A's candidate selection and approach is authoritative.
-- Any content in lens B or lens C that contradicts lens A's chosen candidate does not go into `proposal.md`. Record it under `## Architecture Divergence` in the notes.
+- Any content in lens B or lens C that contradicts lens A's chosen candidate does not go into `proposal.md`. Record it under `## Scope Divergence` in the notes.
 - If lens B or lens C converged independently on lens A's approach, record that corroboration in the notes.
 
 ### 4. Compress — do not concatenate
@@ -109,7 +109,7 @@ the escalation. "None" if there are none.>
 <Every claim removed in step 2, with the citation that failed and what the code
 actually says. "None" if there are none.>
 
-## Architecture Divergence
+## Scope Divergence
 
 <What lens B or lens C assumed that differed from lens A, what content that cost
 them, and where they converged independently. "None — all three converged" if

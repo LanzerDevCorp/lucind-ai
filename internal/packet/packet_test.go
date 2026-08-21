@@ -997,7 +997,12 @@ func TestExplorePacketTemplatesContract(t *testing.T) {
 				"## Unresolved Contradictions",
 				"## Coverage Gaps",
 				"## Dropped Citations",
+				"## Approach Divergence",
 				"1800 words",
+			},
+			forbidStrings: []string{
+				"## Architecture Divergence",
+				"architecture divergence",
 			},
 		},
 	}
@@ -1137,7 +1142,11 @@ func TestProposePacketTemplatesContract(t *testing.T) {
 				"## Unresolved Contradictions",
 				"## Coverage Gaps",
 				"## Dropped Citations",
+				"## Scope Divergence",
 				"1800 words",
+			},
+			forbidStrings: []string{
+				"## Architecture Divergence",
 			},
 		},
 	}

@@ -59,7 +59,7 @@ Compare the problem statements and candidate feasibility across drafts.
 
 - Lens A's problem and candidate analysis is primary.
 - If lens B scenarios or lens C risks reveal unviable candidates, document the arbitration in synthesis notes.
-- If all three converged independently on problem boundaries and approach viability, record that corroboration under `## Architecture Divergence` (or approach divergence) in the notes.
+- If all three converged independently on problem boundaries and approach viability, record that corroboration under `## Approach Divergence` in the notes.
 
 ### 4. Compress — do not concatenate
 
@@ -108,7 +108,7 @@ the escalation. "None" if there are none.>
 <Every claim removed in step 2, with the citation that failed and what the code
 actually says. "None" if there are none.>
 
-## Architecture Divergence
+## Approach Divergence
 
 <What lens B or lens C assumed that differed from lens A, what content that cost
 them, and where they converged independently. "None — all three converged" if
