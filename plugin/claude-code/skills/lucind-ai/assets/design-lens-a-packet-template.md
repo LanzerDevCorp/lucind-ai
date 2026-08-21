@@ -3,7 +3,6 @@ id: design-<change-id>-lens-a
 executor: agy
 routed_by: decisions lens of the three-lens design fan-out
 model: <model, e.g. gemini-3.7-flash-high>
-legacy_main: true
 allowed_paths: ["openspec/changes/<change-id>/design-lens-a.md"]
 ---
 
