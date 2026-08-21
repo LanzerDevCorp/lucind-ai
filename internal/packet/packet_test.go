@@ -1011,3 +1011,129 @@ func TestExplorePacketTemplatesContract(t *testing.T) {
 	}
 }
 
+func TestProposePacketTemplatesContract(t *testing.T) {
+	assetsDir := filepath.Join("..", "..", "plugin", "claude-code", "skills", "lucind-ai", "assets")
+	templates := []struct {
+		filename      string
+		wantID        string
+		wantExecutor  string
+		wantPaths     []string
+		wantStrings   []string
+		forbidStrings []string
+	}{
+		{
+			filename:     "propose-lens-a-packet-template.md",
+			wantID:       "propose-<change-id>-lens-a",
+			wantExecutor: "agy",
+			wantPaths:    []string{"openspec/changes/<change-id>/propose-lens-a.md"},
+			wantStrings: []string{
+				"candidate and approach",
+				"~/.claude/skills/sdd-propose/SKILL.md",
+				"Proposal Lens A — Candidate & Approach",
+				"Lens B owns",
+				"Lens C owns",
+				"1000 words",
+			},
+		},
+		{
+			filename:     "propose-lens-b-packet-template.md",
+			wantID:       "propose-<change-id>-lens-b",
+			wantExecutor: "agy",
+			wantPaths:    []string{"openspec/changes/<change-id>/propose-lens-b.md"},
+			wantStrings: []string{
+				"capability impact and delta specs",
+				"~/.claude/skills/sdd-propose/SKILL.md",
+				"Proposal Lens B — Capability Impact & Specs",
+				"Lens A owns",
+				"Lens C owns",
+				"1000 words",
+			},
+		},
+		{
+			filename:     "propose-lens-c-packet-template.md",
+			wantID:       "propose-<change-id>-lens-c",
+			wantExecutor: "agy",
+			wantPaths:    []string{"openspec/changes/<change-id>/propose-lens-c.md"},
+			wantStrings: []string{
+				"risks, rollback, and test impact",
+				"~/.claude/skills/sdd-propose/SKILL.md",
+				"Proposal Lens C — Risks, Rollback & Test Impact",
+				"Lens A owns",
+				"Lens B owns",
+				"1000 words",
+			},
+		},
+		{
+			filename:     "propose-synthesis-packet-template.md",
+			wantID:       "propose-<change-id>-synthesis",
+			wantExecutor: "cursor-agent",
+			wantPaths: []string{
+				"openspec/changes/<change-id>/proposal.md",
+				"openspec/changes/<change-id>/proposal-synthesis-notes.md",
+			},
+			wantStrings: []string{
+				"propose-lens-a.md",
+				"propose-lens-b.md",
+				"propose-lens-c.md",
+				"proposal.md",
+				"proposal-synthesis-notes.md",
+				"## Unresolved Contradictions",
+				"## Coverage Gaps",
+				"## Dropped Citations",
+				"1800 words",
+			},
+		},
+	}
+
+	var lensPackets []packet.Packet
+	for _, tt := range templates {
+		t.Run(tt.filename, func(t *testing.T) {
+			path := filepath.Join(assetsDir, tt.filename)
+			data, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("ReadFile(%s) error = %v", path, err)
+			}
+			content := string(data)
+
+			p, err := packet.Parse(strings.NewReader(content))
+			if err != nil {
+				t.Fatalf("packet.Parse(%s) error = %v", tt.filename, err)
+			}
+
+			if p.ID != tt.wantID {
+				t.Errorf("ID = %q, want %q", p.ID, tt.wantID)
+			}
+			if p.Executor != tt.wantExecutor {
+				t.Errorf("Executor = %q, want %q", p.Executor, tt.wantExecutor)
+			}
+			if p.RoutedBy == "" {
+				t.Errorf("RoutedBy is empty")
+			}
+			if !slices.Equal(p.AllowedPaths, tt.wantPaths) {
+				t.Errorf("AllowedPaths = %v, want %v", p.AllowedPaths, tt.wantPaths)
+			}
+			for _, ws := range tt.wantStrings {
+				if !strings.Contains(content, ws) {
+					t.Errorf("template %s missing expected string %q", tt.filename, ws)
+				}
+			}
+			for _, fs := range tt.forbidStrings {
+				if strings.Contains(content, fs) {
+					t.Errorf("template %s contains forbidden string %q", tt.filename, fs)
+				}
+			}
+
+			if strings.Contains(tt.filename, "lens") {
+				lensPackets = append(lensPackets, p)
+			}
+		})
+	}
+
+	if len(lensPackets) == 3 {
+		if err := packet.DisjointAllowedPaths(lensPackets); err != nil {
+			t.Errorf("DisjointAllowedPaths(propose lenses) error = %v", err)
+		}
+	}
+}
+
+
