@@ -54,9 +54,11 @@ Prefer this `executor:` value by SDD lifecycle phase when writing a packet. It i
 | SDD phase | Preferred executor | Why |
 |---|---|---|
 | design, proposal, specs, tasks | `cursor-agent` | Editorial/planning judgment on a bounded artifact -- matches its "single-piece precision" strength. |
-| apply (implementation) | `agy` | Broad, mechanical, multi-file execution -- matches its "sweeps and volume" strength. |
+| apply (implementation) | `agy` by default; `cursor-agent` per task when the task itself is precision/judgment work | `agy` for broad, mechanical, multi-file execution -- matches its "sweeps and volume" strength. But `apply` is not a single monolithic phase for executor-choice purposes: a DAG-wave apply dispatch names one `executor:` per node (`internal/dag`'s `Node.Executor`), so reassign individual apply tasks to `cursor-agent` when they read as one bounded, judgment-heavy artifact rather than a broad sweep -- e.g. a single new small file with careful edge-case DTOs, or a pure docs/README task -- the same "sweeps-vs-precision" aptitude map (`docs/prd.md` section 5) that drives the planning-phase preference, just applied per-task instead of per-phase. Not a hard split: most `apply` tasks (multi-package wiring, state machines, broad plumbing) still default to `agy`.
 
 `validate` deliberately has no entry here. It is not a phase `lucind-ai` dispatches at all. Reviewing/validating a diff is `gentle-ai`'s RDD, run by a human from an `opencode` session with `gpt-5.6-sol` (`docs/prd.md` section 9) — outside this binary's dispatch model entirely, not a third executor choice.
+
+**Verified precedent (`feature-parent-integration`, DAG-wave apply):** of 10 remaining apply tasks split across 7 waves, 2 were reassigned from the `agy` default to `cursor-agent` on user instruction: `internal/serve/model.go` (one new bounded file, shell-free DTOs) and the docs/README task (pure editorial). The other 8 (multi-package wiring, state machines, git plumbing) stayed `agy`. Reassigning meant editing the `executor:` field per node in the `apply-dag.yaml` sidecar and re-running `lucind-ai split` to regenerate consistent packet frontmatter -- nothing in `cmd/lucind-ai/cli.go`'s `supportedExecutors` map treats the two differently, so this is purely an authoring-time choice, exactly like the phase-level preference above.
 
 ### Dual-executor SDD-phase dispatch (orchestrator pattern)
 
