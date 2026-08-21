@@ -50,7 +50,7 @@ Non-executable; paths add safety edges: W1 `1.1`; W2 `1.2 + 2.1`; W3 `1.3 + 2.2 
 - [x] 3.1 `internal/overlap`: **RED** evidence/labels/thresholds/structural omission; **GREEN** normalize. Table/Git fixtures. **Deps:** 1.2. U4.
 - [x] 3.2 `internal/{run,integrate,ledger}`: **RED** required blocks both promotions; warnings dispatch; **GREEN** gate. Two-parent integration. **Deps:** 2.3, 3.1. U4.
 - [x] 3.3 `internal/reconcile`, `internal/ledger`: **RED** direction binding, decline/cancel/expiry/renewal; **GREEN** audit/candidate. State. **Deps:** 3.1. U4.
-- [ ] 3.4 `internal/{resolve,integrate}`: **RED** leakage/index/markers/ambiguity/checks/timeout/limit/stale refs preserve evidence; **GREEN** resolver/CAS. Git faults. **Deps:** 2.3, 3.2, 3.3. U4.
+- [x] 3.4 `internal/{resolve,integrate}`: **RED** leakage/index/markers/ambiguity/checks/timeout/limit/stale refs preserve evidence; **GREEN** resolver/CAS. Git faults. **Deps:** 2.3, 3.2, 3.3. U4.
 
 ## Phase 4: Operations
 
