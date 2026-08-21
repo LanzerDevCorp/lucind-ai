@@ -20,31 +20,32 @@ Chain strategy: pending
 
 ## Phase 1: Planning Packet Template Assets
 
-- [ ] 1.0-RED Pin malformed-frontmatter typed errors in `internal/packet/packet_test.go` (`:207` `ErrInvalidAllowedPaths`; `:340` `ErrMissingID` / `ErrMissingExecutor` / `ErrMissingRoutedBy` / `ErrEmptyBody`; `:815` `ErrInvalidLegacyMain`). `packet.Parse` (`packet.go:78-166`) copies the body; it does not execute it.
-- [ ] 1.1-RED Write a failing table-driven `packet.Parse` + pairwise `DisjointAllowedPaths` (`disjoint.go:29`) test for explore templates (copy `packet_test.go:518-526`).
-- [ ] 1.1 Create `plugin/claude-code/skills/lucind-ai/assets/explore-lens-{a,b,c}-packet-template.md` with disjoint draft paths, slice ownership, and `legacy_main: true`.
-- [ ] 1.2 Create `assets/explore-synthesis-packet-template.md` targeting canonical `explore.md` with notes skeleton, compression ceiling, and citation verification.
-- [ ] 1.3-RED Write a failing Parse + `DisjointAllowedPaths` test for propose templates (same pattern).
-- [ ] 1.3 Create `assets/propose-lens-{a,b,c}-packet-template.md` with disjoint draft paths, slice ownership, and `legacy_main: true`.
-- [ ] 1.4 Create `assets/propose-synthesis-packet-template.md` targeting canonical `proposal.md` with notes skeleton, compression ceiling, and citation verification.
+- [x] 1.0-RED Pin malformed-frontmatter typed errors in `internal/packet/packet_test.go` (`:207` `ErrInvalidAllowedPaths`; `:340` `ErrMissingID` / `ErrMissingExecutor` / `ErrMissingRoutedBy` / `ErrEmptyBody`; `:815` `ErrInvalidLegacyMain`). `packet.Parse` (`packet.go:78-166`) copies the body; it does not execute it.
+- [x] 1.1-RED Write a failing table-driven `packet.Parse` + pairwise `DisjointAllowedPaths` (`disjoint.go:29`) test for explore templates (copy `packet_test.go:518-526`).
+- [x] 1.1 Create `plugin/claude-code/skills/lucind-ai/assets/explore-lens-{a,b,c}-packet-template.md` with disjoint draft paths, slice ownership, and `legacy_main: true`.
+- [x] 1.2 Create `assets/explore-synthesis-packet-template.md` targeting canonical `explore.md` with notes skeleton, compression ceiling, and citation verification.
+- [x] 1.3-RED Write a failing Parse + `DisjointAllowedPaths` test for propose templates (same pattern).
+- [x] 1.3 Create `assets/propose-lens-{a,b,c}-packet-template.md` with disjoint draft paths, slice ownership, and `legacy_main: true`.
+- [x] 1.4 Create `assets/propose-synthesis-packet-template.md` targeting canonical `proposal.md` with notes skeleton, compression ceiling, and citation verification.
 
 ## Phase 2: Skill Authoring Contract & Documentation
 
-- [ ] 2.1-RED Extend `TestSkillAssetContract` (`packet_test.go:476`) so the frontmatter table must list `feature`, `parent_ref`, `base_sha`, `expected_parent_sha`, `legacy_main`.
-- [ ] 2.1 Update that table in `plugin/claude-code/skills/lucind-ai/SKILL.md` to document those five keys.
-- [ ] 2.2-RED Same seam: fan-out is the planning convention (explore, propose, design, specs, tasks); wave 2 branches from integrated `HEAD`; skill governs schema, packet governs topology/slices/ceilings; canonical ceiling stays strictly below the lens sum.
-- [ ] 2.2 Promote multi-lens fan-out in `SKILL.md` to that convention with asymmetric precedence and compression ceilings.
-- [ ] 2.3-RED Same seam: orchestrator runs `feature create` before dispatch; lanes do not create or move parent refs; two-tier wave-1 remediation (admission repair vs single-lane re-dispatch).
-- [ ] 2.3 Document feature-branch ownership in `SKILL.md` (`feature create` before dispatch; lanes do not create/move parent refs).
-- [ ] 2.4 Document two-tier operator remediation in `SKILL.md` (silent admission repair vs execution single-lane re-dispatch).
-- [ ] 2.5-RED Same seam: subcommands `serve`, `feature`, `reconcile`, `renew` (keep `split`, `check`) and `run` flags `--approval-timeout`, `--legacy-main`, `--expected-parent-sha` (keep `--timeout`).
-- [ ] 2.5 Document those shipped subcommands and `run` flags in `SKILL.md`.
+- [x] 2.1-RED Extend `TestSkillAssetContract` (`packet_test.go:476`) so the frontmatter table must list `feature`, `parent_ref`, `base_sha`, `expected_parent_sha`, `legacy_main`.
+- [x] 2.1 Update that table in `plugin/claude-code/skills/lucind-ai/SKILL.md` to document those five keys.
+- [x] 2.2-RED Same seam: fan-out is the planning convention (explore, propose, design, specs, tasks); wave 2 branches from integrated `HEAD`; skill governs schema, packet governs topology/slices/ceilings; canonical ceiling stays strictly below the lens sum.
+- [x] 2.2 Promote multi-lens fan-out in `SKILL.md` to that convention with asymmetric precedence and compression ceilings.
+- [x] 2.3-RED Same seam: orchestrator runs `feature create` before dispatch; lanes do not create or move parent refs; two-tier wave-1 remediation (admission repair vs single-lane re-dispatch).
+- [x] 2.3 Document feature-branch ownership in `SKILL.md` (`feature create` before dispatch; lanes do not create/move parent refs).
+- [x] 2.4 Document two-tier operator remediation in `SKILL.md` (silent admission repair vs execution single-lane re-dispatch).
+- [x] 2.5-RED Same seam: subcommands `serve`, `feature`, `reconcile`, `renew` (keep `split`, `check`) and `run` flags `--approval-timeout`, `--legacy-main`, `--expected-parent-sha` (keep `--timeout`).
+- [x] 2.5 Document those shipped subcommands and `run` flags in `SKILL.md`.
 
 ## Phase 3: Contract Test Coverage
 
-- [ ] 3.1-RED Extend the table-driven Parse + `DisjointAllowedPaths` test to existing `assets/design-*-packet-template.md` (already `legacy_main: true` at `design-lens-a-packet-template.md:6`).
-- [ ] 3.1 Add the table-driven contract test in `internal/packet/packet_test.go` parsing explore, propose, and design templates with `packet.Parse` and pairwise `DisjointAllowedPaths`.
-- [ ] 3.2 Extend `TestSkillAssetContract` in `internal/packet/packet_test.go` with assertions for the five keys, planning fan-out convention, CLI subcommands/flags, and feature-branch ownership.
+- [x] 3.1-RED Extend the table-driven Parse + `DisjointAllowedPaths` test to existing `assets/design-*-packet-template.md` (already `legacy_main: true` at `design-lens-a-packet-template.md:6`).
+- [x] 3.1 Add the table-driven contract test in `internal/packet/packet_test.go` parsing explore, propose, and design templates with `packet.Parse` and pairwise `DisjointAllowedPaths`.
+- [x] 3.2 Extend `TestSkillAssetContract` in `internal/packet/packet_test.go` with assertions for the five keys, planning fan-out convention, CLI subcommands/flags, and feature-branch ownership.
+
 
 ## Suggested Work Units
 
