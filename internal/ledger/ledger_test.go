@@ -7,9 +7,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"modernc.org/sqlite"
 
 	"github.com/LanzerDevCorp/lucind-ai/internal/barrier"
 	"github.com/LanzerDevCorp/lucind-ai/internal/lane"
@@ -181,6 +184,116 @@ func TestRegisterLaneRejectsInvalidStatus(t *testing.T) {
 	}
 	if err := l.RegisterLane(context.Background(), in); err == nil {
 		t.Fatal("RegisterLane with invalid status = nil error, want an error")
+	}
+}
+
+// TestRegisterLaneRejectsUnadmittedExecutor proves the defect: a lanes
+// insert whose executor the schema CHECK does not admit used to come back
+// as ErrRoutingConditionMissing, even when routing_condition was present
+// and valid. The Go layer must name the executor and the admitted set.
+// The schema itself is exercised with a raw INSERT against the same live
+// database — a fake would not prove the mapping against the constraint
+// that actually rejected opencode lanes in production.
+func TestRegisterLaneRejectsUnadmittedExecutor(t *testing.T) {
+	l := openTestLedger(t)
+	ctx := context.Background()
+	const badExecutor = "not-an-executor"
+	wantAdmitted := []string{"agy", "cursor-agent", "human", "opencode"}
+
+	in := Lane{
+		RunID:            "run-1",
+		LaneID:           "lane-a",
+		PacketID:         "packet-1",
+		Executor:         badExecutor,
+		RoutingCondition: "diff touches internal/lane",
+		Status:           lane.Pending,
+	}
+	err := l.RegisterLane(ctx, in)
+	if errors.Is(err, ErrRoutingConditionMissing) {
+		t.Fatalf("RegisterLane with executor %q returned ErrRoutingConditionMissing; routing_condition was %q", badExecutor, in.RoutingCondition)
+	}
+	var got *ExecutorNotAdmittedError
+	if !errors.As(err, &got) {
+		t.Fatalf("RegisterLane error = %v (%T), want *ExecutorNotAdmittedError", err, err)
+	}
+	if got.Executor != badExecutor {
+		t.Errorf("Executor = %q, want %q", got.Executor, badExecutor)
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, badExecutor) {
+		t.Errorf("error %q does not name the rejected executor", msg)
+	}
+	for _, name := range wantAdmitted {
+		if !containsString(got.Admitted, name) {
+			t.Errorf("Admitted = %v, missing %q", got.Admitted, name)
+		}
+		if !strings.Contains(msg, name) {
+			t.Errorf("error %q does not name admitted executor %q", msg, name)
+		}
+	}
+
+	// The live schema must reject the same executor: otherwise a Go-only
+	// gate could report an admitted set the CHECK does not actually enforce.
+	_, sqlErr := l.db.ExecContext(ctx, `
+		INSERT INTO lanes (run_id, lane_id, packet_id, executor, routing_condition, status, worktree_path, worktree_preserved, attempt)
+		VALUES ('run-1', 'lane-raw', 'packet-raw', ?, 'diff touches internal/lane', 'pending', '', 0, 1)`,
+		badExecutor,
+	)
+	if sqlErr == nil {
+		t.Fatal("raw INSERT of unadmitted executor succeeded; schema CHECK did not reject it")
+	}
+	var sqliteErr *sqlite.Error
+	if !errors.As(sqlErr, &sqliteErr) {
+		t.Fatalf("raw INSERT error = %v (%T), want *sqlite.Error", sqlErr, sqlErr)
+	}
+	if sqliteErr.Code() != sqliteConstraintCheck {
+		t.Fatalf("raw INSERT sqlite code = %d, want SQLITE_CONSTRAINT_CHECK (%d); err = %v", sqliteErr.Code(), sqliteConstraintCheck, sqlErr)
+	}
+}
+
+func containsString(ss []string, want string) bool {
+	for _, s := range ss {
+		if s == want {
+			return true
+		}
+	}
+	return false
+}
+
+// TestRegisterLaneUnattributedConstraintSurfacesSQLiteError proves that a
+// lanes CHECK the package cannot attribute — here attempt < 1, which is
+// neither a missing routing_condition nor an unadmitted executor — is
+// returned as the underlying SQLite error, not guessed as
+// ErrRoutingConditionMissing. A wrong specific answer is worse than an
+// honest unattributed one.
+func TestRegisterLaneUnattributedConstraintSurfacesSQLiteError(t *testing.T) {
+	l := openTestLedger(t)
+	in := Lane{
+		RunID:            "run-1",
+		LaneID:           "lane-a",
+		PacketID:         "packet-1",
+		Executor:         "agy",
+		RoutingCondition: "diff touches internal/lane",
+		Status:           lane.Pending,
+		Attempt:          -1,
+	}
+	err := l.RegisterLane(context.Background(), in)
+	if err == nil {
+		t.Fatal("RegisterLane with attempt=-1 = nil error, want the SQLite constraint failure")
+	}
+	if errors.Is(err, ErrRoutingConditionMissing) {
+		t.Fatal("RegisterLane mapped an attempt CHECK failure to ErrRoutingConditionMissing")
+	}
+	var unadmitted *ExecutorNotAdmittedError
+	if errors.As(err, &unadmitted) {
+		t.Fatal("RegisterLane mapped an attempt CHECK failure to ExecutorNotAdmittedError")
+	}
+	var sqliteErr *sqlite.Error
+	if !errors.As(err, &sqliteErr) {
+		t.Fatalf("RegisterLane error = %v (%T), want it to wrap *sqlite.Error", err, err)
+	}
+	if sqliteErr.Code() != sqliteConstraintCheck {
+		t.Fatalf("wrapped sqlite code = %d, want SQLITE_CONSTRAINT_CHECK (%d)", sqliteErr.Code(), sqliteConstraintCheck)
 	}
 }
 
@@ -1807,4 +1920,3 @@ func TestLedgerAllReconciliationRequests(t *testing.T) {
 		t.Errorf("AllReconciliationRequests = %+v, want [req-all-1, req-all-2]", all)
 	}
 }
-

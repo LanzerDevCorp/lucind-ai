@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"modernc.org/sqlite" // registers the "sqlite" database/sql driver
@@ -66,6 +67,61 @@ var (
 	// ErrOverlapEvidenceNotFound is returned when overlap evidence is not found.
 	ErrOverlapEvidenceNotFound = errors.New("ledger: overlap evidence not found")
 )
+
+// ExecutorNotAdmittedError is returned by RegisterLane when Executor is not
+// in the set the schema's lanes.executor CHECK admits. It names both the
+// rejected value and the admitted set so a caller can see the mismatch
+// without dumping table DDL.
+type ExecutorNotAdmittedError struct {
+	Executor string
+	Admitted []string
+}
+
+func (e *ExecutorNotAdmittedError) Error() string {
+	return fmt.Sprintf("ledger: executor %q is not admitted (admitted: %s)", e.Executor, strings.Join(e.Admitted, ", "))
+}
+
+// admittedExecutors is derived from schemaDDL's lanes.executor CHECK, not
+// duplicated beside it. A second literal in Go is the class of defect this
+// package already paid for: the executor package admitted "opencode" while
+// the CHECK did not, and every rejected insert was mapped to a missing
+// routing condition. Parsing the DDL keeps the Go gate and the constraint
+// on the same source of truth; schema.go itself stays untouched.
+var admittedExecutors = parseAdmittedExecutors(schemaDDL)
+
+func parseAdmittedExecutors(ddl string) []string {
+	const marker = "CHECK (executor IN ("
+	i := strings.Index(ddl, marker)
+	if i < 0 {
+		panic("ledger: schemaDDL has no CHECK (executor IN (...))")
+	}
+	rest := ddl[i+len(marker):]
+	end := strings.Index(rest, ")")
+	if end < 0 {
+		panic("ledger: schemaDDL executor IN list is unterminated")
+	}
+	var out []string
+	for _, p := range strings.Split(rest[:end], ",") {
+		p = strings.TrimSpace(p)
+		p = strings.Trim(p, "'")
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	if len(out) == 0 {
+		panic("ledger: schemaDDL executor IN list parsed empty")
+	}
+	return out
+}
+
+func executorAdmitted(name string) bool {
+	for _, a := range admittedExecutors {
+		if a == name {
+			return true
+		}
+	}
+	return false
+}
 
 const (
 	wantJournalMode = "wal"
@@ -189,13 +245,20 @@ type Lane struct {
 }
 
 // RegisterLane inserts a new lane row. Status is validated in Go before any
-// write; the routing_condition constraint is enforced by the schema and its
-// two possible SQLite failure shapes are both mapped to
-// ErrRoutingConditionMissing. A zero Attempt defaults to 1, matching the
-// schema's own default.
+// write; executor is validated the same way against the admitted set parsed
+// from schemaDDL, so an unadmitted executor is rejected with
+// ExecutorNotAdmittedError rather than reaching SQLite and being mapped to
+// a missing routing condition. The routing_condition constraint is
+// enforced by the schema and its two possible SQLite failure shapes are
+// both mapped to ErrRoutingConditionMissing. A zero Attempt defaults to 1,
+// matching the schema's own default.
 func (l *Ledger) RegisterLane(ctx context.Context, ln Lane) error {
 	if !ln.Status.Valid() {
 		return fmt.Errorf("ledger: invalid lane status %q", ln.Status)
+	}
+	if !executorAdmitted(ln.Executor) {
+		admitted := append([]string(nil), admittedExecutors...)
+		return &ExecutorNotAdmittedError{Executor: ln.Executor, Admitted: admitted}
 	}
 
 	attempt := ln.Attempt
@@ -212,7 +275,7 @@ func (l *Ledger) RegisterLane(ctx context.Context, ln Lane) error {
 		ln.WorktreePath, boolToInt(ln.WorktreePreserved), attempt,
 	)
 	if err != nil {
-		return mapLaneConstraintError(err)
+		return mapLaneConstraintError(err, ln.RoutingCondition)
 	}
 
 	return nil
@@ -340,16 +403,21 @@ func (l *Ledger) SetWorktreePreserved(ctx context.Context, runID, laneID string,
 }
 
 // mapLaneConstraintError converts a SQLite constraint failure on a lanes
-// insert into ErrRoutingConditionMissing when the failure's structured code
-// matches a NOT NULL or CHECK violation. RegisterLane pre-validates status
-// in Go, so within this package's accepted field set the only constraint a
-// well-formed call can still trip is routing_condition.
-func mapLaneConstraintError(err error) error {
+// insert into ErrRoutingConditionMissing only when routing_condition is
+// actually missing (NULL or empty/whitespace). Executor and status are
+// pre-validated in Go, so they never reach this mapper; any remaining
+// NOT NULL or CHECK failure this package cannot attribute — for example
+// attempt < 1 — is returned as the underlying SQLite error rather than
+// guessed as a missing routing condition. A wrong specific answer is
+// worse than an honest unattributed one.
+func mapLaneConstraintError(err error, routingCondition string) error {
 	var sqliteErr *sqlite.Error
 	if errors.As(err, &sqliteErr) {
 		switch sqliteErr.Code() {
 		case sqliteConstraintNotNull, sqliteConstraintCheck:
-			return ErrRoutingConditionMissing
+			if strings.TrimSpace(routingCondition) == "" {
+				return ErrRoutingConditionMissing
+			}
 		}
 	}
 	return fmt.Errorf("ledger: register lane: %w", err)
@@ -1365,4 +1433,3 @@ func (l *Ledger) AllReconciliationRequests(ctx context.Context) ([]Reconciliatio
 	}
 	return out, nil
 }
-
