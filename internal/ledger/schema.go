@@ -7,7 +7,7 @@ import (
 )
 
 // schemaVersion is the migration version this schema represents.
-const schemaVersion = 4
+const schemaVersion = 5
 
 const schemaMigrationsDDL = `
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS lanes (
   run_id             TEXT    NOT NULL,
   lane_id            TEXT    NOT NULL,
   packet_id          TEXT    NOT NULL,
-  executor           TEXT    NOT NULL CHECK (executor IN ('agy','cursor-agent','human')),
+  executor           TEXT    NOT NULL CHECK (executor IN ('agy','cursor-agent','human','opencode')),
   routing_condition  TEXT    NOT NULL CHECK (length(trim(routing_condition)) > 0),
   status             TEXT    NOT NULL CHECK (status IN
                        ('pending','running','done','blocked','deviated','failed')),
@@ -179,6 +179,45 @@ CREATE TABLE IF NOT EXISTS integration_events (
 CREATE INDEX IF NOT EXISTS idx_integration_events_feature ON integration_events(feature_id, id);
 `
 
+// migrateV4ToV5DDL adds "opencode" to the lanes.executor CHECK constraint.
+// SQLite cannot ALTER a CHECK constraint in place, and lanes is a STRICT
+// table, so this follows the same create-copy-drop-rename shape as
+// migrateV1ToV2DDL's events table rebuild: create lanes_new with the wider
+// CHECK, copy every row and column verbatim (preserving PRIMARY KEY
+// identity), drop the old table, rename the new one into place. No other
+// column changes; this migration exists solely to admit the third
+// executor -- see cmd/lucind-ai/cli.go's supportedExecutors.
+const migrateV4ToV5DDL = `
+CREATE TABLE lanes_new (
+  run_id             TEXT    NOT NULL,
+  lane_id            TEXT    NOT NULL,
+  packet_id          TEXT    NOT NULL,
+  executor           TEXT    NOT NULL CHECK (executor IN ('agy','cursor-agent','human','opencode')),
+  routing_condition  TEXT    NOT NULL CHECK (length(trim(routing_condition)) > 0),
+  status             TEXT    NOT NULL CHECK (status IN
+                       ('pending','running','done','blocked','deviated','failed')),
+  worktree_path      TEXT    NOT NULL DEFAULT '',
+  worktree_preserved INTEGER NOT NULL DEFAULT 0 CHECK (worktree_preserved IN (0,1)),
+  attempt            INTEGER NOT NULL DEFAULT 1 CHECK (attempt >= 1),
+  started_at         TEXT,
+  ended_at           TEXT,
+  PRIMARY KEY (run_id, lane_id)
+) STRICT;
+
+INSERT INTO lanes_new (
+  run_id, lane_id, packet_id, executor, routing_condition, status,
+  worktree_path, worktree_preserved, attempt, started_at, ended_at
+)
+SELECT
+  run_id, lane_id, packet_id, executor, routing_condition, status,
+  worktree_path, worktree_preserved, attempt, started_at, ended_at
+FROM lanes ORDER BY run_id, lane_id;
+
+DROP TABLE lanes;
+
+ALTER TABLE lanes_new RENAME TO lanes;
+`
+
 // migrate applies the schema inside one transaction and records the
 // migration version. It is idempotent: re-running it against an already
 // migrated database (e.g. a second Open on the same file) is a safe no-op.
@@ -249,6 +288,19 @@ func migrate(ctx context.Context, db *sql.DB) error {
 			return err
 		}
 		currentVersion = 4
+	}
+
+	if currentVersion < 5 {
+		if _, err := tx.ExecContext(ctx, migrateV4ToV5DDL); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)`,
+			5, time.Now().UTC().Format(time.RFC3339),
+		); err != nil {
+			return err
+		}
+		currentVersion = 5
 	}
 
 	return tx.Commit()

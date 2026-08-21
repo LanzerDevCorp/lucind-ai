@@ -811,6 +811,126 @@ CREATE INDEX IF NOT EXISTS idx_events_run ON events(run_id, id);
 	}
 }
 
+// TestMigrateV4DatabaseAllowsOpencodeExecutorAndPreservesRows proves the v5
+// migration widens lanes.executor's CHECK to admit "opencode" and preserves
+// every pre-existing lane row across the create-copy-drop-rename rebuild
+// (SQLite cannot ALTER a CHECK on a STRICT table in place). Before this
+// migration, RegisterLane for any opencode packet violated the CHECK and
+// silently left the lane unregistered -- no lanes row, no lane_registered
+// event -- even though its worktree had already been created.
+func TestMigrateV4DatabaseAllowsOpencodeExecutorAndPreservesRows(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	dbPath := ledgerpath.Resolve(root)
+
+	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
+		t.Fatalf("create .lucind dir: %v", err)
+	}
+
+	dsn := "file:" + dbPath + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)"
+	rawDB, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		t.Fatalf("raw open: %v", err)
+	}
+
+	// Apply a v4 snapshot directly: schema_migrations recorded through
+	// version 4, and lanes with the pre-v5 CHECK -- no "opencode" -- so
+	// Open's migrate() has real, versioned pre-migration state to rebuild
+	// from, exactly like the v1/v2 fixtures above.
+	v4DDL := `
+CREATE TABLE IF NOT EXISTS schema_migrations (
+  version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL) STRICT;
+
+CREATE TABLE IF NOT EXISTS lanes (
+  run_id             TEXT    NOT NULL,
+  lane_id            TEXT    NOT NULL,
+  packet_id          TEXT    NOT NULL,
+  executor           TEXT    NOT NULL CHECK (executor IN ('agy','cursor-agent','human')),
+  routing_condition  TEXT    NOT NULL CHECK (length(trim(routing_condition)) > 0),
+  status             TEXT    NOT NULL CHECK (status IN
+                       ('pending','running','done','blocked','deviated','failed')),
+  worktree_path      TEXT    NOT NULL DEFAULT '',
+  worktree_preserved INTEGER NOT NULL DEFAULT 0 CHECK (worktree_preserved IN (0,1)),
+  attempt            INTEGER NOT NULL DEFAULT 1 CHECK (attempt >= 1),
+  started_at         TEXT,
+  ended_at           TEXT,
+  PRIMARY KEY (run_id, lane_id)
+) STRICT;
+`
+	if _, err := rawDB.ExecContext(ctx, v4DDL); err != nil {
+		rawDB.Close()
+		t.Fatalf("apply v4 schema DDL: %v", err)
+	}
+
+	v4AppliedAt := "2026-08-20T10:00:00Z"
+	if _, err := rawDB.ExecContext(ctx,
+		`INSERT INTO schema_migrations (version, applied_at) VALUES (1, ?), (2, ?), (3, ?), (4, ?)`,
+		v4AppliedAt, v4AppliedAt, v4AppliedAt, v4AppliedAt,
+	); err != nil {
+		rawDB.Close()
+		t.Fatalf("record v4 migration: %v", err)
+	}
+
+	// Insert a lane under v4, with every non-default column populated so a
+	// silent column drop during create-copy-drop-rename would be visible.
+	if _, err := rawDB.ExecContext(ctx, `
+		INSERT INTO lanes (run_id, lane_id, packet_id, executor, routing_condition, status, worktree_path, worktree_preserved, attempt, started_at, ended_at)
+		VALUES ('run-1', 'lane-a', 'p-a', 'agy', 'cond-a', 'done', '/path/a', 1, 2, '2026-08-20T10:00:00Z', '2026-08-20T10:05:00Z')
+	`); err != nil {
+		rawDB.Close()
+		t.Fatalf("insert v4 lane: %v", err)
+	}
+
+	if err := rawDB.Close(); err != nil {
+		t.Fatalf("close raw DB: %v", err)
+	}
+
+	// Open the v4 database through normal Open, triggering migration to v5.
+	l, err := Open(ctx, root)
+	if err != nil {
+		t.Fatalf("Open on v4 database: %v", err)
+	}
+	defer l.Close()
+
+	var v5Count int
+	if err := l.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM schema_migrations WHERE version = 5`).Scan(&v5Count); err != nil {
+		t.Fatalf("query version 5: %v", err)
+	}
+	if v5Count != 1 {
+		t.Errorf("version 5 count = %d, want 1", v5Count)
+	}
+
+	// The pre-existing agy lane, and every one of its columns, survived
+	// the create-copy-drop-rename rebuild.
+	lanes, err := l.Lanes(ctx, "run-1")
+	if err != nil {
+		t.Fatalf("Lanes(run-1): %v", err)
+	}
+	if len(lanes) != 1 {
+		t.Fatalf("lanes = %+v, want exactly 1 preserved row", lanes)
+	}
+	ln := lanes[0]
+	if ln.LaneID != "lane-a" || ln.PacketID != "p-a" || ln.Executor != "agy" ||
+		ln.RoutingCondition != "cond-a" || ln.Status != lane.Done ||
+		ln.WorktreePath != "/path/a" || !ln.WorktreePreserved || ln.Attempt != 2 ||
+		ln.StartedAt == nil || ln.EndedAt == nil {
+		t.Fatalf("lane not preserved verbatim across migration: %+v", ln)
+	}
+
+	// The whole point of the migration: RegisterLane with executor
+	// "opencode" now succeeds instead of violating the old CHECK.
+	if err := l.RegisterLane(ctx, Lane{
+		RunID:            "run-1",
+		LaneID:           "lane-b",
+		PacketID:         "p-b",
+		Executor:         "opencode",
+		RoutingCondition: "cond-b",
+		Status:           lane.Pending,
+	}); err != nil {
+		t.Fatalf("RegisterLane with executor \"opencode\" after v5 migration: %v", err)
+	}
+}
+
 func TestLedgerApprovalLifecycleAndDecision(t *testing.T) {
 	ctx := context.Background()
 	l := openTestLedger(t)
@@ -1118,8 +1238,12 @@ func TestFreshLedgerMigratesToV4WithAllSevenTables(t *testing.T) {
 	if err := l.db.QueryRowContext(ctx, `SELECT MAX(version) FROM schema_migrations`).Scan(&currentVersion); err != nil {
 		t.Fatalf("query schema_migrations max version: %v", err)
 	}
-	if currentVersion != 4 {
-		t.Errorf("currentVersion = %d, want 4", currentVersion)
+	// Derived from schemaVersion, not a hardcoded literal -- a fresh ledger
+	// always migrates to this package's latest version, whatever that is;
+	// this test's real assertion is the v4-introduced tables below, and a
+	// literal 4 here already went stale once (the v5 migration).
+	if currentVersion != schemaVersion {
+		t.Errorf("currentVersion = %d, want %d", currentVersion, schemaVersion)
 	}
 
 	wantTables := []string{
@@ -1266,8 +1390,12 @@ func TestMigrateV3DatabasePreservesDataAndAdvancesToV4(t *testing.T) {
 	if err := l.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM schema_migrations`).Scan(&totalMigrations); err != nil {
 		t.Fatalf("query total migrations: %v", err)
 	}
-	if totalMigrations != 4 {
-		t.Errorf("total migrations count after second migrate = %d, want 4", totalMigrations)
+	// Derived from schemaVersion, not a hardcoded literal: this package's
+	// own version constant is the single source of truth for how many
+	// migrations a fresh-to-latest run records, and a literal here already
+	// went stale once (recorded 4 before the v5 migration existed).
+	if totalMigrations != schemaVersion {
+		t.Errorf("total migrations count after second migrate = %d, want %d", totalMigrations, schemaVersion)
 	}
 }
 
