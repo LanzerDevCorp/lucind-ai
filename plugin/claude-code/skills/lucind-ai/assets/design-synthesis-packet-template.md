@@ -3,7 +3,6 @@ id: design-<change-id>-synthesis
 executor: cursor-agent
 routed_by: synthesis of three parallel design lenses into one canonical design
 model: cursor-grok-4.6-high
-legacy_main: true
 allowed_paths: ["openspec/changes/<change-id>/design.md", "openspec/changes/<change-id>/design-synthesis-notes.md"]
 ---
 

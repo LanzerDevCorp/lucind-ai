@@ -1239,7 +1239,6 @@ func TestDesignPacketTemplatesContract(t *testing.T) {
 				"Lens B owns",
 				"Lens C owns",
 				"1000 words",
-				"legacy_main: true",
 			},
 		},
 		{
@@ -1254,7 +1253,6 @@ func TestDesignPacketTemplatesContract(t *testing.T) {
 				"Lens A owns",
 				"Lens C owns",
 				"1000 words",
-				"legacy_main: true",
 			},
 		},
 		{
@@ -1269,7 +1267,6 @@ func TestDesignPacketTemplatesContract(t *testing.T) {
 				"Lens A owns",
 				"Lens B owns",
 				"1000 words",
-				"legacy_main: true",
 			},
 		},
 		{
@@ -1290,7 +1287,6 @@ func TestDesignPacketTemplatesContract(t *testing.T) {
 				"## Coverage Gaps",
 				"## Dropped Citations",
 				"1800 words",
-				"legacy_main: true",
 			},
 		},
 	}
@@ -1319,9 +1315,6 @@ func TestDesignPacketTemplatesContract(t *testing.T) {
 			if p.RoutedBy == "" {
 				t.Errorf("RoutedBy is empty")
 			}
-			if !p.LegacyMain {
-				t.Errorf("LegacyMain = %v, want true", p.LegacyMain)
-			}
 			if !slices.Equal(p.AllowedPaths, tt.wantPaths) {
 				t.Errorf("AllowedPaths = %v, want %v", p.AllowedPaths, tt.wantPaths)
 			}
@@ -1334,6 +1327,21 @@ func TestDesignPacketTemplatesContract(t *testing.T) {
 				if strings.Contains(content, fs) {
 					t.Errorf("template %s contains forbidden string %q", tt.filename, fs)
 				}
+			}
+
+			// The amended Planning Fan-Out Template Assets requirement makes
+			// "declares no dispatch target" the default for a reusable
+			// template, and this is the assertion that defends it. A template
+			// that bakes legacy_main: true silently targets main even when the
+			// change runs against a named feature parent -- the exact coupling
+			// the amendment removed. Without this check, reintroducing that
+			// field would pass every other assertion in this table.
+			if p.LegacyMain {
+				t.Errorf("template %s declares legacy_main: true; a reusable template must declare no dispatch target", tt.filename)
+			}
+			if p.Feature != "" || p.ParentRef != "" || p.BaseSHA != "" || p.ExpectedParentSHA != "" {
+				t.Errorf("template %s declares feature-target fields (feature=%q parent_ref=%q base_sha=%q expected_parent_sha=%q); a reusable template must declare no dispatch target",
+					tt.filename, p.Feature, p.ParentRef, p.BaseSHA, p.ExpectedParentSHA)
 			}
 
 			if strings.Contains(tt.filename, "lens") {
