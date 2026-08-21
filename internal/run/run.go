@@ -340,6 +340,7 @@ func Execute(ctx context.Context, deps Deps, p packet.Packet) (Report, error) {
 		Prompt:       p.Body,
 		WorktreePath: wt.Path,
 		Model:        model,
+		Agent:        p.Agent,
 		SchemaPath:   schemaPath,
 	})
 

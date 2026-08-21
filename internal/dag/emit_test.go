@@ -118,6 +118,89 @@ func TestEmit_SuccessfulSplitWritesPackets(t *testing.T) {
 	}
 }
 
+func TestEmit_AgentFieldEmittedWhenSet(t *testing.T) {
+	tempDir := t.TempDir()
+	bodiesDir := filepath.Join(tempDir, "bodies")
+	if err := os.MkdirAll(bodiesDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := "## Goal\n\nAuthor the DAG\n"
+	if err := os.WriteFile(filepath.Join(bodiesDir, "author-dag.md"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	d := dag.DAG{
+		Change: "test-change",
+		Packets: []dag.Node{
+			{
+				ID:       "author-dag",
+				Executor: "opencode",
+				RoutedBy: "DAG authoring, specialist agent required",
+				Agent:    "lucind-dag",
+				BodyPath: "bodies/author-dag.md",
+			},
+		},
+	}
+
+	outDir := filepath.Join(tempDir, "packets")
+	if err := dag.Emit(d, tempDir, outDir); err != nil {
+		t.Fatalf("Emit failed: %v", err)
+	}
+
+	content, err := os.ReadFile(filepath.Join(outDir, "author-dag.md"))
+	if err != nil {
+		t.Fatalf("failed to read emitted packet: %v", err)
+	}
+	if !strings.Contains(string(content), "agent: lucind-dag") {
+		t.Errorf("expected agent in emitted packet frontmatter, got:\n%s", content)
+	}
+
+	p, err := packet.Parse(strings.NewReader(string(content)))
+	if err != nil {
+		t.Fatalf("packet.Parse failed for emitted packet: %v", err)
+	}
+	if p.Agent != "lucind-dag" {
+		t.Errorf("Agent = %q, want %q", p.Agent, "lucind-dag")
+	}
+}
+
+func TestEmit_AgentFieldOmittedWhenEmpty(t *testing.T) {
+	tempDir := t.TempDir()
+	bodiesDir := filepath.Join(tempDir, "bodies")
+	if err := os.MkdirAll(bodiesDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := "## Goal\n\nLedger CRUD implementation\n"
+	if err := os.WriteFile(filepath.Join(bodiesDir, "apply-ledger.md"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	d := dag.DAG{
+		Change: "test-change",
+		Packets: []dag.Node{
+			{
+				ID:       "apply-ledger",
+				Executor: "agy",
+				RoutedBy: "schema and CRUD isolated from HTTP",
+				BodyPath: "bodies/apply-ledger.md",
+			},
+		},
+	}
+
+	outDir := filepath.Join(tempDir, "packets")
+	if err := dag.Emit(d, tempDir, outDir); err != nil {
+		t.Fatalf("Emit failed: %v", err)
+	}
+
+	content, err := os.ReadFile(filepath.Join(outDir, "apply-ledger.md"))
+	if err != nil {
+		t.Fatalf("failed to read emitted packet: %v", err)
+	}
+	if strings.Contains(string(content), "agent:") {
+		t.Errorf("expected no agent line in emitted packet when omitted, got:\n%s", content)
+	}
+}
+
 func TestEmit_FeatureTargetFieldsRoundTrip(t *testing.T) {
 	tempDir := t.TempDir()
 	bodiesDir := filepath.Join(tempDir, "bodies")

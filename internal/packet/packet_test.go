@@ -89,6 +89,46 @@ func TestParseModelAbsentLeavesFieldEmpty(t *testing.T) {
 	}
 }
 
+func TestParseAgentPresentIsParsed(t *testing.T) {
+	src := "---\n" +
+		"id: author-dag\n" +
+		"executor: opencode\n" +
+		"routed_by: DAG authoring, specialist agent required\n" +
+		"agent: lucind-dag\n" +
+		"---\n" +
+		"\n" +
+		"## Goal\n"
+
+	p, err := packet.Parse(strings.NewReader(src))
+	if err != nil {
+		t.Fatalf("Parse() error = %v, want nil", err)
+	}
+	if p.Agent != "lucind-dag" {
+		t.Errorf("Agent = %q, want %q", p.Agent, "lucind-dag")
+	}
+}
+
+// TestParseAgentAbsentLeavesFieldEmpty mirrors
+// TestParseModelAbsentLeavesFieldEmpty: an absent agent key leaves
+// Packet.Agent at its zero value, no default injected.
+func TestParseAgentAbsentLeavesFieldEmpty(t *testing.T) {
+	src := "---\n" +
+		"id: fix-auth\n" +
+		"executor: agy\n" +
+		"routed_by: touches auth, Tier A verification required\n" +
+		"---\n" +
+		"\n" +
+		"## Goal\n"
+
+	p, err := packet.Parse(strings.NewReader(src))
+	if err != nil {
+		t.Fatalf("Parse() error = %v, want nil", err)
+	}
+	if p.Agent != "" {
+		t.Errorf("Agent = %q, want empty", p.Agent)
+	}
+}
+
 func TestParseReadOnlyFrontmatter(t *testing.T) {
 	tests := []struct {
 		name         string

@@ -9,8 +9,9 @@ import (
 )
 
 // EmitPacketContent formats the frontmatter and body for a single packet Node.
-// The frontmatter includes id, executor, routed_by, model (if set), and a single-line
-// JSON array for allowed_paths. The body is the Markdown at body_path verbatim.
+// The frontmatter includes id, executor, routed_by, model (if set), agent (if
+// set), and a single-line JSON array for allowed_paths. The body is the
+// Markdown at body_path verbatim.
 func EmitPacketContent(node Node, baseDir string) (string, error) {
 	fullBodyPath := filepath.Join(baseDir, node.BodyPath)
 	bodyBytes, err := os.ReadFile(fullBodyPath)
@@ -25,6 +26,9 @@ func EmitPacketContent(node Node, baseDir string) (string, error) {
 	b.WriteString(fmt.Sprintf("routed_by: %s\n", node.RoutedBy))
 	if node.Model != "" {
 		b.WriteString(fmt.Sprintf("model: %s\n", node.Model))
+	}
+	if node.Agent != "" {
+		b.WriteString(fmt.Sprintf("agent: %s\n", node.Agent))
 	}
 	if node.Feature != "" {
 		b.WriteString(fmt.Sprintf("feature: %s\n", node.Feature))

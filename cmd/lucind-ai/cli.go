@@ -12,6 +12,7 @@ import (
 	"os/user"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"time"
 
@@ -56,6 +57,7 @@ var depsFactory = productionDeps
 var supportedExecutors = map[string]func() executor.Executor{
 	"agy":          func() executor.Executor { return executor.Agy{} },
 	"cursor-agent": func() executor.Executor { return executor.CursorAgent{} },
+	"opencode":     func() executor.Executor { return executor.Opencode{} },
 }
 
 // packetPaths collects every --packet flag value, in the order given, so a
@@ -184,7 +186,28 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 	// checked for every packet before any of them dispatches.
 	for i, p := range ps {
 		if _, ok := supportedExecutors[p.Executor]; !ok {
-			fmt.Fprintf(stderr, "lucind-ai: unsupported executor %q in packet %q (supported: agy, cursor-agent)\n", p.Executor, packetFlags[i])
+			names := make([]string, 0, len(supportedExecutors))
+			for name := range supportedExecutors {
+				names = append(names, name)
+			}
+			sort.Strings(names)
+			fmt.Fprintf(stderr, "lucind-ai: unsupported executor %q in packet %q (supported: %s)\n", p.Executor, packetFlags[i], strings.Join(names, ", "))
+			return 1
+		}
+	}
+
+	// A named agent is only meaningful for the opencode executor -- checked
+	// for every packet before any of them dispatches, exactly like the
+	// executor-support and model checks above. Other executors ignore
+	// Request.Agent silently at the Run level, but rejecting it here catches
+	// a packet author's mistake (or copy-paste from an opencode packet)
+	// before it dispatches instead of it just being a no-op.
+	for i, p := range ps {
+		if p.Agent == "" {
+			continue
+		}
+		if p.Executor != "opencode" {
+			fmt.Fprintf(stderr, "lucind-ai: packet %q names agent %q, but agent is only meaningful for executor \"opencode\" (got executor %q)\n", packetFlags[i], p.Agent, p.Executor)
 			return 1
 		}
 	}

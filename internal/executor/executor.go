@@ -21,6 +21,15 @@ type Request struct {
 	WorktreePath string
 	// Model is optional; the flag is omitted entirely when this is empty.
 	Model string
+	// Agent is optional; only Opencode's Run reads it, sent as --agent.
+	// Other executors ignore it. Unlike Model there is no
+	// KnownModels-equivalent allow-list for agent names: an agent name only
+	// selects a system prompt / tool-permission profile within opencode's
+	// own account, never a different billed provider, so cross-executor
+	// misuse has no billing consequence the way a mismatched Model does --
+	// cli.go's pre-dispatch validation still rejects it on a non-opencode
+	// executor, but for clarity, not for cost safety.
+	Agent string
 	// SchemaPath is the path to the result schema on disk; --json-schema is
 	// omitted when empty (cursor-agent cannot be constrained at the
 	// source, so this is a belt, not the braces).

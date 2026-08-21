@@ -22,9 +22,10 @@ Every packet must open with a YAML frontmatter block enclosed by `---`:
 | Key | Required | Description |
 |---|---|---|
 | `id` | Yes | Unique identifier for the lane. Names the branch (`lucind/<id>`) and worktree directory. |
-| `executor` | Yes | Execution runtime to dispatch (currently `agy` or `cursor-agent`). |
+| `executor` | Yes | Execution runtime to dispatch (currently `agy`, `cursor-agent`, or `opencode`). |
 | `routed_by` | Yes | The explicit condition that triggered this routing decision — never the executor name. |
-| `model` | No | Model name passed to executor. Omitted, each executor supplies its own default (`agy`: `gemini-3.7-flash-high`; `cursor-agent`: `cursor-grok-4.6-high`) — do not hardcode `gemini-3.7-flash-high` for a `cursor-agent` packet, it bills against Cursor's separate, more limited "Other Models" quota instead of the included "Cursor Models" quota. |
+| `model` | No | Model name passed to executor. Omitted, each executor supplies its own default (`agy`: `gemini-3.7-flash-high`; `cursor-agent`: `cursor-grok-4.6-high`; `opencode`: `openai/gpt-5.6-sol`) — do not hardcode `gemini-3.7-flash-high` for a `cursor-agent` packet, it bills against Cursor's separate, more limited "Other Models" quota instead of the included "Cursor Models" quota. |
+| `agent` | No | Opencode-only: names a purpose-built opencode agent (e.g. `lucind-dag` for DAG authoring, see `opencode agent list`) passed as `--agent`. Rejected before dispatch on any executor other than `opencode`, since agent selects a system prompt / tool-permission profile that only opencode has. |
 | `read_only` | No | `true` or `false`. Omitted defaults to write. A `true` packet must produce no unique commits and leave a clean worktree. |
 | `allowed_paths` | No | Single-line JSON array of repository-relative paths this packet may touch, e.g. `allowed_paths: ["internal/dag/", "cmd/lucind-ai/cli.go"]`. Omitted (or empty) is today's exact path: no overlap check across the batch, no post-run diff check. A YAML list under the key does not parse — the value after `:` must be one JSON array. |
 
@@ -121,6 +122,83 @@ Wave N+1 is dispatched only when wave N exits 0: every lane `done`, and none lis
    - **Disagreement / Disputed Defects** (`blocked`/`deviated`): confirmed spec violations mark overall verdict `BLOCKED` with remediation tasks in `state.yaml`; demonstrable false positives are refuted with concrete `file:line` evidence in `verify.md` without blocking.
    - **Lane Failure** (`failed` due to timeout/infra): re-dispatches the single failing lane before synthesis.
    - **Irreconcilable Ambiguity**: contradictory interpretations of underspecified requirements unresolvable from specs/design set overall verdict `BLOCKED` and escalate decision options to the human.
+
+### Three-lens design fan-out (pilot, not yet exercised)
+
+A variant of the dual-executor pattern above, for the `design` phase only. Instead of two
+executors writing the same artifact twice, three `agy` lanes each own a disjoint slice of the
+design, and `cursor-agent` synthesizes the canonical document. The orchestrator's job shrinks from
+reading every draft to reading one notes file.
+
+Marked **pilot**: designed and templated, not yet run end to end. Do not present its output as a
+proven path until a real change has gone through it.
+
+**Why three lenses and not three copies.** The dual dispatch above already converged "almost
+completely" on `propose`. Running the same prompt three times converges harder, not less — you
+pay triple for one document. A lens is only worth a lane when it has its own required reading
+list, its own output skeleton, and an explicit cross-reference naming what the sibling lenses own.
+All three template bodies carry those three things; strip any of them and the fan-out degenerates
+back into redundant copies.
+
+| Lane | Executor | Owns | Reads (exclusive) |
+|---|---|---|---|
+| `design-<id>-lens-a` | `agy` | Technical approach; every architecture decision except rollback, with alternatives and rationale | module structure, entry points, existing patterns, prior archived changes |
+| `design-<id>-lens-b` | `agy` | Flow and invariants; surface deltas (types, schemas, frontmatter, CLI); file changes | type/struct/interface declarations, persisted and wire formats, `cmd/` flag surface |
+| `design-<id>-lens-c` | `agy` | Testing strategy and test seams; threat matrix; rollback and additivity; out of scope | existing `*_test.go`, injection seams, the threat-matrix table embedded in its own `## Context` |
+| `design-<id>-synthesis` | `cursor-agent` | The canonical `design.md` plus `design-synthesis-notes.md` | all three lens drafts, plus the real code behind their citations |
+
+Templates: `assets/design-lens-{a,b,c}-packet-template.md` and
+`assets/design-synthesis-packet-template.md`.
+
+**Dispatch — two invocations, no sidecar.** These are hand-authored write packets, exactly like
+the verify dual dispatch; `lucind-ai split` and `apply-dag.yaml` are not involved, so the sidecar's
+missing `read_only` field (`internal/dag/parse.go`) is not a blocker here.
+
+1. `lucind-ai run --packet .lucind/packets/design-<id>-lens-a.md --packet .lucind/packets/design-<id>-lens-b.md --packet .lucind/packets/design-<id>-lens-c.md`
+   Three lanes in parallel, each writing one distinct draft path, so the overlap check passes and
+   no lane races another. The barrier joins when all three reach terminal status.
+2. Confirm all three integrated, then
+   `lucind-ai run --packet .lucind/packets/design-<id>-synthesis.md`.
+
+The second invocation is **not optional and not merely sequencing**. Lens worktrees cannot see
+each other; the synthesis worktree is branched from the integrated result, which is the only point
+where all three drafts exist in one tree.
+
+**The dependency this design accepts on purpose.** Lens B and lens C are downstream of lens A's
+architecture decision, but run before it exists. Each therefore opens its draft with
+`## Assumed architecture`, and the synthesizer treats lens A's as authoritative, recording what
+B or C assumed instead under `## Architecture Divergence`. Independent convergence on the same
+architecture is corroboration and is recorded as such; divergence means the decision was
+underdetermined, which is signal worth having.
+
+The alternative — lens A alone in wave 1, B and C in wave 2 branched from it — costs a third
+`lucind-ai run` invocation and buys cleaner drafts. Switching to it is a scheduling change only:
+dispatch A alone first, then B and C together. Take it if a pilot shows B and C drifting.
+
+**Budgets.** Each lens draft is capped under 700 words; the canonical `design.md` under 1200. The
+gap is the point. Roughly 2100 words of feedstock compressed to 1200 forces the synthesizer to
+arbitrate and cut. A synthesis that lands near 2100 words has concatenated rather than
+synthesized, and is a failed run even if every sentence in it is true. For calibration, archived designs in this repo run
+774–2969 words; the two that respected `sdd-design`'s nominal 800-word budget are the outliers, not
+the norm.
+
+**What the orchestrator reads.** `design-synthesis-notes.md`, and only that: `## Unresolved
+Contradictions`, `## Coverage Gaps`, `## Dropped Citations`, `## Architecture Divergence`. The
+synthesizer is instructed to escalate contradictions rather than pick, so a populated first section
+is a decision waiting for a human, not a defect.
+
+**The risk this moves rather than removes.** In the dual pattern the orchestrator independently
+verified every `file:line` before accepting it. Here the synthesizer does that, in a worktree with
+the real code — which it can do, and which the template makes a done-criterion. But it is now the
+single place where a hallucinated citation can pass. If the citation-verification pass or the
+`## Dropped Citations` section is ever weakened, the fan-out loses the property that made it safe.
+
+**Coverage checklist.** The synthesizer checks the canonical document against this repository's
+actual design spine, derived from every design in `openspec/changes/archive/`: technical approach;
+architecture decisions with alternatives and rationale; flow and invariants; file changes with
+terminal consumers; testing strategy and test seams; threat matrix with every row `Applicable` or
+`N/A: reason`; rollback and additivity; open questions and out of scope. Headings vary by change —
+archived designs use their own vocabulary — but all eight must be substantively present.
 
 ### Packet Structure
 

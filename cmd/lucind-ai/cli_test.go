@@ -159,8 +159,14 @@ func TestRunUnsupportedExecutorNamesIt(t *testing.T) {
 	if !strings.Contains(stderr.String(), "bogus-executor") {
 		t.Fatalf("stderr = %q, want it to name the unsupported executor %q", stderr.String(), "bogus-executor")
 	}
-	if !strings.Contains(stderr.String(), "(supported: agy, cursor-agent)") {
-		t.Fatalf("stderr = %q, want it to list supported executors (supported: agy, cursor-agent)", stderr.String())
+	// Supported executors are listed sorted, derived from supportedExecutors
+	// at runtime -- not a hardcoded literal -- so this assertion checks each
+	// name individually rather than a fixed joined string, and stays
+	// correct as executors are added or removed.
+	for name := range supportedExecutors {
+		if !strings.Contains(stderr.String(), name) {
+			t.Fatalf("stderr = %q, want it to list supported executor %q", stderr.String(), name)
+		}
 	}
 }
 
@@ -199,8 +205,8 @@ func TestRunModelMismatchedToExecutorIsRejected(t *testing.T) {
 }
 
 // TestRunKnownModelForExecutorPasses proves a model that genuinely belongs
-// to the named executor -- including a deliberate escalation away from
-// that executor's own default -- passes the check.
+// to the named executor -- named explicitly, not omitted -- passes the
+// check.
 func TestRunKnownModelForExecutorPasses(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 
@@ -210,7 +216,7 @@ func TestRunKnownModelForExecutorPasses(t *testing.T) {
 		"id: lane-1\n" +
 		"executor: cursor-agent\n" +
 		"routed_by: single-piece precision\n" +
-		"model: claude-opus-4-8-high\n" +
+		"model: cursor-grok-4.6-high\n" +
 		"---\n" +
 		"Do the thing.\n"
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
@@ -226,7 +232,7 @@ func TestRunKnownModelForExecutorPasses(t *testing.T) {
 		t.Fatalf("run exit code = 0 with no real dispatch environment, want non-zero for an unrelated reason")
 	}
 	if strings.Contains(stderr.String(), "not a known model") {
-		t.Fatalf("stderr = %q, want the known model claude-opus-4-8-high to pass the check", stderr.String())
+		t.Fatalf("stderr = %q, want the known model cursor-grok-4.6-high to pass the check", stderr.String())
 	}
 }
 
@@ -254,6 +260,69 @@ func TestRunOmittedModelSkipsModelCheck(t *testing.T) {
 	}
 }
 
+// TestRunAgentOnNonOpencodeExecutorIsRejected proves that a packet naming
+// agent on an executor other than opencode is rejected before dispatch,
+// since agent is only meaningful for opencode.
+func TestRunAgentOnNonOpencodeExecutorIsRejected(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "packet.md")
+	content := "---\n" +
+		"id: lane-1\n" +
+		"executor: agy\n" +
+		"routed_by: single-piece precision\n" +
+		"agent: lucind-dag\n" +
+		"---\n" +
+		"Do the thing.\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write packet fixture: %v", err)
+	}
+
+	code := run(context.Background(), []string{"run", "--packet", path}, &stdout, &stderr)
+
+	if code == 0 {
+		t.Fatalf("run with agent on a non-opencode executor exit code = 0, want non-zero")
+	}
+	if !strings.Contains(stderr.String(), "lucind-dag") {
+		t.Fatalf("stderr = %q, want it to name the agent", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "agy") {
+		t.Fatalf("stderr = %q, want it to name the executor", stderr.String())
+	}
+}
+
+// TestRunAgentOnOpencodeExecutorPasses proves that a packet naming agent on
+// executor: opencode passes the pre-dispatch agent check.
+func TestRunAgentOnOpencodeExecutorPasses(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "packet.md")
+	content := "---\n" +
+		"id: lane-1\n" +
+		"executor: opencode\n" +
+		"routed_by: DAG authoring, specialist agent required\n" +
+		"agent: lucind-dag\n" +
+		"---\n" +
+		"Do the thing.\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write packet fixture: %v", err)
+	}
+
+	code := run(context.Background(), []string{"run", "--packet", path}, &stdout, &stderr)
+
+	// The agent check must pass; the run still fails downstream because
+	// this test has no real primary root / ledger wired -- what matters
+	// here is that the agent-mismatch message never appears.
+	if code == 0 {
+		t.Fatalf("run exit code = 0 with no real dispatch environment, want non-zero for an unrelated reason")
+	}
+	if strings.Contains(stderr.String(), "only meaningful for executor") {
+		t.Fatalf("stderr = %q, want agent on opencode to pass the check", stderr.String())
+	}
+}
+
 // TestRunAcceptsCursorAgentExecutor proves that a packet specifying
 // "executor: cursor-agent" passes the pre-dispatch unsupported executor check.
 func TestRunAcceptsCursorAgentExecutor(t *testing.T) {
@@ -263,6 +332,18 @@ func TestRunAcceptsCursorAgentExecutor(t *testing.T) {
 	}
 	if factory == nil || factory() == nil {
 		t.Fatalf("supportedExecutors[%q] factory returned nil", "cursor-agent")
+	}
+}
+
+// TestRunAcceptsOpencodeExecutor proves that a packet specifying
+// "executor: opencode" passes the pre-dispatch unsupported executor check.
+func TestRunAcceptsOpencodeExecutor(t *testing.T) {
+	factory, ok := supportedExecutors["opencode"]
+	if !ok {
+		t.Fatalf("supportedExecutors[%q] not found, want opencode to be accepted as a supported executor", "opencode")
+	}
+	if factory == nil || factory() == nil {
+		t.Fatalf("supportedExecutors[%q] factory returned nil", "opencode")
 	}
 }
 

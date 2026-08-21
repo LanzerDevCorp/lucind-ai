@@ -46,6 +46,12 @@ type Packet struct {
 	// applied by internal/run when this field is empty — not filled in
 	// here, so Parse keeps reflecting frontmatter literally.
 	Model string
+	// Agent selects which named opencode agent (passed as --agent) the
+	// executor dispatches with. It is optional and only meaningful for the
+	// opencode executor -- other executors ignore it. Like Model, an absent
+	// agent key leaves this at its zero value; Parse reflects frontmatter
+	// literally and injects no default.
+	Agent string
 	// ReadOnly marks this packet as exploration or read-only: it must
 	// produce no commits and leave a clean worktree. When absent, it
 	// defaults to false (write packet).
@@ -94,6 +100,8 @@ func Parse(r io.Reader) (Packet, error) {
 			p.RoutedBy = strings.TrimSpace(value)
 		case "model":
 			p.Model = strings.TrimSpace(value)
+		case "agent":
+			p.Agent = strings.TrimSpace(value)
 		case "read_only":
 			switch strings.TrimSpace(value) {
 			case "true":

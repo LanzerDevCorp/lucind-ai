@@ -84,6 +84,72 @@ packets:
 	}
 }
 
+func TestParse_AgentFieldRoundTrips(t *testing.T) {
+	dir := t.TempDir()
+	bodiesDir := filepath.Join(dir, "bodies")
+	if err := os.MkdirAll(bodiesDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bodiesDir, "author-dag.md"), []byte("# Goal\nAuthor the DAG"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	yamlContent := `change: apply-dag-dispatch
+packets:
+  - id: author-dag
+    executor: opencode
+    routed_by: DAG authoring, specialist agent required
+    agent: lucind-dag
+    body_path: bodies/author-dag.md
+`
+	dagPath := filepath.Join(dir, "apply-dag.yaml")
+	if err := os.WriteFile(dagPath, []byte(yamlContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	d, err := dag.Parse(dagPath)
+	if err != nil {
+		t.Fatalf("unexpected error parsing sidecar: %v", err)
+	}
+	if len(d.Packets) != 1 {
+		t.Fatalf("expected 1 packet, got %d", len(d.Packets))
+	}
+	if got := d.Packets[0].Agent; got != "lucind-dag" {
+		t.Errorf("Agent = %q, want %q", got, "lucind-dag")
+	}
+}
+
+func TestParse_AgentFieldAbsentLeavesFieldEmpty(t *testing.T) {
+	dir := t.TempDir()
+	bodiesDir := filepath.Join(dir, "bodies")
+	if err := os.MkdirAll(bodiesDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bodiesDir, "apply-ledger.md"), []byte("# Goal\nLedger work"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	yamlContent := `change: apply-dag-dispatch
+packets:
+  - id: apply-ledger
+    executor: agy
+    routed_by: schema and CRUD isolated from HTTP
+    body_path: bodies/apply-ledger.md
+`
+	dagPath := filepath.Join(dir, "apply-dag.yaml")
+	if err := os.WriteFile(dagPath, []byte(yamlContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	d, err := dag.Parse(dagPath)
+	if err != nil {
+		t.Fatalf("unexpected error parsing sidecar: %v", err)
+	}
+	if got := d.Packets[0].Agent; got != "" {
+		t.Errorf("Agent = %q, want empty", got)
+	}
+}
+
 func TestParse_MissingBodyPathFile(t *testing.T) {
 	dir := t.TempDir()
 	yamlContent := `change: test-change

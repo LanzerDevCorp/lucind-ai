@@ -24,6 +24,7 @@ type Node struct {
 	Executor          string   `yaml:"executor"`
 	RoutedBy          string   `yaml:"routed_by"`
 	Model             string   `yaml:"model,omitempty"`
+	Agent             string   `yaml:"agent,omitempty"`
 	Feature           string   `yaml:"feature,omitempty"`
 	ParentRef         string   `yaml:"parent_ref,omitempty"`
 	BaseSHA           string   `yaml:"base_sha,omitempty"`

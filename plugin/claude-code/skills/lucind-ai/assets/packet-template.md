@@ -2,7 +2,8 @@
 id: <id>
 executor: agy
 routed_by: <the condition that selected this lane and this verification level — never the executor's name; that is the outcome of routing, not its reason>
-model: <optional — omit to use the executor's own default (agy: gemini-3.7-flash-high, cursor-agent: cursor-grok-4.6-high); set explicitly only to override it>
+model: <optional — omit to use the executor's own default (agy: gemini-3.7-flash-high, cursor-agent: cursor-grok-4.6-high, opencode: openai/gpt-5.6-sol); set explicitly only to override it>
+agent: <optional, opencode only — names a purpose-built opencode agent (e.g. lucind-dag for DAG authoring) to invoke via --agent; omit for opencode's own default agent, and omit entirely for agy/cursor-agent>
 allowed_paths: ["path/one", "path/two"]
 ---
 
