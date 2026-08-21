@@ -228,6 +228,11 @@ The distinction is load-bearing because phase skills describe one sub-agent writ
 | `propose` | Intent; Scope (in / out); Capabilities (new / modified); Approach; Affected Areas; Risks; Rollback Plan; Dependencies; Success Criteria; Review burden; Rejected alternatives; Open questions left to design |
 | `design` | Technical approach; architecture decisions with alternatives and rationale; flow and invariants; file changes with terminal consumers; testing strategy and test seams; threat matrix with every row `Applicable` or `N/A: reason`; rollback and additivity; open questions and out of scope |
 
+**Tasks fan-out — every wave must survive `Integrate`.** Path disjointness and ordered dependencies are not enough. `Integrate` runs `lucind-checks.sh` on the combined tree (`internal/run/integrate.go:50-59`; `internal/integrate/integrate.go:83-91`) and bisects a failing batch (`internal/run/integrate.go:28-30,83-84`). A wave whose accepted done criterion is that tests fail is reverted before its successor can turn them green.
+
+A partition is viable only when every wave can pass those checks on the combined tree by itself. Strict-TDD wave splitting is incompatible with that gate: RED and GREEN for one unit belong in one lane. Repository precedent: `openspec/changes/archive/2026-08-20-apply-dag-dispatch-hardening/tasks.md` declined a DAG split (a two-node DAG was possible; Unit 1 was too small to pay for sidecar orchestration) and used a single packet.
+
+**Size forecast for template work.** Forecast fan-out template work at roughly 150 lines per template. The `sdd-fan-out-lens` tasks lens C forecast 120–250 changed lines against an actual 1730, and neither sibling lens nor the synthesizer challenged it, with eight ~150-line templates already visible in the existing design set.
 
 ### Packet Structure
 
