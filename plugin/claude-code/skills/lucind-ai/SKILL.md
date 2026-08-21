@@ -54,6 +54,24 @@ turning a should-be-automatic merge into manual per-lane recovery work every tim
 under `.lucind/packets/` instead avoids this failure mode entirely; no other packet content or
 dispatch step changes.
 
+### Where `.lucind/` ends and the change folder begins
+
+Packet files go under `.lucind/packets/` for the reason in **Where to author packet files**. That
+rule is one use of a larger split: `.lucind/` is runtime state, ignored on purpose;
+`openspec/changes/<id>/` is the change's history, tracked.
+
+| Location | Tracked? | Holds | Why this side exists |
+|---|---|---|---|
+| `.lucind/` | No (`.gitignore:2`) | In-flight packets, `.lucind/result.json`, the ledger, other worktree-local runtime files | Every lane writes `.lucind/result.json`. If `.lucind/` were tracked, that file would dirty `git status --porcelain`, so `enforceCompletionMode` would fail both write and read-only packets (`internal/run/run.go:628-661`). `Integrate` would refuse to promote while the primary root is dirty (`internal/integrate/integrate.go:25,112-126`). The same paths would fail the allowed-paths scope check, so the changed-path union skips `.lucind/` (`internal/run/run.go:599-601`). |
+| `openspec/changes/<id>/` | Yes | Canonical phase artifacts, `apply-dag.yaml` when a DAG is wanted, and packet bodies copied in after a phase closes | These are the change. `lucind-ai split --dag` reads the sidecar from here; later phases, verify, and archive read the canonical files. |
+
+**What the ignore costs, and the remedy.** Packet files are the instructions that produced the
+work. They stay ignored while a batch runs for the reason above — which is why a sidecar authored
+only under `.lucind/` never appears in git history, and reads as "never used" when the truth is
+"used, never committed". Nothing stops copying a phase's packets into the change folder once that
+phase closes. Worked precedent: `openspec/changes/archive/2026-08-21-sdd-fan-out-lens/apply-bodies/`
+— packet bodies, tracked, archived, breaking nothing.
+
 ### Executor preference by SDD phase
 
 Prefer this `executor:` value by SDD lifecycle phase when writing a packet. It is a preference the author applies by hand, not a rule enforced by any code — `executor` stays a value a human writes by hand (`docs/prd.md` section 6 step 1), and there is and will remain no code-level routing. It is a second, complementary lens to the aptitude map in `docs/prd.md` section 5 (sweeps-vs-precision); a packet author may weigh both when they point in different directions.
