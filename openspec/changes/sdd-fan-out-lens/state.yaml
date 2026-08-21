@@ -6,7 +6,7 @@ delivery_strategy: single-pr
 review_budget_lines: 5000
 phases:
   explore:
-    status: in-progress
+    status: done
     engram_topic: sdd/sdd-fan-out-lens/explore
     drafts:
       - openspec/changes/sdd-fan-out-lens/explore-lens-a.md
@@ -24,8 +24,27 @@ phases:
       which is gitignored and per-worktree, so nothing integrates and the synthesis lane
       -- branched from main after wave 1 -- would find no drafts to read. Sibling
       worktrees cannot see each other; integration is the only channel between waves.
+
+      Wave 1 done/done/done, integrated 3, reverted 0 (781/764/590 words, all under the
+      800 cap). Wave 2 synthesis done, integrated 1, reverted 0: 962-word canonical
+      explore.md, zero unresolved contradictions.
+
+      Two findings from the pilot itself. (1) The citation-verification pass earned its
+      keep: a mid-flight commit to SKILL.md (1a7fb9f) shifted line numbers after the lens
+      lanes had branched, so every SKILL.md cite in lens A was stale by the time the
+      synthesizer read it. The synthesizer caught and recast all nine ranges plus six more
+      unrelated bad cites. OPERATIONAL RULE: do not commit to files the lenses cite while a
+      fan-out is in flight. (2) The partition leaked on the sidecar-versus-hand-authored
+      seam -- all three lenses covered it, harmlessly but redundantly. The synthesizer's
+      proposed tightening is recorded in explore-synthesis-notes.md under Lens Overlap.
   proposal:
-    status: pending
+    status: in-progress
+    engram_topic: sdd/sdd-fan-out-lens/proposal
+    drafts:
+      - openspec/changes/sdd-fan-out-lens/proposal-lens-a.md
+      - openspec/changes/sdd-fan-out-lens/proposal-lens-b.md
+      - openspec/changes/sdd-fan-out-lens/proposal-lens-c.md
+    canonical: openspec/changes/sdd-fan-out-lens/proposal.md
   design:
     status: pending
   spec:
