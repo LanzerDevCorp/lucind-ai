@@ -1388,4 +1388,212 @@ func TestPruneIntegrationEventsRetention(t *testing.T) {
 	}
 }
 
+func TestLedgerOverlapEvidenceCRUD(t *testing.T) {
+	ctx := context.Background()
+	l := openTestLedger(t)
 
+	now := time.Date(2026, 8, 20, 11, 0, 0, 0, time.UTC)
+	row := OverlapEvidenceRow{
+		FeatureID:     "feat-1",
+		Version:       "v1",
+		EvidenceHash:  "hash123",
+		EvidenceClass: "required",
+		EvidenceJSON:  `{"class":"required"}`,
+		CreatedAt:     now,
+	}
+
+	id, err := l.InsertOverlapEvidence(ctx, row)
+	if err != nil {
+		t.Fatalf("InsertOverlapEvidence: %v", err)
+	}
+	if id <= 0 {
+		t.Fatalf("expected positive id, got %d", id)
+	}
+
+	// Query by featureID and hash
+	got, err := l.OverlapEvidence(ctx, "feat-1", "hash123")
+	if err != nil {
+		t.Fatalf("OverlapEvidence: %v", err)
+	}
+	if got.EvidenceHash != "hash123" || got.EvidenceClass != "required" || got.EvidenceJSON != row.EvidenceJSON {
+		t.Errorf("got = %+v, want %+v", got, row)
+	}
+
+	// Query by hash
+	gotByHash, err := l.OverlapEvidenceByHash(ctx, "hash123")
+	if err != nil {
+		t.Fatalf("OverlapEvidenceByHash: %v", err)
+	}
+	if gotByHash.ID != got.ID {
+		t.Errorf("gotByHash.ID = %d, want %d", gotByHash.ID, got.ID)
+	}
+
+	// Query nonexistent
+	_, err = l.OverlapEvidence(ctx, "feat-1", "nonexistent")
+	if !errors.Is(err, ErrOverlapEvidenceNotFound) {
+		t.Errorf("expected ErrOverlapEvidenceNotFound, got %v", err)
+	}
+	_, err = l.OverlapEvidenceByHash(ctx, "nonexistent")
+	if !errors.Is(err, ErrOverlapEvidenceNotFound) {
+		t.Errorf("expected ErrOverlapEvidenceNotFound, got %v", err)
+	}
+}
+
+func TestLedgerReconciliationRequestCRUD(t *testing.T) {
+	ctx := context.Background()
+	l := openTestLedger(t)
+
+	now := time.Date(2026, 8, 20, 12, 0, 0, 0, time.UTC)
+	exp := now.Add(15 * time.Minute)
+	req := ReconciliationRequestRow{
+		ID:              "req-1",
+		FeatureID:       "feat-target",
+		Direction:       "feat-source -> feat-target",
+		Status:          "awaiting",
+		Actor:           "",
+		EvidenceVersion: "v1",
+		EvidenceHash:    "hash456",
+		SourceSHA:       "sha-src",
+		TargetSHA:       "sha-tgt",
+		ExpiresAt:       &exp,
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}
+
+	if err := l.InsertReconciliationRequest(ctx, req); err != nil {
+		t.Fatalf("InsertReconciliationRequest: %v", err)
+	}
+
+	// Query by ID
+	got, err := l.ReconciliationRequest(ctx, "req-1")
+	if err != nil {
+		t.Fatalf("ReconciliationRequest: %v", err)
+	}
+	if got.ID != "req-1" || got.Status != "awaiting" || got.SourceSHA != "sha-src" || got.TargetSHA != "sha-tgt" {
+		t.Errorf("got = %+v, want %+v", got, req)
+	}
+	if got.ExpiresAt == nil || !got.ExpiresAt.Equal(exp) {
+		t.Errorf("got.ExpiresAt = %v, want %v", got.ExpiresAt, exp)
+	}
+
+	// List by FeatureID
+	list, err := l.ReconciliationRequests(ctx, "feat-target")
+	if err != nil {
+		t.Fatalf("ReconciliationRequests: %v", err)
+	}
+	if len(list) != 1 || list[0].ID != "req-1" {
+		t.Fatalf("ReconciliationRequests returned %+v, want 1 item", list)
+	}
+
+	// Update mutable fields
+	got.Status = "approved"
+	got.Actor = "local:tester"
+	got.UpdatedAt = now.Add(1 * time.Minute)
+	if err := l.UpdateReconciliationRequest(ctx, got); err != nil {
+		t.Fatalf("UpdateReconciliationRequest: %v", err)
+	}
+
+	updated, err := l.ReconciliationRequest(ctx, "req-1")
+	if err != nil {
+		t.Fatalf("ReconciliationRequest after update: %v", err)
+	}
+	if updated.Status != "approved" || updated.Actor != "local:tester" {
+		t.Errorf("updated = %+v, want approved and actor local:tester", updated)
+	}
+
+	// Query nonexistent
+	_, err = l.ReconciliationRequest(ctx, "nonexistent")
+	if !errors.Is(err, ErrReconciliationRequestNotFound) {
+		t.Errorf("expected ErrReconciliationRequestNotFound, got %v", err)
+	}
+
+	// Update nonexistent
+	err = l.UpdateReconciliationRequest(ctx, ReconciliationRequestRow{ID: "nonexistent"})
+	if !errors.Is(err, ErrReconciliationRequestNotFound) {
+		t.Errorf("expected ErrReconciliationRequestNotFound, got %v", err)
+	}
+}
+
+func TestLedgerReconciliationCandidateCRUD(t *testing.T) {
+	ctx := context.Background()
+	l := openTestLedger(t)
+
+	now := time.Date(2026, 8, 20, 13, 0, 0, 0, time.UTC)
+	cand := ReconciliationCandidateRow{
+		ID:            "cand-1",
+		RequestID:     "req-1",
+		Status:        "candidate_running",
+		AllowedPaths:  "pkg/a.go,pkg/b.go",
+		Model:         "sonnet",
+		Config:        "",
+		Output:        "",
+		Checks:        "",
+		CandidateSHA:  "",
+		FailureReason: "",
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}
+
+	if err := l.InsertReconciliationCandidate(ctx, cand); err != nil {
+		t.Fatalf("InsertReconciliationCandidate: %v", err)
+	}
+
+	// Query by ID
+	got, err := l.ReconciliationCandidate(ctx, "cand-1")
+	if err != nil {
+		t.Fatalf("ReconciliationCandidate: %v", err)
+	}
+	if got.ID != "cand-1" || got.Status != "candidate_running" || got.Model != "sonnet" {
+		t.Errorf("got = %+v, want %+v", got, cand)
+	}
+
+	// Query by RequestID
+	gotByReq, err := l.ReconciliationCandidateByRequest(ctx, "req-1")
+	if err != nil {
+		t.Fatalf("ReconciliationCandidateByRequest: %v", err)
+	}
+	if gotByReq.ID != "cand-1" {
+		t.Errorf("gotByReq.ID = %q, want cand-1", gotByReq.ID)
+	}
+
+	// List by RequestID
+	list, err := l.ReconciliationCandidates(ctx, "req-1")
+	if err != nil {
+		t.Fatalf("ReconciliationCandidates: %v", err)
+	}
+	if len(list) != 1 || list[0].ID != "cand-1" {
+		t.Fatalf("ReconciliationCandidates returned %+v, want 1 item", list)
+	}
+
+	// Update status
+	got.Status = "integrated"
+	got.CandidateSHA = "sha-integrated"
+	got.UpdatedAt = now.Add(2 * time.Minute)
+	if err := l.UpdateReconciliationCandidate(ctx, got); err != nil {
+		t.Fatalf("UpdateReconciliationCandidate: %v", err)
+	}
+
+	updated, err := l.ReconciliationCandidate(ctx, "cand-1")
+	if err != nil {
+		t.Fatalf("ReconciliationCandidate after update: %v", err)
+	}
+	if updated.Status != "integrated" || updated.CandidateSHA != "sha-integrated" {
+		t.Errorf("updated = %+v, want integrated with sha", updated)
+	}
+
+	// Query nonexistent
+	_, err = l.ReconciliationCandidate(ctx, "nonexistent")
+	if !errors.Is(err, ErrReconciliationCandidateNotFound) {
+		t.Errorf("expected ErrReconciliationCandidateNotFound, got %v", err)
+	}
+	_, err = l.ReconciliationCandidateByRequest(ctx, "nonexistent")
+	if !errors.Is(err, ErrReconciliationCandidateNotFound) {
+		t.Errorf("expected ErrReconciliationCandidateNotFound, got %v", err)
+	}
+
+	// Update nonexistent
+	err = l.UpdateReconciliationCandidate(ctx, ReconciliationCandidateRow{ID: "nonexistent"})
+	if !errors.Is(err, ErrReconciliationCandidateNotFound) {
+		t.Errorf("expected ErrReconciliationCandidateNotFound, got %v", err)
+	}
+}
