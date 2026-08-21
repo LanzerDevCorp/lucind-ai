@@ -598,7 +598,12 @@ func productionDeps(runID, primaryRoot string, ledg *ledger.Ledger, timeout, app
 			}
 			return factory(), nil
 		},
-		CreateWorktree:  worktree.Create,
+		CreateWorktree: func(ctx context.Context, primaryRoot, laneID, parentRef, baseSHA string) (worktree.Worktree, error) {
+			if parentRef == "" && baseSHA == "" {
+				return worktree.Create(ctx, primaryRoot, laneID)
+			}
+			return worktree.CreateWithParent(ctx, primaryRoot, laneID, parentRef, baseSHA)
+		},
 		WorktreeFS:      os.DirFS,
 		Now:             time.Now,
 		LaneTimeout:     timeout,

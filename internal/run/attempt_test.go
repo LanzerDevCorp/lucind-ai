@@ -50,7 +50,7 @@ func newAttemptTestDeps(t *testing.T, spies *attemptSpies) (run.Deps, *ledger.Le
 		PrimaryRoot: t.TempDir(),
 		Ledger:      l,
 		Now:         func() time.Time { return now },
-		CreateWorktree: func(ctx context.Context, primaryRoot, laneID string) (worktree.Worktree, error) {
+		CreateWorktree: func(ctx context.Context, primaryRoot, laneID, parentRef, baseSHA string) (worktree.Worktree, error) {
 			spies.mu.Lock()
 			spies.createWorktreeCalls = append(spies.createWorktreeCalls, laneID)
 			spies.mu.Unlock()

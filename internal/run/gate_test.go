@@ -53,7 +53,7 @@ func newGateTestDeps(t *testing.T, spies *gateSpies) (run.Deps, *ledger.Ledger, 
 		PrimaryRoot: t.TempDir(),
 		Ledger:      l,
 		Now:         func() time.Time { return now },
-		CreateWorktree: func(ctx context.Context, primaryRoot, laneID string) (worktree.Worktree, error) {
+		CreateWorktree: func(ctx context.Context, primaryRoot, laneID, parentRef, baseSHA string) (worktree.Worktree, error) {
 			return worktree.Worktree{Path: primaryRoot + "/wt/" + laneID, Branch: "lucind/" + laneID, BaseSHA: "base-sha-common"}, nil
 		},
 		CombineTree: func(ctx context.Context, primaryRoot, runID string, branches []string) (string, string, error) {

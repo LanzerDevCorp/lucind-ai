@@ -465,9 +465,9 @@ func TestRunOverlappingAllowedPathsFailsBeforeCreateWorktree(t *testing.T) {
 	defer func() { depsFactory = origFactory }()
 	depsFactory = func(runID, primaryRoot string, ledg *ledger.Ledger, timeout, approvalTimeout time.Duration) lucindrun.Deps {
 		deps := origFactory(runID, primaryRoot, ledg, timeout, approvalTimeout)
-		deps.CreateWorktree = func(ctx context.Context, primaryRoot, laneID string) (worktree.Worktree, error) {
+		deps.CreateWorktree = func(ctx context.Context, primaryRoot, laneID, parentRef, baseSHA string) (worktree.Worktree, error) {
 			createCalled = true
-			return origFactory(runID, primaryRoot, ledg, timeout, approvalTimeout).CreateWorktree(ctx, primaryRoot, laneID)
+			return origFactory(runID, primaryRoot, ledg, timeout, approvalTimeout).CreateWorktree(ctx, primaryRoot, laneID, parentRef, baseSHA)
 		}
 		deps.PersistEnvelope = func(ctx context.Context, primaryRoot, laneID string, envelope *result.Envelope) error {
 			return nil
@@ -1073,7 +1073,7 @@ func TestRunSequentialInvocationsProduceDistinctRunIDs(t *testing.T) {
 	defer func() { depsFactory = origFactory }()
 	depsFactory = func(runID, primaryRoot string, ledg *ledger.Ledger, timeout, approvalTimeout time.Duration) lucindrun.Deps {
 		deps := origFactory(runID, primaryRoot, ledg, timeout, approvalTimeout)
-		deps.CreateWorktree = func(ctx context.Context, primaryRoot, laneID string) (worktree.Worktree, error) {
+		deps.CreateWorktree = func(ctx context.Context, primaryRoot, laneID, parentRef, baseSHA string) (worktree.Worktree, error) {
 			return worktree.Worktree{Path: t.TempDir(), Branch: "branch-" + laneID}, nil
 		}
 		deps.HasUniqueLaneCommits = func(ctx context.Context, worktreePath, baseSHA string) (bool, error) {
@@ -1169,7 +1169,7 @@ func TestRunDispatchPersistsIntegratedLaneEnvelopeToPrimaryRoot(t *testing.T) {
 	defer func() { depsFactory = origFactory }()
 	depsFactory = func(runID, primaryRoot string, ledg *ledger.Ledger, timeout, approvalTimeout time.Duration) lucindrun.Deps {
 		deps := origFactory(runID, primaryRoot, ledg, timeout, approvalTimeout)
-		deps.CreateWorktree = func(ctx context.Context, primaryRoot, laneID string) (worktree.Worktree, error) {
+		deps.CreateWorktree = func(ctx context.Context, primaryRoot, laneID, parentRef, baseSHA string) (worktree.Worktree, error) {
 			return worktree.Worktree{Path: t.TempDir(), Branch: "branch-" + laneID}, nil
 		}
 		deps.HasUniqueLaneCommits = func(ctx context.Context, worktreePath, baseSHA string) (bool, error) {
@@ -2744,7 +2744,7 @@ func featureDispatchDeps(t *testing.T, promoted *[]string) func(string, string, 
 	origFactory := depsFactory
 	return func(runID, primaryRoot string, ledg *ledger.Ledger, timeout, approvalTimeout time.Duration) lucindrun.Deps {
 		deps := origFactory(runID, primaryRoot, ledg, timeout, approvalTimeout)
-		deps.CreateWorktree = func(ctx context.Context, primaryRoot, laneID string) (worktree.Worktree, error) {
+		deps.CreateWorktree = func(ctx context.Context, primaryRoot, laneID, parentRef, baseSHA string) (worktree.Worktree, error) {
 			return worktree.Worktree{Path: t.TempDir(), Branch: "branch-" + laneID}, nil
 		}
 		deps.HasUniqueLaneCommits = func(ctx context.Context, worktreePath, baseSHA string) (bool, error) {
@@ -2887,7 +2887,7 @@ func TestRunDispatchRejectsMixedFeatureTargets(t *testing.T) {
 	t.Cleanup(func() { depsFactory = origFactory })
 	depsFactory = func(runID, primaryRoot string, ledg *ledger.Ledger, timeout, approvalTimeout time.Duration) lucindrun.Deps {
 		deps := origFactory(runID, primaryRoot, ledg, timeout, approvalTimeout)
-		deps.CreateWorktree = func(ctx context.Context, primaryRoot, laneID string) (worktree.Worktree, error) {
+		deps.CreateWorktree = func(ctx context.Context, primaryRoot, laneID, parentRef, baseSHA string) (worktree.Worktree, error) {
 			t.Errorf("CreateWorktree called for lane %q; a mixed-target batch must be rejected before any lane dispatches", laneID)
 			return worktree.Worktree{}, nil
 		}

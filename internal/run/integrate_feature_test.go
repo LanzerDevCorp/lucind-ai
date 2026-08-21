@@ -14,6 +14,7 @@ import (
 	"github.com/LanzerDevCorp/lucind-ai/internal/packet"
 	"github.com/LanzerDevCorp/lucind-ai/internal/result"
 	"github.com/LanzerDevCorp/lucind-ai/internal/run"
+	"github.com/LanzerDevCorp/lucind-ai/internal/worktree"
 )
 
 // featurePacket builds a packet that names a full feature target, which is
@@ -327,3 +328,56 @@ func TestIntegrateFeatureBlockedRevertsLanes(t *testing.T) {
 		t.Errorf("lane status = %q, want %q", status, lane.Blocked)
 	}
 }
+
+// A feature lane must start from the feature's own base, not from whatever the
+// primary checkout has checked out. Promoting a candidate built on an
+// unrelated base onto the feature's parent ref is a silent wrong-base merge:
+// the CAS succeeds and the tree is not what anyone asked for.
+func TestExecuteCreatesFeatureWorktreeFromPacketBase(t *testing.T) {
+	tests := []struct {
+		name          string
+		pkt           packet.Packet
+		wantParentRef string
+		wantBaseSHA   string
+	}{
+		{
+			name:          "feature lane carries its parent and base",
+			pkt:           featurePacket("lane-1", "feat-alpha"),
+			wantParentRef: "refs/heads/feature-feat-alpha",
+			wantBaseSHA:   "base-sha-common",
+		},
+		{
+			// Legacy dispatch keeps today's exact behavior: no start point, so
+			// git branches the lane from the primary checkout's HEAD.
+			name:          "legacy lane carries neither",
+			pkt:           legacyPacket("lane-1"),
+			wantParentRef: "",
+			wantBaseSHA:   "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			deps, _, _ := newFeatureIntegrateDeps(t, &gateSpies{})
+
+			var gotParentRef, gotBaseSHA string
+			deps.CreateWorktree = func(ctx context.Context, primaryRoot, laneID, parentRef, baseSHA string) (worktree.Worktree, error) {
+				gotParentRef, gotBaseSHA = parentRef, baseSHA
+				return worktree.Worktree{}, errStopAfterWorktree
+			}
+
+			_, _ = run.Execute(context.Background(), deps, tt.pkt)
+
+			if gotParentRef != tt.wantParentRef {
+				t.Errorf("CreateWorktree parentRef = %q, want %q", gotParentRef, tt.wantParentRef)
+			}
+			if gotBaseSHA != tt.wantBaseSHA {
+				t.Errorf("CreateWorktree baseSHA = %q, want %q", gotBaseSHA, tt.wantBaseSHA)
+			}
+		})
+	}
+}
+
+// errStopAfterWorktree ends Execute right after the call under test, so the
+// assertion does not depend on anything downstream of worktree creation.
+var errStopAfterWorktree = errors.New("stop after worktree creation")

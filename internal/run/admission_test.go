@@ -81,7 +81,7 @@ func TestAdmissionRejectsMissingFeatureTargetWithoutLegacyMain(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			wtCalled := false
 			deps := newTestDeps(t, t.TempDir(), func(string) fs.FS { return fstest.MapFS{} }, &fakeExecutor{})
-			deps.CreateWorktree = func(ctx context.Context, primaryRoot, laneID string) (worktree.Worktree, error) {
+			deps.CreateWorktree = func(ctx context.Context, primaryRoot, laneID, parentRef, baseSHA string) (worktree.Worktree, error) {
 				wtCalled = true
 				return worktree.Worktree{Path: t.TempDir(), BaseSHA: "1111111111111111111111111111111111111111"}, nil
 			}
@@ -121,7 +121,7 @@ func TestAdmissionAcceptsExplicitTargetFields(t *testing.T) {
 	exec := &fakeExecutor{outcome: executor.Outcome{ExitCode: 0}}
 	deps := newTestDeps(t, wtDir, fsys, exec)
 	wtCalled := false
-	deps.CreateWorktree = func(ctx context.Context, primaryRoot, laneID string) (worktree.Worktree, error) {
+	deps.CreateWorktree = func(ctx context.Context, primaryRoot, laneID, parentRef, baseSHA string) (worktree.Worktree, error) {
 		wtCalled = true
 		return worktree.Worktree{Path: wtDir, BaseSHA: "1111111111111111111111111111111111111111"}, nil
 	}
@@ -157,7 +157,7 @@ func TestAdmissionAcceptsLegacyMainWithExpectedParentSHA(t *testing.T) {
 	exec := &fakeExecutor{outcome: executor.Outcome{ExitCode: 0}}
 	deps := newTestDeps(t, wtDir, fsys, exec)
 	wtCalled := false
-	deps.CreateWorktree = func(ctx context.Context, primaryRoot, laneID string) (worktree.Worktree, error) {
+	deps.CreateWorktree = func(ctx context.Context, primaryRoot, laneID, parentRef, baseSHA string) (worktree.Worktree, error) {
 		wtCalled = true
 		return worktree.Worktree{Path: wtDir, BaseSHA: "1111111111111111111111111111111111111111"}, nil
 	}
@@ -186,7 +186,7 @@ func TestAdmissionRejectsLegacyMainWithoutExpectedParentSHA(t *testing.T) {
 
 	wtCalled := false
 	deps := newTestDeps(t, t.TempDir(), func(string) fs.FS { return fstest.MapFS{} }, &fakeExecutor{})
-	deps.CreateWorktree = func(ctx context.Context, primaryRoot, laneID string) (worktree.Worktree, error) {
+	deps.CreateWorktree = func(ctx context.Context, primaryRoot, laneID, parentRef, baseSHA string) (worktree.Worktree, error) {
 		wtCalled = true
 		return worktree.Worktree{Path: t.TempDir(), BaseSHA: "1111111111111111111111111111111111111111"}, nil
 	}

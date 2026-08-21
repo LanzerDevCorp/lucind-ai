@@ -108,7 +108,7 @@ func newTestDeps(t *testing.T, wtPath string, fsys func(string) fs.FS, exec exec
 		LookupExecutor: func(string) (executor.Executor, error) {
 			return exec, nil
 		},
-		CreateWorktree: func(_ context.Context, primaryRoot, laneID string) (worktree.Worktree, error) {
+		CreateWorktree: func(_ context.Context, primaryRoot, laneID, _, _ string) (worktree.Worktree, error) {
 			return worktree.Worktree{Path: wtPath, Branch: "lucind/" + laneID, BaseSHA: sha}, nil
 		},
 		WorktreeFS: fsys,
@@ -534,7 +534,7 @@ func TestExecuteReturnsErrorWhenWorktreeCreationFails(t *testing.T) {
 	deps := newTestDeps(t, t.TempDir(), func(string) fs.FS {
 		return fstest.MapFS{".lucind/result.json": {Data: []byte(doneEnvelopeJSON)}}
 	}, fe)
-	deps.CreateWorktree = func(context.Context, string, string) (worktree.Worktree, error) {
+	deps.CreateWorktree = func(context.Context, string, string, string, string) (worktree.Worktree, error) {
 		return worktree.Worktree{}, wantErr
 	}
 
@@ -1561,7 +1561,7 @@ func TestExecuteScopeCheckInScopeChangesReachesDone(t *testing.T) {
 	}, fe, birthSHA)
 	deps.PrimaryRoot = primaryRoot
 
-	wt, err := deps.CreateWorktree(context.Background(), primaryRoot, "lane-a")
+	wt, err := deps.CreateWorktree(context.Background(), primaryRoot, "lane-a", "", "")
 	if err != nil {
 		t.Fatalf("CreateWorktree error = %v", err)
 	}

@@ -175,7 +175,7 @@ func newBatchTestDeps(t *testing.T, worktreeRoot func(laneID string) string, env
 		LookupExecutor: func(name string) (executor.Executor, error) {
 			return execEnv, nil
 		},
-		CreateWorktree: func(_ context.Context, _, laneID string) (worktree.Worktree, error) {
+		CreateWorktree: func(_ context.Context, _, laneID, _, _ string) (worktree.Worktree, error) {
 			if failWorktreeFor[laneID] {
 				return worktree.Worktree{}, fmt.Errorf("git worktree add: boom for %s", laneID)
 			}
@@ -434,9 +434,9 @@ func TestExecuteBatchPostWorktreeFailureReportCarriesWorktree(t *testing.T) {
 		return []byte(laneEnvelopeJSON(id, "done"))
 	}, fe, nil)
 	innerCreate := deps.CreateWorktree
-	deps.CreateWorktree = func(ctx context.Context, primaryRoot, laneID string) (worktree.Worktree, error) {
+	deps.CreateWorktree = func(ctx context.Context, primaryRoot, laneID, parentRef, baseSHA string) (worktree.Worktree, error) {
 		createCalls++
-		return innerCreate(ctx, primaryRoot, laneID)
+		return innerCreate(ctx, primaryRoot, laneID, parentRef, baseSHA)
 	}
 
 	p := batchPacket("lane-post-wt")
@@ -480,9 +480,9 @@ func TestExecuteBatchAdmissionRejectionReportSaysNoWorktree(t *testing.T) {
 		return []byte(laneEnvelopeJSON(id, "done"))
 	}, fe, nil)
 	innerCreate := deps.CreateWorktree
-	deps.CreateWorktree = func(ctx context.Context, primaryRoot, laneID string) (worktree.Worktree, error) {
+	deps.CreateWorktree = func(ctx context.Context, primaryRoot, laneID, parentRef, baseSHA string) (worktree.Worktree, error) {
 		createCalls++
-		return innerCreate(ctx, primaryRoot, laneID)
+		return innerCreate(ctx, primaryRoot, laneID, parentRef, baseSHA)
 	}
 
 	p := packet.Packet{
@@ -667,7 +667,7 @@ func TestExecuteBatchRejectsEmptyBatchBeforeAnySideEffect(t *testing.T) {
 		LookupExecutor: func(string) (executor.Executor, error) {
 			return newBatchFakeExecutor(), nil
 		},
-		CreateWorktree: func(context.Context, string, string) (worktree.Worktree, error) {
+		CreateWorktree: func(context.Context, string, string, string, string) (worktree.Worktree, error) {
 			atomic.AddInt32(&createCalls, 1)
 			return worktree.Worktree{}, nil
 		},
@@ -712,7 +712,7 @@ func TestExecuteBatchRejectsDuplicateLaneIDsBeforeAnySideEffect(t *testing.T) {
 		LookupExecutor: func(string) (executor.Executor, error) {
 			return newBatchFakeExecutor(), nil
 		},
-		CreateWorktree: func(context.Context, string, string) (worktree.Worktree, error) {
+		CreateWorktree: func(context.Context, string, string, string, string) (worktree.Worktree, error) {
 			atomic.AddInt32(&createCalls, 1)
 			return worktree.Worktree{}, nil
 		},

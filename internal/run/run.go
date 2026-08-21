@@ -153,7 +153,13 @@ type Deps struct {
 	// LookupExecutor resolves an executor by the packet's own Executor name
 	// at dispatch time, one call per lane -- not once per batch.
 	LookupExecutor func(name string) (executor.Executor, error)
-	CreateWorktree func(ctx context.Context, primaryRoot, laneID string) (worktree.Worktree, error)
+	// CreateWorktree creates the lane's worktree. parentRef and baseSHA are
+	// the packet's declared feature target, and are empty for a legacy
+	// dispatch -- empty means "no start point", which branches the lane from
+	// the primary checkout's HEAD, exactly as before feature targets existed.
+	// A feature lane must instead start at its own base_sha, or its candidate
+	// is built on a tree the feature's parent never contained.
+	CreateWorktree func(ctx context.Context, primaryRoot, laneID, parentRef, baseSHA string) (worktree.Worktree, error)
 	WorktreeFS     func(path string) fs.FS // opens a worktree for reading its result envelope
 	Now            func() time.Time        // injected clock; tests pin it
 	// LaneTimeout is the wall-clock budget ExecuteBatch grants each lane,
@@ -283,7 +289,14 @@ func Execute(ctx context.Context, deps Deps, p packet.Packet) (Report, error) {
 
 	now := deps.Now()
 
-	wt, err := deps.CreateWorktree(ctx, deps.PrimaryRoot, p.ID)
+	// validatePacketAdmission has already defaulted a legacy packet's
+	// ParentRef to "main", which is not a usable worktree start point, so
+	// legacy lanes pass neither field and keep the no-start-point behavior.
+	var laneParentRef, laneBaseSHA string
+	if !p.LegacyMain {
+		laneParentRef, laneBaseSHA = p.ParentRef, p.BaseSHA
+	}
+	wt, err := deps.CreateWorktree(ctx, deps.PrimaryRoot, p.ID, laneParentRef, laneBaseSHA)
 	if err != nil {
 		return report, fmt.Errorf("run: create worktree for lane %q: %w", p.ID, err)
 	}
