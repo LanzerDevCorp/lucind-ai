@@ -131,9 +131,19 @@ func runOneLane(ctx context.Context, deps Deps, p packet.Packet, b *barrier.Barr
 		// Best-effort: even if ensureLaneFailed itself cannot write to the
 		// ledger, the lane still must be observed into the barrier as
 		// failed below, or the barrier would wait forever for a lane that
-		// can never report in.
-		_ = ensureLaneFailed(ctx, deps, p, now, err)
-		report = Report{LaneID: p.ID, Status: lane.Failed}
+		// can never report in. The recording error is not returned — that
+		// would fail the batch — but both causes go on Report.Diagnosis.
+		// lucind-ai run prints each lane through printReport, which already
+		// emits Diagnosis under the failure banner; that is how a run
+		// invocation is actually read. stderr is reserved for lucind-ai's
+		// own process errors, not per-lane detail, and this is not a new
+		// output format.
+		recErr := ensureLaneFailed(ctx, deps, p, now, err)
+		diagnosis := err.Error()
+		if recErr != nil {
+			diagnosis = fmt.Sprintf("%s (additionally, failed to record the lane failure in the ledger: %v)", err, recErr)
+		}
+		report = Report{LaneID: p.ID, Status: lane.Failed, Diagnosis: diagnosis}
 	}
 
 	// Observe is safe for concurrent use (see barrier.Barrier.Observe) and

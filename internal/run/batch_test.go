@@ -366,6 +366,57 @@ func TestExecuteBatchWorktreeCreationFailureStillRegistersLaneAsFailed(t *testin
 	}
 }
 
+// TestExecuteBatchRecordingFailureKeepsBothCausesOnReport proves that when
+// ensureLaneFailed itself fails — here because it retries RegisterLane with
+// the same unadmitted executor that caused Execute to fail — the operator
+// still learns both causes. lucind-ai run prints each lane through
+// printReport, which already emits Report.Diagnosis under the failure
+// banner; that is the surface a run invocation is actually read on. A test
+// that only asserted lane.Failed would re-pin today's behavior: the lane
+// already reaches failed, and Diagnosis stays empty.
+func TestExecuteBatchRecordingFailureKeepsBothCausesOnReport(t *testing.T) {
+	root := t.TempDir()
+	fe := newBatchFakeExecutor()
+	fe.outcomeFor[root+"/lane-ok"] = executor.Outcome{ExitCode: 0}
+
+	deps := newBatchTestDeps(t, func(id string) string { return root + "/" + id }, func(id string) []byte {
+		return []byte(laneEnvelopeJSON(id, "done"))
+	}, fe, nil)
+
+	bad := batchPacket("lane-unadmitted")
+	bad.Executor = "not-an-executor"
+	ok := batchPacket("lane-ok")
+
+	report, err := run.ExecuteBatch(context.Background(), deps, []packet.Packet{bad, ok})
+	if err != nil {
+		t.Fatalf("ExecuteBatch() error = %v, want nil (recording failure must not fail the batch)", err)
+	}
+	if len(report.Lanes) != 2 {
+		t.Fatalf("len(report.Lanes) = %d, want 2", len(report.Lanes))
+	}
+
+	got := report.Lanes[0]
+	if got.LaneID != "lane-unadmitted" {
+		t.Fatalf("Lanes[0].LaneID = %q, want lane-unadmitted", got.LaneID)
+	}
+	if got.Status != lane.Failed {
+		t.Errorf("status = %v, want failed", got.Status)
+	}
+	if got.Diagnosis == "" {
+		t.Fatal("Diagnosis is empty: both the original lane failure and the recording failure are invisible to the operator")
+	}
+	if !strings.Contains(got.Diagnosis, "not-an-executor") {
+		t.Errorf("Diagnosis %q does not name the original unadmitted executor", got.Diagnosis)
+	}
+	if !strings.Contains(got.Diagnosis, "additionally") {
+		t.Errorf("Diagnosis %q does not mention the recording failure", got.Diagnosis)
+	}
+
+	if report.Lanes[1].Status != lane.Done {
+		t.Errorf("lane-ok status = %v, want done -- must still have run", report.Lanes[1].Status)
+	}
+}
+
 // TestExecuteBatchRunsLanesConcurrentlyNotSequentially proves lanes run
 // concurrently by deterministic synchronization, never by wall-clock timing
 // (sleeping and hoping the scheduler interleaves the way you expect is
