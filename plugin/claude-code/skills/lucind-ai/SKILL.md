@@ -28,6 +28,12 @@ Every packet must open with a YAML frontmatter block enclosed by `---`:
 | `agent` | No | Opencode-only: names a purpose-built opencode agent (e.g. `lucind-dag` for DAG authoring, see `opencode agent list`) passed as `--agent`. Rejected before dispatch on any executor other than `opencode`, since agent selects a system prompt / tool-permission profile that only opencode has. |
 | `read_only` | No | `true` or `false`. Omitted defaults to write. A `true` packet must produce no unique commits and leave a clean worktree. |
 | `allowed_paths` | No | Single-line JSON array of repository-relative paths this packet may touch, e.g. `allowed_paths: ["internal/dag/", "cmd/lucind-ai/cli.go"]`. Omitted (or empty) is today's exact path: no overlap check across the batch, no post-run diff check. A YAML list under the key does not parse — the value after `:` must be one JSON array. |
+| `feature` | No | Target feature identifier for parent integration. Required when targeting a feature branch unless `legacy_main: true` is set. |
+| `parent_ref` | No | Target parent git reference (e.g. `refs/heads/feature/<id>`). |
+| `base_sha` | No | Immutable commit SHA where the feature branch was created. |
+| `expected_parent_sha` | No | Expected commit SHA of `parent_ref` before promotion. |
+| `legacy_main` | No | `true` or `false`. Indicates legacy mode dispatch targeting `main`. |
+
 
 The document body following the closing `---` is the prompt passed to the executor and must not be empty.
 
@@ -123,134 +129,68 @@ Wave N+1 is dispatched only when wave N exits 0: every lane `done`, and none lis
    - **Lane Failure** (`failed` due to timeout/infra): re-dispatches the single failing lane before synthesis.
    - **Irreconcilable Ambiguity**: contradictory interpretations of underspecified requirements unresolvable from specs/design set overall verdict `BLOCKED` and escalate decision options to the human.
 
-### Three-lens design fan-out (pilot, not yet exercised)
+### Multi-lens planning fan-out convention (explore, propose, design, specs, tasks)
 
-A variant of the dual-executor pattern above, for the `design` phase only. Instead of two
-executors writing the same artifact twice, three `agy` lanes each own a disjoint slice of the
-design, and `cursor-agent` synthesizes the canonical document. The orchestrator's job shrinks from
-reading every draft to reading one notes file.
+The standard planning fan-out convention across SDD planning phases (`explore`, `propose`, `design`, `specs`, `tasks`). Instead of two executors writing the same artifact twice, three `agy` lanes each own a disjoint slice of the phase document, and `cursor-agent` synthesizes the canonical document. The orchestrator's job shrinks from reading every draft to reading one notes file.
 
-Marked **pilot**: designed and templated, not yet run end to end. Do not present its output as a
-proven path until a real change has gone through it.
+**Why three lenses and not three copies.** Running the same prompt three times converges harder, not less — you pay triple for one document. A lens is only worth a lane when it has its own required reading list, its own output skeleton, and an explicit cross-reference naming what the sibling lenses own. All lens template bodies carry those three things; strip any of them and the fan-out degenerates back into redundant copies.
 
-**Why three lenses and not three copies.** The dual dispatch above already converged "almost
-completely" on `propose`. Running the same prompt three times converges harder, not less — you
-pay triple for one document. A lens is only worth a lane when it has its own required reading
-list, its own output skeleton, and an explicit cross-reference naming what the sibling lenses own.
-All three template bodies carry those three things; strip any of them and the fan-out degenerates
-back into redundant copies.
+| Phase | Lens A | Lens B | Lens C | Synthesis |
+|---|---|---|---|---|
+| `explore` | Problem & Candidates (`explore-lens-a.md`) | Capabilities & Scenarios (`explore-lens-b.md`) | Risks, Trade-offs & Spikes (`explore-lens-c.md`) | `explore.md` + `explore-synthesis-notes.md` |
+| `propose` | Candidate & Approach (`propose-lens-a.md`) | Capability Impact & Specs (`propose-lens-b.md`) | Risks, Rollback & Test Impact (`propose-lens-c.md`) | `proposal.md` + `proposal-synthesis-notes.md` |
+| `design` | Technical approach & decisions (`design-lens-a.md`) | Flow, invariants, deltas & file changes (`design-lens-b.md`) | Testing, threat matrix & rollback (`design-lens-c.md`) | `design.md` + `design-synthesis-notes.md` |
+| `specs` | Delta specs lens A | Delta specs lens B | Delta specs lens C | Canonical specs + synthesis notes |
+| `tasks` | Tasks lens A | Tasks lens B | Tasks lens C | Canonical `tasks.md` + synthesis notes |
 
-| Lane | Executor | Owns | Reads (exclusive) |
-|---|---|---|---|
-| `design-<id>-lens-a` | `agy` | Technical approach; every architecture decision except rollback, with alternatives and rationale | module structure, entry points, existing patterns, prior archived changes |
-| `design-<id>-lens-b` | `agy` | Flow and invariants; surface deltas (types, schemas, frontmatter, CLI); file changes | type/struct/interface declarations, persisted and wire formats, `cmd/` flag surface |
-| `design-<id>-lens-c` | `agy` | Testing strategy and test seams; threat matrix; rollback and additivity; out of scope | existing `*_test.go`, injection seams, the threat-matrix table embedded in its own `## Context` |
-| `design-<id>-synthesis` | `cursor-agent` | The canonical `design.md` plus `design-synthesis-notes.md` | all three lens drafts, plus the real code behind their citations |
+Templates: `assets/explore-lens-{a,b,c}-packet-template.md`, `assets/explore-synthesis-packet-template.md`, `assets/propose-lens-{a,b,c}-packet-template.md`, `assets/propose-synthesis-packet-template.md`, `assets/design-lens-{a,b,c}-packet-template.md`, and `assets/design-synthesis-packet-template.md`.
 
-Templates: `assets/design-lens-{a,b,c}-packet-template.md` and
-`assets/design-synthesis-packet-template.md`.
+**Dispatch — two invocations, no sidecar.** These are hand-authored write packets; `lucind-ai split` and `apply-dag.yaml` are not involved and sidecars are not required.
 
-**Dispatch — two invocations, no sidecar.** These are hand-authored write packets, exactly like
-the verify dual dispatch; `lucind-ai split` and `apply-dag.yaml` are not involved, so the sidecar's
-missing `read_only` field (`internal/dag/parse.go`) is not a blocker here.
+**Feature-branch ownership.** The orchestrator runs `lucind-ai feature create` before dispatch to initialize feature records in the ledger. Packets declare `feature`, `parent_ref`, `base_sha`, and `expected_parent_sha`, or declare legacy mode with `legacy_main: true` (or dispatch with `--legacy-main`). Lanes do not create or move parent refs.
 
-Since `feature-parent-integration`, every packet must either name all four of `feature`,
-`parent_ref`, `base_sha`, and `expected_parent_sha`, or declare legacy mode — admission fails
-closed otherwise (`run.ErrMissingFeatureTarget`). The four templates therefore carry
-`legacy_main: true`, and dispatch supplies the expected SHA, which is computed at run time rather
-than pasted into frontmatter where it would go stale:
+Dispatch supplies the expected SHA at run time:
 
 1. ```
    lucind-ai run --expected-parent-sha "$(git rev-parse refs/heads/main)" \
-     --packet .lucind/packets/design-<id>-lens-a.md \
-     --packet .lucind/packets/design-<id>-lens-b.md \
-     --packet .lucind/packets/design-<id>-lens-c.md
+     --packet .lucind/packets/<phase>-<id>-lens-a.md \
+     --packet .lucind/packets/<phase>-<id>-lens-b.md \
+     --packet .lucind/packets/<phase>-<id>-lens-c.md
    ```
-   Three lanes in parallel, each writing one distinct draft path, so the overlap check passes and
-   no lane races another. The barrier joins when all three reach terminal status.
-2. Confirm all three integrated, then dispatch the synthesizer the same way, recomputing the SHA —
-   `main` moved when wave 1 integrated:
+   Three lanes in parallel, each writing one distinct draft path, so the overlap check passes and no lane races another. The barrier joins when all three reach terminal status.
+2. Confirm all three integrated, then dispatch the synthesizer the same way, recomputing the SHA — `main` moved when wave 1 integrated:
    ```
    lucind-ai run --expected-parent-sha "$(git rev-parse refs/heads/main)" \
-     --packet .lucind/packets/design-<id>-synthesis.md
+     --packet .lucind/packets/<phase>-<id>-synthesis.md
    ```
 
-**When admission fails, it fails silently.** A packet missing its target fields produces
-`status: failed` with an *empty* worktree path and no reason printed on stdout or stderr — the
-lane never reaches an executor, so there is nothing to inspect and no quota is spent. An empty
-worktree path in a lane report means admission rejected the packet, not that the agent failed.
-Check the frontmatter before looking anywhere else.
+**Two-tier operator remediation for wave-1 failure:**
+1. *Admission failure* (`status: failed`, empty worktree path): Admission fails silently with no reason printed on stdout or stderr. The lane never reaches an executor. Check and repair the frontmatter target fields (`feature`, `parent_ref`, `base_sha`, `expected_parent_sha`, or `legacy_main: true`) before looking anywhere else.
+2. *Execution failure* (`blocked`, `failed`, or `deviated`): Remediate the issue and re-dispatch only the single failed lane. Dispatch wave 2 only after `integrated_ids` contains all three lens IDs. Unresolvable blockage stays with the operator; do not start synthesis.
 
-The second invocation is **not optional and not merely sequencing**. Lens worktrees cannot see
-each other; the synthesis worktree is branched from the integrated result, which is the only point
-where all three drafts exist in one tree.
+The second invocation is **not optional and not merely sequencing**. Lens worktrees cannot see each other; the synthesis worktree is branched from the integrated result, which is the only point where all three drafts exist in one tree.
 
-**The dependency this design accepts on purpose.** Lens B and lens C are downstream of lens A's
-architecture decision, but run before it exists. Each therefore opens its draft with
-`## Assumed architecture`, and the synthesizer treats lens A's as authoritative, recording what
-B or C assumed instead under `## Architecture Divergence`. Independent convergence on the same
-architecture is corroboration and is recorded as such; divergence means the decision was
-underdetermined, which is signal worth having.
+**The dependency this design accepts on purpose.** Lens B and lens C are downstream of lens A's choices, but run before it completes. Each opens its draft with `## Assumed architecture` (or approach), and the synthesizer treats lens A's as authoritative, recording what B or C assumed instead under `## Architecture Divergence`. Independent convergence on the same choice is corroboration and is recorded as such; divergence means the decision was underdetermined, which is signal worth having.
 
-The alternative — lens A alone in wave 1, B and C in wave 2 branched from it — costs a third
-`lucind-ai run` invocation and buys cleaner drafts. Switching to it is a scheduling change only:
-dispatch A alone first, then B and C together. Take it if a pilot shows B and C drifting.
+**Budgets — and why there is one.** Each lens draft is capped under 1000 words; the canonical document under 1800 words.
 
-**Budgets — and why there is one.** Each lens draft is capped under 1000 words; the canonical
-`design.md` under 1800.
+The gap between them is the entire mechanism. If the synthesizer's output budget were as large as the sum of its inputs, "synthesize" could be satisfied by stapling three drafts together and nothing would force a choice. Roughly 3000 words of feedstock compressed to 1800 makes arbitration mandatory. A synthesis that lands near 3000 words concatenated rather than synthesized, and is a failed run even if every sentence in it is true. **The one number that must never invert: the canonical budget stays below the sum of the lens budgets.** Raise them together or not at all. Go binary does not parse or enforce word counts.
 
-The gap between them is the entire mechanism. If the synthesizer's output budget were as large as
-the sum of its inputs, "synthesize" could be satisfied by stapling three drafts together and
-nothing would force a choice. Roughly 3000 words of feedstock compressed to 1800 makes arbitration
-mandatory. A synthesis that lands near 3000 words concatenated rather than synthesized, and is a
-failed run even if every sentence in it is true. **The one number that must never invert: the
-canonical budget stays below the sum of the lens budgets.** Raise them together or not at all.
+The second reason for a cap is downstream cost: planning artifacts are re-read by subsequent phases, apply, verify, and every judgment lane, so length is a tax multiplied by every consumer.
 
-The second reason for a cap is downstream cost: `design.md` is re-read by tasks, apply, verify, and
-every judgment lane, so its length is a tax multiplied by every consumer. The third is scope — a
-design document is a decision record, not a spec. Requirements live in `specs/`, the checklist in
-`tasks.md`, behavior in code. Long designs are usually long because they restate code the reader
-could open.
+**Reading the real contract, and who wins.** All planning packets grant read-only access to `~/.claude/skills/sdd-*/` so the lanes read the `gentle-ai` phase contract as written instead of trusting a packet's paraphrase of it. Precedence between the two is deliberately **asymmetric**, and getting it backwards breaks the fan-out:
 
-For calibration, archived designs in this repo run 774–2969 words. `sdd-design`'s nominal budget is
-800; only two of six respected it, which is why 1800 rather than 800 is the realistic ceiling here.
+- **The skill wins on what a document must contain** — required sections, schemas, and content rules. A packet that paraphrases those and drifts is the thing that is wrong.
+- **The packet wins on how the phase is executed** — the three-lane split, slice ownership, word budgets, output paths and skeletons, out-of-scope, done criteria.
 
-**Reading the real contract, and who wins.** All four packets grant read-only access to
-`~/.claude/skills/sdd-design/` so the lanes read the `gentle-ai` phase contract as written instead
-of trusting a packet's paraphrase of it. Precedence between the two is deliberately **asymmetric**,
-and getting it backwards breaks the fan-out:
+The distinction is load-bearing because phase skills describe one sub-agent writing a whole document alone. Read as blanket authority it would tell every lens to write the complete document, persist it to Engram, and return the phase summary block — which would collapse three lenses back into three redundant full documents. Lanes follow the packet on execution topology and record conflicts in notes. Nothing outside the repository is ever written.
 
-- **The skill wins on what a design document must contain** — required sections, the
-  choice / alternatives / rationale shape of a decision, the threat-matrix applicability rule. A
-  packet that paraphrases those and drifts is the thing that is wrong.
-- **The packet wins on how the phase is executed** — the three-lane split, slice ownership, word
-  budgets, output paths and skeletons, out-of-scope, done criteria.
+**What the orchestrator reads.** `<phase>-synthesis-notes.md`, and only that: `## Unresolved Contradictions`, `## Coverage Gaps`, `## Dropped Citations`, `## Architecture Divergence`. The synthesizer is instructed to escalate contradictions rather than pick, so a populated first section is a decision waiting for a human, not a defect.
 
-The distinction is load-bearing because `sdd-design` describes one sub-agent writing a whole
-`design.md` alone. Read as blanket authority it would tell every lens to write the complete
-document, persist it to Engram, return the phase summary block, and hold an 800-word budget —
-which would collapse three lenses back into three redundant full designs and destroy the
-compression gap in the same stroke. Lanes are told to follow the packet on those points and record
-the conflict rather than silently resolve it. Nothing outside the repository is ever written, so no
-revert command is needed.
+**The risk this moves rather than removes.** In the dual pattern the orchestrator independently verified every `file:line` before accepting it. Here the synthesizer does that, in a worktree with the real code — which it can do, and which the template makes a done-criterion. But it is now the single place where a hallucinated citation can pass. If the citation-verification pass or the `## Dropped Citations` section is ever weakened, the fan-out loses the property that made it safe.
 
-**What the orchestrator reads.** `design-synthesis-notes.md`, and only that: `## Unresolved
-Contradictions`, `## Coverage Gaps`, `## Dropped Citations`, `## Architecture Divergence`. The
-synthesizer is instructed to escalate contradictions rather than pick, so a populated first section
-is a decision waiting for a human, not a defect.
+**Coverage checklist.** The synthesizer checks the canonical document against this repository's actual phase spine: technical approach, architecture decisions with alternatives and rationale, flow and invariants, file changes with terminal consumers, testing strategy and test seams, threat matrix with every row `Applicable` or `N/A: reason`, rollback and additivity, open questions and out of scope. Headings vary by change, but all required spine items must be substantively present.
 
-**The risk this moves rather than removes.** In the dual pattern the orchestrator independently
-verified every `file:line` before accepting it. Here the synthesizer does that, in a worktree with
-the real code — which it can do, and which the template makes a done-criterion. But it is now the
-single place where a hallucinated citation can pass. If the citation-verification pass or the
-`## Dropped Citations` section is ever weakened, the fan-out loses the property that made it safe.
-
-**Coverage checklist.** The synthesizer checks the canonical document against this repository's
-actual design spine, derived from every design in `openspec/changes/archive/`: technical approach;
-architecture decisions with alternatives and rationale; flow and invariants; file changes with
-terminal consumers; testing strategy and test seams; threat matrix with every row `Applicable` or
-`N/A: reason`; rollback and additivity; open questions and out of scope. Headings vary by change —
-archived designs use their own vocabulary — but all eight must be substantively present.
 
 ### Packet Structure
 
@@ -286,20 +226,40 @@ The `lucind-ai` CLI orchestrates worktrees, dispatches runners, records state, a
 Run from the primary repository root (the binary refuses to run from inside a linked worktree):
 
 ```bash
-lucind-ai run --packet <path> [--packet <path> ...] [--timeout <duration>]
+lucind-ai run --packet <path> [--packet <path> ...] [--timeout <duration>] [--approval-timeout <duration>] [--legacy-main] [--expected-parent-sha <sha>]
 lucind-ai split --dag <path> --out <dir>
 lucind-ai check [--out <path>]
+lucind-ai serve [--addr <addr>]
+lucind-ai feature create <id>
+lucind-ai reconcile
+lucind-ai renew
 lucind-ai --version
 ```
+
+### Subcommands
+
+- `lucind-ai run`: Dispatch one or more packet lanes concurrently in isolated worktrees.
+- `lucind-ai split`: Split an `apply-dag.yaml` sidecar into per-lane packets and print wave dispatch commands.
+- `lucind-ai check`: Run repository checks once via `lucind-checks.sh` (`internal/integrate.Check`).
+- `lucind-ai serve`: Start the HTTP API/web server for approvals and status monitoring (`--addr`).
+- `lucind-ai feature`: Manage feature branches and parent integration in the ledger (`feature create <id>`, etc.).
+- `lucind-ai reconcile`: Reconcile SQLite ledger state with worktrees and git refs.
+- `lucind-ai renew`: Renew active lane leases or approvals in the ledger.
+
+### `run` Flags
 
 | Flag | Type | Default | Description |
 |---|---|---|---|
 | `--packet <path>` | String (repeatable) | *(required)* | Path to a packet file. Each instance adds one concurrent lane. |
 | `--timeout <duration>` | Duration | `20m` | Wall-clock budget granted to each lane independently. |
+| `--approval-timeout <duration>` | Duration | `30m` | Wall-clock timeout when waiting on operator approval before aborting. |
+| `--legacy-main` | Bool | `false` | Dispatch in legacy mode targeting `main` without feature target metadata. |
+| `--expected-parent-sha <sha>` | String | `""` | Specify expected commit SHA of parent reference before merging. |
 
 `lucind-ai split` takes two required flags: `--dag` (path to an `apply-dag.yaml` sidecar) and `--out` (directory for emitted packet markdown). It prints one `lucind-ai run --packet …` line per wave; it does not dispatch those waves.
 
 `lucind-ai check` runs `lucind-checks.sh` once via `internal/integrate.Check`. Transcript goes to stdout on pass and stderr on fail; `--out <path>` also writes the structured mechanical log (git SHA, command, duration, exit code, transcript). Exit 0 on pass, 1 on fail.
+
 
 ### Concurrency & Barrier
 
