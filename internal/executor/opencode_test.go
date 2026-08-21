@@ -414,3 +414,58 @@ func TestOpencodeRunIncludesAgentFlagWhenSet(t *testing.T) {
 		t.Errorf("--agent = (%q, %v), want (%q, true)", got, ok, "lucind-dag")
 	}
 }
+
+// TestOpencodeRunDetectsSilentAgentFallbackAsFailure reproduces opencode's
+// real, verified behavior when a requested --agent name cannot run
+// directly (its mode is "subagent", not "primary" or "all"): the process
+// exits 0 but silently substitutes its own default agent, warning only on
+// stderr. Run must not let that read as success -- see
+// agentFallbackWarning's doc comment in opencode.go.
+func TestOpencodeRunDetectsSilentAgentFallbackAsFailure(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping subprocess test in -short mode")
+	}
+
+	stub := writeOpencodeStub(t, "#!/bin/sh\n"+
+		`echo 'agent "lucind-dag" is a subagent, not a primary agent. Falling back to default agent' 1>&2`+"\n"+
+		"exit 0\n")
+
+	o := executor.Opencode{Binary: stub}
+	outcome, err := o.Run(context.Background(), executor.Request{
+		Prompt:       "do the thing",
+		WorktreePath: t.TempDir(),
+		Agent:        "lucind-dag",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v, want nil", err)
+	}
+	if outcome.ExitCode == 0 {
+		t.Errorf("ExitCode = 0, want non-zero: a silent agent-fallback warning on stderr must not read as success")
+	}
+}
+
+// TestOpencodeRunIgnoresFallbackWarningTextWhenNoAgentWasRequested proves
+// the detection in TestOpencodeRunDetectsSilentAgentFallbackAsFailure is
+// scoped to Request.Agent being set -- the same stderr text with no agent
+// requested (nothing to have fallen back from) must not force a failure.
+func TestOpencodeRunIgnoresFallbackWarningTextWhenNoAgentWasRequested(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping subprocess test in -short mode")
+	}
+
+	stub := writeOpencodeStub(t, "#!/bin/sh\n"+
+		`echo 'agent "lucind-dag" is a subagent, not a primary agent. Falling back to default agent' 1>&2`+"\n"+
+		"exit 0\n")
+
+	o := executor.Opencode{Binary: stub}
+	outcome, err := o.Run(context.Background(), executor.Request{
+		Prompt:       "do the thing",
+		WorktreePath: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v, want nil", err)
+	}
+	if outcome.ExitCode != 0 {
+		t.Errorf("ExitCode = %d, want 0: no Agent was requested, so this text carries no meaning here", outcome.ExitCode)
+	}
+}

@@ -5,12 +5,30 @@ import (
 	"context"
 	"errors"
 	"os/exec"
+	"strings"
 	"time"
 )
 
 // defaultOpencodeBinary is the name Opencode execs when Binary is left empty.
 // It relies on PATH lookup, matching how the CLI is normally invoked.
 const defaultOpencodeBinary = "opencode"
+
+// agentFallbackWarning is the stable substring of opencode's own stderr
+// message when the requested --agent name cannot run directly -- its
+// frontmatter mode is "subagent" rather than "primary" or "all" -- and
+// opencode silently substitutes its own default agent instead of failing.
+// Confirmed against the real opencode CLI (v1.18.19, `opencode run --agent
+// <subagent-name> ...`): exit code 0, stdout unaffected, and this exact
+// text on stderr (ANSI color codes wrap it but never split it):
+// `agent "<name>" is a subagent, not a primary agent. Falling back to
+// default agent`. Detected in Run and treated as a failure (see the
+// ExitCode override below) rather than left as a silent exit-0 success:
+// the dispatched work would have run under an arbitrary, uncontrolled
+// system prompt instead of the one the packet was authored against, and
+// nothing else in this binary's pipeline is guaranteed to notice that
+// substitution -- a read-only or otherwise-lenient packet could still
+// produce a result envelope that passes schema validation.
+const agentFallbackWarning = "is a subagent, not a primary agent. Falling back to default agent"
 
 // Opencode dispatches the opencode CLI headlessly via its "run" subcommand.
 type Opencode struct {
@@ -127,6 +145,9 @@ func (o Opencode) Run(ctx context.Context, req Request) (Outcome, error) {
 			outcome.ExitCode = cmd.ProcessState.ExitCode()
 		}
 		outcome.OutputTruncated = true
+		if req.Agent != "" && strings.Contains(outcome.Stderr, agentFallbackWarning) {
+			outcome.ExitCode = 1
+		}
 		return outcome, nil
 	}
 
@@ -143,5 +164,13 @@ func (o Opencode) Run(ctx context.Context, req Request) (Outcome, error) {
 	}
 
 	outcome.ExitCode = 0
+	if req.Agent != "" && strings.Contains(outcome.Stderr, agentFallbackWarning) {
+		// opencode exited 0 having silently run a different agent than
+		// the one requested -- see agentFallbackWarning's doc comment.
+		// Force a non-zero ExitCode so executor.Status maps this to
+		// lane.Blocked exactly like any other failed dispatch, instead
+		// of letting the real exit 0 read as success.
+		outcome.ExitCode = 1
+	}
 	return outcome, nil
 }
