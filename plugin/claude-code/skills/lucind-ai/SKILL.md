@@ -149,10 +149,15 @@ Templates: `assets/explore-lens-{a,b,c}-packet-template.md`, `assets/explore-syn
 
 **Feature-branch ownership.** The orchestrator runs `lucind-ai feature create` before dispatch to initialize feature records in the ledger. Packets declare `feature`, `parent_ref`, `base_sha`, and `expected_parent_sha`, or declare legacy mode with `legacy_main: true` (or dispatch with `--legacy-main`). Lanes do not create or move parent refs.
 
-Dispatch supplies the expected SHA at run time:
+Dispatch supplies the target at run time, because the templates declare none. Against `main` that
+means **both** flags, not either one: admission rejects legacy mode without an expected SHA, and an
+expected SHA without legacy mode falls through to the four-field branch and fails there
+(`internal/run/run.go:251-263`). Against a named feature parent, drop both flags and let the copied
+packet name `feature`, `parent_ref`, `base_sha`, and `expected_parent_sha` instead — the template
+itself needs no edit either way, which is the property the target-less default exists to protect.
 
 1. ```
-   lucind-ai run --expected-parent-sha "$(git rev-parse refs/heads/main)" \
+   lucind-ai run --legacy-main --expected-parent-sha "$(git rev-parse refs/heads/main)" \
      --packet .lucind/packets/<phase>-<id>-lens-a.md \
      --packet .lucind/packets/<phase>-<id>-lens-b.md \
      --packet .lucind/packets/<phase>-<id>-lens-c.md
@@ -160,7 +165,7 @@ Dispatch supplies the expected SHA at run time:
    Three lanes in parallel, each writing one distinct draft path, so the overlap check passes and no lane races another. The barrier joins when all three reach terminal status.
 2. Confirm all three integrated, then dispatch the synthesizer the same way, recomputing the SHA — `main` moved when wave 1 integrated:
    ```
-   lucind-ai run --expected-parent-sha "$(git rev-parse refs/heads/main)" \
+   lucind-ai run --legacy-main --expected-parent-sha "$(git rev-parse refs/heads/main)" \
      --packet .lucind/packets/<phase>-<id>-synthesis.md
    ```
 

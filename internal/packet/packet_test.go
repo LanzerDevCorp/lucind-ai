@@ -1040,6 +1040,21 @@ func TestExplorePacketTemplatesContract(t *testing.T) {
 				}
 			}
 
+			// The amended Planning Fan-Out Template Assets requirement makes
+			// "declares no dispatch target" the default for a reusable
+			// template, and this is the assertion that defends it. A template
+			// that bakes legacy_main: true silently targets main even when the
+			// change runs against a named feature parent -- the exact coupling
+			// the amendment removed. Without this check, reintroducing that
+			// field would pass every other assertion in this table.
+			if p.LegacyMain {
+				t.Errorf("template %s declares legacy_main: true; a reusable template must declare no dispatch target", tt.filename)
+			}
+			if p.Feature != "" || p.ParentRef != "" || p.BaseSHA != "" || p.ExpectedParentSHA != "" {
+				t.Errorf("template %s declares feature-target fields (feature=%q parent_ref=%q base_sha=%q expected_parent_sha=%q); a reusable template must declare no dispatch target",
+					tt.filename, p.Feature, p.ParentRef, p.BaseSHA, p.ExpectedParentSHA)
+			}
+
 			if strings.Contains(tt.filename, "lens") {
 				lensPackets = append(lensPackets, p)
 			}
@@ -1163,6 +1178,21 @@ func TestProposePacketTemplatesContract(t *testing.T) {
 				if strings.Contains(content, fs) {
 					t.Errorf("template %s contains forbidden string %q", tt.filename, fs)
 				}
+			}
+
+			// The amended Planning Fan-Out Template Assets requirement makes
+			// "declares no dispatch target" the default for a reusable
+			// template, and this is the assertion that defends it. A template
+			// that bakes legacy_main: true silently targets main even when the
+			// change runs against a named feature parent -- the exact coupling
+			// the amendment removed. Without this check, reintroducing that
+			// field would pass every other assertion in this table.
+			if p.LegacyMain {
+				t.Errorf("template %s declares legacy_main: true; a reusable template must declare no dispatch target", tt.filename)
+			}
+			if p.Feature != "" || p.ParentRef != "" || p.BaseSHA != "" || p.ExpectedParentSHA != "" {
+				t.Errorf("template %s declares feature-target fields (feature=%q parent_ref=%q base_sha=%q expected_parent_sha=%q); a reusable template must declare no dispatch target",
+					tt.filename, p.Feature, p.ParentRef, p.BaseSHA, p.ExpectedParentSHA)
 			}
 
 			if strings.Contains(tt.filename, "lens") {
