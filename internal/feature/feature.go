@@ -95,8 +95,10 @@ func NewService(l *ledger.Ledger) *Service {
 	return &Service{ledger: l}
 }
 
-// validateParentRef ensures parent ref is non-empty, not main, and not in the Lucind temp namespace.
-func validateParentRef(parentRef string) error {
+// ValidateParentRef ensures parent ref is non-empty, not main, and not in the
+// Lucind temp namespace. It is exported so a caller can reject an unusable
+// parent before doing any work, using the same rule Create enforces.
+func ValidateParentRef(parentRef string) error {
 	trimmed := strings.TrimSpace(parentRef)
 	if trimmed == "" {
 		return ErrInvalidParentRef
@@ -120,7 +122,7 @@ func (s *Service) Create(ctx context.Context, id, parentRef, baseSHA string, exp
 	if strings.TrimSpace(baseSHA) == "" {
 		return Feature{}, ErrBaseSHARequired
 	}
-	if err := validateParentRef(parentRef); err != nil {
+	if err := ValidateParentRef(parentRef); err != nil {
 		return Feature{}, err
 	}
 

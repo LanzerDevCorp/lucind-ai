@@ -41,6 +41,14 @@ import (
 // -- see run.ExecuteBatch's doc comment for why.
 const defaultTimeout = 20 * time.Minute
 
+// attemptOwner is the lease owner every feature-targeted dispatch claims. The
+// value is fixed rather than per-process on purpose: feature.AcquireLease
+// grants a lease only when the existing one has expired, with no same-owner
+// exception (internal/feature/feature.go:307), so one concurrent dispatch on a
+// feature blocks the other regardless of who they say they are. A fixed string
+// keeps the audit trail readable without weakening that.
+const attemptOwner = "lucind-ai run"
+
 // usage is printed on stderr for a missing/unknown subcommand or a usage
 // error, so a person driving the binary from a terminal always sees the one
 // invocation that works rather than a stack trace. --packet is repeatable:
@@ -245,6 +253,17 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 		return 1
 	}
 
+	// One batch produces one combined tree and promotes it once, so the
+	// packets must agree on where it lands. Derived here, next to the other
+	// packet-level pre-flight checks, so a batch that names two features
+	// fails before worktree.Create burns a lane's quota on work with
+	// nowhere coherent to go.
+	attemptTarget, featureTargeted, err := lucindrun.FeatureTarget(ps)
+	if err != nil {
+		fmt.Fprintf(stderr, "lucind-ai: %v\n", err)
+		return 1
+	}
+
 	primaryRoot, err := resolvePrimaryRoot(ctx)
 	if err != nil {
 		fmt.Fprintf(stderr, "lucind-ai: resolve primary repository root: %v\n", err)
@@ -291,7 +310,23 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 		return 1
 	}
 
-	integrateReport, err := lucindrun.Integrate(ctx, deps, batch)
+	// A feature-targeted batch promotes by compare-and-swap on its named
+	// parent ref, through the durable attempt state machine: lease held for
+	// the whole attempt, cross-feature overlap gate before promotion, and a
+	// recoverable row if this process dies mid-flight. A legacy batch keeps
+	// the ff-merge into the primary checkout it has always used.
+	var (
+		integrateReport lucindrun.IntegrateReport
+		attempt         lucindrun.Attempt
+	)
+	if featureTargeted {
+		attemptTarget.ID = runID
+		attemptTarget.IdempotencyKey = runID
+		attemptTarget.Owner = attemptOwner
+		integrateReport, attempt, err = lucindrun.IntegrateFeature(ctx, deps, batch, attemptTarget)
+	} else {
+		integrateReport, err = lucindrun.Integrate(ctx, deps, batch)
+	}
 	if err != nil {
 		fmt.Fprintf(stderr, "lucind-ai: %v\n", err)
 		return 1
@@ -309,6 +344,12 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 		}
 	}
 	fmt.Fprintf(stdout, "released:  %t\n", batch.Released)
+
+	// The attempt id is what `lucind-ai feature recover --attempt <id>`
+	// takes, so it has to reach the operator's terminal even on success.
+	if attempt.ID != "" {
+		fmt.Fprintf(stdout, "attempt:   %s (%s)\n", attempt.ID, attempt.Status)
+	}
 
 	printIntegrateReport(stdout, integrateReport)
 
@@ -569,6 +610,23 @@ func productionDeps(runID, primaryRoot string, ledg *ledger.Ledger, timeout, app
 		CombineTree:    integrate.Combine,
 		RunChecks:      integrate.Check,
 		PromoteTarget:  integrate.Promote,
+		PromoteCAS:     integrate.PromoteCAS,
+		ResolveRefSHA: func(ctx context.Context, primaryRoot, ref string) (string, error) {
+			return worktree.ResolveCommitSHA(ctx, worktree.DefaultGitRunner, primaryRoot, worktree.CanonicalizeRef(ref))
+		},
+		// The candidate is the tip of the combined worktree, resolved there
+		// rather than in primaryRoot. Left unset, ExecuteAttempt falls back to
+		// the integration *branch name* and would compare-and-swap the parent
+		// ref to a string that is not a commit SHA.
+		ResolveCandidateSHA: func(ctx context.Context, primaryRoot, worktreePath, branch string) (string, error) {
+			return worktree.ResolveCommitSHA(ctx, worktree.DefaultGitRunner, worktreePath, "HEAD")
+		},
+		// The lease is held across combine and the full check run, and nothing
+		// renews it mid-attempt. The 30s package default would expire during
+		// lucind-checks.sh on any real repository and land the attempt in
+		// `stale` after the checks had already passed, so it is pinned to the
+		// same clock a lane gets.
+		FeatureLeaseTTL: timeout,
 		DiscardCombined: func(ctx context.Context, primaryRoot, path, branch string) error {
 			if err := worktree.Remove(ctx, primaryRoot, path); err != nil {
 				return err
@@ -1225,5 +1283,3 @@ func runReconcileRenew(ctx context.Context, args []string, stdout, stderr io.Wri
 		newReq.ID, newReq.Status, *requestID, newReq.Direction, newReq.ExpiresAt.Format(time.RFC3339))
 	return 0
 }
-
-

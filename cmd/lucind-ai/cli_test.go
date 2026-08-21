@@ -1061,9 +1061,7 @@ func TestRunSequentialInvocationsProduceDistinctRunIDs(t *testing.T) {
 		"id: lane-1\n" +
 		"executor: agy\n" +
 		"routed_by: test\n" +
-		"feature: feat-1\n" +
-		"parent_ref: refs/heads/main\n" +
-		"base_sha: 1111111111111111111111111111111111111111\n" +
+		"legacy_main: true\n" +
 		"expected_parent_sha: 1111111111111111111111111111111111111111\n" +
 		"---\n" +
 		"Task 1\n"
@@ -1159,9 +1157,7 @@ func TestRunDispatchPersistsIntegratedLaneEnvelopeToPrimaryRoot(t *testing.T) {
 		"id: lane-1\n" +
 		"executor: agy\n" +
 		"routed_by: test\n" +
-		"feature: feat-1\n" +
-		"parent_ref: refs/heads/main\n" +
-		"base_sha: 1111111111111111111111111111111111111111\n" +
+		"legacy_main: true\n" +
 		"expected_parent_sha: 1111111111111111111111111111111111111111\n" +
 		"---\n" +
 		"Task 1\n"
@@ -1332,9 +1328,7 @@ packets:
   - id: apply-root
     executor: agy
     routed_by: root has no dependencies
-    feature: apply-dag-dispatch
-    parent_ref: refs/heads/main
-    base_sha: 1111111111111111111111111111111111111111
+    legacy_main: true
     expected_parent_sha: 1111111111111111111111111111111111111111
     allowed_paths:
       - internal/root/
@@ -1343,9 +1337,7 @@ packets:
   - id: apply-leaf
     executor: agy
     routed_by: leaf depends on root
-    feature: apply-dag-dispatch
-    parent_ref: refs/heads/main
-    base_sha: 1111111111111111111111111111111111111111
+    legacy_main: true
     expected_parent_sha: 1111111111111111111111111111111111111111
     allowed_paths:
       - internal/leaf/
@@ -1980,8 +1972,15 @@ func TestRunLegacyModeDispatch(t *testing.T) {
 		if code == 0 {
 			t.Fatalf("expected non-zero exit code for legacy packet without --legacy-main, got 0; stdout = %q", stdout.String())
 		}
-		if !strings.Contains(stdout.String(), "status:    failed") {
-			t.Errorf("expected status: failed in stdout, got:\n%s", stdout.String())
+		// This used to surface as a per-lane "status: failed" after every
+		// worktree already existed, with no reason printed anywhere. Deriving
+		// the batch's integration target before dispatch moves the same
+		// rejection to stderr, before any quota is spent, and names the exit.
+		if !strings.Contains(stderr.String(), "--legacy-main") {
+			t.Errorf("expected stderr to name the --legacy-main exit, got:\n%s", stderr.String())
+		}
+		if strings.Contains(stdout.String(), "status:") {
+			t.Errorf("expected no lane to dispatch at all, got:\n%s", stdout.String())
 		}
 	})
 
@@ -2736,3 +2735,180 @@ func TestReconcileDeclineCancelRenewCLI(t *testing.T) {
 
 
 
+
+// featureDispatchDeps stubs the compare-and-swap promotion path so a
+// feature-targeted dispatch can be driven end to end without a second real
+// feature branch in the fixture repository.
+func featureDispatchDeps(t *testing.T, promoted *[]string) func(string, string, *ledger.Ledger, time.Duration, time.Duration) lucindrun.Deps {
+	t.Helper()
+	origFactory := depsFactory
+	return func(runID, primaryRoot string, ledg *ledger.Ledger, timeout, approvalTimeout time.Duration) lucindrun.Deps {
+		deps := origFactory(runID, primaryRoot, ledg, timeout, approvalTimeout)
+		deps.CreateWorktree = func(ctx context.Context, primaryRoot, laneID string) (worktree.Worktree, error) {
+			return worktree.Worktree{Path: t.TempDir(), Branch: "branch-" + laneID}, nil
+		}
+		deps.HasUniqueLaneCommits = func(ctx context.Context, worktreePath, baseSHA string) (bool, error) {
+			return true, nil
+		}
+		deps.PorcelainEmpty = func(ctx context.Context, worktreePath string) (bool, error) {
+			return true, nil
+		}
+		deps.LookupExecutor = func(name string) (executor.Executor, error) {
+			return testDoneExecutor{}, nil
+		}
+		deps.CombineTree = func(ctx context.Context, primaryRoot, runID string, branches []string) (string, string, error) {
+			return t.TempDir(), "integration-branch", nil
+		}
+		deps.RunChecks = func(ctx context.Context, worktreePath string) (bool, string, error) {
+			return true, "", nil
+		}
+		deps.ResolveRefSHA = func(ctx context.Context, primaryRoot, ref string) (string, error) {
+			return "1111111111111111111111111111111111111111", nil
+		}
+		deps.ResolveCandidateSHA = func(ctx context.Context, primaryRoot, worktreePath, branch string) (string, error) {
+			return "2222222222222222222222222222222222222222", nil
+		}
+		deps.PromoteCAS = func(ctx context.Context, primaryRoot, parentRef, candidateSHA, expectedSHA string) error {
+			*promoted = append(*promoted, parentRef+" "+expectedSHA+"->"+candidateSHA)
+			return nil
+		}
+		deps.PromoteTarget = func(ctx context.Context, primaryRoot, integrationBranch string) error {
+			t.Errorf("PromoteTarget called on a feature-targeted batch; promotion must go through the compare-and-swap attempt path, never an ff-merge into the primary checkout")
+			return nil
+		}
+		deps.DiscardCombined = func(ctx context.Context, primaryRoot, worktreePath, branchName string) error {
+			return nil
+		}
+		deps.RemoveLaneWorktree = func(ctx context.Context, primaryRoot, worktreePath, branch string) error {
+			return nil
+		}
+		return deps
+	}
+}
+
+// A feature-targeted dispatch must drive the durable attempt state machine:
+// it records an integration_attempts row, promotes by compare-and-swap on the
+// named parent ref, and never ff-merges into whatever the primary checkout
+// happens to have checked out.
+func TestRunDispatchFeatureBatchRecordsIntegrationAttempt(t *testing.T) {
+	primaryRoot := initRepo(t)
+
+	p1 := filepath.Join(primaryRoot, "packet-1.md")
+	p1Content := "---\n" +
+		"id: lane-feat-1\n" +
+		"executor: agy\n" +
+		"routed_by: test\n" +
+		"feature: feat-alpha\n" +
+		"parent_ref: refs/heads/feature-alpha\n" +
+		"base_sha: 1111111111111111111111111111111111111111\n" +
+		"expected_parent_sha: 1111111111111111111111111111111111111111\n" +
+		"---\n" +
+		"Task 1\n"
+	if err := os.WriteFile(p1, []byte(p1Content), 0o644); err != nil {
+		t.Fatalf("write packet 1: %v", err)
+	}
+
+	var promoted []string
+	origFactory := depsFactory
+	t.Cleanup(func() { depsFactory = origFactory })
+	depsFactory = featureDispatchDeps(t, &promoted)
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(primaryRoot); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(cwd)
+
+	var stdout, stderr bytes.Buffer
+	code := run(context.Background(), []string{"run", "--packet", p1}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run exit code = %d, want 0; stderr = %q stdout = %q", code, stderr.String(), stdout.String())
+	}
+
+	if len(promoted) != 1 {
+		t.Fatalf("PromoteCAS calls = %v, want exactly one compare-and-swap promotion", promoted)
+	}
+	want := "refs/heads/feature-alpha 1111111111111111111111111111111111111111->2222222222222222222222222222222222222222"
+	if promoted[0] != want {
+		t.Errorf("PromoteCAS call = %q, want %q", promoted[0], want)
+	}
+
+	if !strings.Contains(stdout.String(), "attempt:") {
+		t.Errorf("stdout = %q, want it to name the integration attempt so `feature recover --attempt <id>` has an id to use", stdout.String())
+	}
+
+	ledg, err := ledger.Open(context.Background(), primaryRoot)
+	if err != nil {
+		t.Fatalf("ledger.Open() error = %v", err)
+	}
+	defer ledg.Close()
+
+	var count int
+	if err := ledg.DB().QueryRowContext(context.Background(),
+		`SELECT COUNT(*) FROM integration_attempts WHERE feature_id = ? AND status = 'promoted'`, "feat-alpha").Scan(&count); err != nil {
+		t.Fatalf("query integration_attempts: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("promoted integration_attempts rows = %d, want 1", count)
+	}
+}
+
+// One batch promotes onto one parent. A batch naming two features is rejected
+// before any lane dispatches, so no quota is burned on work that has nowhere
+// coherent to land.
+func TestRunDispatchRejectsMixedFeatureTargets(t *testing.T) {
+	primaryRoot := initRepo(t)
+
+	writePacket := func(name, laneID, featureID string) string {
+		path := filepath.Join(primaryRoot, name)
+		content := "---\n" +
+			"id: " + laneID + "\n" +
+			"executor: agy\n" +
+			"routed_by: test\n" +
+			"feature: " + featureID + "\n" +
+			"parent_ref: refs/heads/" + featureID + "\n" +
+			"base_sha: 1111111111111111111111111111111111111111\n" +
+			"expected_parent_sha: 1111111111111111111111111111111111111111\n" +
+			"---\n" +
+			"Task\n"
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatalf("write packet %s: %v", name, err)
+		}
+		return path
+	}
+
+	p1 := writePacket("packet-1.md", "lane-a", "feat-alpha")
+	p2 := writePacket("packet-2.md", "lane-b", "feat-beta")
+
+	origFactory := depsFactory
+	t.Cleanup(func() { depsFactory = origFactory })
+	depsFactory = func(runID, primaryRoot string, ledg *ledger.Ledger, timeout, approvalTimeout time.Duration) lucindrun.Deps {
+		deps := origFactory(runID, primaryRoot, ledg, timeout, approvalTimeout)
+		deps.CreateWorktree = func(ctx context.Context, primaryRoot, laneID string) (worktree.Worktree, error) {
+			t.Errorf("CreateWorktree called for lane %q; a mixed-target batch must be rejected before any lane dispatches", laneID)
+			return worktree.Worktree{}, nil
+		}
+		return deps
+	}
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(primaryRoot); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(cwd)
+
+	var stdout, stderr bytes.Buffer
+	code := run(context.Background(), []string{"run", "--packet", p1, "--packet", p2}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("run exit code = %d, want 1; stderr = %q", code, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "same feature target") {
+		t.Errorf("stderr = %q, want it to explain that one batch promotes onto one feature target", stderr.String())
+	}
+}
