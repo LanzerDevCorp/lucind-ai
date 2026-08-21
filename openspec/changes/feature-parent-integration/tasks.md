@@ -43,7 +43,7 @@ Non-executable; paths add safety edges: W1 `1.1`; W2 `1.2 + 2.1`; W3 `1.3 + 2.2 
 
 - [x] 2.1 `internal/{packet,dag,run}`, `cmd/lucind-ai/cli.go`: **RED** four fields/legacy rejection; **GREEN** adapter/dispatch-only flag. Package. **Deps:** 1.1. U2.
 - [x] 2.2 `internal/{worktree,integrate}`: **RED** roots, refs/starts, stale CAS; **GREEN** `GitRunner`, worktree, CAS. Temp Git. **Deps:** 2.1. U2.
-- [ ] 2.3 `internal/{run,integrate}`: **RED** replay, resume/block, bisection/promotion; **GREEN** attempt machine/parent. Faults. **Deps:** 1.1, 1.2, 1.3, 2.1, 2.2. U3.
+- [x] 2.3 `internal/{run,integrate}`: **RED** replay, resume/block, bisection/promotion; **GREEN** attempt machine/parent. Faults. **Deps:** 1.1, 1.2, 1.3, 2.1, 2.2. U3.
 
 ## Phase 3: Reconciliation
 
@@ -54,6 +54,6 @@ Non-executable; paths add safety edges: W1 `1.1`; W2 `1.2 + 2.1`; W3 `1.3 + 2.2 
 
 ## Phase 4: Operations
 
-- [ ] 4.1 `internal/serve/model.go`: **RED** shell-free status/audit DTOs; **GREEN** adapter. DTO. **Deps:** 3.3. U5.
+- [x] 4.1 `internal/serve/model.go`: **RED** shell-free status/audit DTOs; **GREEN** adapter. DTO. **Deps:** 3.3. U5.
 - [ ] 4.2 `cmd/lucind-ai/cli.go`, `internal/{run,ledger}`: **RED** feature/reconciliation outputs, idempotency/audit; **GREEN** wiring. Git/SQLite CLI. **Deps:** 1.1, 1.2, 1.3, 2.1, 2.2, 2.3, 3.1, 3.2, 3.3, 3.4, 4.1. U5.
 - [ ] 4.3 `README.md` or `docs/feature-parent-integration.md`: **RED** migration/rollback/no-main/closure; **GREEN** operator/probe notes. Docs review. **Deps:** 4.2. U5.

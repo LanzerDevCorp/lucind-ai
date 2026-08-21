@@ -128,8 +128,9 @@ phases:
         tasks: [2.2, 3.3]
         commit: 8732399
       W3:
-        status: pending
+        status: done
         tasks: [2.3, 4.1]
+        commit: 8df3a48
       W4:
         status: pending
         tasks: [3.2]
