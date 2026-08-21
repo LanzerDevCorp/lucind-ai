@@ -194,11 +194,24 @@ could open.
 For calibration, archived designs in this repo run 774–2969 words. `sdd-design`'s nominal budget is
 800; only two of six respected it, which is why 1800 rather than 800 is the realistic ceiling here.
 
-**Reading the real contract.** All four packets grant read-only access to
+**Reading the real contract, and who wins.** All four packets grant read-only access to
 `~/.claude/skills/sdd-design/` so the lanes read the `gentle-ai` phase contract as written instead
-of trusting a packet's paraphrase of it. Where a packet and the skill disagree, the skill wins and
-the lane reports the drift under `## Open Questions`. Nothing outside the repository is ever
-written, so no revert command is needed.
+of trusting a packet's paraphrase of it. Precedence between the two is deliberately **asymmetric**,
+and getting it backwards breaks the fan-out:
+
+- **The skill wins on what a design document must contain** — required sections, the
+  choice / alternatives / rationale shape of a decision, the threat-matrix applicability rule. A
+  packet that paraphrases those and drifts is the thing that is wrong.
+- **The packet wins on how the phase is executed** — the three-lane split, slice ownership, word
+  budgets, output paths and skeletons, out-of-scope, done criteria.
+
+The distinction is load-bearing because `sdd-design` describes one sub-agent writing a whole
+`design.md` alone. Read as blanket authority it would tell every lens to write the complete
+document, persist it to Engram, return the phase summary block, and hold an 800-word budget —
+which would collapse three lenses back into three redundant full designs and destroy the
+compression gap in the same stroke. Lanes are told to follow the packet on those points and record
+the conflict rather than silently resolve it. Nothing outside the repository is ever written, so no
+revert command is needed.
 
 **What the orchestrator reads.** `design-synthesis-notes.md`, and only that: `## Unresolved
 Contradictions`, `## Coverage Gaps`, `## Dropped Citations`, `## Architecture Divergence`. The

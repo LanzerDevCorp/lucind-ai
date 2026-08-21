@@ -131,7 +131,16 @@ that is the case.>
 ## Allowed paths outside the repository
 
 **Read-only**: `~/.claude/skills/sdd-design/` — the real `gentle-ai` design skill. Check the
-canonical document against the contract as written. Write nothing outside this repository.
+canonical document against the contract as written: its required sections, the choice /
+alternatives / rationale shape of a decision, and the threat-matrix applicability rule. On those,
+the skill wins over this packet's paraphrase, and the drift goes in `## Coverage Gaps`.
+
+It does not win on execution. This packet sets the 1800-word budget — the skill's nominal 800 is
+not honored in this repository, as `openspec/changes/archive/` shows — along with the synthesis
+procedure, the notes file, and the done criteria. The skill's Step 4 Engram persistence and Step 5
+return block are superseded: your output is the two files named above plus `.lucind/result.json`.
+
+Write nothing outside this repository.
 
 ## Done criteria
 

@@ -109,9 +109,24 @@ Do not assess whether the change is additively revertible. You supply the format
 ## Allowed paths outside the repository
 
 **Read-only**: `~/.claude/skills/sdd-design/` — the real `gentle-ai` design skill and its
-`references/`. Read the contract as written, not as this packet paraphrases it; where the two
-disagree, the skill wins and the disagreement belongs in `## Open Questions`. Write nothing
-outside this repository, so there is nothing to revert.
+`references/`. Read the contract as written, not as this packet paraphrases it.
+
+Precedence between the two is **not symmetric**, so read this carefully.
+
+The skill is authority on *what a design document must contain*: its required sections, the
+choice / alternatives / rationale shape of a decision, and the threat-matrix applicability rule.
+Where this packet paraphrases any of that and drifts, the skill wins and the drift belongs in
+`## Open Questions`.
+
+This packet is authority on *how this phase is being executed here*: that the design is split
+across three parallel lanes, which slice this lane owns, its word budget, its output path and
+skeleton, its out-of-scope list, and its done criteria. The skill describes one sub-agent writing
+a whole `design.md` by itself, so parts of it will read as instructing you to do what this packet
+forbids — write the complete document, persist it to Engram, return the phase summary block, hold
+an 800-word budget. Those are superseded here on purpose. Do not correct yourself toward them; note
+the conflict in `## Open Questions` and follow this packet.
+
+Write nothing outside this repository, so there is nothing to revert.
 
 ## Done criteria
 
