@@ -52,13 +52,27 @@ In planning fan-out packets, precedence MUST be asymmetric: the phase skill (`~/
 
 ### Requirement: Planning Fan-Out Template Assets
 
-Planning-phase packet templates under `plugin/claude-code/skills/lucind-ai/assets/` MUST exist for explore, propose, and design (`proposal.md:19,71`). Each MUST parse under `packet.Parse` (`internal/packet/packet.go:77-165`), MUST set `legacy_main: true` or the four feature-target fields, and MUST assign mutually disjoint draft paths for parallel lens lanes (`internal/packet/disjoint.go:24-48`). Design templates already exist; explore and propose templates are in scope.
+Planning-phase packet templates under `plugin/claude-code/skills/lucind-ai/assets/` MUST exist for explore, propose, and design (`proposal.md:19,71`). Each MUST parse under `packet.Parse` (`internal/packet/packet.go:77-165`) and MUST assign mutually disjoint draft paths for parallel lens lanes (`internal/packet/disjoint.go:24-48`). Design templates already exist; explore and propose templates are in scope.
+
+A template MUST NOT declare a dispatch target it cannot know. `legacy_main` and the four feature-target fields describe where one dispatch lands, not what a reusable template is; baking `legacy_main: true` into a template silently targets `main` even when the change runs against a named feature parent. A template therefore satisfies admission by any one of three paths: it declares `legacy_main: true`, it declares the four feature-target fields, or it declares neither and the orchestrator supplies the target at dispatch as `--legacy-main` or `--expected-parent-sha` (`plugin/claude-code/skills/lucind-ai/SKILL.md:150`; `docs/feature-parent-integration.md:188-202`). The third path is the default for a template, because a template is copied across changes whose targets differ.
 
 #### Scenario: Fan-out templates parse as valid packets
 
 - GIVEN the fan-out packet templates in `plugin/claude-code/skills/lucind-ai/assets/`
 - WHEN `packet.Parse` parses each template
-- THEN parsing MUST succeed, `Packet.LegacyMain` MUST be true or feature-target fields MUST be set, and declared draft paths MUST be pairwise disjoint
+- THEN parsing MUST succeed and declared draft paths MUST be pairwise disjoint
+
+#### Scenario: A template declaring no dispatch target is admitted from the command line
+
+- GIVEN a packet copied from a template that declares neither `legacy_main` nor the four feature-target fields
+- WHEN the orchestrator dispatches it with `lucind-ai run --legacy-main --expected-parent-sha <sha>`
+- THEN admission MUST succeed, because `--legacy-main` sets `LegacyMain` on the batch and `--expected-parent-sha` fills the field the packet left empty (`docs/feature-parent-integration.md:200-202`)
+
+#### Scenario: The same template is admitted against a named feature parent
+
+- GIVEN the same target-less template, used by a change that runs against a named feature parent rather than `main`
+- WHEN the copied packet declares `feature`, `parent_ref`, `base_sha`, and `expected_parent_sha`
+- THEN admission MUST succeed with no edit to the template itself, which is the property a baked-in `legacy_main: true` would destroy
 
 #### Scenario: Malformed template fails packet parsing
 

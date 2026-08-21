@@ -22,10 +22,10 @@ Chain strategy: pending
 
 - [x] 1.0-RED Pin malformed-frontmatter typed errors in `internal/packet/packet_test.go` (`:207` `ErrInvalidAllowedPaths`; `:340` `ErrMissingID` / `ErrMissingExecutor` / `ErrMissingRoutedBy` / `ErrEmptyBody`; `:815` `ErrInvalidLegacyMain`). `packet.Parse` (`packet.go:78-166`) copies the body; it does not execute it.
 - [x] 1.1-RED Write a failing table-driven `packet.Parse` + pairwise `DisjointAllowedPaths` (`disjoint.go:29`) test for explore templates (copy `packet_test.go:518-526`).
-- [x] 1.1 Create `plugin/claude-code/skills/lucind-ai/assets/explore-lens-{a,b,c}-packet-template.md` with disjoint draft paths, slice ownership, and `legacy_main: true`.
+- [x] 1.1 Create `plugin/claude-code/skills/lucind-ai/assets/explore-lens-{a,b,c}-packet-template.md` with disjoint draft paths and slice ownership, declaring no dispatch target (the orchestrator supplies it via `--legacy-main` or the four feature-target fields).
 - [x] 1.2 Create `assets/explore-synthesis-packet-template.md` targeting canonical `explore.md` with notes skeleton, compression ceiling, and citation verification.
 - [x] 1.3-RED Write a failing Parse + `DisjointAllowedPaths` test for propose templates (same pattern).
-- [x] 1.3 Create `assets/propose-lens-{a,b,c}-packet-template.md` with disjoint draft paths, slice ownership, and `legacy_main: true`.
+- [x] 1.3 Create `assets/propose-lens-{a,b,c}-packet-template.md` with disjoint draft paths and slice ownership, declaring no dispatch target (the orchestrator supplies it via `--legacy-main` or the four feature-target fields).
 - [x] 1.4 Create `assets/propose-synthesis-packet-template.md` targeting canonical `proposal.md` with notes skeleton, compression ceiling, and citation verification.
 
 ## Phase 2: Skill Authoring Contract & Documentation
