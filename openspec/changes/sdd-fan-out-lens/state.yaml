@@ -38,17 +38,37 @@ phases:
       seam -- all three lenses covered it, harmlessly but redundantly. The synthesizer's
       proposed tightening is recorded in explore-synthesis-notes.md under Lens Overlap.
   proposal:
-    status: in-progress
+    status: done
     engram_topic: sdd/sdd-fan-out-lens/proposal
     drafts:
       - openspec/changes/sdd-fan-out-lens/proposal-lens-a.md
       - openspec/changes/sdd-fan-out-lens/proposal-lens-b.md
       - openspec/changes/sdd-fan-out-lens/proposal-lens-c.md
     canonical: openspec/changes/sdd-fan-out-lens/proposal.md
+    note: |
+      Chose Candidate 1 (null option: convention and template hardening, no Go).
+      All three lenses independently declared Candidate 1 in their Assumed scope
+      blocks with no access to each other -- recorded as independent convergence,
+      not agreement by construction. Wave 1 done/done/done (675/777/656 words,
+      cap 800), wave 2 synthesis 923 words. Synthesis dropped or recast ten
+      citations and stripped eight altitude leaks (function names, argv, and
+      file-change tables that belong to design). Zero unresolved contradictions.
   design:
     status: pending
   spec:
-    status: pending
+    status: in-progress
+    engram_topic: sdd/sdd-fan-out-lens/spec
+    drafts:
+      - openspec/changes/sdd-fan-out-lens/specs-lens-a/
+      - openspec/changes/sdd-fan-out-lens/specs-lens-b/
+      - openspec/changes/sdd-fan-out-lens/specs-lens-c/
+    canonical: openspec/changes/sdd-fan-out-lens/specs/
+    note: |
+      Lens A owns the delta-or-none verdict, because the proposal records
+      New/Modified Capabilities as None yet commits to contract tests that make the
+      skill text and templates verifiable -- and a requirement a test enforces is what
+      a specification exists to record. "No delta, and here is why" is an accepted
+      outcome; the packet forbids manufacturing requirements to have something to write.
   tasks:
     status: pending
   apply:
