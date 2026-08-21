@@ -12,8 +12,11 @@ import (
 	"time"
 
 	"github.com/LanzerDevCorp/lucind-ai/internal/executor"
+	"github.com/LanzerDevCorp/lucind-ai/internal/feature"
 	"github.com/LanzerDevCorp/lucind-ai/internal/lane"
 	"github.com/LanzerDevCorp/lucind-ai/internal/ledger"
+	"github.com/LanzerDevCorp/lucind-ai/internal/overlap"
+	"github.com/LanzerDevCorp/lucind-ai/internal/reconcile"
 	"github.com/LanzerDevCorp/lucind-ai/internal/result"
 	lucindrun "github.com/LanzerDevCorp/lucind-ai/internal/run"
 	"github.com/LanzerDevCorp/lucind-ai/internal/worktree"
@@ -1978,3 +1981,677 @@ func TestRunLegacyModeDispatch(t *testing.T) {
 		}
 	})
 }
+
+func TestFeatureCreateCLI(t *testing.T) {
+	primaryRoot := initRepo(t)
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(primaryRoot); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(cwd)
+
+	baseSHA := "1111111111111111111111111111111111111111"
+	expSHA := "2222222222222222222222222222222222222222"
+
+	t.Run("creates feature and outputs identity", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		code := run(context.Background(), []string{
+			"feature", "create",
+			"--id", "feat-alpha",
+			"--parent", "refs/heads/feature-alpha",
+			"--base-sha", baseSHA,
+			"--expected-parent-sha", expSHA,
+		}, &stdout, &stderr)
+
+		if code != 0 {
+			t.Fatalf("feature create exit code = %d, want 0; stderr = %q", code, stderr.String())
+		}
+		if !strings.Contains(stdout.String(), "feat-alpha") {
+			t.Errorf("stdout = %q, want it to contain feature id %q", stdout.String(), "feat-alpha")
+		}
+
+		// Verify persisted in ledger
+		ledg, err := ledger.Open(context.Background(), primaryRoot)
+		if err != nil {
+			t.Fatalf("ledger.Open error = %v", err)
+		}
+		defer ledg.Close()
+
+		featSvc := feature.NewService(ledg)
+		f, err := featSvc.Get(context.Background(), "feat-alpha")
+		if err != nil {
+			t.Fatalf("featSvc.Get(feat-alpha) error = %v", err)
+		}
+		if f.ID != "feat-alpha" || f.ParentRef != "refs/heads/feature-alpha" || f.BaseSHA != baseSHA || f.ExpectedParentSHA != expSHA || f.Status != feature.StatusActive {
+			t.Errorf("persisted feature mismatch: %+v", f)
+		}
+	})
+
+	t.Run("idempotent invocation with identical flags returns original feature", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		code := run(context.Background(), []string{
+			"feature", "create",
+			"--id", "feat-alpha",
+			"--parent", "refs/heads/feature-alpha",
+			"--base-sha", baseSHA,
+			"--expected-parent-sha", expSHA,
+		}, &stdout, &stderr)
+
+		if code != 0 {
+			t.Fatalf("second feature create exit code = %d, want 0; stderr = %q", code, stderr.String())
+		}
+		if !strings.Contains(stdout.String(), "feat-alpha") {
+			t.Errorf("stdout = %q, want it to contain feature id %q", stdout.String(), "feat-alpha")
+		}
+	})
+
+	t.Run("duplicate id with mismatched attributes is rejected with clear error", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		code := run(context.Background(), []string{
+			"feature", "create",
+			"--id", "feat-alpha",
+			"--parent", "refs/heads/feature-different",
+			"--base-sha", "3333333333333333333333333333333333333333",
+		}, &stdout, &stderr)
+
+		if code == 0 {
+			t.Fatalf("duplicate feature create with different attrs exit code = %d, want non-zero", code)
+		}
+		if !strings.Contains(stderr.String(), "immutable") && !strings.Contains(stderr.String(), "already exists") && !strings.Contains(stderr.String(), "mismatch") {
+			t.Errorf("stderr = %q, want clear error about immutable/duplicate/mismatch", stderr.String())
+		}
+	})
+
+	t.Run("missing required flags fails with usage/error", func(t *testing.T) {
+		for _, tc := range []struct {
+			name string
+			args []string
+			want string
+		}{
+			{"missing id", []string{"feature", "create", "--parent", "refs/heads/foo", "--base-sha", baseSHA}, "--id"},
+			{"missing parent", []string{"feature", "create", "--id", "feat-x", "--base-sha", baseSHA}, "--parent"},
+			{"missing base-sha", []string{"feature", "create", "--id", "feat-x", "--parent", "refs/heads/foo"}, "--base-sha"},
+			{"invalid parent main", []string{"feature", "create", "--id", "feat-x", "--parent", "main", "--base-sha", baseSHA}, "invalid parent"},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				var stdout, stderr bytes.Buffer
+				code := run(context.Background(), tc.args, &stdout, &stderr)
+				if code == 0 {
+					t.Fatalf("run(%v) exit code = 0, want non-zero", tc.args)
+				}
+				if !strings.Contains(stderr.String(), tc.want) {
+					t.Errorf("stderr = %q, want it to contain %q", stderr.String(), tc.want)
+				}
+			})
+		}
+	})
+}
+
+func TestFeatureStatusCLI(t *testing.T) {
+	primaryRoot := initRepo(t)
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(primaryRoot); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(cwd)
+
+	ledg, err := ledger.Open(context.Background(), primaryRoot)
+	if err != nil {
+		t.Fatalf("ledger.Open error = %v", err)
+	}
+
+	featSvc := feature.NewService(ledg)
+	_, err = featSvc.Create(context.Background(), "feat-status-1", "refs/heads/feature-status-1", "1111111111111111111111111111111111111111", "2222222222222222222222222222222222222222")
+	if err != nil {
+		t.Fatalf("featSvc.Create error = %v", err)
+	}
+
+	// Insert attempt and lease
+	_, err = featSvc.AcquireLease(context.Background(), "feat-status-1", "test-worker", 5*time.Minute)
+	if err != nil {
+		t.Fatalf("featSvc.AcquireLease error = %v", err)
+	}
+
+	_, err = ledg.DB().ExecContext(context.Background(), `
+		INSERT INTO integration_attempts (id, feature_id, idempotency_key, status, owner, fence, candidate_sha, failure_reason, created_at, updated_at)
+		VALUES ('att-stat-1', 'feat-status-1', 'idem-1', 'promoted', 'test-worker', 1, '3333333333333333333333333333333333333333', '', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')`)
+	if err != nil {
+		t.Fatalf("insert attempt error = %v", err)
+	}
+	ledg.Close()
+
+	t.Run("feature status with specific --id reports feature, attempt, and lease state", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		code := run(context.Background(), []string{"feature", "status", "--id", "feat-status-1"}, &stdout, &stderr)
+		if code != 0 {
+			t.Fatalf("feature status exit code = %d, want 0; stderr = %q", code, stderr.String())
+		}
+
+		out := stdout.String()
+		if !strings.Contains(out, "feat-status-1") {
+			t.Errorf("stdout = %q, want feature ID feat-status-1", out)
+		}
+		if !strings.Contains(out, "refs/heads/feature-status-1") {
+			t.Errorf("stdout = %q, want parent ref", out)
+		}
+		if !strings.Contains(out, "test-worker") {
+			t.Errorf("stdout = %q, want lease owner test-worker", out)
+		}
+		if !strings.Contains(out, "att-stat-1") {
+			t.Errorf("stdout = %q, want attempt ID att-stat-1", out)
+		}
+		if !strings.Contains(out, "promoted") {
+			t.Errorf("stdout = %q, want attempt status promoted", out)
+		}
+	})
+
+	t.Run("feature status without --id lists features", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		code := run(context.Background(), []string{"feature", "status"}, &stdout, &stderr)
+		if code != 0 {
+			t.Fatalf("feature status exit code = %d, want 0; stderr = %q", code, stderr.String())
+		}
+		out := stdout.String()
+		if !strings.Contains(out, "feat-status-1") {
+			t.Errorf("stdout = %q, want feature ID feat-status-1 in list", out)
+		}
+	})
+
+	t.Run("feature status for non-existent feature returns non-zero", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		code := run(context.Background(), []string{"feature", "status", "--id", "feat-nonexistent"}, &stdout, &stderr)
+		if code == 0 {
+			t.Fatalf("feature status on non-existent feature exit code = 0, want non-zero")
+		}
+	})
+}
+
+func TestFeatureRecoverCLI(t *testing.T) {
+	primaryRoot := initRepo(t)
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(primaryRoot); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(cwd)
+
+	// Create a branch in the repo for feature parent
+	runGit(t, primaryRoot, "checkout", "-b", "feature-recover-parent")
+	headSHA := resolveCommitSHA(context.Background(), primaryRoot)
+
+	ledg, err := ledger.Open(context.Background(), primaryRoot)
+	if err != nil {
+		t.Fatalf("ledger.Open error = %v", err)
+	}
+
+	featSvc := feature.NewService(ledg)
+	_, err = featSvc.Create(context.Background(), "feat-rec", "refs/heads/feature-recover-parent", headSHA, headSHA)
+	if err != nil {
+		t.Fatalf("featSvc.Create error = %v", err)
+	}
+
+	// Case 1: Post-CAS attempt in cas_pending where current branch SHA == candidate_sha -> Resumes/Promotes
+	candSHA := headSHA
+	_, err = ledg.DB().ExecContext(context.Background(), `
+		INSERT INTO integration_attempts (id, feature_id, idempotency_key, status, owner, fence, candidate_sha, failure_reason, created_at, updated_at)
+		VALUES ('att-rec-success', 'feat-rec', 'idem-rec-1', 'cas_pending', 'worker-1', 1, ?, '', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')`,
+		candSHA)
+	if err != nil {
+		t.Fatalf("insert attempt error = %v", err)
+	}
+
+	// Case 2: Attempt with mismatched ref -> Blocks, needs a human
+	_, err = featSvc.Create(context.Background(), "feat-rec-mismatch", "refs/heads/feature-nonexistent-ref", "1111111111111111111111111111111111111111", "1111111111111111111111111111111111111111")
+	if err != nil {
+		t.Fatalf("featSvc.Create error = %v", err)
+	}
+	_, err = ledg.DB().ExecContext(context.Background(), `
+		INSERT INTO integration_attempts (id, feature_id, idempotency_key, status, owner, fence, candidate_sha, failure_reason, created_at, updated_at)
+		VALUES ('att-rec-blocked', 'feat-rec-mismatch', 'idem-rec-2', 'recorded', 'worker-2', 1, '', '', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')`)
+	if err != nil {
+		t.Fatalf("insert attempt error = %v", err)
+	}
+	ledg.Close()
+
+	t.Run("successful recovery surfaces resumed/promoted outcome with exit code 0", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		code := run(context.Background(), []string{"feature", "recover", "--attempt", "att-rec-success"}, &stdout, &stderr)
+		if code != 0 {
+			t.Fatalf("feature recover exit code = %d, want 0; stderr = %q", code, stderr.String())
+		}
+		out := stdout.String()
+		if !strings.Contains(out, "promoted") && !strings.Contains(out, "resumed") {
+			t.Errorf("stdout = %q, want resumed or promoted outcome", out)
+		}
+	})
+
+	t.Run("blocked recovery surfaces blocked outcome with distinct non-zero exit code and human message", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		code := run(context.Background(), []string{"feature", "recover", "--attempt", "att-rec-blocked"}, &stdout, &stderr)
+		if code == 0 {
+			t.Fatalf("feature recover on blocked attempt exit code = 0, want non-zero")
+		}
+		combined := stdout.String() + "\n" + stderr.String()
+		if !strings.Contains(combined, "blocked") {
+			t.Errorf("output = %q, want it to mention 'blocked'", combined)
+		}
+		if !strings.Contains(combined, "human") && !strings.Contains(combined, "mismatch") {
+			t.Errorf("output = %q, want it to explain human intervention or mismatch reason", combined)
+		}
+	})
+
+	t.Run("missing --attempt flag is usage error", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		code := run(context.Background(), []string{"feature", "recover"}, &stdout, &stderr)
+		if code == 0 {
+			t.Fatalf("feature recover without --attempt exit code = 0, want non-zero")
+		}
+		if !strings.Contains(stderr.String(), "--attempt") {
+			t.Errorf("stderr = %q, want --attempt mentioned", stderr.String())
+		}
+	})
+}
+
+func TestReconcileApproveCLI(t *testing.T) {
+	primaryRoot := initRepo(t)
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(primaryRoot); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(cwd)
+
+	ledg, err := ledger.Open(context.Background(), primaryRoot)
+	if err != nil {
+		t.Fatalf("ledger.Open error = %v", err)
+	}
+
+	featSvc := feature.NewService(ledg)
+	_, _ = featSvc.Create(context.Background(), "feat-source", "refs/heads/source", "1111111111111111111111111111111111111111")
+	_, _ = featSvc.Create(context.Background(), "feat-target", "refs/heads/target", "2222222222222222222222222222222222222222")
+
+	reconcileSvc := reconcile.NewService(ledg)
+	ev := &overlap.Evidence{
+		Version:     "1.0",
+		BaseSHA:     "0000000000000000000000000000000000000000",
+		FeatureASHA: "1111111111111111111111111111111111111111",
+		FeatureBSHA: "2222222222222222222222222222222222222222",
+		Class:       overlap.ClassRequired,
+		Signals: overlap.Signals{
+			ConflictPaths: []string{"pkg/conflict.go"},
+		},
+	}
+	req, err := reconcileSvc.CreateRequest(context.Background(), reconcile.CreateRequestParams{
+		ID:            "req-rec-1",
+		FeatureID:     "feat-target",
+		SourceFeature: "feat-source",
+		SourceParent:  "refs/heads/source",
+		TargetFeature: "feat-target",
+		TargetParent:  "refs/heads/target",
+		SourceSHA:     "1111111111111111111111111111111111111111",
+		TargetSHA:     "2222222222222222222222222222222222222222",
+		Evidence:      ev,
+		TTL:           15 * time.Minute,
+	})
+	if err != nil {
+		t.Fatalf("CreateRequest error = %v", err)
+	}
+	ledg.Close()
+
+	t.Run("approving with matching direction succeeds and creates candidate", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		code := run(context.Background(), []string{
+			"reconcile", "approve",
+			"--request", req.ID,
+			"--source", "feat-source",
+			"--target", "feat-target",
+		}, &stdout, &stderr)
+
+		if code != 0 {
+			t.Fatalf("reconcile approve exit code = %d, want 0; stderr = %q", code, stderr.String())
+		}
+		if !strings.Contains(stdout.String(), req.ID) && !strings.Contains(stdout.String(), "approved") {
+			t.Errorf("stdout = %q, want approval confirmation", stdout.String())
+		}
+
+		// Verify candidate in ledger
+		ledg, err := ledger.Open(context.Background(), primaryRoot)
+		if err != nil {
+			t.Fatalf("ledger.Open error = %v", err)
+		}
+		defer ledg.Close()
+
+		cand, err := ledg.ReconciliationCandidateByRequest(context.Background(), req.ID)
+		if err != nil {
+			t.Fatalf("candidate not found for request %s: %v", req.ID, err)
+		}
+		if cand.RequestID != req.ID || cand.Status != string(reconcile.CandidateStatusRunning) {
+			t.Errorf("candidate state unexpected: %+v", cand)
+		}
+	})
+
+	t.Run("idempotent approve returns original result and does not duplicate candidate", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		code := run(context.Background(), []string{
+			"reconcile", "approve",
+			"--request", req.ID,
+			"--source", "feat-source",
+			"--target", "feat-target",
+		}, &stdout, &stderr)
+
+		if code != 0 {
+			t.Fatalf("second reconcile approve exit code = %d, want 0; stderr = %q", code, stderr.String())
+		}
+
+		ledg, err := ledger.Open(context.Background(), primaryRoot)
+		if err != nil {
+			t.Fatalf("ledger.Open error = %v", err)
+		}
+		defer ledg.Close()
+
+		// Verify candidate count for this request is still 1
+		rows, err := ledg.DB().QueryContext(context.Background(), `SELECT COUNT(*) FROM reconciliation_candidates WHERE request_id = ?`, req.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		var count int
+		if rows.Next() {
+			_ = rows.Scan(&count)
+		}
+		if count != 1 {
+			t.Errorf("candidate count = %d, want 1 (no duplicate created)", count)
+		}
+	})
+
+	t.Run("mismatched source or target direction is rejected with clear error", func(t *testing.T) {
+		// Create a second request to test mismatched direction
+		ledg, err := ledger.Open(context.Background(), primaryRoot)
+		if err != nil {
+			t.Fatalf("ledger.Open error = %v", err)
+		}
+		reconcileSvc2 := reconcile.NewService(ledg)
+		req2, err := reconcileSvc2.CreateRequest(context.Background(), reconcile.CreateRequestParams{
+			ID:            "req-rec-2",
+			FeatureID:     "feat-target",
+			SourceFeature: "feat-source",
+			SourceParent:  "refs/heads/source",
+			TargetFeature: "feat-target",
+			TargetParent:  "refs/heads/target",
+			SourceSHA:     "1111111111111111111111111111111111111111",
+			TargetSHA:     "2222222222222222222222222222222222222222",
+			Evidence:      ev,
+			TTL:           15 * time.Minute,
+		})
+		if err != nil {
+			t.Fatalf("CreateRequest error = %v", err)
+		}
+		ledg.Close()
+
+		var stdout, stderr bytes.Buffer
+		code := run(context.Background(), []string{
+			"reconcile", "approve",
+			"--request", req2.ID,
+			"--source", "feat-target", // reversed!
+			"--target", "feat-source",
+		}, &stdout, &stderr)
+
+		if code == 0 {
+			t.Fatalf("reconcile approve with mismatched direction exit code = %d, want non-zero", code)
+		}
+		if !strings.Contains(stderr.String(), "direction") && !strings.Contains(stderr.String(), "mismatch") && !strings.Contains(stderr.String(), "invalid") {
+			t.Errorf("stderr = %q, want direction error", stderr.String())
+		}
+	})
+
+	t.Run("missing required flags fails with usage/error", func(t *testing.T) {
+		for _, tc := range []struct {
+			name string
+			args []string
+			want string
+		}{
+			{"missing request", []string{"reconcile", "approve", "--source", "feat-source", "--target", "feat-target"}, "--request"},
+			{"missing source", []string{"reconcile", "approve", "--request", "req-1", "--target", "feat-target"}, "--source"},
+			{"missing target", []string{"reconcile", "approve", "--request", "req-1", "--source", "feat-source"}, "--target"},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				var stdout, stderr bytes.Buffer
+				code := run(context.Background(), tc.args, &stdout, &stderr)
+				if code == 0 {
+					t.Fatalf("run(%v) exit code = 0, want non-zero", tc.args)
+				}
+				if !strings.Contains(stderr.String(), tc.want) {
+					t.Errorf("stderr = %q, want it to contain %q", stderr.String(), tc.want)
+				}
+			})
+		}
+	})
+}
+
+func TestReconcileDeclineCancelRenewCLI(t *testing.T) {
+	primaryRoot := initRepo(t)
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(primaryRoot); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(cwd)
+
+	baseSHA := resolveCommitSHA(context.Background(), primaryRoot)
+
+	// Create branches with conflicting edits
+	runGit(t, primaryRoot, "checkout", "-b", "source-branch")
+	if err := os.WriteFile(filepath.Join(primaryRoot, "conflict.txt"), []byte("source content\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, primaryRoot, "add", "conflict.txt")
+	runGit(t, primaryRoot, "commit", "-m", "source commit")
+	sourceSHA := resolveCommitSHA(context.Background(), primaryRoot)
+
+	runGit(t, primaryRoot, "checkout", "master")
+	runGit(t, primaryRoot, "checkout", "-b", "target-branch")
+	if err := os.WriteFile(filepath.Join(primaryRoot, "conflict.txt"), []byte("target content\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, primaryRoot, "add", "conflict.txt")
+	runGit(t, primaryRoot, "commit", "-m", "target commit")
+	targetSHA := resolveCommitSHA(context.Background(), primaryRoot)
+
+	ledg, err := ledger.Open(context.Background(), primaryRoot)
+	if err != nil {
+		t.Fatalf("ledger.Open error = %v", err)
+	}
+
+	featSvc := feature.NewService(ledg)
+	_, _ = featSvc.Create(context.Background(), "feat-s", "refs/heads/source-branch", baseSHA)
+	_, _ = featSvc.Create(context.Background(), "feat-t", "refs/heads/target-branch", baseSHA)
+
+	reconcileSvc := reconcile.NewService(ledg)
+	ev := &overlap.Evidence{
+		Version:     "1.0",
+		BaseSHA:     baseSHA,
+		FeatureASHA: sourceSHA,
+		FeatureBSHA: targetSHA,
+		Class:       overlap.ClassRequired,
+		Signals: overlap.Signals{
+			ConflictPaths: []string{"conflict.txt"},
+		},
+	}
+
+	reqDecline, err := reconcileSvc.CreateRequest(context.Background(), reconcile.CreateRequestParams{
+		ID:            "req-decline-1",
+		FeatureID:     "feat-t",
+		SourceFeature: "feat-s",
+		SourceParent:  "refs/heads/source-branch",
+		TargetFeature: "feat-t",
+		TargetParent:  "refs/heads/target-branch",
+		SourceSHA:     sourceSHA,
+		TargetSHA:     targetSHA,
+		Evidence:      ev,
+		TTL:           15 * time.Minute,
+	})
+	if err != nil {
+		t.Fatalf("CreateRequest decline: %v", err)
+	}
+
+	reqCancel, err := reconcileSvc.CreateRequest(context.Background(), reconcile.CreateRequestParams{
+		ID:            "req-cancel-1",
+		FeatureID:     "feat-t",
+		SourceFeature: "feat-s",
+		SourceParent:  "refs/heads/source-branch",
+		TargetFeature: "feat-t",
+		TargetParent:  "refs/heads/target-branch",
+		SourceSHA:     sourceSHA,
+		TargetSHA:     targetSHA,
+		Evidence:      ev,
+		TTL:           15 * time.Minute,
+	})
+	if err != nil {
+		t.Fatalf("CreateRequest cancel: %v", err)
+	}
+
+	reqRenew, err := reconcileSvc.CreateRequest(context.Background(), reconcile.CreateRequestParams{
+		ID:            "req-renew-1",
+		FeatureID:     "feat-t",
+		SourceFeature: "feat-s",
+		SourceParent:  "refs/heads/source-branch",
+		TargetFeature: "feat-t",
+		TargetParent:  "refs/heads/target-branch",
+		SourceSHA:     sourceSHA,
+		TargetSHA:     targetSHA,
+		Evidence:      ev,
+		TTL:           15 * time.Minute,
+	})
+	if err != nil {
+		t.Fatalf("CreateRequest renew: %v", err)
+	}
+	ledg.Close()
+
+	t.Run("reconcile decline marks request declined", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		code := run(context.Background(), []string{
+			"reconcile", "decline",
+			"--request", reqDecline.ID,
+			"--reason", "manual rejection",
+		}, &stdout, &stderr)
+
+		if code != 0 {
+			t.Fatalf("reconcile decline exit code = %d, want 0; stderr = %q", code, stderr.String())
+		}
+		if !strings.Contains(stdout.String(), reqDecline.ID) || !strings.Contains(stdout.String(), "declined") {
+			t.Errorf("stdout = %q, want decline confirmation", stdout.String())
+		}
+
+		ledg, err := ledger.Open(context.Background(), primaryRoot)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer ledg.Close()
+		r, err := ledg.ReconciliationRequest(context.Background(), reqDecline.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if r.Status != "declined" {
+			t.Errorf("request status = %s, want declined", r.Status)
+		}
+	})
+
+	t.Run("reconcile cancel marks request cancelled", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		code := run(context.Background(), []string{
+			"reconcile", "cancel",
+			"--request", reqCancel.ID,
+			"--reason", "cancelling obsolete request",
+		}, &stdout, &stderr)
+
+		if code != 0 {
+			t.Fatalf("reconcile cancel exit code = %d, want 0; stderr = %q", code, stderr.String())
+		}
+		if !strings.Contains(stdout.String(), reqCancel.ID) || !strings.Contains(stdout.String(), "cancelled") {
+			t.Errorf("stdout = %q, want cancel confirmation", stdout.String())
+		}
+
+		ledg, err := ledger.Open(context.Background(), primaryRoot)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer ledg.Close()
+		r, err := ledg.ReconciliationRequest(context.Background(), reqCancel.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if r.Status != "cancelled" {
+			t.Errorf("request status = %s, want cancelled", r.Status)
+		}
+	})
+
+	t.Run("reconcile renew recomputes evidence and creates new request", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		code := run(context.Background(), []string{
+			"reconcile", "renew",
+			"--request", reqRenew.ID,
+		}, &stdout, &stderr)
+
+		if code != 0 {
+			t.Fatalf("reconcile renew exit code = %d, want 0; stderr = %q", code, stderr.String())
+		}
+		if !strings.Contains(stdout.String(), "renewed") && !strings.Contains(stdout.String(), "awaiting") {
+			t.Errorf("stdout = %q, want renew confirmation", stdout.String())
+		}
+	})
+
+	t.Run("top-level renew alias also works", func(t *testing.T) {
+		// Create another request for top-level renew test
+		ledg, err := ledger.Open(context.Background(), primaryRoot)
+		if err != nil {
+			t.Fatal(err)
+		}
+		svc := reconcile.NewService(ledg)
+		reqRenew2, err := svc.CreateRequest(context.Background(), reconcile.CreateRequestParams{
+			ID:            "req-renew-2",
+			FeatureID:     "feat-t",
+			SourceFeature: "feat-s",
+			SourceParent:  "refs/heads/source-branch",
+			TargetFeature: "feat-t",
+			TargetParent:  "refs/heads/target-branch",
+			SourceSHA:     sourceSHA,
+			TargetSHA:     targetSHA,
+			Evidence:      ev,
+			TTL:           15 * time.Minute,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		ledg.Close()
+
+		var stdout, stderr bytes.Buffer
+		code := run(context.Background(), []string{
+			"renew",
+			"--request", reqRenew2.ID,
+		}, &stdout, &stderr)
+
+		if code != 0 {
+			t.Fatalf("renew exit code = %d, want 0; stderr = %q", code, stderr.String())
+		}
+		if !strings.Contains(stdout.String(), "renewed") && !strings.Contains(stdout.String(), "awaiting") {
+			t.Errorf("stdout = %q, want renew confirmation", stdout.String())
+		}
+	})
+}
+
+
+
+
+
