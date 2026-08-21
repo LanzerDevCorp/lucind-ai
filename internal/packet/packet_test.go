@@ -1359,3 +1359,306 @@ func TestDesignPacketTemplatesContract(t *testing.T) {
 
 
 
+
+func TestSpecPacketTemplatesContract(t *testing.T) {
+	assetsDir := filepath.Join("..", "..", "plugin", "claude-code", "skills", "lucind-ai", "assets")
+	templates := []struct {
+		filename      string
+		wantID        string
+		wantExecutor  string
+		wantPaths     []string
+		wantStrings   []string
+		forbidStrings []string
+	}{
+		{
+			filename:     "spec-lens-a-packet-template.md",
+			wantID:       "spec-<change-id>-lens-a",
+			wantExecutor: "agy",
+			wantPaths:    []string{"openspec/changes/<change-id>/spec-lens-a.md"},
+			wantStrings: []string{
+				"capabilities and requirements",
+				"~/.claude/skills/sdd-spec/SKILL.md",
+				"Spec Lens A — Capabilities & Requirements",
+				"Lens B owns",
+				"Lens C owns",
+				"1000 words",
+			},
+		},
+		{
+			filename:     "spec-lens-b-packet-template.md",
+			wantID:       "spec-<change-id>-lens-b",
+			wantExecutor: "agy",
+			wantPaths:    []string{"openspec/changes/<change-id>/spec-lens-b.md"},
+			wantStrings: []string{
+				"scenarios and coverage",
+				"~/.claude/skills/sdd-spec/SKILL.md",
+				"Spec Lens B — Scenarios & Coverage",
+				"Lens A owns",
+				"Lens C owns",
+				"1000 words",
+			},
+		},
+		{
+			filename:     "spec-lens-c-packet-template.md",
+			wantID:       "spec-<change-id>-lens-c",
+			wantExecutor: "agy",
+			wantPaths:    []string{"openspec/changes/<change-id>/spec-lens-c.md"},
+			wantStrings: []string{
+				"live-spec conflict and migration",
+				"~/.claude/skills/sdd-spec/SKILL.md",
+				"Spec Lens C — Live-Spec Conflicts & Migration",
+				"Lens A owns",
+				"Lens B owns",
+				"1000 words",
+				// Lens C is the only lane that opens the live specs in full, so
+				// the verbatim full-block section is the property that keeps
+				// archive from silently deleting scenarios a partial MODIFIED
+				// block failed to copy. Losing this heading loses the lens.
+				"## MODIFIED Full Blocks",
+			},
+		},
+		{
+			filename:     "spec-synthesis-packet-template.md",
+			wantID:       "spec-<change-id>-synthesis",
+			wantExecutor: "cursor-agent",
+			wantPaths: []string{
+				"openspec/changes/<change-id>/specs/",
+				"openspec/changes/<change-id>/spec-synthesis-notes.md",
+			},
+			wantStrings: []string{
+				"spec-lens-a.md",
+				"spec-lens-b.md",
+				"spec-lens-c.md",
+				"spec-synthesis-notes.md",
+				"## Unresolved Contradictions",
+				"## Coverage Gaps",
+				"## Dropped Citations",
+				"## Requirement Divergence",
+				"1800 words",
+			},
+			forbidStrings: []string{
+				"## Architecture Divergence",
+			},
+		},
+	}
+
+	var lensPackets []packet.Packet
+	for _, tt := range templates {
+		t.Run(tt.filename, func(t *testing.T) {
+			path := filepath.Join(assetsDir, tt.filename)
+			data, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("ReadFile(%s) error = %v", path, err)
+			}
+			content := string(data)
+
+			p, err := packet.Parse(strings.NewReader(content))
+			if err != nil {
+				t.Fatalf("packet.Parse(%s) error = %v", tt.filename, err)
+			}
+
+			if p.ID != tt.wantID {
+				t.Errorf("ID = %q, want %q", p.ID, tt.wantID)
+			}
+			if p.Executor != tt.wantExecutor {
+				t.Errorf("Executor = %q, want %q", p.Executor, tt.wantExecutor)
+			}
+			if p.RoutedBy == "" {
+				t.Errorf("RoutedBy is empty")
+			}
+			if !slices.Equal(p.AllowedPaths, tt.wantPaths) {
+				t.Errorf("AllowedPaths = %v, want %v", p.AllowedPaths, tt.wantPaths)
+			}
+			for _, ws := range tt.wantStrings {
+				if !strings.Contains(content, ws) {
+					t.Errorf("template %s missing expected string %q", tt.filename, ws)
+				}
+			}
+			for _, fs := range tt.forbidStrings {
+				if strings.Contains(content, fs) {
+					t.Errorf("template %s contains forbidden string %q", tt.filename, fs)
+				}
+			}
+
+			// The amended Planning Fan-Out Template Assets requirement makes
+			// "declares no dispatch target" the default for a reusable
+			// template, and this is the assertion that defends it. A template
+			// that bakes legacy_main: true silently targets main even when the
+			// change runs against a named feature parent -- the exact coupling
+			// the amendment removed. Without this check, reintroducing that
+			// field would pass every other assertion in this table.
+			if p.LegacyMain {
+				t.Errorf("template %s declares legacy_main: true; a reusable template must declare no dispatch target", tt.filename)
+			}
+			if p.Feature != "" || p.ParentRef != "" || p.BaseSHA != "" || p.ExpectedParentSHA != "" {
+				t.Errorf("template %s declares feature-target fields (feature=%q parent_ref=%q base_sha=%q expected_parent_sha=%q); a reusable template must declare no dispatch target",
+					tt.filename, p.Feature, p.ParentRef, p.BaseSHA, p.ExpectedParentSHA)
+			}
+
+			if strings.Contains(tt.filename, "lens") {
+				lensPackets = append(lensPackets, p)
+			}
+		})
+	}
+
+	if len(lensPackets) == 3 {
+		if err := packet.DisjointAllowedPaths(lensPackets); err != nil {
+			t.Errorf("DisjointAllowedPaths(spec lenses) error = %v", err)
+		}
+	}
+}
+
+func TestTasksPacketTemplatesContract(t *testing.T) {
+	assetsDir := filepath.Join("..", "..", "plugin", "claude-code", "skills", "lucind-ai", "assets")
+	templates := []struct {
+		filename      string
+		wantID        string
+		wantExecutor  string
+		wantPaths     []string
+		wantStrings   []string
+		forbidStrings []string
+	}{
+		{
+			filename:     "tasks-lens-a-packet-template.md",
+			wantID:       "tasks-<change-id>-lens-a",
+			wantExecutor: "agy",
+			wantPaths:    []string{"openspec/changes/<change-id>/tasks-lens-a.md"},
+			wantStrings: []string{
+				"decomposition and ordering",
+				"~/.claude/skills/sdd-tasks/SKILL.md",
+				"Tasks Lens A — Decomposition & Ordering",
+				"Lens B owns",
+				"Lens C owns",
+				"1000 words",
+			},
+		},
+		{
+			filename:     "tasks-lens-b-packet-template.md",
+			wantID:       "tasks-<change-id>-lens-b",
+			wantExecutor: "agy",
+			wantPaths:    []string{"openspec/changes/<change-id>/tasks-lens-b.md"},
+			wantStrings: []string{
+				"partition and dispatch-shape",
+				"~/.claude/skills/sdd-tasks/SKILL.md",
+				"Tasks Lens B — Partition & Dispatch Shape",
+				"Lens A owns",
+				"Lens C owns",
+				"1000 words",
+				// The two repository-specific traps this lens exists to catch.
+				// Without both citations the lane has no reason to hand-check a
+				// partition, and an unviable wave plan reaches apply, where
+				// Integrate reverts it.
+				"internal/run/integrate.go:50-59",
+				"internal/packet/disjoint.go",
+			},
+		},
+		{
+			filename:     "tasks-lens-c-packet-template.md",
+			wantID:       "tasks-<change-id>-lens-c",
+			wantExecutor: "agy",
+			wantPaths:    []string{"openspec/changes/<change-id>/tasks-lens-c.md"},
+			wantStrings: []string{
+				"proof and review-burden",
+				"~/.claude/skills/sdd-tasks/SKILL.md",
+				"Tasks Lens C — Proof & Review Burden",
+				"Lens A owns",
+				"Lens B owns",
+				"1000 words",
+				"## Review Workload Forecast",
+			},
+		},
+		{
+			filename:     "tasks-synthesis-packet-template.md",
+			wantID:       "tasks-<change-id>-synthesis",
+			wantExecutor: "cursor-agent",
+			wantPaths: []string{
+				"openspec/changes/<change-id>/tasks.md",
+				"openspec/changes/<change-id>/tasks-synthesis-notes.md",
+			},
+			wantStrings: []string{
+				"tasks-lens-a.md",
+				"tasks-lens-b.md",
+				"tasks-lens-c.md",
+				"tasks-synthesis-notes.md",
+				"## Unresolved Contradictions",
+				"## Coverage Gaps",
+				"## Dropped Citations",
+				"## Decomposition Divergence",
+				"1800 words",
+				// The synthesizer must re-derive wave viability instead of
+				// trusting lens B's column; these are the citations that make
+				// that check performable rather than rhetorical.
+				"internal/run/integrate.go:50-59",
+				"internal/packet/disjoint.go",
+			},
+			forbidStrings: []string{
+				"## Architecture Divergence",
+			},
+		},
+	}
+
+	var lensPackets []packet.Packet
+	for _, tt := range templates {
+		t.Run(tt.filename, func(t *testing.T) {
+			path := filepath.Join(assetsDir, tt.filename)
+			data, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("ReadFile(%s) error = %v", path, err)
+			}
+			content := string(data)
+
+			p, err := packet.Parse(strings.NewReader(content))
+			if err != nil {
+				t.Fatalf("packet.Parse(%s) error = %v", tt.filename, err)
+			}
+
+			if p.ID != tt.wantID {
+				t.Errorf("ID = %q, want %q", p.ID, tt.wantID)
+			}
+			if p.Executor != tt.wantExecutor {
+				t.Errorf("Executor = %q, want %q", p.Executor, tt.wantExecutor)
+			}
+			if p.RoutedBy == "" {
+				t.Errorf("RoutedBy is empty")
+			}
+			if !slices.Equal(p.AllowedPaths, tt.wantPaths) {
+				t.Errorf("AllowedPaths = %v, want %v", p.AllowedPaths, tt.wantPaths)
+			}
+			for _, ws := range tt.wantStrings {
+				if !strings.Contains(content, ws) {
+					t.Errorf("template %s missing expected string %q", tt.filename, ws)
+				}
+			}
+			for _, fs := range tt.forbidStrings {
+				if strings.Contains(content, fs) {
+					t.Errorf("template %s contains forbidden string %q", tt.filename, fs)
+				}
+			}
+
+			// The amended Planning Fan-Out Template Assets requirement makes
+			// "declares no dispatch target" the default for a reusable
+			// template, and this is the assertion that defends it. A template
+			// that bakes legacy_main: true silently targets main even when the
+			// change runs against a named feature parent -- the exact coupling
+			// the amendment removed. Without this check, reintroducing that
+			// field would pass every other assertion in this table.
+			if p.LegacyMain {
+				t.Errorf("template %s declares legacy_main: true; a reusable template must declare no dispatch target", tt.filename)
+			}
+			if p.Feature != "" || p.ParentRef != "" || p.BaseSHA != "" || p.ExpectedParentSHA != "" {
+				t.Errorf("template %s declares feature-target fields (feature=%q parent_ref=%q base_sha=%q expected_parent_sha=%q); a reusable template must declare no dispatch target",
+					tt.filename, p.Feature, p.ParentRef, p.BaseSHA, p.ExpectedParentSHA)
+			}
+
+			if strings.Contains(tt.filename, "lens") {
+				lensPackets = append(lensPackets, p)
+			}
+		})
+	}
+
+	if len(lensPackets) == 3 {
+		if err := packet.DisjointAllowedPaths(lensPackets); err != nil {
+			t.Errorf("DisjointAllowedPaths(tasks lenses) error = %v", err)
+		}
+	}
+}
