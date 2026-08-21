@@ -285,7 +285,7 @@ lucind-ai --version
 - `lucind-ai check`: Run repository checks once via `lucind-checks.sh` (`internal/integrate.Check`).
 - `lucind-ai serve`: Start the HTTP API/web server for approvals and status monitoring (`--addr`).
 - `lucind-ai feature`: Manage feature branches and parent integration in the ledger (`feature create <id>`, etc.).
-- `lucind-ai reconcile`: Reconcile SQLite ledger state with worktrees and git refs.
+- `lucind-ai reconcile approve|decline|cancel|renew --request <id>`: human decision on an overlap request between two feature parents. `approve` names `--source` and `--target` features; `renew` re-anchors a stale request to current SHAs. It does not reconcile ledger state against worktrees or git refs (`cmd/lucind-ai/cli.go:48`).
 - `lucind-ai renew`: Renew active lane leases or approvals in the ledger.
 
 ### `run` Flags
