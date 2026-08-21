@@ -1,0 +1,39 @@
+change: sdd-fan-out-lens
+packets:
+  - id: sdd-fan-out-lens-contract-tests
+    executor: cursor-agent
+    routed_by: Bounded contract-test design with typed-error and cross-asset assertions; strict RED verification tier.
+    allowed_paths:
+      - internal/packet/packet_test.go
+    depends_on: []
+    body_path: apply-bodies/contract-tests.md
+  - id: sdd-fan-out-lens-explore-templates
+    executor: agy
+    routed_by: Four-file template sweep with deterministic parser and path-disjointness checks; standard GREEN verification tier.
+    allowed_paths:
+      - plugin/claude-code/skills/lucind-ai/assets/explore-lens-a-packet-template.md
+      - plugin/claude-code/skills/lucind-ai/assets/explore-lens-b-packet-template.md
+      - plugin/claude-code/skills/lucind-ai/assets/explore-lens-c-packet-template.md
+      - plugin/claude-code/skills/lucind-ai/assets/explore-synthesis-packet-template.md
+    depends_on:
+      - sdd-fan-out-lens-contract-tests
+    body_path: apply-bodies/explore-templates.md
+  - id: sdd-fan-out-lens-propose-templates
+    executor: agy
+    routed_by: Four-file template sweep with deterministic parser and path-disjointness checks; standard GREEN verification tier.
+    allowed_paths:
+      - plugin/claude-code/skills/lucind-ai/assets/propose-lens-a-packet-template.md
+      - plugin/claude-code/skills/lucind-ai/assets/propose-lens-b-packet-template.md
+      - plugin/claude-code/skills/lucind-ai/assets/propose-lens-c-packet-template.md
+      - plugin/claude-code/skills/lucind-ai/assets/propose-synthesis-packet-template.md
+    depends_on:
+      - sdd-fan-out-lens-contract-tests
+    body_path: apply-bodies/propose-templates.md
+  - id: sdd-fan-out-lens-skill-docs
+    executor: cursor-agent
+    routed_by: Single-document contract reconciliation across parser, CLI, and orchestration semantics; precision GREEN verification tier.
+    allowed_paths:
+      - plugin/claude-code/skills/lucind-ai/SKILL.md
+    depends_on:
+      - sdd-fan-out-lens-contract-tests
+    body_path: apply-bodies/skill-docs.md
