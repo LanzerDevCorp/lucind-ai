@@ -1,0 +1,31 @@
+{
+  "packet_id": "ui-timeline",
+  "status": "done",
+  "summary": "Rendered a bounded, filterable merged timeline of run events, integration audit events, and lane progress with stable cursor ordering and virtualized windowing. View tests cover ordering, kind/search filters, cursor continuation, empty and filtered-empty states, and large-feed bounded behavior.",
+  "hard_stops": [],
+  "files_changed": [
+    {
+      "path": "internal/serve/static/app.js",
+      "change": "modified",
+      "why": "normalize, sort, filter, virtualize, and render merged execution timeline"
+    },
+    {
+      "path": "internal/serve/static_test.go",
+      "change": "modified",
+      "why": "add view tests covering timeline ordering, filters, cursor continuation, empty states, and large feeds"
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "View tests cover ordering, filters, cursor continuation, empty data, and large feeds.",
+      "met": true,
+      "evidence": "go test -v -run TestTimeline ./internal/serve: PASS"
+    },
+    {
+      "criterion": "Only the declared allowed paths change and the commit is recorded.",
+      "met": true,
+      "evidence": "commit 9d1d5eeb034bde90bed8a7929de44e64b32d6c35 on branch lucind/ui-timeline touches only internal/serve/static/app.js and internal/serve/static_test.go"
+    }
+  ],
+  "commit": "9d1d5eeb034bde90bed8a7929de44e64b32d6c35"
+}
