@@ -763,6 +763,154 @@ func assertJSON(t *testing.T, value any, want string) {
 	}
 }
 
+func TestBatchLanesRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	l := openModelLedger(t)
+	at := time.Date(2026, 8, 22, 12, 0, 0, 0, time.UTC)
+	runID := "run-batch-roundtrip"
+
+	if err := l.RegisterRun(ctx, ledger.Run{
+		RunID:     runID,
+		FeatureID: "feature-batch",
+		Status:    "running",
+		TargetRef: "refs/heads/main",
+		LaneCount: 3,
+		StartedAt: at,
+	}); err != nil {
+		t.Fatalf("RegisterRun: %v", err)
+	}
+
+	lanes := []ledger.Lane{
+		{
+			RunID:             runID,
+			LaneID:            "lane-1-done",
+			PacketID:          "pkt-done",
+			Executor:          "agy",
+			RoutingCondition:  "primary",
+			Status:            lane.Done,
+			WorktreePath:      "/tmp/worktrees/lane-done",
+			WorktreePreserved: false,
+			Attempt:           1,
+		},
+		{
+			RunID:             runID,
+			LaneID:            "lane-2-demoted",
+			PacketID:          "pkt-demoted",
+			Executor:          "opencode",
+			RoutingCondition:  "fallback",
+			Status:            lane.Blocked,
+			WorktreePath:      "/tmp/worktrees/lane-demoted",
+			WorktreePreserved: true,
+			Attempt:           2,
+		},
+		{
+			RunID:             runID,
+			LaneID:            "lane-3-failed",
+			PacketID:          "pkt-failed",
+			Executor:          "cursor-agent",
+			RoutingCondition:  "primary",
+			Status:            lane.Failed,
+			WorktreePath:      "/tmp/worktrees/lane-failed",
+			WorktreePreserved: true,
+			Attempt:           1,
+		},
+	}
+
+	for _, ln := range lanes {
+		if err := l.RegisterLane(ctx, ln); err != nil {
+			t.Fatalf("RegisterLane(%s): %v", ln.LaneID, err)
+		}
+		if err := l.UpdateLaneMetadata(ctx, ledger.LaneMetadata{
+			RunID:        ln.RunID,
+			LaneID:       ln.LaneID,
+			Change:       "api-gaps",
+			SDDPhase:     "apply",
+			FanoutGroup:  "serve",
+			Model:        "gpt-5.6",
+			Agent:        "builder",
+			Feature:      "feature-batch",
+			AllowedPaths: []string{"internal/serve"},
+		}, at); err != nil {
+			t.Fatalf("UpdateLaneMetadata(%s): %v", ln.LaneID, err)
+		}
+	}
+
+	demotionNote := "demoted: lock conflict at wave boundary"
+	if err := l.AppendEvent(ctx, ledger.Event{
+		RunID:  runID,
+		LaneID: "lane-2-demoted",
+		Type:   ledger.EventLaneNote,
+		Detail: demotionNote,
+		At:     at.Add(time.Minute),
+	}); err != nil {
+		t.Fatalf("AppendEvent: %v", err)
+	}
+
+	m := serve.NewModel(l)
+	batchLanes, err := m.ListBatchLanes(ctx, runID)
+	if err != nil {
+		t.Fatalf("ListBatchLanes: %v", err)
+	}
+	if len(batchLanes) != 3 {
+		t.Fatalf("ListBatchLanes len = %d, want 3", len(batchLanes))
+	}
+
+	// 1. Status mapping assertions
+	if batchLanes[0].Status != string(lane.Done) {
+		t.Errorf("lane[0] status = %q, want %q", batchLanes[0].Status, lane.Done)
+	}
+	if batchLanes[1].Status != string(lane.Blocked) {
+		t.Errorf("lane[1] status = %q, want %q", batchLanes[1].Status, lane.Blocked)
+	}
+	if batchLanes[2].Status != string(lane.Failed) {
+		t.Errorf("lane[2] status = %q, want %q", batchLanes[2].Status, lane.Failed)
+	}
+
+	// 2. Worktree preservation assertions
+	if batchLanes[0].WorktreePreserved {
+		t.Errorf("lane[0] WorktreePreserved = true, want false")
+	}
+	if batchLanes[0].WorktreePath != "/tmp/worktrees/lane-done" {
+		t.Errorf("lane[0] WorktreePath = %q, want /tmp/worktrees/lane-done", batchLanes[0].WorktreePath)
+	}
+	if !batchLanes[1].WorktreePreserved {
+		t.Errorf("lane[1] WorktreePreserved = false, want true")
+	}
+	if batchLanes[1].WorktreePath != "/tmp/worktrees/lane-demoted" {
+		t.Errorf("lane[1] WorktreePath = %q, want /tmp/worktrees/lane-demoted", batchLanes[1].WorktreePath)
+	}
+	if !batchLanes[2].WorktreePreserved {
+		t.Errorf("lane[2] WorktreePreserved = false, want true")
+	}
+	if batchLanes[2].WorktreePath != "/tmp/worktrees/lane-failed" {
+		t.Errorf("lane[2] WorktreePath = %q, want /tmp/worktrees/lane-failed", batchLanes[2].WorktreePath)
+	}
+
+	// 3. Demotion note assertion
+	if batchLanes[0].Note != "" {
+		t.Errorf("lane[0] Note = %q, want empty", batchLanes[0].Note)
+	}
+	if batchLanes[1].Note != demotionNote {
+		t.Errorf("lane[1] Note = %q, want %q", batchLanes[1].Note, demotionNote)
+	}
+	if batchLanes[2].Note != "" {
+		t.Errorf("lane[2] Note = %q, want empty", batchLanes[2].Note)
+	}
+
+	// 4. Barrier outcome assertions
+	for i, bl := range batchLanes {
+		if !bl.Outcome.Released {
+			t.Errorf("lane[%d] Outcome.Released = false, want true (all lanes terminal)", i)
+		}
+		if len(bl.Outcome.Integrate) != 1 || bl.Outcome.Integrate[0] != "lane-1-done" {
+			t.Errorf("lane[%d] Outcome.Integrate = %v, want [lane-1-done]", i, bl.Outcome.Integrate)
+		}
+		if len(bl.Outcome.Preserve) != 2 || bl.Outcome.Preserve[0] != "lane-2-demoted" || bl.Outcome.Preserve[1] != "lane-3-failed" {
+			t.Errorf("lane[%d] Outcome.Preserve = %v, want [lane-2-demoted, lane-3-failed]", i, bl.Outcome.Preserve)
+		}
+	}
+}
+
 func TestModelSourceDoesNotShellOut(t *testing.T) {
 	_, thisFile, _, ok := runtime.Caller(0)
 	if !ok {

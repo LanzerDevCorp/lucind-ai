@@ -881,5 +881,52 @@ func TestStaticWiringAllSixViewsLoadAndWireState(t *testing.T) {
 	})
 }
 
+func TestStaticAssetsContainAllViewContainers(t *testing.T) {
+	html := readStaticAsset(t, "index.html")
+	js := readStaticAsset(t, "app.js")
+
+	t.Run("static HTML contains shell and baseline view containers", func(t *testing.T) {
+		assertContainsAll(t, "index.html", html,
+			`id="control-room-shell"`,
+			`id="approvals-view"`,
+			`id="approvals-container"`,
+			`id="activity-view"`,
+			`data-view-outlet="approvals"`,
+			`data-view-outlet="activity"`,
+			`id="pending-approvals-count"`,
+			`id="approver-name"`,
+			`id="approver-rate"`,
+			`id="connection-status"`,
+			`id="connection-status-text"`,
+			`id="opencode-cmd"`,
+		)
+	})
+
+	t.Run("embedded JavaScript defines dynamic view containers rendered by the shell", func(t *testing.T) {
+		assertContainsAll(t, "app.js", js,
+			// Apply DAG view container
+			"apply-dag-view",
+			"createApplyDAGRegion",
+			"renderApplyDAG",
+			// SDD Flows view container
+			"sdd-flows-container",
+			"ensureSDDFlowsContainer",
+			"renderSDDFlows",
+			// Feature Swimlanes view container
+			"feature-swimlanes-container",
+			"ensureFeatureSwimlanesContainer",
+			"renderFeatureSwimlanes",
+			// Timeline view container
+			"timeline-container",
+			"ensureTimelineContainer",
+			"renderTimeline",
+		)
+	})
+}
+
+func TestStaticAssetsContainFivePanels(t *testing.T) {
+	TestStaticAssetsContainAllViewContainers(t)
+}
+
 
 
