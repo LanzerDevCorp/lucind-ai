@@ -1662,3 +1662,90 @@ func TestTasksPacketTemplatesContract(t *testing.T) {
 		}
 	}
 }
+
+// Archive is deliberately not a fan-out: one agy lane, no lens split, no
+// synthesizer, and no word budget. This contract pins the properties that make
+// it safe to run mechanically -- the shell-only copy rule with its diff -r
+// readback, the two gates that can refuse to close the cycle, and allowed
+// paths that name this change's folder rather than all of openspec/changes/.
+func TestArchivePacketTemplateContract(t *testing.T) {
+	path := filepath.Join("..", "..", "plugin", "claude-code", "skills", "lucind-ai", "assets", "archive-packet-template.md")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(%s) error = %v", path, err)
+	}
+	content := string(data)
+
+	p, err := packet.Parse(strings.NewReader(content))
+	if err != nil {
+		t.Fatalf("packet.Parse() error = %v", err)
+	}
+
+	if p.ID != "archive-<change-id>" {
+		t.Errorf("ID = %q, want %q", p.ID, "archive-<change-id>")
+	}
+	if p.Executor != "agy" {
+		t.Errorf("Executor = %q, want %q", p.Executor, "agy")
+	}
+	if p.RoutedBy == "" {
+		t.Errorf("RoutedBy is empty")
+	}
+
+	wantPaths := []string{
+		"openspec/specs/",
+		"openspec/changes/<change-id>/",
+		"openspec/changes/archive/",
+	}
+	if !slices.Equal(p.AllowedPaths, wantPaths) {
+		t.Errorf("AllowedPaths = %v, want %v", p.AllowedPaths, wantPaths)
+	}
+	// Granting all of openspec/changes/ would put every other in-flight
+	// change inside this lane's scope, which matters once two changes are
+	// open at once.
+	for _, ap := range p.AllowedPaths {
+		if strings.TrimRight(ap, "/") == "openspec/changes" {
+			t.Errorf("AllowedPaths grants %q, which covers every other in-flight change", ap)
+		}
+	}
+
+	wantStrings := []string{
+		"~/.claude/skills/sdd-archive/SKILL.md",
+		// The copy rule and its only acceptable evidence.
+		"cp -R",
+		"git mv",
+		"diff -r",
+		"MUST NEVER pass through the model's Read/Write path",
+		// The session dispatch record this template exists to preserve --
+		// gitignored, so nothing else in the cycle saves it.
+		".lucind/packets/",
+		".lucind/results/",
+		".gitignore:2",
+		// The two gates that can refuse to close the cycle.
+		"Task completion",
+		"CRITICAL",
+		// MODIFIED semantics: archive writes what the capability becomes.
+		"replace the entire live requirement block",
+		"archive-report.md",
+	}
+	for _, ws := range wantStrings {
+		if !strings.Contains(content, ws) {
+			t.Errorf("template missing expected string %q", ws)
+		}
+	}
+
+	// Archive is single-lane by design. Lens or synthesis vocabulary here
+	// would mean the fan-out convention leaked into a phase that must not
+	// compress anything.
+	for _, fs := range []string{"lens-a", "Lens A owns", "synthesis notes", "1800 words", "1000 words"} {
+		if strings.Contains(content, fs) {
+			t.Errorf("template contains fan-out string %q; archive is one mechanical lane", fs)
+		}
+	}
+
+	if p.LegacyMain {
+		t.Errorf("template declares legacy_main: true; a reusable template must declare no dispatch target")
+	}
+	if p.Feature != "" || p.ParentRef != "" || p.BaseSHA != "" || p.ExpectedParentSHA != "" {
+		t.Errorf("template declares feature-target fields; a reusable template must declare no dispatch target")
+	}
+}

@@ -65,12 +65,20 @@ rule is one use of a larger split: `.lucind/` is runtime state, ignored on purpo
 | `.lucind/` | No (`.gitignore:2`) | In-flight packets, `.lucind/result.json`, the ledger, other worktree-local runtime files | Every lane writes `.lucind/result.json`. If `.lucind/` were tracked, that file would dirty `git status --porcelain`, so `enforceCompletionMode` would fail both write and read-only packets (`internal/run/run.go:628-661`). `Integrate` would refuse to promote while the primary root is dirty (`internal/integrate/integrate.go:25,112-126`). The same paths would fail the allowed-paths scope check, so the changed-path union skips `.lucind/` (`internal/run/run.go:599-601`). |
 | `openspec/changes/<id>/` | Yes | Canonical phase artifacts, `apply-dag.yaml` when a DAG is wanted, and packet bodies copied in after a phase closes | These are the change. `lucind-ai split --dag` reads the sidecar from here; later phases, verify, and archive read the canonical files. |
 
-**What the ignore costs, and the remedy.** Packet files are the instructions that produced the
-work. They stay ignored while a batch runs for the reason above — which is why a sidecar authored
-only under `.lucind/` never appears in git history, and reads as "never used" when the truth is
-"used, never committed". Nothing stops copying a phase's packets into the change folder once that
-phase closes. Worked precedent: `openspec/changes/archive/2026-08-21-sdd-fan-out-lens/apply-bodies/`
-— packet bodies, tracked, archived, breaking nothing.
+**What the ignore costs, and who pays it back.** Packet files are the instructions that produced
+the work, and the result envelopes are what each lane returned. Both stay ignored while a batch
+runs for the reason above — which is why a sidecar authored only under `.lucind/` never appears in
+git history, and reads as "never used" when the truth is "used, never committed".
+
+They are also invisible from inside a lane. A lane worktree is a fresh checkout, so it inherits no
+ignored file; `run.Execute` creates `.lucind/` there holding only that lane's `result.schema.json`
+and `result.json` (`internal/run/run.go:689-701`). A lane that needs the primary root's
+`.lucind/packets/` must be granted it as a read-only path outside the repository.
+
+Preserving them is the archive phase's job, and `assets/archive-packet-template.md` does it
+mechanically — see **Archive dispatch** below. Earlier precedent, narrower:
+`openspec/changes/archive/2026-08-21-sdd-fan-out-lens/apply-bodies/` — apply packet bodies only,
+tracked, archived, breaking nothing.
 
 ### Executor preference by SDD phase
 
@@ -253,71 +261,127 @@ A partition is viable only when every wave can pass those checks on the combined
 
 **Size forecast for template work.** Forecast fan-out template work at roughly 150 lines per template. The `sdd-fan-out-lens` tasks lens C forecast 120–250 changed lines against an actual 1730, and neither sibling lens nor the synthesizer challenged it, with eight ~150-line templates already visible in the existing design set.
 
-### Multi-feature orchestration — what is wired and what is not
+### Archive dispatch — one mechanical lane
 
-Read this before planning two features at once. The ledger carries a full cross-feature
-machinery — features, expiring leases with fencing tokens, integration attempts, overlap
-evidence, reconciliation requests — and most of it is **not on the `lucind-ai run` path**. Treating
-it as active is the failure mode this section exists to prevent.
+Archive is dispatched like every other phase, through `lucind-ai run`, from
+`assets/archive-packet-template.md`. It is deliberately **not** a fan-out: one `agy` lane, no lens
+split, no synthesizer, and no word budget.
 
-**What `lucind-ai run` actually does with a feature target.** Admission checks the target fields
-and nothing downstream reads them. `validatePacketAdmission` requires either all four of `feature`,
-`parent_ref`, `base_sha`, `expected_parent_sha`, or `legacy_main` plus an expected SHA
-(`internal/run/run.go:250-268`); on the legacy branch it sets `p.ParentRef = "main"` and stops
-there. Integration then promotes with `git merge --ff-only <integration branch>` into whatever
-branch the **primary checkout currently has checked out** (`internal/integrate/integrate.go:129`,
-wired at `cmd/lucind-ai/cli.go:571`). It never consults `parent_ref`.
+**Why no fan-out here.** Three lenses would produce three opinions about a `git mv`, and a
+synthesizer's job is compression — applied to an audit trail whose entire value is that nothing was
+compressed. The phase's one real judgment, whether the change may close at all, is a gate with
+fixed inputs: an unchecked task in `tasks.md` or a CRITICAL in `verify.md` blocks, with no override.
 
-So targeting a feature parent today means one thing operationally: check that branch out in the
-primary repository before dispatching. The frontmatter fields are an admission contract and a
-record, not a routing instruction.
+**What it moves, in order.** The ordering is load-bearing: once the change folder moves there is
+nowhere left to copy into.
 
-**What is not wired.** The lease acquisition, the integration-attempt state machine, the overlap
-gate, and reconciliation-request creation all live in `run.ExecuteAttempt`
-(`internal/run/attempt.go:217`). Nothing in `cmd/lucind-ai/` calls it — `lucind-ai run` goes to
-`ExecuteBatch` then `Integrate` (`cmd/lucind-ai/cli.go:285,294`), and no other code path reaches
-it. `ExecuteAttempt` has test callers only.
+1. Gates: task completion, CRITICAL verification issues, missing artifacts.
+2. Preserve the session's dispatch record — every packet from `.lucind/packets/` and every envelope
+   from `.lucind/results/` into `openspec/changes/<id>/packets/` and `envelopes/`. This is the step
+   that pays back the ignore cost above, and it supersedes the narrower `apply-bodies/` precedent by
+   covering every phase rather than apply alone.
+3. Merge the delta specs into `openspec/specs/`. A `MODIFIED` block replaces the **entire** live
+   requirement, scenarios included — which is why the spec phase made lens C copy the whole block.
+4. Write `archive-report.md`.
+5. `git mv` the change folder into `openspec/changes/archive/<YYYY-MM-DD>-<id>/`.
 
-The consequence is specific and worth stating plainly: **the cross-feature collision gate does not
-fire during a normal dispatch.** Two features touching the same file produce no overlap evidence,
-no reconciliation request, and no block. Whatever `git merge --ff-only` does is what happens.
+**The copy rule, and its only acceptable evidence.** The `gentle-ai` archive skill's Mechanical
+Copy Contract governs: file content never passes through the model's Read/Write path. Copies and
+moves use `cp -R`, `mv`, or `git mv`, and every one is followed by a `diff -r` readback whose
+**verbatim** output goes in the result envelope. Empty is the only pass; a skipped `diff -r` fails
+the phase, because an agent's self-report that bytes survived is not evidence that they did. A
+model that truncates one file while reporting success corrupts the audit trail with nothing
+downstream to catch it.
 
-**What that leaves reachable from the CLI:**
+Editing a live spec in step 3 is a targeted structural edit, not a whole-file copy, and is the one
+place Read/Write is correct.
 
-| Surface | Reachable | Notes |
+**Allowed paths name the change, not the directory.** `openspec/changes/<change-id>/` and
+`openspec/changes/archive/` are granted separately rather than `openspec/changes/`, so an archive
+lane cannot reach another in-flight change — which starts mattering the moment two changes are open
+at once.
+
+### Multi-feature orchestration
+
+A batch that names a feature target promotes through the durable attempt state machine
+(`internal/run/attempt.go:217`), reached from `lucind-ai run` via `IntegrateFeature`
+(`internal/run/integrate_feature.go`). A legacy batch keeps the ff-merge it always used. The route
+is decided by the packets, before dispatch.
+
+| | Legacy batch (`--legacy-main`) | Feature batch |
 |---|---|---|
-| `feature create` | Yes | Writes the `features` row. Does **not** create the git branch — you do. `validateParentRef` rejects an empty ref, `main`, and the Lucind temp namespace (`internal/feature/feature.go:99`). |
-| `feature status` | Yes | Reads `features` and `integration_attempts`. |
-| `serve` | Yes | Read-only web views over the same rows. |
-| `feature recover --attempt <id>` | Only with an attempt row | `RecoverAttempt` resumes an existing attempt; only `ExecuteAttempt` creates one, so there is nothing to recover today. |
-| `reconcile approve\|decline\|cancel\|renew --request <id>` | Only with a request row | Only the overlap gate creates one, so likewise. |
+| Lane worktree base | primary checkout's `HEAD` | the packet's `base_sha` |
+| Promotion | `git merge --ff-only` into the primary checkout | compare-and-swap on `parent_ref` |
+| Primary working tree | must be clean; receives the merge | never touched |
+| Lease | none | held for the whole attempt |
+| Cross-feature overlap gate | not run | runs before promotion |
+| Failure isolation | bisects to the clean subset | no bisection; the attempt fails whole |
+| Durable record | lane rows only | an `integration_attempts` row, recoverable |
 
-**Running two features in parallel, honestly.** From a single clone it is not supported. `Integrate`
-ff-merges into the primary checkout's current branch, the binary refuses to run from a linked
-worktree, and the ledger is one SQLite file in the primary root — two concurrent invocations would
-promote into the same branch. Two features in parallel means two clones, each with its own primary
-root, its own `.lucind/lucind.db`, and its own checked-out parent.
+**Which checkout you are on stops mattering for a feature batch.** Promotion is a CAS on the named
+ref and does not check out, merge into, or otherwise mutate the primary working tree, and lane
+worktrees start at `base_sha` rather than at `HEAD`. Both halves are required: before the second
+one landed, lanes branched from whatever was checked out and CAS-promoted a tree the parent never
+contained — a silent wrong-base merge that succeeded.
 
-That also means the two ledgers cannot see each other, so nothing detects a collision between them
-even in principle. Keeping two features from colliding is currently the same discipline as keeping
-two lanes in one wave from colliding: **disjoint paths, decided by the orchestrator before
-dispatch, and checked by hand.** The `allowed_paths` component-boundary prefix rule
-(`internal/packet/disjoint.go`) is the tool for it — but it only runs within one batch, so across
-two features it is a convention you apply, not a gate that protects you.
+**Four things are refused before any lane dispatches**, so a batch that cannot land coherently
+burns no quota (`internal/run/integrate_feature.go`, `FeatureTarget`):
 
-**What the gate would do once wired**, so the intent is not lost: `evaluateOverlapGate`
-(`internal/run/attempt.go:623`) compares the candidate against every other active feature and
-classifies (`internal/overlap/overlap.go:623-678`). `required` — a predicted merge conflict, a
-rename/delete collision, a shared binary, intersecting or nearby hunks, or a hotspot weight over
-threshold — blocks promotion, releases the lease, and creates one awaiting reconciliation request
-per feature pair, deduplicated across retries. `warning` — merely shared paths, or a hotspot over
-the lower threshold — records evidence and does not block. `informational` is a no-op.
+1. Two packets naming different features. One batch produces one combined tree and promotes it
+   once; there is no correct answer, so it is not guessed.
+2. Legacy and feature-targeted packets mixed in one batch.
+3. The same feature with divergent `expected_parent_sha`.
+4. A feature whose `parent_ref` is `main`, or the `lucind/` lane namespace, or empty
+   (`feature.ValidateParentRef`). **A change targeting `main` is a legacy dispatch**, not a feature
+   whose parent happens to be main — `--legacy-main` with `--expected-parent-sha`.
 
-**Do not present any of this as working before it has run once.** Every one of these tables is
-empty in this repository. The `opencode` executor was in exactly this position — built, specified,
-and tested — and three stacked defects appeared on its first real dispatch, each only reachable
-after fixing the one before it. Wiring `ExecuteAttempt` into the dispatch path and running two real
-features is the evidence; the test suite is not.
+A packet declaring no target at all, dispatched with no flags, is likewise refused up front and
+told both exits. That used to surface as a per-lane `status: failed` after every worktree already
+existed, with no reason printed anywhere.
+
+**What the overlap gate does now that it runs.** `evaluateOverlapGate`
+(`internal/run/attempt.go:623`) compares the candidate against every other active feature in the
+same ledger and classifies (`internal/overlap/overlap.go:623-678`):
+
+- **required** — a predicted merge conflict, a rename/delete collision, a shared binary,
+  intersecting or nearby hunks, or a hotspot weight over threshold. Blocks promotion, releases the
+  lease, and creates one awaiting reconciliation request per feature pair, deduplicated across
+  retries. The lanes are demoted with the block as their reason and their worktrees preserved.
+  `lucind-ai reconcile approve|decline|cancel` is the human decision that clears it.
+- **warning** — merely shared paths, or a hotspot over the lower threshold. Records evidence, does
+  not block.
+- **informational** — a no-op.
+
+**The attempt is durable, and its id is printed.** `lucind-ai run` prints
+`attempt:   <id> (<status>)`. If the process dies mid-attempt the row is non-terminal, and
+`lucind-ai feature recover --attempt <id>` resumes it. Until this route existed, that command had
+nothing to recover.
+
+**The lease is not renewed mid-attempt.** It is held across combine and the full check run, so its
+TTL is pinned to the same `--timeout` a lane gets rather than the package's 30-second default,
+which would expire during `lucind-checks.sh` and land a passing attempt in `stale`. A second
+concurrent dispatch on the same feature is blocked, not raced: `feature.AcquireLease` grants only
+on an expired lease, with no same-owner exception (`internal/feature/feature.go:307`).
+
+**Two features at once — what is now true, and what is still unproven.** The structural blocker is
+gone: with CAS promotion there is no shared checkout for two batches to fight over, and because one
+clone means one ledger, the overlap gate can actually see both features. That is a better shape
+than two clones, where the two ledgers would be blind to each other.
+
+It has never been run. Every one of `features`, `integration_attempts`, `feature_leases`,
+`reconciliation_requests`, and `overlap_evidence` was empty when this route was wired. Treat
+concurrency here as designed and unexercised, not as working — the `opencode` executor was in the
+same position, built and tested, and three stacked defects appeared on its first real dispatch,
+each reachable only after fixing the one before it.
+
+**Setup for a feature batch:**
+
+1. Create the parent branch in git. `lucind-ai feature create --id … --parent … --base-sha …`
+   writes the ledger row; it does not create the branch.
+2. Name `feature`, `parent_ref`, `base_sha`, and `expected_parent_sha` on every packet in the
+   batch, identically.
+3. Dispatch with no target flags — the flags are the legacy path.
+
 
 ### Packet Structure
 
