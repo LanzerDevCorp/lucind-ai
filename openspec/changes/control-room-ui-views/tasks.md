@@ -36,25 +36,25 @@ Does not prove: live 2s timers, scroll preservation, or visual layout.
 
 ## Phase 1: Data Access & DTO Foundation
 
-- [ ] 1.1 Add `BatchLane` and `ListBatchLanes(ctx, runID) ([]BatchLane, error)` on `*serve.Model`. DTO neighborhood today is feature-parent types (`model.go:26-125`); methods start at `ListFeatures` (`:128`). SELECT `lanes` / `lane_note` events (`internal/ledger/schema.go:18-43`); map status (`internal/lane/status.go:10-16`), worktree, preserved flag (`schema.go:26-27`), `barrier.Evaluate` (`internal/barrier/barrier.go:36-60`). No `os`/`exec`/`git`.
-- [ ] 1.2 Add `TestBatchLanesRoundTrip` in `model_test.go` using `openModelLedger` (`:22-30`): status mapping, worktree preservation, demotion note, barrier outcome. Keep `TestModelSourceDoesNotShellOut` (`:595-627`).
+- [x] 1.1 Add `BatchLane` and `ListBatchLanes(ctx, runID) ([]BatchLane, error)` on `*serve.Model`. DTO neighborhood today is feature-parent types (`model.go:26-125`); methods start at `ListFeatures` (`:128`). SELECT `lanes` / `lane_note` events (`internal/ledger/schema.go:18-43`); map status (`internal/lane/status.go:10-16`), worktree, preserved flag (`schema.go:26-27`), `barrier.Evaluate` (`internal/barrier/barrier.go:36-60`). No `os`/`exec`/`git`.
+- [x] 1.2 Add `TestBatchLanesRoundTrip` in `model_test.go` using `openModelLedger` (`:22-30`): status mapping, worktree preservation, demotion note, barrier outcome. Keep `TestModelSourceDoesNotShellOut` (`:595-627`).
 
 ## Phase 2: HTTP Endpoints & Route Wiring
 
-- [ ] 2.1 In `NewHandler` (`handlers.go:36-118`) mount GET `/api/approvals`, `/api/features`, `/api/features/{id}/attempts`, `/api/leases`, `/api/overlap/{feature_id}`, `/api/reconcile/requests`, `/api/batch/lanes`. Keep `GET /api/state` (`:79-85`) and bulk POST 400 (`:161-176`). Call `ListBatchLanes` plus existing `ListFeatures` `:128`, `ListAttempts` `:167`, `ListLeases` `:206`, `ListOverlapEvidence` `:245`, composed `ListReconciliationRequests` `:278`. Nil slices encode as `[]`.
-- [ ] 2.2 Add `TestGetRoutesReturnJSON` in `server_test.go`: 200 JSON, empty `[]`, error paths. Keep `TestBulkRequestBodyReturns400` (`:42-93`) and `TestDecideAlreadyDecidedReturns409Conflict` (`:196-236`).
+- [x] 2.1 In `NewHandler` (`handlers.go:36-118`) mount GET `/api/approvals`, `/api/features`, `/api/features/{id}/attempts`, `/api/leases`, `/api/overlap/{feature_id}`, `/api/reconcile/requests`, `/api/batch/lanes`. Keep `GET /api/state` (`:79-85`) and bulk POST 400 (`:161-176`). Call `ListBatchLanes` plus existing `ListFeatures` `:128`, `ListAttempts` `:167`, `ListLeases` `:206`, `ListOverlapEvidence` `:245`, composed `ListReconciliationRequests` `:278`. Nil slices encode as `[]`.
+- [x] 2.2 Add `TestGetRoutesReturnJSON` in `server_test.go`: 200 JSON, empty `[]`, error paths. Keep `TestBulkRequestBodyReturns400` (`:42-93`) and `TestDecideAlreadyDecidedReturns409Conflict` (`:196-236`).
 
 ## Phase 3: Dashboard Layout & Panel Structure
 
-- [ ] 3.1 In `index.html:141-162` add containers for Batch/Wave, Approvals, Feature/Lease, Reconciliation, Lane Envelope. Keep `approver-name`, `approver-rate`, `opencode-cmd` (`:146-152`).
+- [x] 3.1 In `index.html:141-162` add containers for Batch/Wave, Approvals, Feature/Lease, Reconciliation, Lane Envelope. Keep `approver-name`, `approver-rate`, `opencode-cmd` (`:146-152`).
 
 ## Phase 4: Client Controller & Dynamic Rendering
 
-- [ ] 4.1 Replace the single `/api/state` poller (`app.js:1-97`) with five-panel fetch. Hot 2s poll (`:96-97`) only `/api/approvals`, `/api/leases`, `/api/batch/lanes`; lazy-fetch overlap `evidence_json` and candidate `output`/`checks` on expand. Patch by `card-${runID}-${laneID}` (`:49`); do not wipe with `innerHTML = ''` (`:45`) every tick. Keep `escapeHtml` (`:91-94`), `isValidEvidence` (`:12-20`), per-card POST (`:72-78`).
+- [~] 4.1 **SUPERSEDED** (see `verify.md`; the client converged on one composed `/api/state` endpoint plus an SSE stream, so the five-panel poller was never built) Replace the single `/api/state` poller (`app.js:1-97`) with five-panel fetch. Hot 2s poll (`:96-97`) only `/api/approvals`, `/api/leases`, `/api/batch/lanes`; lazy-fetch overlap `evidence_json` and candidate `output`/`checks` on expand. Patch by `card-${runID}-${laneID}` (`:49`); do not wipe with `innerHTML = ''` (`:45`) every tick. Keep `escapeHtml` (`:91-94`), `isValidEvidence` (`:12-20`), per-card POST (`:72-78`).
 
 ## Phase 5: Static Asset & UI Contract Verification
 
-- [ ] 5.1 Add `TestStaticAssetsContainFivePanels` in `static_test.go` via `StaticFS()` (`static.go:12-18`): five panel IDs, metric IDs present. Keep no-approve-all (`:11-38`), unselected cards (`:69-80`), `isValidEvidence` rejects bare prose (`:83-101`).
+- [x] 5.1 Add `TestStaticAssetsContainFivePanels` in `static_test.go` via `StaticFS()` (`static.go:12-18`): five panel IDs, metric IDs present. Keep no-approve-all (`:11-38`), unselected cards (`:69-80`), `isValidEvidence` rejects bare prose (`:83-101`).
 
 ## Dependency Order
 
