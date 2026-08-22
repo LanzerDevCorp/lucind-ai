@@ -2,11 +2,15 @@ package serve
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"crypto/subtle"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/LanzerDevCorp/lucind-ai/internal/ledger"
@@ -32,9 +36,80 @@ type defectRequest struct {
 	Defect bool `json:"defect"`
 }
 
+// HandlerConfig adds optional live telemetry and dispatch control without
+// changing the read-only behavior of existing NewHandler callers.
+type HandlerConfig struct {
+	Hub            *Hub
+	EnableDispatch bool
+	DispatchToken  string
+}
+
 // NewHandler creates a new HTTP handler that serves the approvals UI and API.
 func NewHandler(l *ledger.Ledger, defaultApprover string, opencodeCmd string) http.Handler {
+	return NewHandlerWithConfig(l, defaultApprover, opencodeCmd, HandlerConfig{})
+}
+
+// NewHandlerWithConfig creates a handler with optional SSE and dispatch
+// control. Dispatch remains disabled unless explicitly enabled with a token.
+func NewHandlerWithConfig(l *ledger.Ledger, defaultApprover string, opencodeCmd string, config HandlerConfig) http.Handler {
 	mux := http.NewServeMux()
+	model := NewModel(l)
+
+	mux.HandleFunc("/api/features", func(w http.ResponseWriter, r *http.Request) {
+		if !requireGET(w, r) {
+			return
+		}
+		value, err := model.ListFeatures(r.Context())
+		writeModelResponse(w, value, err)
+	})
+	mux.HandleFunc("/api/features/", func(w http.ResponseWriter, r *http.Request) {
+		handleFeatureRead(w, r, model)
+	})
+	mux.HandleFunc("/api/attempts/", func(w http.ResponseWriter, r *http.Request) {
+		if !requireGET(w, r) {
+			return
+		}
+		id, ok := singlePathID(r.URL.Path, "/api/attempts/")
+		if !ok {
+			writeJSONError(w, http.StatusNotFound, "not found")
+			return
+		}
+		value, err := model.GetAttempt(r.Context(), id)
+		writeModelResponse(w, value, err)
+	})
+	mux.HandleFunc("/api/leases", func(w http.ResponseWriter, r *http.Request) {
+		if !requireGET(w, r) {
+			return
+		}
+		value, err := model.ListLeases(r.Context())
+		writeModelResponse(w, value, err)
+	})
+	mux.HandleFunc("/api/reconciliations/", func(w http.ResponseWriter, r *http.Request) {
+		handleReconciliationRead(w, r, model)
+	})
+	mux.HandleFunc("/api/candidates/", func(w http.ResponseWriter, r *http.Request) {
+		if !requireGET(w, r) {
+			return
+		}
+		id, ok := singlePathID(r.URL.Path, "/api/candidates/")
+		if !ok {
+			writeJSONError(w, http.StatusNotFound, "not found")
+			return
+		}
+		value, err := model.GetReconciliationCandidate(r.Context(), id)
+		writeModelResponse(w, value, err)
+	})
+	mux.HandleFunc("/api/stream", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if config.Hub == nil {
+			writeJSONError(w, http.StatusServiceUnavailable, "telemetry stream unavailable")
+			return
+		}
+		config.Hub.ServeHTTP(w, r)
+	})
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
@@ -102,6 +177,9 @@ func NewHandler(l *ledger.Ledger, defaultApprover string, opencodeCmd string) ht
 
 		// Check for /approvals/{runID}/{laneID}/defect
 		if len(parts) == 3 && parts[2] == "defect" {
+			if !authorizeDispatch(w, r, config) {
+				return
+			}
 			handleDefect(w, r, l, runID, laneID)
 			return
 		}
@@ -111,10 +189,163 @@ func NewHandler(l *ledger.Ledger, defaultApprover string, opencodeCmd string) ht
 			return
 		}
 
+		if !authorizeDispatch(w, r, config) {
+			return
+		}
 		handleDecide(w, r, l, defaultApprover, runID, laneID)
 	})
 
+	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
+		writeJSONError(w, http.StatusNotFound, "not found")
+	})
+
 	return mux
+}
+
+func handleFeatureRead(w http.ResponseWriter, r *http.Request, model *Model) {
+	if !requireGET(w, r) {
+		return
+	}
+	parts := pathParts(strings.TrimPrefix(r.URL.Path, "/api/features/"))
+	if len(parts) == 0 {
+		writeJSONError(w, http.StatusNotFound, "not found")
+		return
+	}
+
+	var value any
+	var err error
+	switch {
+	case len(parts) == 1:
+		value, err = model.GetFeature(r.Context(), parts[0])
+	case len(parts) == 2 && parts[1] == "attempts":
+		value, err = model.ListAttempts(r.Context(), parts[0])
+	case len(parts) == 2 && parts[1] == "lease":
+		value, err = model.GetLease(r.Context(), parts[0])
+	case len(parts) == 2 && parts[1] == "overlap":
+		value, err = model.ListOverlapEvidence(r.Context(), parts[0])
+	case len(parts) == 3 && parts[1] == "overlap":
+		value, err = model.GetOverlapEvidence(r.Context(), parts[0], parts[2])
+	case len(parts) == 2 && parts[1] == "reconciliations":
+		value, err = model.ListReconciliationRequests(r.Context(), parts[0])
+	case len(parts) == 2 && parts[1] == "events":
+		value, err = model.ListAuditEvents(r.Context(), parts[0])
+	default:
+		writeJSONError(w, http.StatusNotFound, "not found")
+		return
+	}
+	writeModelResponse(w, value, err)
+}
+
+func handleReconciliationRead(w http.ResponseWriter, r *http.Request, model *Model) {
+	if !requireGET(w, r) {
+		return
+	}
+	parts := pathParts(strings.TrimPrefix(r.URL.Path, "/api/reconciliations/"))
+	var value any
+	var err error
+	switch {
+	case len(parts) == 1:
+		value, err = model.GetReconciliationRequest(r.Context(), parts[0])
+	case len(parts) == 2 && parts[1] == "candidates":
+		value, err = model.ListReconciliationCandidates(r.Context(), parts[0])
+	default:
+		writeJSONError(w, http.StatusNotFound, "not found")
+		return
+	}
+	writeModelResponse(w, value, err)
+}
+
+func requireGET(w http.ResponseWriter, r *http.Request) bool {
+	if r.Method == http.MethodGet {
+		return true
+	}
+	http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	return false
+}
+
+func singlePathID(path, prefix string) (string, bool) {
+	parts := pathParts(strings.TrimPrefix(path, prefix))
+	if len(parts) != 1 || parts[0] == "" {
+		return "", false
+	}
+	return parts[0], true
+}
+
+func pathParts(path string) []string {
+	trimmed := strings.Trim(path, "/")
+	if trimmed == "" {
+		return nil
+	}
+	return strings.Split(trimmed, "/")
+}
+
+func writeModelResponse(w http.ResponseWriter, value any, err error) {
+	if err != nil {
+		if isModelNotFound(err) {
+			writeJSONError(w, http.StatusNotFound, "not found")
+			return
+		}
+		writeJSONError(w, http.StatusInternalServerError, "query failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
+func isModelNotFound(err error) bool {
+	return errors.Is(err, sql.ErrNoRows) ||
+		errors.Is(err, ledger.ErrOverlapEvidenceNotFound) ||
+		errors.Is(err, ledger.ErrReconciliationRequestNotFound) ||
+		errors.Is(err, ledger.ErrReconciliationCandidateNotFound)
+}
+
+func writeJSON(w http.ResponseWriter, status int, value any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(value)
+}
+
+func writeJSONError(w http.ResponseWriter, status int, message string) {
+	writeJSON(w, status, map[string]string{"error": message})
+}
+
+func authorizeDispatch(w http.ResponseWriter, r *http.Request, config HandlerConfig) bool {
+	if !config.EnableDispatch || config.DispatchToken == "" {
+		writeJSONError(w, http.StatusForbidden, "dispatch control disabled")
+		return false
+	}
+	if !requestIsSameOrigin(r) {
+		writeJSONError(w, http.StatusForbidden, "same-origin request required")
+		return false
+	}
+	if !validBearerToken(r.Header.Get("Authorization"), config.DispatchToken) {
+		w.Header().Set("WWW-Authenticate", `Bearer realm="lucind-ai-control"`)
+		writeJSONError(w, http.StatusUnauthorized, "invalid control token")
+		return false
+	}
+	return true
+}
+
+func requestIsSameOrigin(r *http.Request) bool {
+	origin, err := url.Parse(r.Header.Get("Origin"))
+	if err != nil || origin.Scheme == "" || origin.Host == "" || origin.User != nil ||
+		(origin.Path != "" && origin.Path != "/") || origin.RawQuery != "" || origin.Fragment != "" {
+		return false
+	}
+	scheme := "http"
+	if r.TLS != nil {
+		scheme = "https"
+	}
+	return strings.EqualFold(origin.Scheme, scheme) && strings.EqualFold(origin.Host, r.Host)
+}
+
+func validBearerToken(header, expected string) bool {
+	scheme, token, ok := strings.Cut(strings.TrimSpace(header), " ")
+	if !ok || !strings.EqualFold(scheme, "Bearer") || token == "" {
+		return false
+	}
+	providedHash := sha256.Sum256([]byte(token))
+	expectedHash := sha256.Sum256([]byte(expected))
+	return subtle.ConstantTimeCompare(providedHash[:], expectedHash[:]) == 1
 }
 
 func serveStateJSON(w http.ResponseWriter, r *http.Request, l *ledger.Ledger, defaultApprover string, opencodeCmd string) {
