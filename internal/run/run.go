@@ -201,6 +201,14 @@ type Deps struct {
 	ResolveCandidateSHA func(ctx context.Context, primaryRoot, worktreePath, branch string) (string, error)
 	EvaluateOverlap     func(ctx context.Context, repoDir, baseSHA, shaA, shaB string, opts ...overlap.EvaluateOption) (*overlap.Evidence, error)
 	FeatureLeaseTTL     time.Duration
+	// RenewInterval controls how often driveAttemptFromLeased renews the
+	// feature lease while checkFunc (integrate.Check) runs during the
+	// CHECKING phase -- see the lease-renewal loop there. Zero means the
+	// interval is derived from FeatureLeaseTTL (leaseTTL/3, floored at
+	// 1 second). This exists mainly as a test injection point: a test can
+	// set it to a couple of milliseconds to observe renewal deterministically
+	// without waiting out a real multi-second lease TTL.
+	RenewInterval time.Duration
 }
 
 // Report is the outcome of running exactly one lane through Execute.

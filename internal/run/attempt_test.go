@@ -715,6 +715,138 @@ func TestGetAttemptQueries(t *testing.T) {
 	}
 }
 
+// TestCheckingPhaseRenewsLeaseWhileChecksRun proves fix 1: the feature lease
+// acquired at the start of an attempt must be renewed periodically while
+// checkFunc (integrate.Check, a synchronous call that can run arbitrarily
+// long) is in flight during the CHECKING phase -- not just validated once
+// after it returns. Without renewal, a genuinely still-working attempt whose
+// checks simply take a while would be wrongly killed the moment leaseTTL
+// elapses.
+//
+// RunChecks snapshots the lease's ExpiresAt at entry, sleeps for real
+// (long enough to span several RenewInterval ticks given the tiny interval
+// injected below), then snapshots ExpiresAt again before returning -- both
+// snapshots taken from inside the CHECKING window, before CAS/release could
+// otherwise move the lease. If renewal happened, the second snapshot must be
+// strictly later than the first.
+func TestCheckingPhaseRenewsLeaseWhileChecksRun(t *testing.T) {
+	spies := &attemptSpies{}
+	deps, _, featSvc := newAttemptTestDeps(t, spies)
+	// FeatureLeaseTTL is left at newAttemptTestDeps' default (30s): this test
+	// only needs to prove that ExpiresAt keeps advancing during CHECKING, not
+	// that a short-TTL lease survives -- pairing a tiny RenewInterval with a
+	// tiny TTL would make the test flaky under SQLite's real write-lock
+	// contention (RenewLease and the attempt's own audit writes share one
+	// writer connection), for no assertion benefit.
+	deps.RenewInterval = 5 * time.Millisecond
+
+	featID := "feat-renew-1"
+	_, err := featSvc.Create(context.Background(), featID, "refs/heads/feature-renew", "base-sha-1", "expected-parent-sha-1")
+	if err != nil {
+		t.Fatalf("featSvc.Create() error = %v", err)
+	}
+
+	var beforeExpiry, afterExpiry time.Time
+	deps.RunChecks = func(ctx context.Context, worktreePath string) (bool, string, error) {
+		lease, lErr := featSvc.GetLease(ctx, featID)
+		if lErr != nil {
+			t.Fatalf("GetLease() before sleep error = %v", lErr)
+		}
+		beforeExpiry = lease.ExpiresAt
+
+		time.Sleep(30 * time.Millisecond)
+
+		lease, lErr = featSvc.GetLease(ctx, featID)
+		if lErr != nil {
+			t.Fatalf("GetLease() after sleep error = %v", lErr)
+		}
+		afterExpiry = lease.ExpiresAt
+
+		return true, "all checks passed", nil
+	}
+
+	req := run.AttemptRequest{
+		ID:                "att-renew-1",
+		FeatureID:         featID,
+		ParentRef:         "refs/heads/feature-renew",
+		BaseSHA:           "base-sha-1",
+		ExpectedParentSHA: "expected-parent-sha-1",
+		IdempotencyKey:    "key-renew-1",
+		Owner:             "owner-renew",
+		Branches:          []string{"lucind/lane-1"},
+	}
+
+	res, err := run.ExecuteAttempt(context.Background(), deps, req)
+	if err != nil {
+		t.Fatalf("ExecuteAttempt() error = %v", err)
+	}
+	if res.Status != run.AttemptStatusPromoted {
+		t.Fatalf("res.Status = %v, want %v", res.Status, run.AttemptStatusPromoted)
+	}
+
+	if beforeExpiry.IsZero() || afterExpiry.IsZero() {
+		t.Fatalf("lease snapshots not captured: before=%v after=%v", beforeExpiry, afterExpiry)
+	}
+	if !afterExpiry.After(beforeExpiry) {
+		t.Errorf("lease ExpiresAt did not advance during CHECKING: before=%v after=%v, want renewal to extend it", beforeExpiry, afterExpiry)
+	}
+}
+
+// TestCheckingPhaseLeaseLossDuringChecksStillGoesStale is the regression
+// companion to fix 1: renewal must never paper over a genuine lease loss.
+// If another owner steals the lease while checks are running (simulated
+// here directly against the ledger row, since a real steal requires the
+// lease to already look expired to AcquireLease), the existing post-check
+// ValidateLease gate (labeled "lease lost before CAS") must still catch it
+// and the attempt must still end up AttemptStatusStale, exactly as before
+// this fix.
+func TestCheckingPhaseLeaseLossDuringChecksStillGoesStale(t *testing.T) {
+	spies := &attemptSpies{}
+	deps, l, featSvc := newAttemptTestDeps(t, spies)
+	deps.FeatureLeaseTTL = 150 * time.Millisecond
+	deps.RenewInterval = 2 * time.Millisecond
+
+	featID := "feat-renew-stale-1"
+	_, err := featSvc.Create(context.Background(), featID, "refs/heads/feature-renew-stale", "base-sha-1", "expected-parent-sha-1")
+	if err != nil {
+		t.Fatalf("featSvc.Create() error = %v", err)
+	}
+
+	deps.RunChecks = func(ctx context.Context, worktreePath string) (bool, string, error) {
+		// Simulate another owner stealing the lease mid-check.
+		if _, uErr := l.DB().ExecContext(ctx, `UPDATE feature_leases SET owner = 'thief', fence = fence + 1 WHERE feature_id = ?`, featID); uErr != nil {
+			t.Fatalf("simulate lease theft: %v", uErr)
+		}
+		time.Sleep(10 * time.Millisecond)
+		return true, "all checks passed", nil
+	}
+
+	req := run.AttemptRequest{
+		ID:                "att-renew-stale-1",
+		FeatureID:         featID,
+		ParentRef:         "refs/heads/feature-renew-stale",
+		BaseSHA:           "base-sha-1",
+		ExpectedParentSHA: "expected-parent-sha-1",
+		IdempotencyKey:    "key-renew-stale-1",
+		Owner:             "owner-renew-stale",
+		Branches:          []string{"lucind/lane-1"},
+	}
+
+	res, err := run.ExecuteAttempt(context.Background(), deps, req)
+	if err != nil {
+		t.Fatalf("ExecuteAttempt() unexpected hard error = %v", err)
+	}
+	if res.Status != run.AttemptStatusStale {
+		t.Fatalf("res.Status = %v, want %v (renewal must not paper over a real lease loss)", res.Status, run.AttemptStatusStale)
+	}
+	if res.FailureReason == "" {
+		t.Errorf("res.FailureReason is empty, want detail about lease loss before CAS")
+	}
+	if len(spies.promoteCASCalls) != 0 {
+		t.Errorf("PromoteCAS called %d times, want 0 when lease was lost during checks", len(spies.promoteCASCalls))
+	}
+}
+
 func TestAttemptValidationSentinels(t *testing.T) {
 	spies := &attemptSpies{}
 	deps, _, _ := newAttemptTestDeps(t, spies)

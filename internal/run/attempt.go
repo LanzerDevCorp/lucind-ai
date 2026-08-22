@@ -328,6 +328,51 @@ func ExecuteAttempt(ctx context.Context, deps Deps, req AttemptRequest) (Attempt
 	return driveAttemptFromLeased(ctx, deps, att, featSvc, req)
 }
 
+// startLeaseRenewal begins a background loop that periodically renews the
+// feature lease at renewInterval while checkFunc (integrate.Check) runs
+// during the CHECKING phase of driveAttemptFromLeased. checkFunc is a
+// synchronous call that can run arbitrarily long, and the lease acquired at
+// the start of the attempt is a fixed-TTL lock that nothing else proves
+// liveness against during that window -- without this, a genuinely
+// still-working attempt whose checks simply take a while gets wrongly killed
+// once leaseTTL elapses.
+//
+// Renewal errors are deliberately ignored here: this loop is not the
+// authoritative gate on lease loss -- the featSvc.ValidateLease call
+// immediately after checkFunc returns is -- so a transient renewal failure
+// must never abort an in-flight check. A genuine loss of the lease (another
+// owner took it) still surfaces correctly through that post-check
+// ValidateLease call, since renewal cannot succeed once owner/fence no
+// longer match.
+//
+// The returned stop function cancels the loop and blocks until it has
+// exited, so the caller can rely on the goroutine being gone the moment
+// stop returns. It must be called exactly once, unconditionally, as soon as
+// checkFunc returns (success, failure, or error alike) to avoid leaking it.
+func startLeaseRenewal(ctx context.Context, featSvc *feature.Service, att Attempt, leaseTTL, renewInterval time.Duration) (stop func()) {
+	renewCtx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(renewInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-renewCtx.Done():
+				return
+			case <-ticker.C:
+				_, _ = featSvc.RenewLease(renewCtx, att.FeatureID, att.Owner, att.Fence, leaseTTL)
+			}
+		}
+	}()
+
+	return func() {
+		cancel()
+		<-done
+	}
+}
+
 func driveAttemptFromLeased(ctx context.Context, deps Deps, att Attempt, featSvc *feature.Service, req AttemptRequest) (Attempt, error) {
 	// 3. COMBINING
 	now := updateNow(deps)
@@ -381,7 +426,21 @@ func driveAttemptFromLeased(ctx context.Context, deps Deps, att Attempt, featSvc
 	if checkFunc == nil {
 		checkFunc = integrate.Check
 	}
+
+	checkLeaseTTL := deps.FeatureLeaseTTL
+	if checkLeaseTTL <= 0 {
+		checkLeaseTTL = 30 * time.Second
+	}
+	renewInterval := deps.RenewInterval
+	if renewInterval <= 0 {
+		renewInterval = checkLeaseTTL / 3
+		if renewInterval < time.Second {
+			renewInterval = time.Second
+		}
+	}
+	stopLeaseRenewal := startLeaseRenewal(ctx, featSvc, att, checkLeaseTTL, renewInterval)
 	passed, output, err := checkFunc(ctx, wtPath)
+	stopLeaseRenewal()
 	if err != nil || !passed {
 		reason := output
 		if err != nil {
