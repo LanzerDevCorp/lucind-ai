@@ -3,6 +3,7 @@ package run_test
 import (
 	"context"
 	"io/fs"
+	"strings"
 	"sync"
 	"testing"
 	"testing/fstest"
@@ -623,5 +624,353 @@ func TestApprovedIntegratedCandidateUnblocksPromotion(t *testing.T) {
 	}
 	if count != 1 {
 		t.Errorf("reconciliation_requests count = %d, want still exactly 1", count)
+	}
+}
+
+// 6. Regression: a single required conflict with no matching resolution must still block
+// immediately with the existing per-conflict reason, unchanged by the post-loop accumulation
+// refactor.
+func TestUnresolvedRequiredOverlapBlocksWithReconciliationReason(t *testing.T) {
+	spies := &gateSpies{
+		evaluateOverlapFunc: func(ctx context.Context, repoDir, baseSHA, shaA, shaB string, opts ...overlap.EvaluateOption) (*overlap.Evidence, error) {
+			ev := &overlap.Evidence{
+				Version:     "v1",
+				BaseSHA:     baseSHA,
+				FeatureASHA: shaA,
+				FeatureBSHA: shaB,
+				Class:       overlap.ClassRequired,
+				Rationale:   []string{"predicted Git merge conflict detected"},
+				CreatedAt:   time.Date(2026, 8, 20, 12, 0, 0, 0, time.UTC),
+			}
+			h, _ := ev.ComputeHash()
+			ev.Hash = h
+			return ev, nil
+		},
+	}
+	deps, _, featSvc := newGateTestDeps(t, spies)
+
+	featA, err := featSvc.Create(context.Background(), "feat-unresolved-a", "refs/heads/feature-unresolved-a", "base-sha-common", "expected-sha-refs/heads/feature-unresolved-a")
+	if err != nil {
+		t.Fatalf("featSvc.Create(feat-unresolved-a) error = %v", err)
+	}
+	featB, err := featSvc.Create(context.Background(), "feat-unresolved-b", "refs/heads/feature-unresolved-b", "base-sha-common", "expected-sha-refs/heads/feature-unresolved-b")
+	if err != nil {
+		t.Fatalf("featSvc.Create(feat-unresolved-b) error = %v", err)
+	}
+
+	req := run.AttemptRequest{
+		ID:                "att-unresolved-a-1",
+		FeatureID:         featA.ID,
+		ParentRef:         featA.ParentRef,
+		BaseSHA:           featA.BaseSHA,
+		ExpectedParentSHA: featA.ExpectedParentSHA,
+		IdempotencyKey:    "idem-unresolved-a-1",
+		Owner:             "owner-unresolved-a",
+		Branches:          []string{"lucind/lane-unresolved-a-1"},
+	}
+	res, err := run.ExecuteAttempt(context.Background(), deps, req)
+	if err != nil {
+		t.Fatalf("ExecuteAttempt() error = %v", err)
+	}
+	if res.Status != run.AttemptStatusBlocked {
+		t.Fatalf("res.Status = %v, want %v", res.Status, run.AttemptStatusBlocked)
+	}
+	wantReason := "promotion blocked: reconciliation-required overlap with feature " + featB.ID
+	if res.FailureReason != wantReason {
+		t.Errorf("res.FailureReason = %q, want %q", res.FailureReason, wantReason)
+	}
+}
+
+// 7. RED: Two required-overlap conflicts against two different other features, where only one is
+// already resolved (approved request + integrated candidate) and the other is still unresolved.
+// The unresolved conflict must still block immediately, exactly as an unresolved conflict always
+// has -- but critically, evalFunc must be called with the SAME original candidate SHA for BOTH
+// comparisons, never a SHA mutated by the first (resolved) conflict's override. Before this fix,
+// evaluateOverlapGate mutated att.CandidateSHA in place as soon as the first conflict resolved,
+// so every later comparison in the same pass was silently evaluated against the wrong SHA.
+func TestTwoRequiredConflictsOneResolvedOneUnresolvedUsesOriginalCandidateSHA(t *testing.T) {
+	type shaCall struct {
+		ShaA string
+		ShaB string
+	}
+	var calls []shaCall
+
+	spies := &gateSpies{}
+	deps, l, featSvc := newGateTestDeps(t, spies)
+
+	requiredEvalFunc := func(ctx context.Context, repoDir, baseSHA, shaA, shaB string, opts ...overlap.EvaluateOption) (*overlap.Evidence, error) {
+		ev := &overlap.Evidence{
+			Version:     "v1",
+			BaseSHA:     baseSHA,
+			FeatureASHA: shaA,
+			FeatureBSHA: shaB,
+			Class:       overlap.ClassRequired,
+			Rationale:   []string{"predicted Git merge conflict detected"},
+			Signals: overlap.Signals{
+				PredictedConflict: true,
+				ConflictPaths:     []string{"conflict.go"},
+			},
+			CreatedAt: time.Date(2026, 8, 20, 12, 0, 0, 0, time.UTC),
+		}
+		h, _ := ev.ComputeHash()
+		ev.Hash = h
+		return ev, nil
+	}
+	spies.evaluateOverlapFunc = requiredEvalFunc
+
+	featMain, err := featSvc.Create(context.Background(), "feat-nway-main", "refs/heads/feature-nway-main", "base-sha-common", "expected-sha-refs/heads/feature-nway-main")
+	if err != nil {
+		t.Fatalf("featSvc.Create(feat-nway-main) error = %v", err)
+	}
+	featResolved, err := featSvc.Create(context.Background(), "feat-nway-resolved", "refs/heads/feature-nway-resolved", "base-sha-common", "expected-sha-refs/heads/feature-nway-resolved")
+	if err != nil {
+		t.Fatalf("featSvc.Create(feat-nway-resolved) error = %v", err)
+	}
+
+	// Step 1: block feat-nway-main against feat-nway-resolved alone (the unresolved feature does
+	// not exist yet), creating the reconciliation request that gets resolved below.
+	setupReq := run.AttemptRequest{
+		ID:                "att-nway-setup-1",
+		FeatureID:         featMain.ID,
+		ParentRef:         featMain.ParentRef,
+		BaseSHA:           featMain.BaseSHA,
+		ExpectedParentSHA: featMain.ExpectedParentSHA,
+		IdempotencyKey:    "idem-nway-setup-1",
+		Owner:             "owner-nway-setup",
+		Branches:          []string{"lucind/lane-nway-setup-1"},
+	}
+	setupRes, err := run.ExecuteAttempt(context.Background(), deps, setupReq)
+	if err != nil {
+		t.Fatalf("ExecuteAttempt(setup) error = %v", err)
+	}
+	if setupRes.Status != run.AttemptStatusBlocked {
+		t.Fatalf("setupRes.Status = %v, want %v", setupRes.Status, run.AttemptStatusBlocked)
+	}
+
+	var reqID string
+	if err := l.DB().QueryRowContext(context.Background(), `SELECT id FROM reconciliation_requests LIMIT 1`).Scan(&reqID); err != nil {
+		t.Fatalf("query reconciliation_request id: %v", err)
+	}
+
+	reconcileSvc := reconcile.NewService(l, reconcile.WithClock(deps.Now))
+	_, _, err = reconcileSvc.Approve(context.Background(), reconcile.ApproveParams{
+		RequestID:     reqID,
+		SourceFeature: featMain.ID,
+		TargetFeature: featResolved.ID,
+		Actor:         "test-actor",
+	})
+	if err != nil {
+		t.Fatalf("reconcileSvc.Approve() error = %v", err)
+	}
+	cand, err := l.ReconciliationCandidateByRequest(context.Background(), reqID)
+	if err != nil {
+		t.Fatalf("ReconciliationCandidateByRequest() error = %v", err)
+	}
+	const resolvedSHA = "resolved-sha-nway-a"
+	if _, err := reconcileSvc.UpdateCandidateStatus(context.Background(), cand.ID, reconcile.CandidateStatusIntegrated, resolvedSHA, ""); err != nil {
+		t.Fatalf("reconcileSvc.UpdateCandidateStatus() error = %v", err)
+	}
+
+	// Step 2: bring in the second, still-unresolved conflict, and record every evalFunc call made
+	// during the retry that must see both features.
+	featUnresolved, err := featSvc.Create(context.Background(), "feat-nway-unresolved", "refs/heads/feature-nway-unresolved", "base-sha-common", "expected-sha-refs/heads/feature-nway-unresolved")
+	if err != nil {
+		t.Fatalf("featSvc.Create(feat-nway-unresolved) error = %v", err)
+	}
+
+	spies.evaluateOverlapFunc = func(ctx context.Context, repoDir, baseSHA, shaA, shaB string, opts ...overlap.EvaluateOption) (*overlap.Evidence, error) {
+		calls = append(calls, shaCall{ShaA: shaA, ShaB: shaB})
+		return requiredEvalFunc(ctx, repoDir, baseSHA, shaA, shaB, opts...)
+	}
+
+	retryReq := run.AttemptRequest{
+		ID:                "att-nway-retry-1",
+		FeatureID:         featMain.ID,
+		ParentRef:         featMain.ParentRef,
+		BaseSHA:           featMain.BaseSHA,
+		ExpectedParentSHA: featMain.ExpectedParentSHA,
+		IdempotencyKey:    "idem-nway-retry-1",
+		Owner:             "owner-nway-retry",
+		Branches:          []string{"lucind/lane-nway-retry-1"},
+	}
+	retryRes, err := run.ExecuteAttempt(context.Background(), deps, retryReq)
+	if err != nil {
+		t.Fatalf("ExecuteAttempt(retry) error = %v", err)
+	}
+	if retryRes.Status != run.AttemptStatusBlocked {
+		t.Fatalf("retryRes.Status = %v, want %v (the unresolved conflict must still block)", retryRes.Status, run.AttemptStatusBlocked)
+	}
+	if !strings.Contains(retryRes.FailureReason, featUnresolved.ID) {
+		t.Errorf("retryRes.FailureReason = %q, want it to mention %q (the still-unresolved feature)", retryRes.FailureReason, featUnresolved.ID)
+	}
+
+	if len(calls) != 2 {
+		t.Fatalf("evalFunc called %d times, want 2 (one per other active feature)", len(calls))
+	}
+	expectedSHA := "candidate-sha-integrate-att-nway-retry-1"
+	for i, c := range calls {
+		if c.ShaA != expectedSHA {
+			t.Errorf("call[%d].ShaA = %q, want %q (the retry's own original candidate SHA, not a SHA mutated by resolving the other conflict)", i, c.ShaA, expectedSHA)
+		}
+	}
+	if calls[0].ShaA != calls[1].ShaA {
+		t.Errorf("call[0].ShaA = %q != call[1].ShaA = %q, want identical original SHA for both comparisons", calls[0].ShaA, calls[1].ShaA)
+	}
+
+	var reqCount int
+	if err := l.DB().QueryRowContext(context.Background(), `SELECT COUNT(*) FROM reconciliation_requests`).Scan(&reqCount); err != nil {
+		t.Fatalf("query reconciliation_requests count: %v", err)
+	}
+	if reqCount != 2 {
+		t.Errorf("reconciliation_requests count = %d, want 2 (one resolved, one newly created for the unresolved conflict)", reqCount)
+	}
+}
+
+// 8. RED: Two required-overlap conflicts against two different other features, BOTH already
+// resolved (approved request + integrated candidate). A single resolution can be safely promoted
+// (see TestApprovedIntegratedCandidateUnblocksPromotion), but combining two independent
+// merge-commit resolutions into one candidate is out of scope for this fix -- silently picking
+// one and discarding the other would promote a candidate that drops one of the two human
+// resolutions. The attempt must instead block explicitly with a clear N-way reason, leave
+// CandidateSHA unchanged from the attempt's own original candidate, and release its lease so a
+// human can resolve and promote sequentially, one pair at a time.
+func TestTwoRequiredConflictsBothResolvedBlocksNWayReconciliation(t *testing.T) {
+	spies := &gateSpies{}
+	deps, l, featSvc := newGateTestDeps(t, spies)
+
+	requiredEvalFunc := func(ctx context.Context, repoDir, baseSHA, shaA, shaB string, opts ...overlap.EvaluateOption) (*overlap.Evidence, error) {
+		ev := &overlap.Evidence{
+			Version:     "v1",
+			BaseSHA:     baseSHA,
+			FeatureASHA: shaA,
+			FeatureBSHA: shaB,
+			Class:       overlap.ClassRequired,
+			Rationale:   []string{"predicted Git merge conflict detected"},
+			Signals: overlap.Signals{
+				PredictedConflict: true,
+				ConflictPaths:     []string{"conflict.go"},
+			},
+			CreatedAt: time.Date(2026, 8, 20, 12, 0, 0, 0, time.UTC),
+		}
+		h, _ := ev.ComputeHash()
+		ev.Hash = h
+		return ev, nil
+	}
+	spies.evaluateOverlapFunc = requiredEvalFunc
+
+	featMain, err := featSvc.Create(context.Background(), "feat-nway2-main", "refs/heads/feature-nway2-main", "base-sha-common", "expected-sha-refs/heads/feature-nway2-main")
+	if err != nil {
+		t.Fatalf("featSvc.Create(feat-nway2-main) error = %v", err)
+	}
+
+	reconcileSvc := reconcile.NewService(l, reconcile.WithClock(deps.Now))
+
+	// resolveOneConflict runs one blocking attempt against otherFeatID (the only other active
+	// feature the first time it is called against a fresh pair), then approves and integrates a
+	// resolved candidate for it, mirroring the human-in-the-loop path from
+	// TestApprovedIntegratedCandidateUnblocksPromotion.
+	resolveOneConflict := func(otherFeatID, attemptID, resolvedSHA string) {
+		t.Helper()
+
+		req := run.AttemptRequest{
+			ID:                attemptID,
+			FeatureID:         featMain.ID,
+			ParentRef:         featMain.ParentRef,
+			BaseSHA:           featMain.BaseSHA,
+			ExpectedParentSHA: featMain.ExpectedParentSHA,
+			IdempotencyKey:    "idem-" + attemptID,
+			Owner:             "owner-" + attemptID,
+			Branches:          []string{"lucind/lane-" + attemptID},
+		}
+		res, err := run.ExecuteAttempt(context.Background(), deps, req)
+		if err != nil {
+			t.Fatalf("ExecuteAttempt(%s) error = %v", attemptID, err)
+		}
+		if res.Status != run.AttemptStatusBlocked {
+			t.Fatalf("ExecuteAttempt(%s).Status = %v, want %v", attemptID, res.Status, run.AttemptStatusBlocked)
+		}
+
+		existing, err := l.AllReconciliationRequests(context.Background())
+		if err != nil {
+			t.Fatalf("AllReconciliationRequests() error = %v", err)
+		}
+		var reqID string
+		for _, r := range existing {
+			src, _, tgt, _ := reconcile.ParseDirection(r.Direction)
+			if (src == featMain.ID && tgt == otherFeatID) || (src == otherFeatID && tgt == featMain.ID) {
+				if r.Status == string(reconcile.RequestStatusAwaiting) {
+					reqID = r.ID
+					break
+				}
+			}
+		}
+		if reqID == "" {
+			t.Fatalf("no awaiting reconciliation_request found for %s", otherFeatID)
+		}
+
+		if _, _, err := reconcileSvc.Approve(context.Background(), reconcile.ApproveParams{
+			RequestID:     reqID,
+			SourceFeature: featMain.ID,
+			TargetFeature: otherFeatID,
+			Actor:         "test-actor",
+		}); err != nil {
+			t.Fatalf("reconcileSvc.Approve(%s) error = %v", otherFeatID, err)
+		}
+		cand, err := l.ReconciliationCandidateByRequest(context.Background(), reqID)
+		if err != nil {
+			t.Fatalf("ReconciliationCandidateByRequest(%s) error = %v", otherFeatID, err)
+		}
+		if _, err := reconcileSvc.UpdateCandidateStatus(context.Background(), cand.ID, reconcile.CandidateStatusIntegrated, resolvedSHA, ""); err != nil {
+			t.Fatalf("reconcileSvc.UpdateCandidateStatus(%s) error = %v", otherFeatID, err)
+		}
+	}
+
+	featB, err := featSvc.Create(context.Background(), "feat-nway2-b", "refs/heads/feature-nway2-b", "base-sha-common", "expected-sha-refs/heads/feature-nway2-b")
+	if err != nil {
+		t.Fatalf("featSvc.Create(feat-nway2-b) error = %v", err)
+	}
+	resolveOneConflict(featB.ID, "att-nway2-setup-b", "resolved-sha-nway2-b")
+
+	featC, err := featSvc.Create(context.Background(), "feat-nway2-c", "refs/heads/feature-nway2-c", "base-sha-common", "expected-sha-refs/heads/feature-nway2-c")
+	if err != nil {
+		t.Fatalf("featSvc.Create(feat-nway2-c) error = %v", err)
+	}
+	resolveOneConflict(featC.ID, "att-nway2-setup-c", "resolved-sha-nway2-c")
+
+	// Both conflicts are now resolved. The real test attempt must not silently promote either
+	// resolution alone.
+	finalReq := run.AttemptRequest{
+		ID:                "att-nway2-final",
+		FeatureID:         featMain.ID,
+		ParentRef:         featMain.ParentRef,
+		BaseSHA:           featMain.BaseSHA,
+		ExpectedParentSHA: featMain.ExpectedParentSHA,
+		IdempotencyKey:    "idem-nway2-final",
+		Owner:             "owner-nway2-final",
+		Branches:          []string{"lucind/lane-nway2-final"},
+	}
+	finalRes, err := run.ExecuteAttempt(context.Background(), deps, finalReq)
+	if err != nil {
+		t.Fatalf("ExecuteAttempt(final) error = %v", err)
+	}
+
+	if finalRes.Status != run.AttemptStatusBlocked {
+		t.Fatalf("finalRes.Status = %v, want %v (N-way resolution must block, not silently promote one side)", finalRes.Status, run.AttemptStatusBlocked)
+	}
+	if !strings.Contains(finalRes.FailureReason, featB.ID) || !strings.Contains(finalRes.FailureReason, featC.ID) {
+		t.Errorf("finalRes.FailureReason = %q, want it to mention both %q and %q", finalRes.FailureReason, featB.ID, featC.ID)
+	}
+
+	expectedOriginalSHA := "candidate-sha-integrate-att-nway2-final"
+	if finalRes.CandidateSHA != expectedOriginalSHA {
+		t.Errorf("finalRes.CandidateSHA = %q, want %q (unchanged from the attempt's own original candidate -- neither resolution silently applied)", finalRes.CandidateSHA, expectedOriginalSHA)
+	}
+	if finalRes.CandidateSHA == "resolved-sha-nway2-b" || finalRes.CandidateSHA == "resolved-sha-nway2-c" {
+		t.Errorf("finalRes.CandidateSHA = %q, must not silently adopt either single resolution", finalRes.CandidateSHA)
+	}
+
+	// Lease must have been released so a human can resolve and promote sequentially.
+	if _, err := featSvc.AcquireLease(context.Background(), featMain.ID, "probe-owner", time.Second); err != nil {
+		t.Errorf("AcquireLease() after N-way block error = %v, want lease to have been released", err)
 	}
 }

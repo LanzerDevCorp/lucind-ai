@@ -697,6 +697,17 @@ func evaluateOverlapGate(ctx context.Context, deps Deps, att Attempt, featSvc *f
 
 	reconcileSvc := reconcile.NewService(deps.Ledger, reconcile.WithClock(func() time.Time { return updateNow(deps) }))
 
+	// originalCandidateSHA is att's real candidate before any conflict in this pass resolves.
+	// Every evalFunc call below must compare against this value, never att.CandidateSHA directly:
+	// a resolved conflict's override is accumulated separately (resolvedOverrideSHA /
+	// resolvedAgainst) and only ever applied to att.CandidateSHA after the loop, so a later
+	// comparison in the same pass can never see an earlier resolution's SHA by mistake.
+	originalCandidateSHA := att.CandidateSHA
+	var (
+		resolvedOverrideSHA string   // the resolved candidate SHA, valid only when exactly one conflict resolves
+		resolvedAgainst     []string // otherFeat.ID for every conflict that resolved in this pass
+	)
+
 	for _, otherFeat := range activeFeatures {
 		if otherFeat.ID == att.FeatureID {
 			continue
@@ -729,7 +740,7 @@ func evaluateOverlapGate(ctx context.Context, deps Deps, att Attempt, featSvc *f
 			commonBase = baseSHA
 		}
 
-		ev, err := evalFunc(ctx, deps.PrimaryRoot, commonBase, att.CandidateSHA, otherSHA)
+		ev, err := evalFunc(ctx, deps.PrimaryRoot, commonBase, originalCandidateSHA, otherSHA)
 		if err != nil {
 			if errors.Is(err, overlap.ErrNoMergeBase) {
 				continue
@@ -798,14 +809,20 @@ func evaluateOverlapGate(ctx context.Context, deps Deps, att Attempt, featSvc *f
 			// timestamp, same content), so requiring the whole evidence to match byte-for-byte
 			// would never match on a real retry. What must not have moved is the other side of
 			// the conflict -- if otherFeat's tip is still what the human resolved against, their
-			// resolution still applies regardless of this retry's own SHA (which gets replaced
-			// by it below). If otherFeat has since promoted again, its tip differs from what the
-			// request recorded and this falls through to blocking again, same as an unresolved
-			// overlap.
+			// resolution still applies regardless of this retry's own SHA. If otherFeat has
+			// since promoted again, its tip differs from what the request recorded and this
+			// falls through to blocking again, same as an unresolved overlap.
+			//
+			// The override is accumulated here, never applied to att.CandidateSHA directly:
+			// doing so in place would corrupt originalCandidateSHA's meaning for any later
+			// otherFeat comparison in this same pass, and would silently discard every
+			// resolution but the last if two or more conflicts resolve simultaneously -- see
+			// the post-loop accumulation below.
 			if matched != nil && matched.Status == string(reconcile.RequestStatusApproved) && matchedOtherSHA == otherSHA {
 				cand, cErr := deps.Ledger.ReconciliationCandidateByRequest(ctx, matched.ID)
 				if cErr == nil && cand.Status == string(reconcile.CandidateStatusIntegrated) && cand.CandidateSHA != "" {
-					att.CandidateSHA = cand.CandidateSHA
+					resolvedOverrideSHA = cand.CandidateSHA
+					resolvedAgainst = append(resolvedAgainst, otherFeat.ID)
 					continue
 				}
 			}
@@ -817,7 +834,7 @@ func evaluateOverlapGate(ctx context.Context, deps Deps, att Attempt, featSvc *f
 					SourceParent:  parentRef,
 					TargetFeature: otherFeat.ID,
 					TargetParent:  otherFeat.ParentRef,
-					SourceSHA:     att.CandidateSHA,
+					SourceSHA:     originalCandidateSHA,
 					TargetSHA:     otherSHA,
 					Evidence:      ev,
 					TTL:           15 * time.Minute,
@@ -842,5 +859,36 @@ func evaluateOverlapGate(ctx context.Context, deps Deps, att Attempt, featSvc *f
 		}
 	}
 
-	return false, att, nil
+	switch len(resolvedAgainst) {
+	case 0:
+		// Untouched happy path: no required conflict was resolved in this pass.
+		return false, att, nil
+
+	case 1:
+		// Exactly one resolution: promote using the human-resolved candidate, same as before
+		// this fix -- just driven by post-loop accumulation instead of in-loop mutation.
+		att.CandidateSHA = resolvedOverrideSHA
+		return false, att, nil
+
+	default:
+		// Two or more required conflicts resolved simultaneously: a full N-way merge-of-merges
+		// is out of scope here. Each resolution is an independent merge commit; there is no
+		// mechanism to combine N of them into one candidate, and silently picking one would
+		// promote a candidate that drops every other human resolution. Block explicitly instead
+		// of guessing, and release the lease so the conflicts can be resolved and promoted
+		// sequentially, one feature pair at a time.
+		now := updateNow(deps)
+		att.Status = AttemptStatusBlocked
+		att.FailureReason = fmt.Sprintf(
+			"promotion blocked: N-way reconciliation not supported (%d resolved required overlaps: %s); resolve and promote sequentially, one feature pair at a time",
+			len(resolvedAgainst), strings.Join(resolvedAgainst, ", "),
+		)
+		att.CandidateSHA = originalCandidateSHA
+		att.UpdatedAt = now
+		if err := updateAttemptWithAudit(ctx, deps.Ledger, att, "attempt_blocked", att.FailureReason); err != nil {
+			return false, att, fmt.Errorf("update attempt blocked status: %w", err)
+		}
+		_ = featSvc.ReleaseLease(ctx, att.FeatureID, att.Owner, att.Fence)
+		return true, att, nil
+	}
 }
