@@ -167,7 +167,7 @@ packets:
     routed_by: implementation depends on failing test
     allowed_paths:
       - impl/foo.go
-    read_only:
+    read_only_paths:
       - path/a.go
     depends_on: []
     body_path: bodies/apply-impl.md

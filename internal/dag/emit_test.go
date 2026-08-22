@@ -226,8 +226,11 @@ func TestEmit_ReadOnlyEmittedWhenSet(t *testing.T) {
 		t.Fatalf("EmitPacketContent failed: %v", err)
 	}
 
-	if !strings.Contains(content, `read_only: ["test/foo_test.go"]`) {
-		t.Errorf("expected single-line JSON array for read_only in frontmatter, got:\n%s", content)
+	if !strings.Contains(content, `read_only_paths: ["test/foo_test.go"]`) {
+		t.Errorf("expected single-line JSON array for read_only_paths in frontmatter, got:\n%s", content)
+	}
+	if strings.Contains(content, "\nread_only:") {
+		t.Errorf("must never emit under the pre-existing packet-level boolean key \"read_only\", got:\n%s", content)
 	}
 }
 

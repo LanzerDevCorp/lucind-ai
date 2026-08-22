@@ -11,8 +11,16 @@ import (
 // EmitPacketContent formats the frontmatter and body for a single packet Node.
 // The frontmatter includes id, executor, routed_by, model (if set), agent (if
 // set), a single-line JSON array for allowed_paths, and a single-line JSON
-// array for read_only (if non-empty). The body is the Markdown at body_path
-// verbatim.
+// array for read_only_paths (if non-empty). The body is the Markdown at
+// body_path verbatim.
+//
+// read_only_paths is deliberately NOT emitted under the key "read_only":
+// internal/packet.Packet already reserves that exact frontmatter key for an
+// unrelated, pre-existing boolean ("this whole packet must produce no
+// commits") parsed strictly as the literal string "true" or "false"
+// (internal/packet/packet.go's ErrInvalidReadOnly). Emitting the Strict-TDD
+// path list under the same key would make packet.Parse reject every packet
+// split from a node that declares it.
 func EmitPacketContent(node Node, baseDir string) (string, error) {
 	fullBodyPath := filepath.Join(baseDir, node.BodyPath)
 	bodyBytes, err := os.ReadFile(fullBodyPath)
@@ -54,9 +62,9 @@ func EmitPacketContent(node Node, baseDir string) (string, error) {
 	if len(node.ReadOnly) > 0 {
 		readOnlyJSON, err := json.Marshal(node.ReadOnly)
 		if err != nil {
-			return "", fmt.Errorf("dag: failed to marshal read_only for %q: %w", node.ID, err)
+			return "", fmt.Errorf("dag: failed to marshal read_only_paths for %q: %w", node.ID, err)
 		}
-		b.WriteString(fmt.Sprintf("read_only: %s\n", string(readOnlyJSON)))
+		b.WriteString(fmt.Sprintf("read_only_paths: %s\n", string(readOnlyJSON)))
 	}
 	b.WriteString("---\n\n")
 	b.WriteString(strings.TrimLeft(string(bodyBytes), "\n"))
