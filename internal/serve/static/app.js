@@ -1,6 +1,45 @@
 'use strict';
 
 const POLL_INTERVAL_MS = 2000;
+const SDD_FLOW_FIELDS = Object.freeze([
+  'run_id',
+  'change',
+  'sdd_phase',
+  'fanout_group',
+  'status',
+  'lane_count',
+  'lane_ids'
+]);
+const SDD_PLANNING_PHASES = Object.freeze([
+  { key: 'explore', label: 'Explore' },
+  { key: 'proposal', label: 'Proposal' },
+  { key: 'spec', label: 'Spec' },
+  { key: 'design', label: 'Design' },
+  { key: 'tasks', label: 'Tasks' }
+]);
+const SDD_EXECUTION_PHASES = Object.freeze([
+  { key: 'apply', label: 'Apply' },
+  { key: 'verify', label: 'Verify' },
+  { key: 'archive', label: 'Archive' }
+]);
+const SDD_PHASE_ALIASES = Object.freeze({ propose: 'proposal', specs: 'spec' });
+const SDD_FLOW_STYLES = `
+  .sdd-flows { display: grid; gap: 1.25rem; margin-top: 1.5rem; }
+  .sdd-change { display: grid; gap: 1.25rem; }
+  .sdd-change-title { margin-bottom: 0; font-family: var(--font-mono); overflow-wrap: anywhere; }
+  .sdd-rail-section { display: grid; gap: 0.65rem; }
+  .sdd-rail-title { margin: 0; color: var(--muted); font-family: var(--font-mono); font-size: 0.68rem; letter-spacing: 0.12em; text-transform: uppercase; }
+  .sdd-rail { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 0.65rem; }
+  .sdd-phase { min-width: 0; padding: 0.85rem; border: 1px solid var(--line); background: var(--surface-deep); }
+  .sdd-phase h4 { margin: 0 0 0.7rem; font-family: var(--font-mono); }
+  .sdd-flow-group { display: grid; gap: 0.4rem; margin-top: 0.55rem; padding: 0.65rem; border-left: 4px solid var(--line-strong); background: var(--surface); }
+  .sdd-flow-group[data-flow-role="planning-lenses"] { border-left-color: var(--warning); }
+  .sdd-flow-group[data-flow-role="synthesis"] { border-left-color: var(--signal); }
+  .sdd-flow-group[data-flow-role="execution"] { border-left-color: var(--live); }
+  .sdd-flow-role { color: var(--ink); font-weight: 700; }
+  .sdd-flow-meta, .sdd-flow-lanes, .sdd-phase-missing { margin: 0; color: var(--muted); font-family: var(--font-mono); font-size: 0.72rem; line-height: 1.5; }
+  .sdd-flow-lanes { display: grid; gap: 0.25rem; padding: 0; list-style: none; }
+`;
 
 function createLiveStore({
   fetchStateImpl = window.fetch.bind(window),
@@ -591,6 +630,148 @@ function renderState(state) {
   }
   if (fleetContainer) patchFleetCards(fleetContainer, normalizeFleetState(state, Date.now()));
   renderApplyDAG(state.apply_dag);
+
+  const sddFlows = Array.isArray(state.sdd_flows) ? state.sdd_flows : [];
+  renderSDDFlows(ensureSDDFlowsContainer(), sddFlows);
+}
+
+function createTextElement(tagName, className, text) {
+  const element = document.createElement(tagName);
+  if (className) element.className = className;
+  element.textContent = text;
+  return element;
+}
+
+function ensureSDDFlowsContainer() {
+  let container = document.getElementById('sdd-flows-container');
+  if (container) return container;
+
+  const activityView = document.getElementById('activity-view');
+  if (!activityView) return null;
+
+  if (!document.getElementById('sdd-flow-styles')) {
+    const style = document.createElement('style');
+    style.id = 'sdd-flow-styles';
+    style.textContent = SDD_FLOW_STYLES;
+    document.head.appendChild(style);
+  }
+
+  container = document.createElement('section');
+  container.id = 'sdd-flows-container';
+  container.className = 'sdd-flows';
+  container.setAttribute('aria-labelledby', 'sdd-flows-title');
+  container.appendChild(createTextElement('h2', 'sdd-change-title', 'SDD flows'));
+  container.firstChild.id = 'sdd-flows-title';
+  activityView.appendChild(container);
+  return container;
+}
+
+function normalizeSDDFlow(flow) {
+  const normalized = {};
+  SDD_FLOW_FIELDS.forEach(field => {
+    const supplied = flow && Object.prototype.hasOwnProperty.call(flow, field);
+    normalized[field] = supplied ? flow[field] : null;
+  });
+  normalized.sdd_phase = SDD_PHASE_ALIASES[normalized.sdd_phase] || normalized.sdd_phase;
+  normalized.lane_ids = Array.isArray(normalized.lane_ids) ? normalized.lane_ids : [];
+  return normalized;
+}
+
+function groupSDDFlowsByChange(flows) {
+  const changes = new Map();
+  flows.map(normalizeSDDFlow).forEach(flow => {
+    const change = typeof flow.change === 'string' && flow.change ? flow.change : 'Unnamed change';
+    if (!changes.has(change)) changes.set(change, new Map());
+    const phases = changes.get(change);
+    if (!phases.has(flow.sdd_phase)) phases.set(flow.sdd_phase, []);
+    phases.get(flow.sdd_phase).push(flow);
+  });
+  return changes;
+}
+
+function sddFlowRole(flow, planning) {
+  const group = typeof flow.fanout_group === 'string' ? flow.fanout_group.toLowerCase() : '';
+  const laneNames = flow.lane_ids.join(' ').toLowerCase();
+  if (planning && (group.includes('synth') || laneNames.includes('synth'))) {
+    return { key: 'synthesis', label: 'Synthesis lane' };
+  }
+  if (planning) return { key: 'planning-lenses', label: 'Planning lenses' };
+  return { key: 'execution', label: 'Execution phase' };
+}
+
+function renderSDDFlowGroup(flow, planning) {
+  const role = sddFlowRole(flow, planning);
+  const group = document.createElement('div');
+  group.className = 'sdd-flow-group';
+  group.setAttribute('data-flow-role', role.key);
+  group.appendChild(createTextElement('div', 'sdd-flow-role', role.label));
+
+  const meta = [];
+  if (flow.fanout_group) meta.push(`Group: ${flow.fanout_group}`);
+  if (flow.run_id) meta.push(`Run: ${flow.run_id}`);
+  if (flow.status) meta.push(`Status: ${flow.status}`);
+  if (Number.isInteger(flow.lane_count)) meta.push(`Lanes: ${flow.lane_count}`);
+  if (meta.length > 0) group.appendChild(createTextElement('p', 'sdd-flow-meta', meta.join(' · ')));
+
+  if (flow.lane_ids.length > 0) {
+    const lanes = document.createElement('ul');
+    lanes.className = 'sdd-flow-lanes';
+    flow.lane_ids.forEach((laneID, index) => {
+      let label = `Lane: ${laneID}`;
+      if (role.key === 'planning-lenses') label = `Lens ${index + 1}: ${laneID}`;
+      if (role.key === 'synthesis') label = `Synthesis: ${laneID}`;
+      lanes.appendChild(createTextElement('li', '', label));
+    });
+    group.appendChild(lanes);
+  }
+  return group;
+}
+
+function renderSDDPhase(phase, flows, planning) {
+  const phaseElement = document.createElement('section');
+  phaseElement.className = 'sdd-phase';
+  phaseElement.setAttribute('aria-label', `${phase.label} phase`);
+  phaseElement.appendChild(createTextElement('h4', '', phase.label));
+
+  if (!flows || flows.length === 0) {
+    phaseElement.appendChild(createTextElement('p', 'sdd-phase-missing', 'Not reported by server'));
+    return phaseElement;
+  }
+  flows.forEach(flow => phaseElement.appendChild(renderSDDFlowGroup(flow, planning)));
+  return phaseElement;
+}
+
+function renderSDDRailSection(title, phases, flowsByPhase, planning) {
+  const section = document.createElement('section');
+  section.className = 'sdd-rail-section';
+  section.appendChild(createTextElement('h3', 'sdd-rail-title', title));
+  const rail = document.createElement('div');
+  rail.className = 'sdd-rail';
+  rail.setAttribute('aria-label', title);
+  phases.forEach(phase => {
+    rail.appendChild(renderSDDPhase(phase, flowsByPhase.get(phase.key), planning));
+  });
+  section.appendChild(rail);
+  return section;
+}
+
+function renderSDDFlows(container, flows) {
+  if (!container) return;
+  while (container.children.length > 1) container.lastChild.remove();
+  const changes = groupSDDFlowsByChange(Array.isArray(flows) ? flows : []);
+  if (changes.size === 0) {
+    container.appendChild(createTextElement('div', 'empty-state', 'No SDD flows reported.'));
+    return;
+  }
+
+  changes.forEach((flowsByPhase, change) => {
+    const changeElement = document.createElement('article');
+    changeElement.className = 'approval-card sdd-change';
+    changeElement.appendChild(createTextElement('h2', 'sdd-change-title', change));
+    changeElement.appendChild(renderSDDRailSection('Planning rail', SDD_PLANNING_PHASES, flowsByPhase, true));
+    changeElement.appendChild(renderSDDRailSection('Execution', SDD_EXECUTION_PHASES, flowsByPhase, false));
+    container.appendChild(changeElement);
+  });
 }
 
 function setupViewNavigation() {

@@ -350,3 +350,88 @@ func TestApplyDAGViewKeepsLiveStatusesAndDiagnosticsAsServerText(t *testing.T) {
 		t.Error("app.js assigns region.innerHTML; server-provided DAG diagnostics must use safe DOM text")
 	}
 }
+
+func TestSDDFlowViewCoversCompletePartialAndEmptyRails(t *testing.T) {
+	js := readStaticAsset(t, "app.js")
+
+	tests := []struct {
+		name      string
+		contracts []string
+	}{
+		{
+			name: "complete rail separates planning and execution",
+			contracts: []string{
+				"const SDD_PLANNING_PHASES",
+				"{ key: 'explore', label: 'Explore' }",
+				"{ key: 'proposal', label: 'Proposal' }",
+				"{ key: 'spec', label: 'Spec' }",
+				"{ key: 'design', label: 'Design' }",
+				"{ key: 'tasks', label: 'Tasks' }",
+				"const SDD_EXECUTION_PHASES",
+				"{ key: 'apply', label: 'Apply' }",
+				"{ key: 'verify', label: 'Verify' }",
+				"{ key: 'archive', label: 'Archive' }",
+				"Planning rail",
+				"Execution",
+			},
+		},
+		{
+			name: "planning fanout distinguishes lenses from synthesis",
+			contracts: []string{
+				"Planning lenses",
+				"Synthesis lane",
+				"data-flow-role",
+				"Lens ${index + 1}",
+				"flow.lane_ids",
+			},
+		},
+		{
+			name: "partial rail reports absent phases without inventing status",
+			contracts: []string{
+				"Not reported by server",
+				"renderSDDPhase",
+			},
+		},
+		{
+			name: "empty flow has a dedicated empty state",
+			contracts: []string{
+				"No SDD flows reported.",
+				"renderSDDFlows",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assertContainsAll(t, "app.js", js, tt.contracts...)
+		})
+	}
+}
+
+func TestSDDFlowViewUsesOnlyServerPayloadFields(t *testing.T) {
+	js := readStaticAsset(t, "app.js")
+	assertContainsAll(t, "app.js", js,
+		"const SDD_FLOW_FIELDS",
+		"'run_id'",
+		"'change'",
+		"'sdd_phase'",
+		"'fanout_group'",
+		"'status'",
+		"'lane_count'",
+		"'lane_ids'",
+	)
+
+	start := strings.Index(js, "function normalizeSDDFlow")
+	end := strings.Index(js, "function setupViewNavigation")
+	if start < 0 || end < 0 || end <= start {
+		t.Fatalf("app.js must define its SDD flow renderer before setupViewNavigation")
+	}
+	renderer := js[start:end]
+	for _, absentField := range []string{
+		"timestamp", "duration", "dependencies", "artifacts", "artifact_presence", "executor",
+	} {
+		if strings.Contains(renderer, absentField) {
+			t.Errorf("SDD flow renderer references absent server field %q", absentField)
+		}
+	}
+}
