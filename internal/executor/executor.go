@@ -9,7 +9,16 @@
 // always the one that decides, never the child process.
 package executor
 
-import "context"
+import (
+	"context"
+	"time"
+)
+
+// ProgressEvent is one timestamped progress message emitted during a dispatch.
+type ProgressEvent struct {
+	Message string
+	At      time.Time
+}
 
 // Request is one dispatch: a prompt to run, in a worktree, on a model.
 type Request struct {
@@ -34,6 +43,9 @@ type Request struct {
 	// omitted when empty (cursor-agent cannot be constrained at the
 	// source, so this is a belt, not the braces).
 	SchemaPath string
+	// Progress optionally receives incremental dispatch progress. Executors
+	// that do not emit progress leave it unused; nil preserves existing behavior.
+	Progress chan<- ProgressEvent
 }
 
 // Outcome is what actually happened when the child process ran, nothing
