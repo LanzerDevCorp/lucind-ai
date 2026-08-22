@@ -462,6 +462,118 @@ function renderConnection(connection) {
   text.textContent = connection.message;
 }
 
+const APPLY_DAG_STYLE_ID = 'apply-dag-view-styles';
+
+function ensureApplyDAGStyles() {
+  if (document.getElementById(APPLY_DAG_STYLE_ID)) return;
+  const style = document.createElement('style');
+  style.id = APPLY_DAG_STYLE_ID;
+  style.textContent = `
+    .apply-dag-view { display: grid; gap: 1rem; margin-top: 1rem; }
+    .dag-wave, .dag-dependencies, .dag-overlaps { padding: 1rem; border: 1px solid var(--line); background: var(--surface); }
+    .dag-packets { display: grid; gap: 0.65rem; }
+    .dag-packet { padding: 0.8rem; border: 1px solid var(--line-strong); background: var(--surface-raised); }
+    .dag-packet [data-packet-status] { color: var(--muted); font-family: var(--font-mono); }
+    .dag-packet[data-status="pending"] { border-left: 4px solid var(--muted); }
+    .dag-packet[data-status="running"] { border-left: 4px solid var(--warning); }
+    .dag-packet[data-status="done"] { border-left: 4px solid var(--live); }
+    .dag-packet[data-status="blocked"] { border-left: 4px solid var(--danger); }
+    .dag-packet[data-status="deviated"] { border-left: 4px solid var(--warning); }
+    .dag-packet[data-status="failed"] { border-left: 4px solid var(--danger); }
+    .dag-dependency { font-family: var(--font-mono); }
+    .dag-overlap-error { padding: 0.8rem; border: 1px solid var(--danger); background: rgba(255, 90, 90, 0.08); color: var(--danger); white-space: pre-wrap; }
+  `;
+  document.head.appendChild(style);
+}
+
+function createApplyDAGRegion() {
+  const outlet = document.getElementById('activity-view');
+  if (!outlet) return null;
+  ensureApplyDAGStyles();
+
+  const region = document.createElement('section');
+  region.id = 'apply-dag-view';
+  region.className = 'apply-dag-view';
+  region.setAttribute('aria-label', 'Apply DAG execution');
+  region.setAttribute('aria-live', 'polite');
+  outlet.appendChild(region);
+  return region;
+}
+
+function renderApplyDAG(dag) {
+  let region = document.getElementById('apply-dag-view');
+  if (!dag) {
+    if (region) region.hidden = true;
+    return;
+  }
+  if (!region) region = createApplyDAGRegion();
+  if (!region) return;
+
+  region.hidden = false;
+  const fragment = document.createDocumentFragment();
+
+  const heading = document.createElement('h2');
+  heading.textContent = `Apply DAG · ${dag.change}`;
+  fragment.appendChild(heading);
+
+  dag.waves.forEach(wave => {
+    const waveSection = document.createElement('section');
+    waveSection.className = 'dag-wave';
+    waveSection.setAttribute('data-wave-number', String(wave.number));
+
+    const waveHeading = document.createElement('h3');
+    waveHeading.textContent = `Wave ${wave.number}`;
+    waveSection.appendChild(waveHeading);
+
+    const packetList = document.createElement('div');
+    packetList.className = 'dag-packets';
+    wave.packets.forEach(packet => {
+      const packetNode = document.createElement('article');
+      packetNode.className = 'dag-packet';
+      packetNode.setAttribute('data-packet-id', packet.id);
+      packetNode.dataset.status = packet.status;
+
+      const packetID = document.createElement('strong');
+      packetID.textContent = packet.id;
+      const packetStatus = document.createElement('span');
+      packetStatus.setAttribute('data-packet-status', '');
+      packetStatus.textContent = ` ${packet.status}`;
+      packetNode.append(packetID, packetStatus);
+      packetList.appendChild(packetNode);
+    });
+    waveSection.appendChild(packetList);
+    fragment.appendChild(waveSection);
+  });
+
+  const dependencies = document.createElement('section');
+  dependencies.className = 'dag-dependencies';
+  const dependencyHeading = document.createElement('h3');
+  dependencyHeading.textContent = 'Dependencies';
+  dependencies.appendChild(dependencyHeading);
+  dag.dependencies.forEach(dependency => {
+    const edge = document.createElement('div');
+    edge.className = 'dag-dependency';
+    edge.textContent = `${dependency.from} → ${dependency.to}`;
+    dependencies.appendChild(edge);
+  });
+  fragment.appendChild(dependencies);
+
+  const overlaps = document.createElement('section');
+  overlaps.className = 'dag-overlaps';
+  const overlapHeading = document.createElement('h3');
+  overlapHeading.textContent = 'Overlap violations';
+  overlaps.appendChild(overlapHeading);
+  dag.overlap_violations.forEach(violation => {
+    const error = document.createElement('pre');
+    error.className = 'dag-overlap-error';
+    error.textContent = JSON.stringify(violation, null, 2);
+    overlaps.appendChild(error);
+  });
+  fragment.appendChild(overlaps);
+
+  region.replaceChildren(fragment);
+}
+
 function renderState(state) {
   const approver = document.getElementById('approver-name');
   const rate = document.getElementById('approver-rate');
@@ -478,6 +590,7 @@ function renderState(state) {
     if (pendingCount) pendingCount.textContent = String(count);
   }
   if (fleetContainer) patchFleetCards(fleetContainer, normalizeFleetState(state, Date.now()));
+  renderApplyDAG(state.apply_dag);
 }
 
 function setupViewNavigation() {

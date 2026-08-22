@@ -299,3 +299,54 @@ func TestFleetViewNormalizesGoAndSnakeCaseFieldsWithKeyedPatching(t *testing.T) 
 		t.Error("app.js replaces the Fleet outlet; live refreshes must patch keyed lane cards")
 	}
 }
+
+func TestApplyDAGViewConsumesServerTopologyWithoutClientRecomputation(t *testing.T) {
+	js := readStaticAsset(t, "app.js")
+	assertContainsAll(t, "app.js", js,
+		"function renderApplyDAG(dag)",
+		"renderApplyDAG(state.apply_dag)",
+		"dag.waves.forEach",
+		"wave.packets.forEach",
+		"dag.dependencies.forEach",
+		"dag.overlap_violations.forEach",
+	)
+
+	for _, forbidden := range []string{"topologicalSort", "computeWaves", "inferDependencies", "deriveGraph"} {
+		if strings.Contains(js, forbidden) {
+			t.Errorf("app.js contains %q; the browser must render the API DAG without deriving topology", forbidden)
+		}
+	}
+}
+
+func TestApplyDAGViewSupportsMultipleWavesDependenciesTerminalStatusesAndOverlapErrors(t *testing.T) {
+	js := readStaticAsset(t, "app.js")
+	assertContainsAll(t, "app.js", js,
+		"data-wave-number",
+		"data-packet-id",
+		"dependency.from",
+		"dependency.to",
+		"packet.status",
+		`[data-status="done"]`,
+		`[data-status="blocked"]`,
+		`[data-status="deviated"]`,
+		`[data-status="failed"]`,
+		"dag-overlap-error",
+		"JSON.stringify(violation, null, 2)",
+	)
+}
+
+func TestApplyDAGViewKeepsLiveStatusesAndDiagnosticsAsServerText(t *testing.T) {
+	js := readStaticAsset(t, "app.js")
+	assertContainsAll(t, "app.js", js,
+		`[data-status="pending"]`,
+		`[data-status="running"]`,
+		"packetStatus.textContent = ` ${packet.status}`",
+		"edge.textContent = `${dependency.from} → ${dependency.to}`",
+		"error.textContent = JSON.stringify(violation, null, 2)",
+		"region.replaceChildren(fragment)",
+	)
+
+	if strings.Contains(js, "region.innerHTML") {
+		t.Error("app.js assigns region.innerHTML; server-provided DAG diagnostics must use safe DOM text")
+	}
+}
