@@ -435,3 +435,253 @@ func TestSDDFlowViewUsesOnlyServerPayloadFields(t *testing.T) {
 		}
 	}
 }
+
+func TestFeatureSwimlanesViewCoversActiveExpiredBlockedPromotedAndReconciliationStates(t *testing.T) {
+	js := readStaticAsset(t, "app.js")
+
+	tests := []struct {
+		name      string
+		contracts []string
+	}{
+		{
+			name: "active state is explicit for feature and live lease",
+			contracts: []string{
+				"featureStatus === 'active'",
+				`card.dataset.status = feature.status`,
+				`card.dataset.featureStatus = feature.featureStatus`,
+				`[data-status="active"]`,
+				`card.dataset.leaseStatus = feature.lease.status`,
+				"badge-feature-status",
+			},
+		},
+		{
+			name: "expired state covers past lease TTL and expired status",
+			contracts: []string{
+				"formatTTL(expiresAt, now",
+				"return 'Expired'",
+				`card.dataset.leaseStatus = feature.lease.status`,
+				`badge-expired`,
+				`data-status="expired"`,
+				`[data-status="expired"]`,
+			},
+		},
+		{
+			name: "blocked state renders attempt status and diagnostic failure reason",
+			contracts: []string{
+				`setAttribute('data-attempt-status', attempt.status)`,
+				`[data-status="blocked"]`,
+				"badge-blocked",
+				"failure-reason",
+				"Failure reason",
+			},
+		},
+		{
+			name: "promoted state renders promoted badge and candidate SHA",
+			contracts: []string{
+				`setAttribute('data-attempt-status', 'promoted')`,
+				`[data-status="promoted"]`,
+				"badge-promoted",
+				"Candidate SHA",
+			},
+		},
+		{
+			name: "reconciliation-required state renders badge and request details",
+			contracts: []string{
+				"reconciliationRequired",
+				`setAttribute('data-reconcile-badge', 'required')`,
+				"Reconciliation required",
+				`data-reconcile-required`,
+				`[data-status="reconciliation-required"]`,
+				"reconcile-card",
+				"data-reconcile-status",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assertContainsAll(t, "app.js", js, tt.contracts...)
+		})
+	}
+}
+
+func TestFeatureSwimlanesRenderParentBaseRefsLeaseTTLOverlapEvidenceAndReconciliationBadges(t *testing.T) {
+	js := readStaticAsset(t, "app.js")
+	assertContainsAll(t, "app.js", js,
+		"function normalizeFeatureSwimlanes",
+		"function renderFeatureSwimlanes",
+		"function ensureFeatureSwimlanesContainer",
+		"Parent / Base refs",
+		"Parent ref",
+		"Base SHA",
+		"Expected parent SHA",
+		"Lease & TTL",
+		"Lease holder",
+		"Lease fence",
+		"Live TTL",
+		"Integration attempts",
+		"Candidate SHA",
+		"Overlap evidence",
+		"overlap-evidence-json",
+		"Reconciliation",
+		"Reconciliation required",
+	)
+}
+
+func TestFeatureSwimlanesNormalizesGoAndSnakeCaseFieldsWithKeyedPatching(t *testing.T) {
+	js := readStaticAsset(t, "app.js")
+	assertContainsAll(t, "app.js", js,
+		"normalizeFeatureSwimlanes",
+		"'parent_ref', 'ParentRef'",
+		"'base_sha', 'BaseSHA'",
+		"'expected_parent_sha', 'ExpectedParentSHA'",
+		"'expires_at', 'ExpiresAt'",
+		"'candidate_sha', 'CandidateSHA'",
+		"'failure_reason', 'FailureReason'",
+		"'evidence_class', 'EvidenceClass'",
+		"'evidence_hash', 'EvidenceHash'",
+		"'evidence_json', 'EvidenceJSON'",
+		"data-feature-key",
+		"createFeatureSwimlaneCard",
+		"updateFeatureSwimlaneCard",
+		"patchFeatureSwimlanes",
+	)
+
+	for _, badReplacement := range []string{
+		"swimlanesContainer.innerHTML",
+		"featureContainer.innerHTML",
+	} {
+		if strings.Contains(js, badReplacement) {
+			t.Errorf("app.js replaces feature container with %q; live refreshes must patch keyed feature swimlane cards", badReplacement)
+		}
+	}
+}
+
+func TestFeatureSwimlanesKeepsDiagnosticsAndJsonAsSafeServerText(t *testing.T) {
+	js := readStaticAsset(t, "app.js")
+	assertContainsAll(t, "app.js", js,
+		"card.replaceChildren",
+		"pre.className = 'overlap-evidence-json'",
+		"pre.textContent = overlap.evidenceJSON",
+		"pre.className = 'failure-reason'",
+		"pre.textContent = attempt.failureReason",
+		"data-features-empty",
+		"No features reported.",
+	)
+}
+
+func TestTimelineViewCoversOrderingFiltersCursorContinuationEmptyAndLargeFeeds(t *testing.T) {
+	js := readStaticAsset(t, "app.js")
+
+	tests := []struct {
+		name      string
+		contracts []string
+	}{
+		{
+			name: "ordering sorts by timestamp and preserves stable tie-breaking",
+			contracts: []string{
+				"function sortTimelineItems",
+				"parseTimelineTimestamp(a.at)",
+				"parseTimelineTimestamp(b.at)",
+				"const kindPriority",
+				"timeA - timeB",
+				"String(a.key).localeCompare",
+			},
+		},
+		{
+			name: "filters support event kinds search query and identity criteria",
+			contracts: []string{
+				"function filterTimelineItems",
+				"data-filter-kind",
+				"timeline-search-input",
+				"item.kind !== kind",
+				"item.runID",
+				"item.laneID",
+				"item.featureID",
+				"item.type",
+				"haystack.includes(search)",
+			},
+		},
+		{
+			name: "cursor continuation supports cursor tracking and forward slicing",
+			contracts: []string{
+				"function filterAfterCursor",
+				"data-cursor",
+				"item.cursor === cursor",
+				"nextCursor",
+			},
+		},
+		{
+			name: "empty data state covers both unpopulated feed and no filter matches",
+			contracts: []string{
+				"data-timeline-empty",
+				"No timeline events reported.",
+				"No timeline events match the selected filters.",
+			},
+		},
+		{
+			name: "large feeds enforce bounded windowing and load more pagination",
+			contracts: []string{
+				"const TIMELINE_WINDOW_SIZE",
+				"function virtualizeTimeline",
+				"data-timeline-window",
+				"data-timeline-count",
+				"data-timeline-more",
+				"clampedLimit",
+				"clampedOffset",
+				"hasMore",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assertContainsAll(t, "app.js", js, tt.contracts...)
+		})
+	}
+}
+
+func TestTimelineNormalizesGoAndSnakeCaseFieldsWithKeyedPatching(t *testing.T) {
+	js := readStaticAsset(t, "app.js")
+	assertContainsAll(t, "app.js", js,
+		"function normalizeTimeline",
+		"function renderTimeline",
+		"function ensureTimelineContainer",
+		"function createTimelineCard",
+		"function updateTimelineCard",
+		"function patchTimelineItems",
+		"'run_events', 'RunEvents'",
+		"'integration_events', 'IntegrationEvents'",
+		"'audit_events', 'AuditEvents'",
+		"'lane_progress', 'LaneProgress'",
+		"'run_id', 'RunID'",
+		"'lane_id', 'LaneID'",
+		"'feature_id', 'FeatureID'",
+		"'attempt_id', 'AttemptID'",
+		"data-timeline-key",
+		"data-timeline-feed",
+	)
+
+	for _, badReplacement := range []string{
+		"timelineContainer.innerHTML",
+		"feed.innerHTML",
+		"feedContainer.innerHTML",
+	} {
+		if strings.Contains(js, badReplacement) {
+			t.Errorf("app.js replaces timeline container with %q; live refreshes must patch keyed timeline cards", badReplacement)
+		}
+	}
+}
+
+func TestTimelineKeepsDetailsAsSafeServerText(t *testing.T) {
+	js := readStaticAsset(t, "app.js")
+	assertContainsAll(t, "app.js", js,
+		"card.append(header, meta, detailBox)",
+		"pre.className = 'timeline-detail-text'",
+		"pre.textContent = item.detail",
+		"timeline-badge badge-",
+		"Execution timeline",
+	)
+}
+
+
