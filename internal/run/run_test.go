@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -38,6 +39,17 @@ type fakeExecutor struct {
 	// dispatch have both already gone through.
 	beforeReturn func()
 }
+
+type progressExecutor struct {
+	run func(context.Context, executor.Request) (executor.Outcome, error)
+}
+
+func (e progressExecutor) Run(ctx context.Context, req executor.Request) (executor.Outcome, error) {
+	return e.run(ctx, req)
+}
+
+func (progressExecutor) DefaultModel() string  { return "test-model" }
+func (progressExecutor) KnownModels() []string { return []string{"test-model"} }
 
 func (f *fakeExecutor) Run(_ context.Context, req executor.Request) (executor.Outcome, error) {
 	f.gotReq = req
@@ -124,6 +136,248 @@ func newTestDeps(t *testing.T, wtPath string, fsys func(string) fs.FS, exec exec
 		},
 	}
 }
+
+func TestExecuteProgressWriterFlushesAtBatchSize(t *testing.T) {
+	const eventCount = 32
+	flushed := make(chan []ledger.LaneProgress, 1)
+	exec := progressExecutor{run: func(_ context.Context, req executor.Request) (executor.Outcome, error) {
+		for i := 0; i < eventCount; i++ {
+			req.Progress <- executor.ProgressEvent{Message: fmt.Sprintf("event-%02d", i), At: time.Unix(int64(i+1), 0)}
+		}
+		select {
+		case batch := <-flushed:
+			if len(batch) != eventCount {
+				t.Errorf("first progress batch length = %d, want %d", len(batch), eventCount)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("progress batch did not flush at 32 events while the executor was still running")
+		}
+		return executor.Outcome{ExitCode: 0}, nil
+	}}
+
+	wtPath := t.TempDir()
+	deps := newTestDeps(t, wtPath, func(string) fs.FS {
+		return fstest.MapFS{resultEnvelopePathForTest(): {Data: []byte(doneEnvelopeJSON)}}
+	}, exec)
+	deps.AppendProgressBatch = func(ctx context.Context, batch []ledger.LaneProgress) error {
+		copyOfBatch := append([]ledger.LaneProgress(nil), batch...)
+		flushed <- copyOfBatch
+		return deps.Ledger.AppendProgressBatch(ctx, batch)
+	}
+
+	if _, err := run.Execute(context.Background(), deps, testPacket()); err != nil {
+		t.Fatalf("Execute() error = %v, want nil", err)
+	}
+	got, err := deps.Ledger.GetProgressAfter(context.Background(), deps.RunID, "lane-a", 0)
+	if err != nil {
+		t.Fatalf("GetProgressAfter() error = %v", err)
+	}
+	if len(got) != eventCount {
+		t.Fatalf("persisted progress count = %d, want %d", len(got), eventCount)
+	}
+}
+
+func TestExecuteProgressWriterFlushesOnInterval(t *testing.T) {
+	flushed := make(chan []ledger.LaneProgress, 1)
+	started := time.Now()
+	exec := progressExecutor{run: func(_ context.Context, req executor.Request) (executor.Outcome, error) {
+		req.Progress <- executor.ProgressEvent{Message: "waiting", At: time.Unix(1, 0)}
+		select {
+		case batch := <-flushed:
+			if len(batch) != 1 || batch[0].Message != "waiting" {
+				t.Errorf("interval batch = %+v, want one waiting event", batch)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("progress batch did not flush on the 250 ms interval while the executor was still running")
+		}
+		return executor.Outcome{ExitCode: 0}, nil
+	}}
+
+	wtPath := t.TempDir()
+	deps := newTestDeps(t, wtPath, func(string) fs.FS {
+		return fstest.MapFS{resultEnvelopePathForTest(): {Data: []byte(doneEnvelopeJSON)}}
+	}, exec)
+	deps.AppendProgressBatch = func(ctx context.Context, batch []ledger.LaneProgress) error {
+		flushed <- append([]ledger.LaneProgress(nil), batch...)
+		return deps.Ledger.AppendProgressBatch(ctx, batch)
+	}
+
+	if _, err := run.Execute(context.Background(), deps, testPacket()); err != nil {
+		t.Fatalf("Execute() error = %v, want nil", err)
+	}
+	if elapsed := time.Since(started); elapsed < 200*time.Millisecond {
+		t.Fatalf("interval flush completed after %v, want approximately 250 ms rather than an immediate flush", elapsed)
+	}
+}
+
+func TestExecuteProgressWriterFlushesOnShutdown(t *testing.T) {
+	const eventCount = 3
+	flushed := make(chan []ledger.LaneProgress, 1)
+	exec := progressExecutor{run: func(_ context.Context, req executor.Request) (executor.Outcome, error) {
+		for i := 0; i < eventCount; i++ {
+			req.Progress <- executor.ProgressEvent{Message: fmt.Sprintf("final-%d", i), At: time.Unix(int64(i+1), 0)}
+		}
+		return executor.Outcome{ExitCode: 0}, nil
+	}}
+
+	wtPath := t.TempDir()
+	deps := newTestDeps(t, wtPath, func(string) fs.FS {
+		return fstest.MapFS{resultEnvelopePathForTest(): {Data: []byte(doneEnvelopeJSON)}}
+	}, exec)
+	deps.AppendProgressBatch = func(ctx context.Context, batch []ledger.LaneProgress) error {
+		flushed <- append([]ledger.LaneProgress(nil), batch...)
+		return deps.Ledger.AppendProgressBatch(ctx, batch)
+	}
+
+	if _, err := run.Execute(context.Background(), deps, testPacket()); err != nil {
+		t.Fatalf("Execute() error = %v, want nil", err)
+	}
+	select {
+	case batch := <-flushed:
+		if len(batch) != eventCount {
+			t.Fatalf("shutdown batch length = %d, want %d", len(batch), eventCount)
+		}
+	default:
+		t.Fatal("executor shutdown did not flush the partial progress batch")
+	}
+}
+
+func TestExecuteBatchProgressWritersKeepConcurrentLanesIsolated(t *testing.T) {
+	const eventsPerLane = 40
+	exec := progressExecutor{run: func(_ context.Context, req executor.Request) (executor.Outcome, error) {
+		laneID := filepath.Base(req.WorktreePath)
+		for i := 0; i < eventsPerLane; i++ {
+			req.Progress <- executor.ProgressEvent{Message: fmt.Sprintf("%s-%02d", laneID, i), At: time.Unix(int64(i+1), 0)}
+		}
+		return executor.Outcome{ExitCode: 0}, nil
+	}}
+
+	root := t.TempDir()
+	deps := newTestDeps(t, filepath.Join(root, "unused"), func(path string) fs.FS {
+		laneID := filepath.Base(path)
+		envelope := fmt.Sprintf(`{"packet_id":%q,"status":"done","summary":"done","hard_stops":[]}`, laneID)
+		return fstest.MapFS{resultEnvelopePathForTest(): {Data: []byte(envelope)}}
+	}, exec)
+	deps.CreateWorktree = func(_ context.Context, _, laneID, _, _ string) (worktree.Worktree, error) {
+		path := filepath.Join(root, laneID)
+		if err := os.MkdirAll(path, 0o755); err != nil {
+			return worktree.Worktree{}, err
+		}
+		return worktree.Worktree{Path: path, Branch: "lucind/" + laneID}, nil
+	}
+
+	pA := testPacket()
+	pB := testPacket()
+	pB.ID = "lane-b"
+	pB.Feature = "feat-lane-b"
+	report, err := run.ExecuteBatch(context.Background(), deps, []packet.Packet{pA, pB})
+	if err != nil {
+		t.Fatalf("ExecuteBatch() error = %v", err)
+	}
+	if !report.Released {
+		t.Fatalf("ExecuteBatch().Released = false, want true; reports = %+v", report.Lanes)
+	}
+	for _, laneID := range []string{"lane-a", "lane-b"} {
+		got, err := deps.Ledger.GetProgressAfter(context.Background(), deps.RunID, laneID, 0)
+		if err != nil {
+			t.Fatalf("GetProgressAfter(%q) error = %v", laneID, err)
+		}
+		if len(got) != eventsPerLane {
+			t.Fatalf("progress count for %s = %d, want %d", laneID, len(got), eventsPerLane)
+		}
+		for _, event := range got {
+			if !strings.HasPrefix(event.Message, laneID+"-") {
+				t.Fatalf("progress for %s contains another lane's message %q", laneID, event.Message)
+			}
+		}
+	}
+}
+
+func TestExecuteProgressProducerDropsWritesWhenChannelIsFull(t *testing.T) {
+	const overflowEvents = 100
+	appendStarted := make(chan struct{})
+	releaseAppend := make(chan struct{})
+	accepted, dropped := 0, 0
+	exec := progressExecutor{run: func(_ context.Context, req executor.Request) (executor.Outcome, error) {
+		for i := 0; i < 32; i++ {
+			req.Progress <- executor.ProgressEvent{Message: fmt.Sprintf("initial-%02d", i), At: time.Unix(int64(i+1), 0)}
+		}
+		select {
+		case <-appendStarted:
+		case <-time.After(2 * time.Second):
+			t.Fatal("progress writer did not begin the threshold flush")
+		}
+		for i := 0; i < overflowEvents; i++ {
+			event := executor.ProgressEvent{Message: fmt.Sprintf("overflow-%03d", i), At: time.Unix(int64(i+100), 0)}
+			select {
+			case req.Progress <- event:
+				accepted++
+			default:
+				dropped++
+			}
+		}
+		close(releaseAppend)
+		return executor.Outcome{ExitCode: 0}, nil
+	}}
+
+	wtPath := t.TempDir()
+	deps := newTestDeps(t, wtPath, func(string) fs.FS {
+		return fstest.MapFS{resultEnvelopePathForTest(): {Data: []byte(doneEnvelopeJSON)}}
+	}, exec)
+	firstAppend := true
+	deps.AppendProgressBatch = func(ctx context.Context, batch []ledger.LaneProgress) error {
+		if firstAppend {
+			firstAppend = false
+			close(appendStarted)
+			<-releaseAppend
+		}
+		return deps.Ledger.AppendProgressBatch(ctx, batch)
+	}
+
+	if _, err := run.Execute(context.Background(), deps, testPacket()); err != nil {
+		t.Fatalf("Execute() error = %v, want nil", err)
+	}
+	if accepted != 32 || dropped != overflowEvents-32 {
+		t.Fatalf("non-blocking overflow writes accepted=%d dropped=%d, want accepted=32 dropped=%d", accepted, dropped, overflowEvents-32)
+	}
+}
+
+func TestExecuteProgressInsertErrorIsObservableWithoutChangingLaneStatus(t *testing.T) {
+	wantErr := errors.New("forced progress insert failure")
+	exec := progressExecutor{run: func(_ context.Context, req executor.Request) (executor.Outcome, error) {
+		req.Progress <- executor.ProgressEvent{Message: "will fail", At: time.Unix(1, 0)}
+		return executor.Outcome{ExitCode: 0}, nil
+	}}
+
+	wtPath := t.TempDir()
+	deps := newTestDeps(t, wtPath, func(string) fs.FS {
+		return fstest.MapFS{resultEnvelopePathForTest(): {Data: []byte(doneEnvelopeJSON)}}
+	}, exec)
+	deps.AppendProgressBatch = func(context.Context, []ledger.LaneProgress) error { return wantErr }
+
+	report, err := run.Execute(context.Background(), deps, testPacket())
+	if err != nil {
+		t.Fatalf("Execute() error = %v, want nil", err)
+	}
+	if report.Status != lane.Done {
+		t.Fatalf("report.Status = %v, want %v despite progress insert failure", report.Status, lane.Done)
+	}
+	if !strings.Contains(report.Diagnosis, wantErr.Error()) {
+		t.Errorf("report.Diagnosis = %q, want progress insert error %q", report.Diagnosis, wantErr)
+	}
+	if details := laneNoteDetails(t, deps.Ledger, deps.RunID); !anyContains(details, wantErr.Error()) {
+		t.Errorf("lane notes = %+v, want progress insert error %q", details, wantErr)
+	}
+	states, err := deps.Ledger.LaneStates(context.Background(), deps.RunID)
+	if err != nil {
+		t.Fatalf("LaneStates() error = %v", err)
+	}
+	if len(states) != 1 || states[0].Status != lane.Done {
+		t.Fatalf("LaneStates() = %+v, want lane-a=done", states)
+	}
+}
+
+func resultEnvelopePathForTest() string { return ".lucind/result.json" }
 
 func TestExecuteHappyPathEnvelopeDoneReachesLaneDone(t *testing.T) {
 	wtPath := t.TempDir()

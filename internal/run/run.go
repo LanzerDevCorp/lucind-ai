@@ -100,6 +100,12 @@ const noStreamDetail = "(none captured)"
 // content.
 const streamTruncatedMarker = "...[truncated, showing last %d of %d bytes]"
 
+const (
+	progressBufferSize    = 32
+	progressBatchSize     = 32
+	progressFlushInterval = 250 * time.Millisecond
+)
+
 // diagnosisDetail formats the reason a lane failed together with its
 // captured stderr AND stdout, each independently bounded by
 // streamDetailCap, for a single ledger note (see EventLaneNote). reason
@@ -177,6 +183,9 @@ type Deps struct {
 	// rejection demotes the lane's status to lane.Blocked before terminal
 	// persistence. Zero disables approval waiting (immediate bypass).
 	ApprovalTimeout time.Duration
+	// AppendProgressBatch is an optional test seam. Production uses Ledger's
+	// atomic batch append when this is nil.
+	AppendProgressBatch func(context.Context, []ledger.LaneProgress) error
 
 	HasUniqueLaneCommits func(ctx context.Context, worktreePath, baseSHA string) (bool, error)
 	PorcelainEmpty       func(ctx context.Context, worktreePath string) (bool, error)
@@ -240,12 +249,10 @@ type Report struct {
 	// dispatch's captured output to diagnose something, they may not be
 	// looking at the whole picture.
 	OutputCaptureIncomplete bool
-	// Diagnosis carries the same reason-plus-streams text recorded as the
-	// lane's ledger note (see diagnosisDetail) for any of the three
-	// non-success dispatch outcomes -- non-zero exit, timeout, or an
-	// exit-0 dispatch whose envelope could not be read. It is empty for a
-	// lane whose terminal status came from a readable envelope, since
-	// that already explains itself through Envelope. Diagnosis exists so
+	// Diagnosis carries diagnostic text also recorded as lane_note events.
+	// It covers non-success dispatch outcomes and best-effort progress
+	// persistence failures. Progress failures never change Status, which
+	// remains decided by the result envelope. Diagnosis exists so
 	// a caller that never touches the ledger -- e.g. cmd/lucind-ai's
 	// printReport -- can still see why a lane failed. It is not, by
 	// itself, proof of what specifically went wrong inside the
@@ -365,13 +372,26 @@ func Execute(ctx context.Context, deps Deps, p packet.Packet) (Report, error) {
 		model = exec.DefaultModel()
 	}
 
+	progress := make(chan executor.ProgressEvent, progressBufferSize)
+	progressDone := make(chan []error, 1)
+	appendProgressBatch := deps.AppendProgressBatch
+	if appendProgressBatch == nil {
+		appendProgressBatch = deps.Ledger.AppendProgressBatch
+	}
+	go func() {
+		progressDone <- writeLaneProgress(context.WithoutCancel(ctx), appendProgressBatch, deps.RunID, p.ID, progress)
+	}()
+
 	outcome, err := exec.Run(ctx, executor.Request{
 		Prompt:       p.Body,
 		WorktreePath: wt.Path,
 		Model:        model,
 		Agent:        p.Agent,
 		SchemaPath:   schemaPath,
+		Progress:     progress,
 	})
+	close(progress)
+	progressErrors := <-progressDone
 
 	// persistCtx carries ctx's values onward without its deadline or
 	// cancellation, for every ledger write from here on. A caller-owned
@@ -386,6 +406,8 @@ func Execute(ctx context.Context, deps Deps, p packet.Packet) (Report, error) {
 	// deadline returns Outcome{TimedOut: true} with a nil error
 	// precisely so the caller can still finish recording it normally.
 	persistCtx := context.WithoutCancel(ctx)
+	progressDiagnosis := reportProgressErrors(persistCtx, deps, p.ID, now, progressErrors)
+	report.Diagnosis = progressDiagnosis
 
 	if err != nil {
 		// executor.Executor.Run returns a non-nil error only for the
@@ -433,6 +455,7 @@ func Execute(ctx context.Context, deps Deps, p packet.Packet) (Report, error) {
 			return report, recordLaneFailure(persistCtx, deps, p.ID, now, cause)
 		}
 	}
+	diagnosis = joinDiagnostics(diagnosis, progressDiagnosis)
 
 	// If the lane computed status Done and approval wait is enabled (ApprovalTimeout > 0),
 	// pause the lane and request a human approval decision before persisting terminal status.
@@ -506,6 +529,74 @@ func Execute(ctx context.Context, deps Deps, p packet.Packet) (Report, error) {
 		OutputCaptureIncomplete: outcome.OutputTruncated,
 		Diagnosis:               diagnosis,
 	}, nil
+}
+
+func writeLaneProgress(
+	ctx context.Context,
+	appendBatch func(context.Context, []ledger.LaneProgress) error,
+	runID, laneID string,
+	progress <-chan executor.ProgressEvent,
+) []error {
+	ticker := time.NewTicker(progressFlushInterval)
+	defer ticker.Stop()
+
+	batch := make([]ledger.LaneProgress, 0, progressBatchSize)
+	var writeErrors []error
+	flush := func() {
+		if len(batch) == 0 {
+			return
+		}
+		if err := appendBatch(ctx, batch); err != nil {
+			writeErrors = append(writeErrors, err)
+		}
+		batch = batch[:0]
+	}
+
+	for {
+		select {
+		case event, ok := <-progress:
+			if !ok {
+				flush()
+				return writeErrors
+			}
+			batch = append(batch, ledger.LaneProgress{
+				RunID: runID, LaneID: laneID, Message: event.Message, At: event.At,
+			})
+			if len(batch) == progressBatchSize {
+				flush()
+			}
+		case <-ticker.C:
+			flush()
+		}
+	}
+}
+
+func reportProgressErrors(ctx context.Context, deps Deps, laneID string, at time.Time, writeErrors []error) string {
+	if len(writeErrors) == 0 {
+		return ""
+	}
+
+	messages := make([]string, len(writeErrors))
+	for i, err := range writeErrors {
+		messages[i] = err.Error()
+	}
+	detail := fmt.Sprintf("progress persistence failed for lane %q: %s", laneID, strings.Join(messages, "; "))
+	if err := deps.Ledger.AppendEvent(ctx, ledger.Event{
+		RunID: deps.RunID, LaneID: laneID, Type: ledger.EventLaneNote, Detail: detail, At: at,
+	}); err != nil {
+		return fmt.Sprintf("%s (additionally, failed to record the progress error in the ledger: %v)", detail, err)
+	}
+	return detail
+}
+
+func joinDiagnostics(parts ...string) string {
+	var nonEmpty []string
+	for _, part := range parts {
+		if part != "" {
+			nonEmpty = append(nonEmpty, part)
+		}
+	}
+	return strings.Join(nonEmpty, "\n")
 }
 
 // recordLaneFailure is the last line of defense against a lane row that
