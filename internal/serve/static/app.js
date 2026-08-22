@@ -1181,6 +1181,553 @@ function renderFeatureSwimlanes(container, features) {
   patchFeatureSwimlanes(container, Array.isArray(features) ? features : []);
 }
 
+const TIMELINE_WINDOW_SIZE = 50;
+const TIMELINE_STYLES = `
+  .timeline-view { display: grid; gap: 1.25rem; margin-top: 1.5rem; }
+  .timeline-controls { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 0.75rem; padding: 0.75rem; border: 1px solid var(--line); background: var(--surface); }
+  .timeline-kind-filters { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+  .timeline-filter-btn { padding: 0.35rem 0.65rem; border: 1px solid var(--line-strong); background: var(--surface-raised); color: var(--muted); cursor: pointer; font-family: var(--font-mono); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; }
+  .timeline-filter-btn[aria-pressed="true"] { border-color: var(--signal); color: var(--signal); background: var(--surface-deep); font-weight: 700; }
+  .timeline-search-box { display: flex; align-items: center; gap: 0.5rem; }
+  .timeline-search-input { padding: 0.35rem 0.65rem; border: 1px solid var(--line-strong); background: var(--surface-deep); color: var(--ink); font-family: var(--font-mono); font-size: 0.76rem; }
+  .timeline-search-input:focus { outline: 2px solid var(--signal); }
+  .timeline-window-bar { display: flex; justify-content: space-between; align-items: center; padding: 0.5rem 0.75rem; border: 1px solid var(--line); background: var(--surface-deep); font-family: var(--font-mono); font-size: 0.72rem; color: var(--muted); }
+  .timeline-count-badge { color: var(--ink); font-weight: 600; }
+  .timeline-load-more { padding: 0.3rem 0.65rem; border: 1px solid var(--line-strong); background: var(--surface-raised); color: var(--signal); cursor: pointer; font-family: var(--font-mono); font-size: 0.72rem; }
+  .timeline-load-more:disabled { opacity: 0.5; cursor: default; }
+  .timeline-feed { display: grid; gap: 0.75rem; }
+  .timeline-card { min-width: 0; padding: 0.85rem; border: 1px solid var(--line); background: var(--surface-raised); box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.2); }
+  .timeline-card[data-kind="event"] { border-left: 5px solid var(--signal); }
+  .timeline-card[data-kind="integration"] { border-left: 5px solid var(--warning); }
+  .timeline-card[data-kind="progress"] { border-left: 5px solid var(--live); }
+  .timeline-card-header { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.5rem; font-family: var(--font-mono); font-size: 0.76rem; }
+  .timeline-card-title { display: flex; align-items: center; gap: 0.5rem; }
+  .timeline-badge { padding: 0.2rem 0.45rem; border: 1px solid var(--line-strong); font-size: 0.65rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; background: var(--surface); }
+  .timeline-badge.badge-event { color: var(--signal); border-color: var(--signal); }
+  .timeline-badge.badge-integration { color: var(--warning); border-color: var(--warning); }
+  .timeline-badge.badge-progress { color: var(--live); border-color: var(--live); }
+  .timeline-type { font-weight: 700; color: var(--ink); }
+  .timeline-time { color: var(--muted); font-size: 0.72rem; }
+  .timeline-meta { display: flex; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 0.4rem; font-family: var(--font-mono); font-size: 0.72rem; color: var(--muted); }
+  .timeline-meta-item strong { color: var(--ink); }
+  .timeline-detail-text { margin: 0.4rem 0 0; padding: 0.5rem; border: 1px solid var(--line); background: var(--surface-deep); color: #d7dcd7; font-family: var(--font-mono); font-size: 0.72rem; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .timeline-empty { padding: 2.4rem; border: 1px dashed var(--line-strong); background: var(--surface); color: var(--muted); }
+`;
+
+function ensureTimelineContainer() {
+  let container = document.getElementById('timeline-container');
+  if (container) return container;
+
+  const activityView = document.getElementById('activity-view');
+  if (!activityView) return null;
+
+  if (!document.getElementById('timeline-styles')) {
+    const style = document.createElement('style');
+    style.id = 'timeline-styles';
+    style.textContent = TIMELINE_STYLES;
+    document.head.appendChild(style);
+  }
+
+  container = document.createElement('section');
+  container.id = 'timeline-container';
+  container.className = 'timeline-view';
+  container.setAttribute('aria-labelledby', 'timeline-title');
+  container.appendChild(createTextElement('h2', 'sdd-change-title', 'Execution timeline'));
+  container.firstChild.id = 'timeline-title';
+  activityView.appendChild(container);
+  return container;
+}
+
+function parseTimelineTimestamp(at) {
+  if (!at) return 0;
+  const parsed = Date.parse(at);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function sortTimelineItems(items) {
+  const kindPriority = { event: 1, integration: 2, progress: 3 };
+  return [...items].sort((a, b) => {
+    const timeA = parseTimelineTimestamp(a.at);
+    const timeB = parseTimelineTimestamp(b.at);
+    if (timeA !== timeB) return timeA - timeB;
+    if (a.at !== b.at) return String(a.at || '').localeCompare(String(b.at || ''));
+    const prioA = kindPriority[a.kind] || 99;
+    const prioB = kindPriority[b.kind] || 99;
+    if (prioA !== prioB) return prioA - prioB;
+    const seqOrIdA = Number(a.seq || a.id || 0);
+    const seqOrIdB = Number(b.seq || b.id || 0);
+    if (seqOrIdA !== seqOrIdB) return seqOrIdA - seqOrIdB;
+    return String(a.key).localeCompare(String(b.key));
+  });
+}
+
+function filterAfterCursor(items, cursor) {
+  if (!cursor) return items;
+  const index = items.findIndex(item => item.cursor === cursor || item.key === cursor);
+  if (index === -1) return items;
+  return items.slice(index + 1);
+}
+
+function filterTimelineItems(items, filters = {}) {
+  const kind = (filters.kind || 'all').toLowerCase();
+  const search = (filters.search || '').trim().toLowerCase();
+  const runID = (filters.runID || '').trim().toLowerCase();
+  const laneID = (filters.laneID || '').trim().toLowerCase();
+  const featureID = (filters.featureID || '').trim().toLowerCase();
+  const type = (filters.type || '').trim().toLowerCase();
+
+  return items.filter(item => {
+    if (kind !== 'all' && item.kind !== kind) return false;
+    if (runID && item.runID.toLowerCase() !== runID) return false;
+    if (laneID && item.laneID.toLowerCase() !== laneID) return false;
+    if (featureID && item.featureID.toLowerCase() !== featureID) return false;
+    if (type && item.type.toLowerCase() !== type) return false;
+    if (search) {
+      const haystack = [
+        item.kind,
+        item.kindLabel,
+        item.type,
+        item.detail,
+        item.runID,
+        item.laneID,
+        item.featureID,
+        item.attemptID,
+        item.cursor
+      ].join(' ').toLowerCase();
+      if (!haystack.includes(search)) return false;
+    }
+    return true;
+  });
+}
+
+function virtualizeTimeline(items, { offset = 0, limit = TIMELINE_WINDOW_SIZE } = {}) {
+  const total = items.length;
+  const clampedLimit = Math.max(1, limit);
+  const clampedOffset = Math.max(0, Math.min(offset, Math.max(0, total - 1)));
+  const visible = items.slice(clampedOffset, clampedOffset + clampedLimit);
+  const hasMore = clampedOffset + clampedLimit < total;
+  const nextCursor = hasMore && visible.length > 0 ? visible[visible.length - 1].cursor : null;
+
+  return {
+    items: visible,
+    total,
+    offset: clampedOffset,
+    limit: clampedLimit,
+    visibleCount: visible.length,
+    hasMore,
+    nextCursor
+  };
+}
+
+function normalizeTimeline(state) {
+  const normalized = new Map();
+
+  // 1. Run Events
+  const rawEvents = [
+    ...asArray(state, 'events', 'Events', 'run_events', 'RunEvents')
+  ];
+  const runs = asArray(state, 'runs', 'Runs');
+  runs.forEach(run => {
+    const runEvents = asArray(run, 'events', 'Events', 'run_events', 'RunEvents');
+    runEvents.forEach(item => {
+      if (typeof item === 'object' && item !== null) {
+        rawEvents.push({ ...item, run_id: field(item, 'run_id', 'RunID') || field(run, 'run_id', 'RunID') });
+      }
+    });
+  });
+
+  rawEvents.forEach((item, index) => {
+    if (!item || typeof item !== 'object') return;
+    const id = field(item, 'id', 'ID') !== undefined && field(item, 'id', 'ID') !== null ? String(field(item, 'id', 'ID')) : String(index + 1);
+    const runID = String(field(item, 'run_id', 'RunID') || '');
+    const laneID = String(field(item, 'lane_id', 'LaneID') || '');
+    const type = String(field(item, 'type', 'Type') || 'event');
+    const detail = String(field(item, 'detail', 'Detail', 'message', 'Message') || '');
+    const at = String(field(item, 'at', 'At', 'timestamp', 'Timestamp') || '');
+    const key = `event-${runID}-${laneID}-${id}`;
+    const cursor = `event:${runID}:${id}`;
+
+    normalized.set(key, {
+      key,
+      kind: 'event',
+      kindLabel: 'Run event',
+      id,
+      runID,
+      laneID,
+      featureID: '',
+      attemptID: '',
+      type,
+      detail,
+      at,
+      timestamp: parseTimelineTimestamp(at),
+      cursor
+    });
+  });
+
+  // 2. Integration Events
+  const rawIntegrationEvents = [
+    ...asArray(state, 'integration_events', 'IntegrationEvents', 'audit_events', 'AuditEvents')
+  ];
+  const features = asArray(state, 'features', 'Features');
+  features.forEach(feat => {
+    const featAudit = asArray(feat, 'audit', 'Audit', 'events', 'Events', 'integration_events', 'IntegrationEvents');
+    featAudit.forEach(item => {
+      if (typeof item === 'object' && item !== null) {
+        rawIntegrationEvents.push({ ...item, feature_id: field(item, 'feature_id', 'FeatureID') || field(feat, 'id', 'ID') });
+      }
+    });
+  });
+  const reconciliations = asArray(state, 'reconciliations', 'Reconciliations', 'reconciliation_requests', 'ReconciliationRequests');
+  reconciliations.forEach(recon => {
+    const reconAudit = asArray(recon, 'audit', 'Audit', 'events', 'Events');
+    reconAudit.forEach(item => {
+      if (typeof item === 'object' && item !== null) {
+        rawIntegrationEvents.push({ ...item, feature_id: field(item, 'feature_id', 'FeatureID') || field(recon, 'feature_id', 'FeatureID') });
+      }
+    });
+  });
+
+  rawIntegrationEvents.forEach((item, index) => {
+    if (!item || typeof item !== 'object') return;
+    const id = field(item, 'id', 'ID') !== undefined && field(item, 'id', 'ID') !== null ? String(field(item, 'id', 'ID')) : String(index + 1);
+    const featureID = String(field(item, 'feature_id', 'FeatureID') || '');
+    const attemptID = String(field(item, 'attempt_id', 'AttemptID') || '');
+    const type = String(field(item, 'type', 'Type') || 'integration');
+    const detail = String(field(item, 'detail', 'Detail', 'message', 'Message') || '');
+    const at = String(field(item, 'at', 'At', 'timestamp', 'Timestamp') || '');
+    const key = `integration-${featureID}-${attemptID}-${id}`;
+    const cursor = `integration:${featureID}:${id}`;
+
+    normalized.set(key, {
+      key,
+      kind: 'integration',
+      kindLabel: 'Integration audit',
+      id,
+      runID: '',
+      laneID: '',
+      featureID,
+      attemptID,
+      type,
+      detail,
+      at,
+      timestamp: parseTimelineTimestamp(at),
+      cursor
+    });
+  });
+
+  // 3. Lane Progress
+  const rawProgress = [
+    ...asArray(state, 'lane_progress', 'LaneProgress', 'progress', 'Progress')
+  ];
+  runs.forEach(run => {
+    const runProg = asArray(run, 'lane_progress', 'LaneProgress', 'progress', 'Progress');
+    runProg.forEach(item => {
+      if (typeof item === 'object' && item !== null) {
+        rawProgress.push({ ...item, run_id: field(item, 'run_id', 'RunID') || field(run, 'run_id', 'RunID') });
+      }
+    });
+  });
+  const lanes = asArray(state, 'lanes', 'Lanes');
+  lanes.forEach(lane => {
+    const laneProg = asArray(lane, 'lane_progress', 'LaneProgress', 'progress', 'Progress');
+    laneProg.forEach(item => {
+      if (typeof item === 'object' && item !== null) {
+        rawProgress.push({
+          ...item,
+          run_id: field(item, 'run_id', 'RunID') || field(lane, 'run_id', 'RunID'),
+          lane_id: field(item, 'lane_id', 'LaneID') || field(lane, 'lane_id', 'LaneID', 'id', 'ID')
+        });
+      }
+    });
+  });
+
+  rawProgress.forEach((item, index) => {
+    if (!item || typeof item !== 'object') return;
+    const seq = field(item, 'seq', 'Seq') !== undefined && field(item, 'seq', 'Seq') !== null ? String(field(item, 'seq', 'Seq')) : String(index + 1);
+    const runID = String(field(item, 'run_id', 'RunID') || '');
+    const laneID = String(field(item, 'lane_id', 'LaneID') || '');
+    const message = String(field(item, 'message', 'Message', 'activity', 'Activity') || '');
+    const at = String(field(item, 'at', 'At', 'timestamp', 'Timestamp') || '');
+    const key = `progress-${runID}-${laneID}-${seq}`;
+    const cursor = `progress:${runID}:${laneID}:${seq}`;
+
+    normalized.set(key, {
+      key,
+      kind: 'progress',
+      kindLabel: 'Lane progress',
+      seq,
+      runID,
+      laneID,
+      featureID: '',
+      attemptID: '',
+      type: 'progress',
+      detail: message,
+      at,
+      timestamp: parseTimelineTimestamp(at),
+      cursor
+    });
+  });
+
+  return Array.from(normalized.values());
+}
+
+function createTimelineCard(item) {
+  const card = document.createElement('article');
+  card.className = 'timeline-card';
+  card.setAttribute('data-timeline-key', item.key);
+  card.setAttribute('data-kind', item.kind);
+  card.dataset.kind = item.kind;
+  card.setAttribute('data-event-type', item.type);
+  card.dataset.eventType = item.type;
+  if (item.runID) card.setAttribute('data-run-id', item.runID);
+  if (item.laneID) card.setAttribute('data-lane-id', item.laneID);
+  if (item.featureID) card.setAttribute('data-feature-id', item.featureID);
+  if (item.cursor) card.setAttribute('data-cursor', item.cursor);
+
+  const header = document.createElement('div');
+  header.className = 'timeline-card-header';
+
+  const titleGroup = document.createElement('div');
+  titleGroup.className = 'timeline-card-title';
+
+  const badge = document.createElement('span');
+  badge.className = `timeline-badge badge-${item.kind}`;
+  badge.textContent = item.kindLabel;
+
+  const typeName = document.createElement('strong');
+  typeName.className = 'timeline-type';
+  typeName.textContent = item.type;
+  titleGroup.append(badge, typeName);
+
+  const timeNode = document.createElement('time');
+  timeNode.className = 'timeline-time';
+  timeNode.textContent = item.at || 'Unavailable';
+  if (item.at) timeNode.setAttribute('datetime', item.at);
+  header.append(titleGroup, timeNode);
+
+  const meta = document.createElement('div');
+  meta.className = 'timeline-meta';
+  const metaParts = [];
+  if (item.runID) metaParts.push(`Run: ${item.runID}`);
+  if (item.laneID) metaParts.push(`Lane: ${item.laneID}`);
+  if (item.featureID) metaParts.push(`Feature: ${item.featureID}`);
+  if (item.attemptID) metaParts.push(`Attempt: ${item.attemptID}`);
+  if (item.seq !== undefined && item.seq !== null && item.seq !== '') metaParts.push(`Seq: ${item.seq}`);
+  if (item.id !== undefined && item.id !== null && item.id !== '') metaParts.push(`ID: ${item.id}`);
+
+  metaParts.forEach(text => {
+    const span = document.createElement('span');
+    span.className = 'timeline-meta-item';
+    span.textContent = text;
+    meta.appendChild(span);
+  });
+
+  const detailBox = document.createElement('div');
+  detailBox.className = 'timeline-detail';
+  const pre = document.createElement('pre');
+  pre.className = 'timeline-detail-text';
+  pre.textContent = item.detail || '(no detail)';
+  detailBox.appendChild(pre);
+
+  card.append(header, meta, detailBox);
+  card._timelineParts = { badge, typeName, timeNode, meta, pre };
+  return card;
+}
+
+function updateTimelineCard(card, item) {
+  card.setAttribute('data-timeline-key', item.key);
+  card.setAttribute('data-kind', item.kind);
+  card.dataset.kind = item.kind;
+  card.setAttribute('data-event-type', item.type);
+  card.dataset.eventType = item.type;
+  if (item.runID) card.setAttribute('data-run-id', item.runID);
+  if (item.laneID) card.setAttribute('data-lane-id', item.laneID);
+  if (item.featureID) card.setAttribute('data-feature-id', item.featureID);
+  if (item.cursor) card.setAttribute('data-cursor', item.cursor);
+
+  const parts = card._timelineParts;
+  if (!parts) return;
+  parts.badge.className = `timeline-badge badge-${item.kind}`;
+  parts.badge.textContent = item.kindLabel;
+  parts.typeName.textContent = item.type;
+  parts.timeNode.textContent = item.at || 'Unavailable';
+  if (item.at) parts.timeNode.setAttribute('datetime', item.at);
+
+  const metaParts = [];
+  if (item.runID) metaParts.push(`Run: ${item.runID}`);
+  if (item.laneID) metaParts.push(`Lane: ${item.laneID}`);
+  if (item.featureID) metaParts.push(`Feature: ${item.featureID}`);
+  if (item.attemptID) metaParts.push(`Attempt: ${item.attemptID}`);
+  if (item.seq !== undefined && item.seq !== null && item.seq !== '') metaParts.push(`Seq: ${item.seq}`);
+  if (item.id !== undefined && item.id !== null && item.id !== '') metaParts.push(`ID: ${item.id}`);
+
+  parts.meta.replaceChildren(
+    ...metaParts.map(text => {
+      const span = document.createElement('span');
+      span.className = 'timeline-meta-item';
+      span.textContent = text;
+      return span;
+    })
+  );
+
+  parts.pre.textContent = item.detail || '(no detail)';
+}
+
+function patchTimelineItems(feedContainer, visibleItems, totalFiltered, totalRaw) {
+  const currentCards = new Map();
+  feedContainer.querySelectorAll('[data-timeline-key]').forEach(card => {
+    currentCards.set(card.getAttribute('data-timeline-key'), card);
+  });
+
+  if (totalFiltered === 0) {
+    currentCards.forEach(card => card.remove());
+    let emptyState = feedContainer.querySelector('[data-timeline-empty]');
+    if (!emptyState) {
+      emptyState = document.createElement('div');
+      emptyState.className = 'timeline-empty empty-state';
+      emptyState.setAttribute('data-timeline-empty', '');
+      feedContainer.appendChild(emptyState);
+    }
+    emptyState.textContent = totalRaw === 0
+      ? 'No timeline events reported.'
+      : 'No timeline events match the selected filters.';
+    return;
+  }
+
+  let emptyState = feedContainer.querySelector('[data-timeline-empty]');
+  if (emptyState) emptyState.remove();
+
+  const activeKeys = new Set();
+  visibleItems.forEach(item => {
+    activeKeys.add(item.key);
+    const existing = currentCards.get(item.key);
+    if (existing) {
+      updateTimelineCard(existing, item);
+    } else {
+      feedContainer.appendChild(createTimelineCard(item));
+    }
+  });
+
+  currentCards.forEach((card, key) => {
+    if (!activeKeys.has(key)) card.remove();
+  });
+}
+
+function renderTimeline(container, rawItems) {
+  if (!container) return;
+
+  if (!container._timelineState) {
+    container._timelineState = {
+      filters: { kind: 'all', search: '', runID: '', laneID: '', featureID: '', type: '' },
+      windowLimit: TIMELINE_WINDOW_SIZE,
+      afterCursor: null
+    };
+  }
+  container._timelineRawItems = Array.isArray(rawItems) ? rawItems : [];
+
+  let controls = container.querySelector('.timeline-controls');
+  if (!controls) {
+    controls = document.createElement('div');
+    controls.className = 'timeline-controls';
+    controls.setAttribute('role', 'toolbar');
+    controls.setAttribute('aria-label', 'Timeline filters');
+
+    const kindGroup = document.createElement('div');
+    kindGroup.className = 'timeline-kind-filters';
+    ['all', 'event', 'integration', 'progress'].forEach(k => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'timeline-filter-btn';
+      btn.setAttribute('data-filter-kind', k);
+      btn.setAttribute('aria-pressed', String(k === container._timelineState.filters.kind));
+      btn.textContent = k === 'all' ? 'All' : k === 'event' ? 'Events' : k === 'integration' ? 'Integration' : 'Progress';
+      btn.addEventListener('click', () => {
+        container._timelineState.filters.kind = k;
+        container.querySelectorAll('[data-filter-kind]').forEach(b => {
+          b.setAttribute('aria-pressed', String(b.getAttribute('data-filter-kind') === k));
+        });
+        renderTimeline(container, container._timelineRawItems);
+      });
+      kindGroup.appendChild(btn);
+    });
+    controls.appendChild(kindGroup);
+
+    const searchBox = document.createElement('div');
+    searchBox.className = 'timeline-search-box';
+    const searchInput = document.createElement('input');
+    searchInput.type = 'search';
+    searchInput.className = 'timeline-search-input';
+    searchInput.placeholder = 'Filter timeline…';
+    searchInput.setAttribute('aria-label', 'Filter timeline events');
+    searchInput.value = container._timelineState.filters.search;
+    searchInput.addEventListener('input', e => {
+      container._timelineState.filters.search = e.target.value;
+      renderTimeline(container, container._timelineRawItems);
+    });
+    searchBox.appendChild(searchInput);
+    controls.appendChild(searchBox);
+
+    container.appendChild(controls);
+  } else {
+    // Update button states
+    controls.querySelectorAll('[data-filter-kind]').forEach(btn => {
+      btn.setAttribute('aria-pressed', String(btn.getAttribute('data-filter-kind') === container._timelineState.filters.kind));
+    });
+  }
+
+  let windowBar = container.querySelector('.timeline-window-bar');
+  if (!windowBar) {
+    windowBar = document.createElement('div');
+    windowBar.className = 'timeline-window-bar';
+    windowBar.setAttribute('data-timeline-window', '');
+
+    const countBadge = document.createElement('span');
+    countBadge.className = 'timeline-count-badge';
+    countBadge.setAttribute('data-timeline-count', '');
+
+    const loadMoreBtn = document.createElement('button');
+    loadMoreBtn.type = 'button';
+    loadMoreBtn.className = 'timeline-load-more';
+    loadMoreBtn.setAttribute('data-timeline-more', '');
+    loadMoreBtn.textContent = 'Load more';
+    loadMoreBtn.addEventListener('click', () => {
+      container._timelineState.windowLimit += TIMELINE_WINDOW_SIZE;
+      renderTimeline(container, container._timelineRawItems);
+    });
+
+    windowBar.append(countBadge, loadMoreBtn);
+    container.appendChild(windowBar);
+  }
+
+  let feed = container.querySelector('.timeline-feed');
+  if (!feed) {
+    feed = document.createElement('div');
+    feed.className = 'timeline-feed';
+    feed.setAttribute('data-timeline-feed', '');
+    feed.setAttribute('aria-live', 'polite');
+    container.appendChild(feed);
+  }
+
+  // Pipeline: sort -> filter -> virtualize/window
+  const sorted = sortTimelineItems(container._timelineRawItems);
+  const filtered = filterTimelineItems(sorted, container._timelineState.filters);
+  const windowed = virtualizeTimeline(filtered, { limit: container._timelineState.windowLimit });
+
+  // Update window bar
+  const countBadge = windowBar.querySelector('[data-timeline-count]');
+  if (countBadge) {
+    countBadge.textContent = `Showing ${windowed.visibleCount} of ${windowed.total} events (total feed: ${container._timelineRawItems.length})`;
+  }
+  const loadMoreBtn = windowBar.querySelector('[data-timeline-more]');
+  if (loadMoreBtn) {
+    loadMoreBtn.hidden = !windowed.hasMore;
+    loadMoreBtn.disabled = !windowed.hasMore;
+  }
+
+  // Patch feed items
+  patchTimelineItems(feed, windowed.items, windowed.total, container._timelineRawItems.length);
+}
+
 function renderState(state) {
   const approver = document.getElementById('approver-name');
   const rate = document.getElementById('approver-rate');
@@ -1204,6 +1751,9 @@ function renderState(state) {
 
   const features = normalizeFeatureSwimlanes(state, Date.now());
   renderFeatureSwimlanes(ensureFeatureSwimlanesContainer(), features);
+
+  const timeline = normalizeTimeline(state);
+  renderTimeline(ensureTimelineContainer(), timeline);
 }
 
 function createTextElement(tagName, className, text) {

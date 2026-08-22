@@ -570,3 +570,118 @@ func TestFeatureSwimlanesKeepsDiagnosticsAndJsonAsSafeServerText(t *testing.T) {
 	)
 }
 
+func TestTimelineViewCoversOrderingFiltersCursorContinuationEmptyAndLargeFeeds(t *testing.T) {
+	js := readStaticAsset(t, "app.js")
+
+	tests := []struct {
+		name      string
+		contracts []string
+	}{
+		{
+			name: "ordering sorts by timestamp and preserves stable tie-breaking",
+			contracts: []string{
+				"function sortTimelineItems",
+				"parseTimelineTimestamp(a.at)",
+				"parseTimelineTimestamp(b.at)",
+				"const kindPriority",
+				"timeA - timeB",
+				"String(a.key).localeCompare",
+			},
+		},
+		{
+			name: "filters support event kinds search query and identity criteria",
+			contracts: []string{
+				"function filterTimelineItems",
+				"data-filter-kind",
+				"timeline-search-input",
+				"item.kind !== kind",
+				"item.runID",
+				"item.laneID",
+				"item.featureID",
+				"item.type",
+				"haystack.includes(search)",
+			},
+		},
+		{
+			name: "cursor continuation supports cursor tracking and forward slicing",
+			contracts: []string{
+				"function filterAfterCursor",
+				"data-cursor",
+				"item.cursor === cursor",
+				"nextCursor",
+			},
+		},
+		{
+			name: "empty data state covers both unpopulated feed and no filter matches",
+			contracts: []string{
+				"data-timeline-empty",
+				"No timeline events reported.",
+				"No timeline events match the selected filters.",
+			},
+		},
+		{
+			name: "large feeds enforce bounded windowing and load more pagination",
+			contracts: []string{
+				"const TIMELINE_WINDOW_SIZE",
+				"function virtualizeTimeline",
+				"data-timeline-window",
+				"data-timeline-count",
+				"data-timeline-more",
+				"clampedLimit",
+				"clampedOffset",
+				"hasMore",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assertContainsAll(t, "app.js", js, tt.contracts...)
+		})
+	}
+}
+
+func TestTimelineNormalizesGoAndSnakeCaseFieldsWithKeyedPatching(t *testing.T) {
+	js := readStaticAsset(t, "app.js")
+	assertContainsAll(t, "app.js", js,
+		"function normalizeTimeline",
+		"function renderTimeline",
+		"function ensureTimelineContainer",
+		"function createTimelineCard",
+		"function updateTimelineCard",
+		"function patchTimelineItems",
+		"'run_events', 'RunEvents'",
+		"'integration_events', 'IntegrationEvents'",
+		"'audit_events', 'AuditEvents'",
+		"'lane_progress', 'LaneProgress'",
+		"'run_id', 'RunID'",
+		"'lane_id', 'LaneID'",
+		"'feature_id', 'FeatureID'",
+		"'attempt_id', 'AttemptID'",
+		"data-timeline-key",
+		"data-timeline-feed",
+	)
+
+	for _, badReplacement := range []string{
+		"timelineContainer.innerHTML",
+		"feed.innerHTML",
+		"feedContainer.innerHTML",
+	} {
+		if strings.Contains(js, badReplacement) {
+			t.Errorf("app.js replaces timeline container with %q; live refreshes must patch keyed timeline cards", badReplacement)
+		}
+	}
+}
+
+func TestTimelineKeepsDetailsAsSafeServerText(t *testing.T) {
+	js := readStaticAsset(t, "app.js")
+	assertContainsAll(t, "app.js", js,
+		"card.append(header, meta, detailBox)",
+		"pre.className = 'timeline-detail-text'",
+		"pre.textContent = item.detail",
+		"timeline-badge badge-",
+		"Execution timeline",
+	)
+}
+
+
