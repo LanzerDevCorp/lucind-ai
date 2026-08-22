@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/LanzerDevCorp/lucind-ai/internal/barrier"
+	"github.com/LanzerDevCorp/lucind-ai/internal/lane"
 	"github.com/LanzerDevCorp/lucind-ai/internal/ledger"
 )
 
@@ -122,6 +124,367 @@ type AuditEvent struct {
 	Type      string    `json:"type"`
 	Detail    string    `json:"detail"`
 	At        time.Time `json:"at"`
+}
+
+// LaneStatusCounts is a stable JSON rollup of the six lane states.
+type LaneStatusCounts struct {
+	Pending  int `json:"pending"`
+	Running  int `json:"running"`
+	Done     int `json:"done"`
+	Blocked  int `json:"blocked"`
+	Deviated int `json:"deviated"`
+	Failed   int `json:"failed"`
+}
+
+// RunSummary is the JSON payload for one run and its derived lane/approval counts.
+type RunSummary struct {
+	RunID            string           `json:"run_id"`
+	FeatureID        string           `json:"feature_id"`
+	Status           string           `json:"status"`
+	TargetRef        string           `json:"target_ref"`
+	LaneCount        int              `json:"lane_count"`
+	StartedAt        time.Time        `json:"started_at"`
+	EndedAt          *time.Time       `json:"ended_at"`
+	LaneStatusCounts LaneStatusCounts `json:"lane_status_counts"`
+	PendingApprovals int              `json:"pending_approvals"`
+}
+
+// Lane is the JSON payload for one lane plus its audited dispatch metadata.
+type Lane struct {
+	RunID             string     `json:"run_id"`
+	LaneID            string     `json:"lane_id"`
+	PacketID          string     `json:"packet_id"`
+	Executor          string     `json:"executor"`
+	RoutingCondition  string     `json:"routing_condition"`
+	Status            string     `json:"status"`
+	WorktreePath      string     `json:"worktree_path"`
+	WorktreePreserved bool       `json:"worktree_preserved"`
+	Attempt           int        `json:"attempt"`
+	StartedAt         *time.Time `json:"started_at"`
+	EndedAt           *time.Time `json:"ended_at"`
+	Model             string     `json:"model"`
+	Agent             string     `json:"agent"`
+	Feature           string     `json:"feature"`
+	SDDPhase          string     `json:"sdd_phase"`
+	FanoutGroup       string     `json:"fanout_group"`
+	Change            string     `json:"change"`
+	AllowedPaths      []string   `json:"allowed_paths"`
+	Dependencies      []string   `json:"dependencies"`
+	BodyDigest        string     `json:"body_digest"`
+}
+
+// LaneProgress is one JSON-facing cursor-tail item.
+type LaneProgress struct {
+	RunID   string    `json:"run_id"`
+	LaneID  string    `json:"lane_id"`
+	Seq     int64     `json:"seq"`
+	Message string    `json:"message"`
+	At      time.Time `json:"at"`
+}
+
+// BatchOutcome is the JSON-facing barrier result shared by a run's batch lanes.
+type BatchOutcome struct {
+	Released  bool     `json:"released"`
+	Integrate []string `json:"integrate"`
+	Preserve  []string `json:"preserve"`
+}
+
+// BatchLane adds the latest diagnostic note and derived barrier outcome to Lane.
+type BatchLane struct {
+	Lane
+	Note    string       `json:"note"`
+	Outcome BatchOutcome `json:"outcome"`
+}
+
+// SDDFlow groups lanes by run and audited SDD dispatch context.
+type SDDFlow struct {
+	RunID       string   `json:"run_id"`
+	Change      string   `json:"change"`
+	SDDPhase    string   `json:"sdd_phase"`
+	FanoutGroup string   `json:"fanout_group"`
+	Status      string   `json:"status"`
+	LaneCount   int      `json:"lane_count"`
+	LaneIDs     []string `json:"lane_ids"`
+}
+
+// Overview is the derived top-level run, lane, approval, and flow rollup.
+type Overview struct {
+	Status           string           `json:"status"`
+	RunCount         int              `json:"run_count"`
+	ActiveRunCount   int              `json:"active_run_count"`
+	LaneCount        int              `json:"lane_count"`
+	LaneStatusCounts LaneStatusCounts `json:"lane_status_counts"`
+	PendingApprovals int              `json:"pending_approvals"`
+	FlowCount        int              `json:"flow_count"`
+}
+
+// GetRun returns one run summary. Unknown run IDs preserve ledger.ErrRunUnknown.
+func (m *Model) GetRun(ctx context.Context, runID string) (RunSummary, error) {
+	run, err := m.ledger.GetRun(ctx, runID)
+	if err != nil {
+		return RunSummary{}, fmt.Errorf("serve: get run: %w", err)
+	}
+	return m.summarizeRun(ctx, run)
+}
+
+// GetRunSummary is the aggregate-oriented name for GetRun.
+func (m *Model) GetRunSummary(ctx context.Context, runID string) (RunSummary, error) {
+	return m.GetRun(ctx, runID)
+}
+
+// ListRuns returns run summaries in the ledger's newest-first stable order.
+func (m *Model) ListRuns(ctx context.Context) ([]RunSummary, error) {
+	runs, err := m.ledger.ListRuns(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("serve: list runs: %w", err)
+	}
+	out := make([]RunSummary, 0, len(runs))
+	for _, run := range runs {
+		summary, err := m.summarizeRun(ctx, run)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, summary)
+	}
+	return out, nil
+}
+
+func (m *Model) summarizeRun(ctx context.Context, run ledger.Run) (RunSummary, error) {
+	lanes, err := m.ListLanes(ctx, run.RunID)
+	if err != nil {
+		return RunSummary{}, err
+	}
+	approvals, err := m.ledger.Approvals(ctx, run.RunID)
+	if err != nil {
+		return RunSummary{}, fmt.Errorf("serve: list run approvals: %w", err)
+	}
+	summary := RunSummary{
+		RunID: run.RunID, FeatureID: run.FeatureID, Status: run.Status,
+		TargetRef: run.TargetRef, LaneCount: run.LaneCount,
+		StartedAt: run.StartedAt, EndedAt: run.EndedAt,
+	}
+	for _, ln := range lanes {
+		addLaneStatus(&summary.LaneStatusCounts, lane.Status(ln.Status))
+	}
+	for _, approval := range approvals {
+		if approval.Decision == ledger.DecisionPending {
+			summary.PendingApprovals++
+		}
+	}
+	return summary, nil
+}
+
+// ListLanes returns a run's lanes ordered by lane_id with non-nil metadata lists.
+func (m *Model) ListLanes(ctx context.Context, runID string) ([]Lane, error) {
+	rows, err := m.ledger.Lanes(ctx, runID)
+	if err != nil {
+		return nil, fmt.Errorf("serve: list lanes: %w", err)
+	}
+	out := make([]Lane, 0, len(rows))
+	for _, row := range rows {
+		metadata, err := m.ledger.GetLaneMetadata(ctx, row.RunID, row.LaneID)
+		if err != nil {
+			return nil, fmt.Errorf("serve: get lane metadata: %w", err)
+		}
+		out = append(out, laneDTO(row, metadata))
+	}
+	return out, nil
+}
+
+// GetLane returns one lane or ledger.ErrLaneUnknown for an unknown identity.
+func (m *Model) GetLane(ctx context.Context, runID, laneID string) (Lane, error) {
+	metadata, err := m.ledger.GetLaneMetadata(ctx, runID, laneID)
+	if err != nil {
+		return Lane{}, fmt.Errorf("serve: get lane: %w", err)
+	}
+	rows, err := m.ledger.Lanes(ctx, runID)
+	if err != nil {
+		return Lane{}, fmt.Errorf("serve: list lanes: %w", err)
+	}
+	for _, row := range rows {
+		if row.LaneID == laneID {
+			return laneDTO(row, metadata), nil
+		}
+	}
+	return Lane{}, ledger.ErrLaneUnknown
+}
+
+func laneDTO(row ledger.Lane, metadata ledger.LaneMetadata) Lane {
+	return Lane{
+		RunID: row.RunID, LaneID: row.LaneID, PacketID: row.PacketID,
+		Executor: row.Executor, RoutingCondition: row.RoutingCondition, Status: string(row.Status),
+		WorktreePath: row.WorktreePath, WorktreePreserved: row.WorktreePreserved,
+		Attempt: row.Attempt, StartedAt: row.StartedAt, EndedAt: row.EndedAt,
+		Model: metadata.Model, Agent: metadata.Agent, Feature: metadata.Feature,
+		SDDPhase: metadata.SDDPhase, FanoutGroup: metadata.FanoutGroup, Change: metadata.Change,
+		AllowedPaths: nonNilStrings(metadata.AllowedPaths), Dependencies: nonNilStrings(metadata.Dependencies),
+		BodyDigest: metadata.BodyDigest,
+	}
+}
+
+// GetLaneProgress returns seq > afterSeq in ascending cursor order.
+func (m *Model) GetLaneProgress(ctx context.Context, runID, laneID string, afterSeq int64) ([]LaneProgress, error) {
+	rows, err := m.ledger.GetProgressAfter(ctx, runID, laneID, afterSeq)
+	if err != nil {
+		return nil, fmt.Errorf("serve: get lane progress: %w", err)
+	}
+	out := make([]LaneProgress, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, LaneProgress{RunID: row.RunID, LaneID: row.LaneID, Seq: row.Seq, Message: row.Message, At: row.At})
+	}
+	return out, nil
+}
+
+// ListBatchLanes derives latest lane notes and the run's barrier outcome.
+func (m *Model) ListBatchLanes(ctx context.Context, runID string) ([]BatchLane, error) {
+	lanes, err := m.ListLanes(ctx, runID)
+	if err != nil {
+		return nil, err
+	}
+	events, err := m.ledger.Events(ctx, runID)
+	if err != nil {
+		return nil, fmt.Errorf("serve: list lane events: %w", err)
+	}
+	notes := make(map[string]string)
+	for _, event := range events {
+		if event.Type == ledger.EventLaneNote && !strings.HasPrefix(event.Detail, "lane_metadata:v1:") {
+			notes[event.LaneID] = event.Detail
+		}
+	}
+	expected := make([]string, 0, len(lanes))
+	states := make([]lane.State, 0, len(lanes))
+	for _, ln := range lanes {
+		expected = append(expected, ln.LaneID)
+		states = append(states, lane.State{LaneID: ln.LaneID, Status: lane.Status(ln.Status)})
+	}
+	result := barrier.Evaluate(expected, states)
+	outcome := BatchOutcome{Released: result.Released, Integrate: nonNilStrings(result.Integrate), Preserve: nonNilStrings(result.Preserve)}
+	out := make([]BatchLane, 0, len(lanes))
+	for _, ln := range lanes {
+		out = append(out, BatchLane{Lane: ln, Note: notes[ln.LaneID], Outcome: outcome})
+	}
+	return out, nil
+}
+
+// ListSDDFlows groups lanes by run and audited change/phase/fanout metadata.
+func (m *Model) ListSDDFlows(ctx context.Context) ([]SDDFlow, error) {
+	runs, err := m.ledger.ListRuns(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("serve: list flow runs: %w", err)
+	}
+	type flowKey struct{ runID, change, phase, fanout string }
+	out := make([]SDDFlow, 0)
+	indexes := make(map[flowKey]int)
+	statuses := make(map[flowKey][]lane.Status)
+	for _, run := range runs {
+		lanes, err := m.ListLanes(ctx, run.RunID)
+		if err != nil {
+			return nil, err
+		}
+		for _, ln := range lanes {
+			key := flowKey{run.RunID, ln.Change, ln.SDDPhase, ln.FanoutGroup}
+			index, ok := indexes[key]
+			if !ok {
+				index = len(out)
+				indexes[key] = index
+				out = append(out, SDDFlow{RunID: key.runID, Change: key.change, SDDPhase: key.phase, FanoutGroup: key.fanout, LaneIDs: []string{}})
+			}
+			out[index].LaneCount++
+			out[index].LaneIDs = append(out[index].LaneIDs, ln.LaneID)
+			statuses[key] = append(statuses[key], lane.Status(ln.Status))
+		}
+	}
+	for key, index := range indexes {
+		out[index].Status = rollupStatus(statuses[key])
+	}
+	return out, nil
+}
+
+// GetOverview composes existing run and flow methods into one aggregate payload.
+func (m *Model) GetOverview(ctx context.Context) (Overview, error) {
+	runs, err := m.ListRuns(ctx)
+	if err != nil {
+		return Overview{}, err
+	}
+	flows, err := m.ListSDDFlows(ctx)
+	if err != nil {
+		return Overview{}, err
+	}
+	overview := Overview{RunCount: len(runs), FlowCount: len(flows)}
+	for _, run := range runs {
+		if run.Status == string(lane.Running) {
+			overview.ActiveRunCount++
+		}
+		overview.LaneCount += run.LaneStatusCounts.total()
+		overview.LaneStatusCounts.add(run.LaneStatusCounts)
+		overview.PendingApprovals += run.PendingApprovals
+	}
+	overview.Status = statusFromCounts(overview.LaneStatusCounts)
+	return overview, nil
+}
+
+func addLaneStatus(counts *LaneStatusCounts, status lane.Status) {
+	switch status {
+	case lane.Pending:
+		counts.Pending++
+	case lane.Running:
+		counts.Running++
+	case lane.Done:
+		counts.Done++
+	case lane.Blocked:
+		counts.Blocked++
+	case lane.Deviated:
+		counts.Deviated++
+	case lane.Failed:
+		counts.Failed++
+	}
+}
+
+func (c *LaneStatusCounts) add(other LaneStatusCounts) {
+	c.Pending += other.Pending
+	c.Running += other.Running
+	c.Done += other.Done
+	c.Blocked += other.Blocked
+	c.Deviated += other.Deviated
+	c.Failed += other.Failed
+}
+
+func (c LaneStatusCounts) total() int {
+	return c.Pending + c.Running + c.Done + c.Blocked + c.Deviated + c.Failed
+}
+
+func rollupStatus(statuses []lane.Status) string {
+	var counts LaneStatusCounts
+	for _, status := range statuses {
+		addLaneStatus(&counts, status)
+	}
+	return statusFromCounts(counts)
+}
+
+func statusFromCounts(counts LaneStatusCounts) string {
+	switch {
+	case counts.Failed > 0:
+		return string(lane.Failed)
+	case counts.Deviated > 0:
+		return string(lane.Deviated)
+	case counts.Blocked > 0:
+		return string(lane.Blocked)
+	case counts.Running > 0:
+		return string(lane.Running)
+	case counts.Pending > 0:
+		return string(lane.Pending)
+	case counts.Done > 0:
+		return string(lane.Done)
+	default:
+		return "empty"
+	}
+}
+
+func nonNilStrings(values []string) []string {
+	if values == nil {
+		return []string{}
+	}
+	return values
 }
 
 // ListFeatures returns every feature row ordered by created_at.
