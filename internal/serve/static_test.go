@@ -8,6 +8,24 @@ import (
 	"github.com/LanzerDevCorp/lucind-ai/internal/serve"
 )
 
+func readStaticAsset(t *testing.T, name string) string {
+	t.Helper()
+	data, err := fs.ReadFile(serve.StaticFS(), name)
+	if err != nil {
+		t.Fatalf("fs.ReadFile(%q): %v", name, err)
+	}
+	return string(data)
+}
+
+func assertContainsAll(t *testing.T, sourceName, source string, contracts ...string) {
+	t.Helper()
+	for _, contract := range contracts {
+		if !strings.Contains(source, contract) {
+			t.Errorf("%s does not contain required contract %q", sourceName, contract)
+		}
+	}
+}
+
 func TestEmbedFSHasNoApproveAllControl(t *testing.T) {
 	staticFS := serve.StaticFS()
 
@@ -98,5 +116,108 @@ func TestStaticEvidenceValidationRejectsBareMultilineProse(t *testing.T) {
 	// clause must be absent from isValidEvidence.
 	if strings.Contains(jsStr, "trimmed.includes('\\n')") || strings.Contains(jsStr, "trimmed.includes(\"\\n\")") {
 		t.Errorf("app.js contains over-permissive trimmed.includes('\\n') in isValidEvidence; bare multi-line prose must not qualify as valid evidence")
+	}
+}
+
+func TestStaticAssetsRemainEmbeddedAndNoBuild(t *testing.T) {
+	staticFS := serve.StaticFS()
+	entries, err := fs.ReadDir(staticFS, ".")
+	if err != nil {
+		t.Fatalf("fs.ReadDir(static root): %v", err)
+	}
+
+	wantFiles := map[string]bool{"app.js": false, "index.html": false}
+	for _, entry := range entries {
+		if _, ok := wantFiles[entry.Name()]; ok && !entry.IsDir() {
+			wantFiles[entry.Name()] = true
+		}
+	}
+	for name, found := range wantFiles {
+		if !found {
+			t.Errorf("embedded static filesystem is missing %q", name)
+		}
+	}
+
+	html := readStaticAsset(t, "index.html")
+	assertContainsAll(t, "index.html", html, `<script src="/app.js"></script>`, `<style>`)
+	for _, forbidden := range []string{"<script type=\"module\"", "node_modules", "https://", "http://", "<link rel=\"stylesheet\""} {
+		if strings.Contains(html, forbidden) {
+			t.Errorf("index.html contains build-time or external asset reference %q", forbidden)
+		}
+	}
+}
+
+func TestControlRoomShellHasPersistentChromeOutletsAndAccessibleStatus(t *testing.T) {
+	html := readStaticAsset(t, "index.html")
+	assertContainsAll(t, "index.html", html,
+		"Control Room",
+		`id="control-room-shell"`,
+		`id="pending-approvals-count"`,
+		`id="approver-name"`,
+		`id="approver-rate"`,
+		`id="connection-status"`,
+		`role="status"`,
+		`aria-live="polite"`,
+		`id="connection-status-text"`,
+		`data-view-outlet="approvals"`,
+		`data-view-outlet="activity"`,
+		`id="approvals-container"`,
+	)
+}
+
+func TestLiveStoreUsesSSEFirstAndDeterministicPollingFallback(t *testing.T) {
+	js := readStaticAsset(t, "app.js")
+
+	t.Run("SSE open and named events refresh state", func(t *testing.T) {
+		assertContainsAll(t, "app.js", js,
+			"function createLiveStore",
+			"new EventSourceImpl('/api/stream')",
+			"eventSource.addEventListener('open'",
+			"eventSource.addEventListener('event'",
+			"eventSource.addEventListener('progress'",
+			"eventSource.addEventListener('resync'",
+			"eventSource.addEventListener('error'",
+		)
+	})
+
+	t.Run("stream error starts one two-second polling loop", func(t *testing.T) {
+		assertContainsAll(t, "app.js", js,
+			"const POLL_INTERVAL_MS = 2000",
+			"if (pollingTimer !== null) return",
+			"pollingTimer = setIntervalImpl",
+			"startPolling('Stream unavailable')",
+			"fetchStateImpl('/api/state'",
+		)
+	})
+
+	t.Run("HTTP failure retains cached state and publishes status", func(t *testing.T) {
+		assertContainsAll(t, "app.js", js,
+			"let cachedState = null",
+			"cachedState = nextState",
+			"showing cached data",
+			"notify()",
+			"getSnapshot",
+			"teardown",
+		)
+		if count := strings.Count(js, "cachedState = null"); count > 1 {
+			t.Errorf("app.js assigns null to cached state %d times; only initialization is allowed so failed refreshes retain the last state", count)
+		}
+	})
+}
+
+func TestApprovalsRemainIndividuallyPatchedAndSubmitted(t *testing.T) {
+	js := readStaticAsset(t, "app.js")
+	assertContainsAll(t, "app.js", js,
+		"function patchApprovalCards",
+		"data-approval-key",
+		"function submitDecision(runID, laneID, decision)",
+		"`/approvals/${encodeURIComponent(runID)}/${encodeURIComponent(laneID)}`",
+		"JSON.stringify({ decision })",
+		"isValidEvidence",
+	)
+	for _, replacement := range []string{"containerEl.innerHTML", "approvalsContainer.innerHTML"} {
+		if strings.Contains(js, replacement) {
+			t.Errorf("app.js contains %q; live refreshes must patch approval cards without replacing the view outlet", replacement)
+		}
 	}
 }
