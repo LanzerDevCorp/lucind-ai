@@ -613,6 +613,574 @@ function renderApplyDAG(dag) {
   region.replaceChildren(fragment);
 }
 
+const FEATURE_SWIMLANE_STYLES = `
+  .feature-swimlanes { display: grid; gap: 1.25rem; margin-top: 1.5rem; }
+  .feature-swimlane { min-width: 0; padding: 1.25rem; border: 1px solid var(--line); background: var(--surface-raised); box-shadow: 7px 7px 0 rgba(0, 0, 0, 0.2); }
+  .feature-swimlane[data-status="active"] { border-left: 5px solid var(--live); }
+  .feature-swimlane[data-status="expired"] { border-left: 5px solid var(--warning); }
+  .feature-swimlane[data-status="blocked"] { border-left: 5px solid var(--danger); }
+  .feature-swimlane[data-status="promoted"] { border-left: 5px solid var(--signal); }
+  .feature-swimlane[data-status="reconciliation-required"] { border-left: 5px solid var(--warning); }
+  .swimlane-header { display: flex; justify-content: space-between; align-items: center; gap: 1rem; padding-bottom: 0.75rem; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  .swimlane-title-group { display: flex; align-items: center; gap: 0.65rem; }
+  .feature-id { font-family: var(--font-mono); font-weight: 700; font-size: 1.05rem; }
+  .feature-badges { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
+  .badge { padding: 0.25rem 0.55rem; border: 1px solid var(--line-strong); font-family: var(--font-mono); font-size: 0.68rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; background: var(--surface); }
+  .badge-feature-status { color: var(--ink); border-color: var(--line); }
+  .badge-reconcile[data-reconcile-badge="required"] { background: rgba(255, 198, 92, 0.15); color: var(--warning); border-color: var(--warning); }
+  .badge-lease[data-lease-status="active"] { color: var(--live); border-color: var(--live); }
+  .badge-lease[data-lease-status="expired"] { color: var(--warning); border-color: var(--warning); }
+  .badge-promoted { color: var(--signal); border-color: var(--signal); }
+  .badge-blocked { color: var(--danger); border-color: var(--danger); }
+  .badge-expired { color: var(--warning); border-color: var(--warning); }
+  .swimlane-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1rem; margin-top: 1rem; }
+  .swimlane-section { min-width: 0; padding: 0.85rem; border: 1px solid var(--line); background: var(--surface-deep); display: grid; gap: 0.6rem; align-content: start; }
+  .swimlane-section-title { margin: 0 0 0.35rem; color: var(--muted); font-family: var(--font-mono); font-size: 0.65rem; letter-spacing: 0.1em; text-transform: uppercase; }
+  .ref-item, .lease-item, .recon-field { display: flex; justify-content: space-between; gap: 0.5rem; font-family: var(--font-mono); font-size: 0.76rem; overflow-wrap: anywhere; }
+  .ref-label, .lease-label, .recon-label, .attempt-label { color: var(--muted); font-size: 0.68rem; text-transform: uppercase; }
+  .ref-value, .lease-value, .recon-value, .attempt-value { color: var(--ink); font-weight: 600; text-align: right; }
+  .attempt-card, .overlap-card, .reconcile-card { padding: 0.65rem; border: 1px solid var(--line); background: var(--surface); display: grid; gap: 0.4rem; }
+  .attempt-card[data-status="promoted"] { border-left: 3px solid var(--signal); }
+  .attempt-card[data-status="blocked"] { border-left: 3px solid var(--danger); }
+  .attempt-card[data-status="failed"] { border-left: 3px solid var(--danger); }
+  .attempt-header, .overlap-header, .reconcile-header { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; font-family: var(--font-mono); font-size: 0.75rem; }
+  .overlap-evidence-json, .failure-reason { margin: 0.4rem 0 0; padding: 0.5rem; border: 1px solid var(--line); background: var(--surface-deep); color: #d7dcd7; font-family: var(--font-mono); font-size: 0.72rem; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .evidence-class-badge { font-family: var(--font-mono); font-size: 0.68rem; font-weight: 700; text-transform: uppercase; color: var(--warning); }
+  .evidence-class-badge[data-class="required"] { color: var(--danger); }
+  .evidence-class-badge[data-class="warning"] { color: var(--warning); }
+  .evidence-class-badge[data-class="informational"] { color: var(--live); }
+  .empty-note { color: var(--muted); font-family: var(--font-mono); font-size: 0.72rem; font-style: italic; }
+  .features-empty { padding: 2.4rem; border: 1px dashed var(--line-strong); background: var(--surface); color: var(--muted); }
+`;
+
+function ensureFeatureSwimlanesContainer() {
+  let container = document.getElementById('feature-swimlanes-container');
+  if (container) return container;
+
+  const activityView = document.getElementById('activity-view');
+  if (!activityView) return null;
+
+  if (!document.getElementById('feature-swimlane-styles')) {
+    const style = document.createElement('style');
+    style.id = 'feature-swimlane-styles';
+    style.textContent = FEATURE_SWIMLANE_STYLES;
+    document.head.appendChild(style);
+  }
+
+  container = document.createElement('section');
+  container.id = 'feature-swimlanes-container';
+  container.className = 'feature-swimlanes';
+  container.setAttribute('aria-labelledby', 'feature-swimlanes-title');
+  container.appendChild(createTextElement('h2', 'sdd-change-title', 'Feature swimlanes'));
+  container.firstChild.id = 'feature-swimlanes-title';
+  activityView.appendChild(container);
+  return container;
+}
+
+function formatTTL(expiresAt, now = Date.now()) {
+  if (!expiresAt) return 'Unavailable';
+  const expiry = Date.parse(expiresAt);
+  if (!Number.isFinite(expiry)) return 'Unavailable';
+  const remainingMs = expiry - now;
+  if (remainingMs <= 0) return 'Expired';
+  const totalSeconds = Math.floor(remainingMs / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  if (hours > 0) return `${hours}h ${minutes}m ${seconds}s`;
+  if (minutes > 0) return `${minutes}m ${seconds}s`;
+  return `${seconds}s`;
+}
+
+function getLeaseStatus(expiresAt, now = Date.now()) {
+  if (!expiresAt) return 'none';
+  const expiry = Date.parse(expiresAt);
+  if (!Number.isFinite(expiry)) return 'none';
+  return expiry <= now ? 'expired' : 'active';
+}
+
+function normalizeFeatureSwimlanes(state, now = Date.now()) {
+  const rawFeatures = [
+    ...asArray(state, 'features', 'Features'),
+    ...asArray(state, 'feature_swimlanes', 'FeatureSwimlanes', 'swimlanes', 'Swimlanes')
+  ];
+  const allLeases = [
+    ...asArray(state, 'leases', 'Leases'),
+    ...asArray(state, 'feature_leases', 'FeatureLeases')
+  ];
+  const allAttempts = [
+    ...asArray(state, 'attempts', 'Attempts'),
+    ...asArray(state, 'integration_attempts', 'IntegrationAttempts')
+  ];
+  const allOverlaps = [
+    ...asArray(state, 'overlap_evidence', 'OverlapEvidence'),
+    ...asArray(state, 'overlaps', 'Overlaps')
+  ];
+  const allReconciliations = [
+    ...asArray(state, 'reconciliations', 'Reconciliations'),
+    ...asArray(state, 'reconciliation_requests', 'ReconciliationRequests')
+  ];
+
+  const leasesByFeature = new Map();
+  allLeases.forEach(lease => {
+    const featID = String(field(lease, 'feature_id', 'FeatureID') || '');
+    if (featID) leasesByFeature.set(featID, lease);
+  });
+
+  const attemptsByFeature = new Map();
+  allAttempts.forEach(attempt => {
+    const featID = String(field(attempt, 'feature_id', 'FeatureID') || '');
+    if (featID) {
+      if (!attemptsByFeature.has(featID)) attemptsByFeature.set(featID, []);
+      attemptsByFeature.get(featID).push(attempt);
+    }
+  });
+
+  const overlapsByFeature = new Map();
+  allOverlaps.forEach(overlap => {
+    const featID = String(field(overlap, 'feature_id', 'FeatureID') || '');
+    if (featID) {
+      if (!overlapsByFeature.has(featID)) overlapsByFeature.set(featID, []);
+      overlapsByFeature.get(featID).push(overlap);
+    }
+  });
+
+  const reconciliationsByFeature = new Map();
+  allReconciliations.forEach(recon => {
+    const featID = String(field(recon, 'feature_id', 'FeatureID') || '');
+    if (featID) {
+      if (!reconciliationsByFeature.has(featID)) reconciliationsByFeature.set(featID, []);
+      reconciliationsByFeature.get(featID).push(recon);
+    }
+  });
+
+  const normalized = new Map();
+
+  rawFeatures.forEach((feature, index) => {
+    const featureID = String(field(feature, 'id', 'ID', 'feature_id', 'FeatureID') || `feature-${index + 1}`);
+    const featureStatus = String(field(feature, 'status', 'Status') || 'active').toLowerCase();
+    const parentRef = String(field(feature, 'parent_ref', 'ParentRef') || 'Unavailable');
+    const baseSHA = String(field(feature, 'base_sha', 'BaseSHA') || 'Unavailable');
+    const expectedParentSHA = String(field(feature, 'expected_parent_sha', 'ExpectedParentSHA') || 'Unavailable');
+
+    // Lease
+    const leaseData = field(feature, 'lease', 'Lease') || leasesByFeature.get(featureID) || {};
+    const leaseOwner = String(field(leaseData, 'owner', 'Owner', 'holder', 'Holder', 'lease_owner', 'LeaseOwner') || 'None');
+    const leaseFenceRaw = field(leaseData, 'fence', 'Fence', 'lease_fence', 'LeaseFence');
+    const leaseFence = leaseFenceRaw !== undefined && leaseFenceRaw !== null ? String(leaseFenceRaw) : '0';
+    const leaseExpiresAt = field(leaseData, 'expires_at', 'ExpiresAt', 'lease_expires_at', 'LeaseExpiresAt');
+    const leaseTTL = formatTTL(leaseExpiresAt, now);
+    const leaseStatus = getLeaseStatus(leaseExpiresAt, now);
+
+    // Attempts
+    const rawAttempts = [
+      ...asArray(feature, 'attempts', 'Attempts', 'integration_attempts', 'IntegrationAttempts'),
+      ...(attemptsByFeature.get(featureID) || [])
+    ];
+    const attempts = rawAttempts.map((attempt, aIdx) => {
+      const attemptID = String(field(attempt, 'id', 'ID', 'attempt_id', 'AttemptID') || `attempt-${aIdx + 1}`);
+      const attemptStatus = String(field(attempt, 'status', 'Status') || 'recorded').toLowerCase();
+      const candidateSHA = String(field(attempt, 'candidate_sha', 'CandidateSHA') || 'Unavailable');
+      const failureReason = String(field(attempt, 'failure_reason', 'FailureReason', 'reason', 'Reason') || '');
+      const fence = field(attempt, 'fence', 'Fence');
+      const owner = field(attempt, 'owner', 'Owner');
+      return {
+        id: attemptID,
+        status: attemptStatus,
+        candidateSHA,
+        failureReason,
+        fence: fence !== undefined && fence !== null ? String(fence) : '',
+        owner: owner ? String(owner) : ''
+      };
+    });
+
+    // Overlap Evidence
+    const rawOverlaps = [
+      ...asArray(feature, 'overlap_evidence', 'OverlapEvidence', 'overlaps', 'Overlaps', 'overlap', 'Overlap'),
+      ...(overlapsByFeature.get(featureID) || [])
+    ];
+    const overlapEvidence = rawOverlaps.map((overlap, oIdx) => {
+      const overlapID = String(field(overlap, 'id', 'ID') || `overlap-${oIdx + 1}`);
+      const version = String(field(overlap, 'version', 'Version') || '');
+      const evidenceClass = String(field(overlap, 'evidence_class', 'EvidenceClass', 'class', 'Class') || 'informational').toLowerCase();
+      const evidenceHash = String(field(overlap, 'evidence_hash', 'EvidenceHash', 'hash', 'Hash') || '');
+      let evidenceJSON = field(overlap, 'evidence_json', 'EvidenceJSON', 'json', 'JSON', 'evidence', 'Evidence');
+      if (typeof evidenceJSON === 'object' && evidenceJSON !== null) {
+        evidenceJSON = JSON.stringify(evidenceJSON, null, 2);
+      } else {
+        evidenceJSON = String(evidenceJSON || '');
+      }
+      return {
+        id: overlapID,
+        version,
+        evidenceClass,
+        evidenceHash,
+        evidenceJSON
+      };
+    });
+
+    // Reconciliations
+    const rawReconciliations = [
+      ...asArray(feature, 'reconciliations', 'Reconciliations', 'reconciliation_requests', 'ReconciliationRequests'),
+      ...(reconciliationsByFeature.get(featureID) || [])
+    ];
+    const reconciliations = rawReconciliations.map((recon, rIdx) => {
+      const reconID = String(field(recon, 'id', 'ID') || `recon-${rIdx + 1}`);
+      const reconStatus = String(field(recon, 'status', 'Status') || 'awaiting').toLowerCase();
+      const direction = String(field(recon, 'direction', 'Direction') || '');
+      const actor = String(field(recon, 'actor', 'Actor') || '');
+      const reconExpiresAt = field(recon, 'expires_at', 'ExpiresAt');
+      return {
+        id: reconID,
+        status: reconStatus,
+        direction,
+        actor,
+        expiresAt: reconExpiresAt
+      };
+    });
+
+    // Determine states
+    const hasReconRequired = reconciliations.some(r => r.status === 'awaiting') ||
+      overlapEvidence.some(o => o.evidenceClass === 'required') ||
+      Boolean(field(feature, 'reconciliation_required', 'ReconciliationRequired'));
+
+    const isPromoted = attempts.some(a => a.status === 'promoted') || featureStatus === 'promoted';
+    const isBlocked = attempts.some(a => a.status === 'blocked') || featureStatus === 'blocked';
+    const isExpired = leaseStatus === 'expired' || featureStatus === 'expired';
+
+    let primaryStatus = featureStatus;
+    if (isPromoted) primaryStatus = 'promoted';
+    else if (isBlocked) primaryStatus = 'blocked';
+    else if (hasReconRequired) primaryStatus = 'reconciliation-required';
+    else if (isExpired) primaryStatus = 'expired';
+    else if (featureStatus === 'active') primaryStatus = 'active';
+
+    normalized.set(featureID, {
+      key: featureID,
+      id: featureID,
+      status: primaryStatus,
+      featureStatus,
+      parentRef,
+      baseSHA,
+      expectedParentSHA,
+      lease: {
+        owner: leaseOwner,
+        fence: leaseFence,
+        expiresAt: leaseExpiresAt,
+        ttl: leaseTTL,
+        status: leaseStatus
+      },
+      attempts,
+      overlapEvidence,
+      reconciliations,
+      reconciliationRequired: hasReconRequired,
+      isPromoted,
+      isBlocked,
+      isExpired
+    });
+  });
+
+  return Array.from(normalized.values());
+}
+
+function buildFeatureSwimlaneDOM(card, feature) {
+  card.dataset.status = feature.status;
+  card.dataset.featureStatus = feature.featureStatus;
+  card.dataset.leaseStatus = feature.lease.status;
+  if (feature.reconciliationRequired) {
+    card.setAttribute('data-reconcile-required', 'true');
+  } else {
+    card.removeAttribute('data-reconcile-required');
+  }
+
+  const fragment = document.createDocumentFragment();
+
+  // Header
+  const header = document.createElement('div');
+  header.className = 'swimlane-header';
+
+  const titleGroup = document.createElement('div');
+  titleGroup.className = 'swimlane-title-group';
+  const featureID = document.createElement('span');
+  featureID.className = 'feature-id';
+  featureID.textContent = `Feature: ${feature.id}`;
+  const statusBadge = document.createElement('span');
+  statusBadge.className = 'badge badge-feature-status';
+  statusBadge.textContent = feature.featureStatus;
+  titleGroup.append(featureID, statusBadge);
+
+  const badges = document.createElement('div');
+  badges.className = 'feature-badges';
+
+  if (feature.reconciliationRequired) {
+    const reconBadge = document.createElement('span');
+    reconBadge.className = 'badge badge-reconcile';
+    reconBadge.setAttribute('data-reconcile-badge', 'required');
+    reconBadge.textContent = 'Reconciliation required';
+    badges.appendChild(reconBadge);
+  }
+
+  if (feature.lease && feature.lease.owner && feature.lease.owner !== 'None') {
+    const leaseBadge = document.createElement('span');
+    leaseBadge.className = 'badge badge-lease';
+    leaseBadge.setAttribute('data-lease-status', feature.lease.status);
+    leaseBadge.textContent = `Lease: ${feature.lease.status} (${feature.lease.ttl})`;
+    badges.appendChild(leaseBadge);
+  }
+
+  if (feature.isPromoted) {
+    const promotedBadge = document.createElement('span');
+    promotedBadge.className = 'badge badge-promoted';
+    promotedBadge.setAttribute('data-attempt-status', 'promoted');
+    promotedBadge.textContent = 'Promoted';
+    badges.appendChild(promotedBadge);
+  }
+
+  if (feature.isBlocked) {
+    const blockedBadge = document.createElement('span');
+    blockedBadge.className = 'badge badge-blocked';
+    blockedBadge.setAttribute('data-attempt-status', 'blocked');
+    blockedBadge.textContent = 'Blocked';
+    badges.appendChild(blockedBadge);
+  }
+
+  if (feature.isExpired) {
+    const expiredBadge = document.createElement('span');
+    expiredBadge.className = 'badge badge-expired';
+    expiredBadge.setAttribute('data-status', 'expired');
+    expiredBadge.textContent = 'Expired';
+    badges.appendChild(expiredBadge);
+  }
+
+  header.append(titleGroup, badges);
+  fragment.appendChild(header);
+
+  // Grid of sections
+  const grid = document.createElement('div');
+  grid.className = 'swimlane-grid';
+
+  // 1. Refs Section
+  const refsSection = document.createElement('section');
+  refsSection.className = 'swimlane-section refs-section';
+  refsSection.setAttribute('aria-label', 'Parent and base references');
+  refsSection.appendChild(createTextElement('h4', 'swimlane-section-title', 'Parent / Base refs'));
+
+  const addRefItem = (label, val) => {
+    const item = document.createElement('div');
+    item.className = 'ref-item';
+    item.appendChild(createTextElement('span', 'ref-label', label));
+    item.appendChild(createTextElement('span', 'ref-value', val));
+    refsSection.appendChild(item);
+  };
+  addRefItem('Parent ref', feature.parentRef);
+  addRefItem('Base SHA', feature.baseSHA);
+  addRefItem('Expected parent SHA', feature.expectedParentSHA);
+  grid.appendChild(refsSection);
+
+  // 2. Lease & TTL Section
+  const leaseSection = document.createElement('section');
+  leaseSection.className = 'swimlane-section lease-section';
+  leaseSection.setAttribute('aria-label', 'Lease holder fence and TTL');
+  leaseSection.appendChild(createTextElement('h4', 'swimlane-section-title', 'Lease & TTL'));
+
+  const addLeaseItem = (label, val) => {
+    const item = document.createElement('div');
+    item.className = 'lease-item';
+    item.appendChild(createTextElement('span', 'lease-label', label));
+    item.appendChild(createTextElement('span', 'lease-value', val));
+    leaseSection.appendChild(item);
+  };
+  addLeaseItem('Lease holder', feature.lease.owner);
+  addLeaseItem('Lease fence', feature.lease.fence);
+  addLeaseItem('Live TTL', feature.lease.ttl);
+  if (feature.lease.expiresAt) {
+    addLeaseItem('Expires at', String(feature.lease.expiresAt));
+  }
+  grid.appendChild(leaseSection);
+
+  // 3. Attempts Section
+  const attemptsSection = document.createElement('section');
+  attemptsSection.className = 'swimlane-section attempts-section';
+  attemptsSection.setAttribute('aria-label', 'Integration attempts');
+  attemptsSection.appendChild(createTextElement('h4', 'swimlane-section-title', 'Integration attempts'));
+
+  if (feature.attempts.length === 0) {
+    attemptsSection.appendChild(createTextElement('div', 'empty-note', 'No integration attempts recorded.'));
+  } else {
+    feature.attempts.forEach(attempt => {
+      const attemptCard = document.createElement('div');
+      attemptCard.className = 'attempt-card';
+      attemptCard.setAttribute('data-attempt-id', attempt.id);
+      attemptCard.setAttribute('data-attempt-status', attempt.status);
+      attemptCard.dataset.status = attempt.status;
+
+      const attemptHeader = document.createElement('div');
+      attemptHeader.className = 'attempt-header';
+      attemptHeader.appendChild(createTextElement('strong', 'attempt-id', attempt.id));
+      attemptHeader.appendChild(createTextElement('span', 'attempt-status', attempt.status));
+      attemptCard.appendChild(attemptHeader);
+
+      const candItem = document.createElement('div');
+      candItem.className = 'ref-item';
+      candItem.appendChild(createTextElement('span', 'attempt-label', 'Candidate SHA'));
+      candItem.appendChild(createTextElement('span', 'attempt-value', attempt.candidateSHA));
+      attemptCard.appendChild(candItem);
+
+      if (attempt.failureReason) {
+        const failItem = document.createElement('div');
+        failItem.className = 'attempt-failure';
+        failItem.appendChild(createTextElement('span', 'attempt-label', 'Failure reason'));
+        const pre = document.createElement('pre');
+        pre.className = 'failure-reason';
+        pre.textContent = attempt.failureReason;
+        failItem.appendChild(pre);
+        attemptCard.appendChild(failItem);
+      }
+      attemptsSection.appendChild(attemptCard);
+    });
+  }
+  grid.appendChild(attemptsSection);
+
+  // 4. Overlap Evidence Section
+  const overlapSection = document.createElement('section');
+  overlapSection.className = 'swimlane-section overlap-section';
+  overlapSection.setAttribute('aria-label', 'Overlap evidence');
+  overlapSection.appendChild(createTextElement('h4', 'swimlane-section-title', 'Overlap evidence'));
+
+  if (feature.overlapEvidence.length === 0) {
+    overlapSection.appendChild(createTextElement('div', 'empty-note', 'No overlap evidence recorded.'));
+  } else {
+    feature.overlapEvidence.forEach(overlap => {
+      const overlapCard = document.createElement('div');
+      overlapCard.className = 'overlap-card';
+      overlapCard.setAttribute('data-evidence-class', overlap.evidenceClass);
+
+      const overlapHeader = document.createElement('div');
+      overlapHeader.className = 'overlap-header';
+      const classBadge = document.createElement('span');
+      classBadge.className = 'evidence-class-badge';
+      classBadge.setAttribute('data-class', overlap.evidenceClass);
+      classBadge.textContent = `Class: ${overlap.evidenceClass}`;
+      const hashSpan = document.createElement('span');
+      hashSpan.className = 'ref-value';
+      hashSpan.textContent = `Hash: ${overlap.evidenceHash || '-'}`;
+      overlapHeader.append(classBadge, hashSpan);
+      overlapCard.appendChild(overlapHeader);
+
+      if (overlap.version) {
+        const verItem = document.createElement('div');
+        verItem.className = 'ref-item';
+        verItem.appendChild(createTextElement('span', 'ref-label', 'Version'));
+        verItem.appendChild(createTextElement('span', 'ref-value', overlap.version));
+        overlapCard.appendChild(verItem);
+      }
+
+      if (overlap.evidenceJSON) {
+        const pre = document.createElement('pre');
+        pre.className = 'overlap-evidence-json';
+        pre.textContent = overlap.evidenceJSON;
+        overlapCard.appendChild(pre);
+      }
+      overlapSection.appendChild(overlapCard);
+    });
+  }
+  grid.appendChild(overlapSection);
+
+  // 5. Reconciliation Section
+  const reconSection = document.createElement('section');
+  reconSection.className = 'swimlane-section reconcile-section';
+  reconSection.setAttribute('aria-label', 'Reconciliation requests');
+  reconSection.appendChild(createTextElement('h4', 'swimlane-section-title', 'Reconciliation'));
+
+  if (feature.reconciliations.length === 0) {
+    reconSection.appendChild(createTextElement('div', 'empty-note', 'No reconciliation requests.'));
+  } else {
+    feature.reconciliations.forEach(recon => {
+      const reconCard = document.createElement('div');
+      reconCard.className = 'reconcile-card';
+      reconCard.setAttribute('data-reconcile-status', recon.status);
+      reconCard.dataset.status = recon.status;
+
+      const reconHeader = document.createElement('div');
+      reconHeader.className = 'reconcile-header';
+      reconHeader.appendChild(createTextElement('strong', 'recon-id', recon.id));
+      reconHeader.appendChild(createTextElement('span', 'recon-status', `Status: ${recon.status}`));
+      reconCard.appendChild(reconHeader);
+
+      if (recon.direction) {
+        const dirItem = document.createElement('div');
+        dirItem.className = 'recon-field';
+        dirItem.appendChild(createTextElement('span', 'recon-label', 'Direction'));
+        dirItem.appendChild(createTextElement('span', 'recon-value', recon.direction));
+        reconCard.appendChild(dirItem);
+      }
+      if (recon.actor) {
+        const actorItem = document.createElement('div');
+        actorItem.className = 'recon-field';
+        actorItem.appendChild(createTextElement('span', 'recon-label', 'Actor'));
+        actorItem.appendChild(createTextElement('span', 'recon-value', recon.actor));
+        reconCard.appendChild(actorItem);
+      }
+      reconSection.appendChild(reconCard);
+    });
+  }
+  grid.appendChild(reconSection);
+
+  fragment.appendChild(grid);
+  card.replaceChildren(fragment);
+}
+
+function createFeatureSwimlaneCard(feature) {
+  const card = document.createElement('article');
+  card.className = 'feature-swimlane';
+  card.setAttribute('data-feature-key', feature.key);
+  buildFeatureSwimlaneDOM(card, feature);
+  return card;
+}
+
+function updateFeatureSwimlaneCard(card, feature) {
+  card.setAttribute('data-feature-key', feature.key);
+  buildFeatureSwimlaneDOM(card, feature);
+}
+
+function patchFeatureSwimlanes(container, features) {
+  const currentCards = new Map();
+  container.querySelectorAll('[data-feature-key]').forEach(card => {
+    currentCards.set(card.getAttribute('data-feature-key'), card);
+  });
+
+  const activeKeys = new Set();
+  features.forEach(feature => {
+    activeKeys.add(feature.key);
+    const existing = currentCards.get(feature.key);
+    if (existing) {
+      updateFeatureSwimlaneCard(existing, feature);
+    } else {
+      container.appendChild(createFeatureSwimlaneCard(feature));
+    }
+  });
+
+  currentCards.forEach((card, key) => {
+    if (!activeKeys.has(key)) card.remove();
+  });
+
+  let emptyState = container.querySelector('[data-features-empty]');
+  if (features.length === 0 && !emptyState) {
+    emptyState = document.createElement('div');
+    emptyState.className = 'features-empty empty-state';
+    emptyState.setAttribute('data-features-empty', '');
+    emptyState.textContent = 'No features reported.';
+    container.appendChild(emptyState);
+  } else if (features.length > 0 && emptyState) {
+    emptyState.remove();
+  }
+}
+
+function renderFeatureSwimlanes(container, features) {
+  if (!container) return;
+  patchFeatureSwimlanes(container, Array.isArray(features) ? features : []);
+}
+
 function renderState(state) {
   const approver = document.getElementById('approver-name');
   const rate = document.getElementById('approver-rate');
@@ -633,6 +1201,9 @@ function renderState(state) {
 
   const sddFlows = Array.isArray(state.sdd_flows) ? state.sdd_flows : [];
   renderSDDFlows(ensureSDDFlowsContainer(), sddFlows);
+
+  const features = normalizeFeatureSwimlanes(state, Date.now());
+  renderFeatureSwimlanes(ensureFeatureSwimlanesContainer(), features);
 }
 
 function createTextElement(tagName, className, text) {
