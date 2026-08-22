@@ -3,7 +3,6 @@
 
 # local agent state
 .codegraph/
-.engram/
 .atl/
 *skill-registry*
 
