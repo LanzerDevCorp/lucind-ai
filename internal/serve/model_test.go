@@ -3,16 +3,20 @@ package serve_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"go/parser"
 	"go/token"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/LanzerDevCorp/lucind-ai/internal/feature"
+	"github.com/LanzerDevCorp/lucind-ai/internal/lane"
 	"github.com/LanzerDevCorp/lucind-ai/internal/ledger"
 	"github.com/LanzerDevCorp/lucind-ai/internal/overlap"
 	"github.com/LanzerDevCorp/lucind-ai/internal/reconcile"
@@ -589,6 +593,173 @@ func assertObservableCore(t *testing.T, got serve.ReconciliationRequest, actor, 
 	}
 	if got.TargetSHA != targetSHA {
 		t.Errorf("TargetSHA = %q, want %q", got.TargetSHA, targetSHA)
+	}
+}
+
+func TestModelRunLaneAndProgressJSONContract(t *testing.T) {
+	ctx := context.Background()
+	l := openModelLedger(t)
+	started := time.Date(2026, 8, 22, 10, 0, 0, 0, time.UTC)
+	ended := started.Add(10 * time.Minute)
+	for _, run := range []ledger.Run{
+		{RunID: "run-old", FeatureID: "feature-old", Status: "done", TargetRef: "refs/heads/old", StartedAt: started.Add(-time.Hour)},
+		{RunID: "run-1", FeatureID: "feature-1", Status: "running", TargetRef: "refs/heads/feature-1", LaneCount: 2, StartedAt: started, EndedAt: &ended},
+	} {
+		if err := l.RegisterRun(ctx, run); err != nil {
+			t.Fatalf("RegisterRun(%s): %v", run.RunID, err)
+		}
+	}
+	for _, ln := range []ledger.Lane{
+		{RunID: "run-1", LaneID: "lane-b", PacketID: "packet-b", Executor: "agy", RoutingCondition: "fallback", Status: lane.Done, WorktreePath: "/tmp/lane-b", WorktreePreserved: true, Attempt: 2},
+		{RunID: "run-1", LaneID: "lane-a", PacketID: "packet-a", Executor: "opencode", RoutingCondition: "primary", Status: lane.Running},
+	} {
+		if err := l.RegisterLane(ctx, ln); err != nil {
+			t.Fatalf("RegisterLane(%s): %v", ln.LaneID, err)
+		}
+	}
+	metadata := ledger.LaneMetadata{
+		RunID: "run-1", LaneID: "lane-a", Model: "gpt-5.6", Agent: "builder",
+		SDDPhase: "apply", FanoutGroup: "serve", Change: "control-room",
+		Feature: "feature-1", AllowedPaths: []string{"internal/serve/model.go"},
+		Dependencies: []string{"ledger-progress"}, BodyDigest: "sha256:abc",
+	}
+	if err := l.UpdateLaneMetadata(ctx, metadata, started); err != nil {
+		t.Fatalf("UpdateLaneMetadata: %v", err)
+	}
+	if err := l.RequestApproval(ctx, ledger.Approval{RunID: "run-1", LaneID: "lane-a", PacketID: "packet-a", RequestedAt: started}); err != nil {
+		t.Fatalf("RequestApproval: %v", err)
+	}
+	for _, seq := range []int64{3, 1, 2} {
+		if err := l.AppendProgress(ctx, ledger.LaneProgress{RunID: "run-1", LaneID: "lane-a", Seq: seq, Message: fmt.Sprintf("chunk-%d", seq), At: started.Add(time.Duration(seq) * time.Second)}); err != nil {
+			t.Fatalf("AppendProgress(%d): %v", seq, err)
+		}
+	}
+
+	m := serve.NewModel(l)
+	run, err := m.GetRun(ctx, "run-1")
+	if err != nil {
+		t.Fatalf("GetRun: %v", err)
+	}
+	assertJSON(t, run, `{"run_id":"run-1","feature_id":"feature-1","status":"running","target_ref":"refs/heads/feature-1","lane_count":2,"started_at":"2026-08-22T10:00:00Z","ended_at":"2026-08-22T10:10:00Z","lane_status_counts":{"pending":0,"running":1,"done":1,"blocked":0,"deviated":0,"failed":0},"pending_approvals":1}`)
+	if summary, err := m.GetRunSummary(ctx, "run-1"); err != nil || !reflect.DeepEqual(summary, run) {
+		t.Fatalf("GetRunSummary = %+v, %v; want GetRun result", summary, err)
+	}
+
+	runs, err := m.ListRuns(ctx)
+	if err != nil {
+		t.Fatalf("ListRuns: %v", err)
+	}
+	if len(runs) != 2 || runs[0].RunID != "run-1" || runs[1].RunID != "run-old" {
+		t.Fatalf("ListRuns order = %+v, want run-1 then run-old", runs)
+	}
+
+	lanes, err := m.ListLanes(ctx, "run-1")
+	if err != nil {
+		t.Fatalf("ListLanes: %v", err)
+	}
+	if len(lanes) != 2 || lanes[0].LaneID != "lane-a" || lanes[1].LaneID != "lane-b" {
+		t.Fatalf("ListLanes order = %+v, want lane-a then lane-b", lanes)
+	}
+	assertJSON(t, lanes[0], `{"run_id":"run-1","lane_id":"lane-a","packet_id":"packet-a","executor":"opencode","routing_condition":"primary","status":"running","worktree_path":"","worktree_preserved":false,"attempt":1,"started_at":null,"ended_at":null,"model":"gpt-5.6","agent":"builder","feature":"feature-1","sdd_phase":"apply","fanout_group":"serve","change":"control-room","allowed_paths":["internal/serve/model.go"],"dependencies":["ledger-progress"],"body_digest":"sha256:abc"}`)
+	if got, err := m.GetLane(ctx, "run-1", "lane-a"); err != nil || got.LaneID != lanes[0].LaneID {
+		t.Fatalf("GetLane = %+v, %v; want lane-a", got, err)
+	}
+	if _, err := m.GetLane(ctx, "run-1", "missing"); !errors.Is(err, ledger.ErrLaneUnknown) {
+		t.Fatalf("GetLane(missing) error = %v, want ledger.ErrLaneUnknown", err)
+	}
+
+	progress, err := m.GetLaneProgress(ctx, "run-1", "lane-a", 1)
+	if err != nil {
+		t.Fatalf("GetLaneProgress: %v", err)
+	}
+	assertJSON(t, progress, `[{"run_id":"run-1","lane_id":"lane-a","seq":2,"message":"chunk-2","at":"2026-08-22T10:00:02Z"},{"run_id":"run-1","lane_id":"lane-a","seq":3,"message":"chunk-3","at":"2026-08-22T10:00:03Z"}]`)
+
+	if _, err := m.GetRun(ctx, "missing"); !errors.Is(err, ledger.ErrRunUnknown) {
+		t.Fatalf("GetRun(missing) error = %v, want ledger.ErrRunUnknown", err)
+	}
+}
+
+func TestModelDerivedFlowBatchAndOverview(t *testing.T) {
+	ctx := context.Background()
+	l := openModelLedger(t)
+	at := time.Date(2026, 8, 22, 11, 0, 0, 0, time.UTC)
+	if err := l.RegisterRun(ctx, ledger.Run{RunID: "run-flow", Status: "running", LaneCount: 2, StartedAt: at}); err != nil {
+		t.Fatalf("RegisterRun: %v", err)
+	}
+	for _, ln := range []ledger.Lane{
+		{RunID: "run-flow", LaneID: "lane-a", PacketID: "a", Executor: "agy", RoutingCondition: "a", Status: lane.Done},
+		{RunID: "run-flow", LaneID: "lane-b", PacketID: "b", Executor: "agy", RoutingCondition: "b", Status: lane.Blocked, WorktreePreserved: true},
+	} {
+		if err := l.RegisterLane(ctx, ln); err != nil {
+			t.Fatalf("RegisterLane: %v", err)
+		}
+		if err := l.UpdateLaneMetadata(ctx, ledger.LaneMetadata{RunID: ln.RunID, LaneID: ln.LaneID, Change: "control-room", SDDPhase: "apply", FanoutGroup: "serve"}, at); err != nil {
+			t.Fatalf("UpdateLaneMetadata: %v", err)
+		}
+	}
+	if err := l.AppendEvent(ctx, ledger.Event{RunID: "run-flow", LaneID: "lane-b", Type: ledger.EventLaneNote, Detail: "blocked by schema", At: at}); err != nil {
+		t.Fatalf("AppendEvent: %v", err)
+	}
+
+	m := serve.NewModel(l)
+	flows, err := m.ListSDDFlows(ctx)
+	if err != nil {
+		t.Fatalf("ListSDDFlows: %v", err)
+	}
+	assertJSON(t, flows, `[{"run_id":"run-flow","change":"control-room","sdd_phase":"apply","fanout_group":"serve","status":"blocked","lane_count":2,"lane_ids":["lane-a","lane-b"]}]`)
+	overview, err := m.GetOverview(ctx)
+	if err != nil {
+		t.Fatalf("GetOverview: %v", err)
+	}
+	assertJSON(t, overview, `{"status":"blocked","run_count":1,"active_run_count":1,"lane_count":2,"lane_status_counts":{"pending":0,"running":0,"done":1,"blocked":1,"deviated":0,"failed":0},"pending_approvals":0,"flow_count":1}`)
+	batch, err := m.ListBatchLanes(ctx, "run-flow")
+	if err != nil {
+		t.Fatalf("ListBatchLanes: %v", err)
+	}
+	if len(batch) != 2 || batch[1].Note != "blocked by schema" || !batch[1].Outcome.Released {
+		t.Fatalf("ListBatchLanes = %+v, want latest note and released outcome", batch)
+	}
+	assertJSON(t, batch[1].Outcome, `{"released":true,"integrate":["lane-a"],"preserve":["lane-b"]}`)
+}
+
+func TestModelNewListsAreNonNilAndDatabaseErrorsRemainObservable(t *testing.T) {
+	ctx := context.Background()
+	l := openModelLedger(t)
+	m := serve.NewModel(l)
+	for name, query := range map[string]func() (any, error){
+		"runs":     func() (any, error) { return m.ListRuns(ctx) },
+		"lanes":    func() (any, error) { return m.ListLanes(ctx, "missing") },
+		"progress": func() (any, error) { return m.GetLaneProgress(ctx, "missing", "missing", 0) },
+		"flows":    func() (any, error) { return m.ListSDDFlows(ctx) },
+		"batch":    func() (any, error) { return m.ListBatchLanes(ctx, "missing") },
+	} {
+		got, err := query()
+		if err != nil {
+			t.Fatalf("%s empty query: %v", name, err)
+		}
+		assertJSON(t, got, `[]`)
+	}
+	overview, err := m.GetOverview(ctx)
+	if err != nil {
+		t.Fatalf("GetOverview empty query: %v", err)
+	}
+	assertJSON(t, overview, `{"status":"empty","run_count":0,"active_run_count":0,"lane_count":0,"lane_status_counts":{"pending":0,"running":0,"done":0,"blocked":0,"deviated":0,"failed":0},"pending_approvals":0,"flow_count":0}`)
+	if err := l.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if _, err := m.ListRuns(ctx); err == nil {
+		t.Fatal("ListRuns on closed DB error = nil, want observable database error")
+	}
+}
+
+func assertJSON(t *testing.T, value any, want string) {
+	t.Helper()
+	got, err := json.Marshal(value)
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	if string(got) != want {
+		t.Errorf("JSON = %s\nwant = %s", got, want)
 	}
 }
 
