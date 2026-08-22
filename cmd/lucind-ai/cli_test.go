@@ -5,6 +5,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1922,6 +1925,259 @@ func TestServeFlagsAndSubcommandRecognized(t *testing.T) {
 	code := run(context.Background(), []string{"serve", "--invalid-flag"}, &stdout, &stderr)
 	if code == 0 {
 		t.Fatalf("serve with invalid flag exit code = 0, want non-zero")
+	}
+}
+
+func startTestServe(t *testing.T, primaryRoot string, args []string) (string, func()) {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("net.Listen: %v", err)
+	}
+	addr := ln.Addr().String()
+	_ = ln.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	var stdout, stderr bytes.Buffer
+	serveArgs := append([]string{"serve", "--addr", addr}, args...)
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(primaryRoot); err != nil {
+		t.Fatal(err)
+	}
+
+	done := make(chan int, 1)
+	go func() {
+		done <- run(ctx, serveArgs, &stdout, &stderr)
+	}()
+
+	var ready bool
+	client := &http.Client{Timeout: 500 * time.Millisecond}
+	for i := 0; i < 50; i++ {
+		time.Sleep(20 * time.Millisecond)
+		resp, err := client.Get("http://" + addr + "/api/state")
+		if err == nil {
+			_ = resp.Body.Close()
+			ready = true
+			break
+		}
+	}
+	if !ready {
+		cancel()
+		_ = os.Chdir(cwd)
+		t.Fatalf("serve did not become ready at %s: stderr=%s, stdout=%s", addr, stderr.String(), stdout.String())
+	}
+
+	cleanup := func() {
+		cancel()
+		<-done
+		_ = os.Chdir(cwd)
+	}
+	return addr, cleanup
+}
+
+func TestServeDefaultDisabledBehavior(t *testing.T) {
+	primaryRoot := initRepo(t)
+	l, err := ledger.Open(context.Background(), primaryRoot)
+	if err != nil {
+		t.Fatalf("ledger.Open: %v", err)
+	}
+	defer l.Close()
+
+	if err := l.RequestApproval(context.Background(), ledger.Approval{
+		RunID:       "run-default",
+		LaneID:      "lane-default",
+		PacketID:    "packet-default",
+		Evidence:    "main.go:10",
+		RequestedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("RequestApproval: %v", err)
+	}
+
+	addr, cleanup := startTestServe(t, primaryRoot, nil)
+	defer cleanup()
+
+	client := &http.Client{Timeout: 2 * time.Second}
+
+	// Decision attempt with default disabled dispatch
+	req, err := http.NewRequest(http.MethodPost, "http://"+addr+"/approvals/run-default/lane-default", strings.NewReader(`{"decision":"approved"}`))
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Origin", "http://"+addr)
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("POST decision: %v", err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("POST decision status = %d, want 403 Forbidden (body: %s)", resp.StatusCode, string(body))
+	}
+	if !strings.Contains(string(body), "dispatch control disabled") {
+		t.Errorf("POST decision body = %q, want 'dispatch control disabled'", string(body))
+	}
+
+	// Defect attempt with default disabled dispatch
+	reqDefect, err := http.NewRequest(http.MethodPost, "http://"+addr+"/approvals/run-default/lane-default/defect", strings.NewReader(`{"defect":true}`))
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	reqDefect.Header.Set("Content-Type", "application/json")
+	reqDefect.Header.Set("Origin", "http://"+addr)
+	respDefect, err := client.Do(reqDefect)
+	if err != nil {
+		t.Fatalf("POST defect: %v", err)
+	}
+	defer respDefect.Body.Close()
+	bodyDefect, _ := io.ReadAll(respDefect.Body)
+
+	if respDefect.StatusCode != http.StatusForbidden {
+		t.Errorf("POST defect status = %d, want 403 Forbidden (body: %s)", respDefect.StatusCode, string(bodyDefect))
+	}
+	if !strings.Contains(string(bodyDefect), "dispatch control disabled") {
+		t.Errorf("POST defect body = %q, want 'dispatch control disabled'", string(bodyDefect))
+	}
+
+	// Verify ledger state unchanged
+	app, err := l.Approval(context.Background(), "run-default", "lane-default")
+	if err != nil {
+		t.Fatalf("Approval: %v", err)
+	}
+	if app.Decision != ledger.DecisionPending {
+		t.Errorf("approval decision = %v, want pending", app.Decision)
+	}
+}
+
+func TestServeExplicitEnabledBehavior(t *testing.T) {
+	primaryRoot := initRepo(t)
+	l, err := ledger.Open(context.Background(), primaryRoot)
+	if err != nil {
+		t.Fatalf("ledger.Open: %v", err)
+	}
+	defer l.Close()
+
+	if err := l.RequestApproval(context.Background(), ledger.Approval{
+		RunID:       "run-explicit",
+		LaneID:      "lane-explicit",
+		PacketID:    "packet-explicit",
+		Evidence:    "main.go:20",
+		RequestedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("RequestApproval: %v", err)
+	}
+
+	const token = "secret-token-123"
+	addr, cleanup := startTestServe(t, primaryRoot, []string{"--enable-dispatch", "--dispatch-token", token})
+	defer cleanup()
+
+	client := &http.Client{Timeout: 2 * time.Second}
+
+	// 1. Missing Origin header -> 403 Forbidden (same-origin request required)
+	req1, _ := http.NewRequest(http.MethodPost, "http://"+addr+"/approvals/run-explicit/lane-explicit", strings.NewReader(`{"decision":"approved"}`))
+	req1.Header.Set("Content-Type", "application/json")
+	req1.Header.Set("Authorization", "Bearer "+token)
+	resp1, err := client.Do(req1)
+	if err != nil {
+		t.Fatalf("req1: %v", err)
+	}
+	resp1.Body.Close()
+	if resp1.StatusCode != http.StatusForbidden {
+		t.Errorf("missing Origin status = %d, want 403 Forbidden", resp1.StatusCode)
+	}
+
+	// 2. Cross Origin header -> 403 Forbidden
+	req2, _ := http.NewRequest(http.MethodPost, "http://"+addr+"/approvals/run-explicit/lane-explicit", strings.NewReader(`{"decision":"approved"}`))
+	req2.Header.Set("Content-Type", "application/json")
+	req2.Header.Set("Origin", "http://attacker.example.com")
+	req2.Header.Set("Authorization", "Bearer "+token)
+	resp2, err := client.Do(req2)
+	if err != nil {
+		t.Fatalf("req2: %v", err)
+	}
+	resp2.Body.Close()
+	if resp2.StatusCode != http.StatusForbidden {
+		t.Errorf("cross Origin status = %d, want 403 Forbidden", resp2.StatusCode)
+	}
+
+	// 3. Same Origin but missing token -> 401 Unauthorized
+	req3, _ := http.NewRequest(http.MethodPost, "http://"+addr+"/approvals/run-explicit/lane-explicit", strings.NewReader(`{"decision":"approved"}`))
+	req3.Header.Set("Content-Type", "application/json")
+	req3.Header.Set("Origin", "http://"+addr)
+	resp3, err := client.Do(req3)
+	if err != nil {
+		t.Fatalf("req3: %v", err)
+	}
+	resp3.Body.Close()
+	if resp3.StatusCode != http.StatusUnauthorized {
+		t.Errorf("missing token status = %d, want 401 Unauthorized", resp3.StatusCode)
+	}
+
+	// 4. Same Origin but wrong token -> 401 Unauthorized
+	req4, _ := http.NewRequest(http.MethodPost, "http://"+addr+"/approvals/run-explicit/lane-explicit", strings.NewReader(`{"decision":"approved"}`))
+	req4.Header.Set("Content-Type", "application/json")
+	req4.Header.Set("Origin", "http://"+addr)
+	req4.Header.Set("Authorization", "Bearer wrong-token")
+	resp4, err := client.Do(req4)
+	if err != nil {
+		t.Fatalf("req4: %v", err)
+	}
+	resp4.Body.Close()
+	if resp4.StatusCode != http.StatusUnauthorized {
+		t.Errorf("wrong token status = %d, want 401 Unauthorized", resp4.StatusCode)
+	}
+
+	// 5. Same Origin and valid Bearer token -> 200 OK
+	req5, _ := http.NewRequest(http.MethodPost, "http://"+addr+"/approvals/run-explicit/lane-explicit", strings.NewReader(`{"decision":"approved"}`))
+	req5.Header.Set("Content-Type", "application/json")
+	req5.Header.Set("Origin", "http://"+addr)
+	req5.Header.Set("Authorization", "Bearer "+token)
+	resp5, err := client.Do(req5)
+	if err != nil {
+		t.Fatalf("req5: %v", err)
+	}
+	body5, _ := io.ReadAll(resp5.Body)
+	resp5.Body.Close()
+	if resp5.StatusCode != http.StatusOK {
+		t.Errorf("authorized decision status = %d, want 200 OK (body: %s)", resp5.StatusCode, string(body5))
+	}
+
+	// Verify ledger updated
+	app, err := l.Approval(context.Background(), "run-explicit", "lane-explicit")
+	if err != nil {
+		t.Fatalf("Approval: %v", err)
+	}
+	if app.Decision != ledger.DecisionApproved {
+		t.Errorf("approval decision = %v, want approved", app.Decision)
+	}
+
+	// 6. Defect update with same Origin and valid Bearer token -> 200 OK
+	reqDefect, _ := http.NewRequest(http.MethodPost, "http://"+addr+"/approvals/run-explicit/lane-explicit/defect", strings.NewReader(`{"defect":true}`))
+	reqDefect.Header.Set("Content-Type", "application/json")
+	reqDefect.Header.Set("Origin", "http://"+addr)
+	reqDefect.Header.Set("Authorization", "Bearer "+token)
+	respDefect, err := client.Do(reqDefect)
+	if err != nil {
+		t.Fatalf("reqDefect: %v", err)
+	}
+	bodyDefect, _ := io.ReadAll(respDefect.Body)
+	respDefect.Body.Close()
+	if respDefect.StatusCode != http.StatusOK {
+		t.Errorf("authorized defect status = %d, want 200 OK (body: %s)", respDefect.StatusCode, string(bodyDefect))
+	}
+
+	// Verify defect flag in ledger
+	appAfterDefect, err := l.Approval(context.Background(), "run-explicit", "lane-explicit")
+	if err != nil {
+		t.Fatalf("Approval after defect: %v", err)
+	}
+	if !appAfterDefect.DefectSurfacedLater {
+		t.Errorf("approval DefectSurfacedLater = false, want true")
 	}
 }
 

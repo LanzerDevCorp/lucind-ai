@@ -820,4 +820,66 @@ func TestApprovalsKeepsEvidenceAndNotesAsSafeServerText(t *testing.T) {
 	)
 }
 
+func TestStaticWiringAllSixViewsLoadAndWireState(t *testing.T) {
+	js := readStaticAsset(t, "app.js")
+
+	t.Run("all six view modules are defined", func(t *testing.T) {
+		assertContainsAll(t, "app.js", js,
+			// View 1: Approvals
+			"function normalizeApprovals",
+			"function patchApprovalCards",
+			"function createApprovalCard",
+			"function updateApprovalCard",
+			"function submitDecision",
+			"function submitDefect",
+			// View 2: Fleet
+			"function normalizeFleetState",
+			"function patchFleetCards",
+			"function createFleetCard",
+			"function updateFleetCard",
+			// View 3: Apply DAG
+			"function renderApplyDAG",
+			"function createApplyDAGRegion",
+			// View 4: SDD Flows
+			"function normalizeSDDFlow",
+			"function groupSDDFlowsByChange",
+			"function renderSDDFlows",
+			"function ensureSDDFlowsContainer",
+			// View 5: Feature Swimlanes
+			"function normalizeFeatureSwimlanes",
+			"function renderFeatureSwimlanes",
+			"function patchFeatureSwimlanes",
+			"function ensureFeatureSwimlanesContainer",
+			// View 6: Timeline
+			"function normalizeTimeline",
+			"function renderTimeline",
+			"function patchTimelineItems",
+			"function ensureTimelineContainer",
+		)
+	})
+
+	t.Run("renderState wires all six views into the embedded application", func(t *testing.T) {
+		assertContainsAll(t, "app.js", js,
+			"function renderState(state)",
+			"patchApprovalCards(approvalsContainer, state.approvals || [])",
+			"patchFleetCards(fleetContainer, normalizeFleetState(state, Date.now()))",
+			"renderApplyDAG(state.apply_dag)",
+			"renderSDDFlows(ensureSDDFlowsContainer(), sddFlows)",
+			"renderFeatureSwimlanes(ensureFeatureSwimlanesContainer(), features)",
+			"renderTimeline(ensureTimelineContainer(), timeline)",
+		)
+	})
+
+	t.Run("live store retains /api/state polling fallback", func(t *testing.T) {
+		assertContainsAll(t, "app.js", js,
+			"function createLiveStore",
+			"const POLL_INTERVAL_MS = 2000",
+			"fetchStateImpl('/api/state'",
+			"startPolling('Stream unavailable')",
+			"cachedState = nextState",
+		)
+	})
+}
+
+
 

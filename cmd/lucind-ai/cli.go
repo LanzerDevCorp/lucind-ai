@@ -53,7 +53,7 @@ const attemptOwner = "lucind-ai run"
 // error, so a person driving the binary from a terminal always sees the one
 // invocation that works rather than a stack trace. --packet is repeatable:
 // each occurrence adds one more lane to the batch.
-const usage = "usage: lucind-ai run --packet <path> [--packet <path> ...] [--timeout <duration>] [--approval-timeout <duration>] [--legacy-main] [--expected-parent-sha <sha>]\n       lucind-ai split --dag <path> --out <dir>\n       lucind-ai check [--out <path>]\n       lucind-ai serve [--addr <addr>] [--approver <name>] [--approval-timeout <duration>]\n       lucind-ai feature create --id <id> --parent <ref> --base-sha <sha> [--expected-parent-sha <sha>]\n       lucind-ai feature status [--id <id>]\n       lucind-ai feature recover --attempt <id>\n       lucind-ai feature renew --id <id> --owner <owner> --fence <fence> [--ttl <duration>]\n       lucind-ai reconcile approve --request <id> --source <feature> --target <feature> [--actor <name>]\n       lucind-ai reconcile decline --request <id> [--actor <name>] [--reason <reason>]\n       lucind-ai reconcile cancel --request <id> [--actor <name>] [--reason <reason>]\n       lucind-ai reconcile renew --request <id> [--base-sha <sha>] [--source-sha <sha>] [--target-sha <sha>]\n       lucind-ai reconcile resolve --candidate <id> --sha <sha> [--actor <name>]\n       lucind-ai worktree cleanup --lane <id>\n       lucind-ai --version"
+const usage = "usage: lucind-ai run --packet <path> [--packet <path> ...] [--timeout <duration>] [--approval-timeout <duration>] [--legacy-main] [--expected-parent-sha <sha>]\n       lucind-ai split --dag <path> --out <dir>\n       lucind-ai check [--out <path>]\n       lucind-ai serve [--addr <addr>] [--approver <name>] [--approval-timeout <duration>] [--enable-dispatch] [--dispatch-token <token>]\n       lucind-ai feature create --id <id> --parent <ref> --base-sha <sha> [--expected-parent-sha <sha>]\n       lucind-ai feature status [--id <id>]\n       lucind-ai feature recover --attempt <id>\n       lucind-ai feature renew --id <id> --owner <owner> --fence <fence> [--ttl <duration>]\n       lucind-ai reconcile approve --request <id> --source <feature> --target <feature> [--actor <name>]\n       lucind-ai reconcile decline --request <id> [--actor <name>] [--reason <reason>]\n       lucind-ai reconcile cancel --request <id> [--actor <name>] [--reason <reason>]\n       lucind-ai reconcile renew --request <id> [--base-sha <sha>] [--source-sha <sha>] [--target-sha <sha>]\n       lucind-ai reconcile resolve --candidate <id> --sha <sha> [--actor <name>]\n       lucind-ai worktree cleanup --lane <id>\n       lucind-ai --version"
 
 // depsFactory constructs run.Deps for runDispatch. In production it is
 // productionDeps; tests may override it to inject test doubles or observe dependency calls.
@@ -683,6 +683,8 @@ func serveDispatch(ctx context.Context, args []string, stdout, stderr io.Writer)
 	addr := fs.String("addr", "127.0.0.1:7433", "listen address (loopback only)")
 	approver := fs.String("approver", defaultApprover(), "signed-in approver identity")
 	approvalTimeout := fs.Duration("approval-timeout", 30*time.Minute, "informational only -- does not gate lanes; pass --approval-timeout to 'lucind-ai run' to actually enable the wait")
+	enableDispatch := fs.Bool("enable-dispatch", false, "enable control mutations (approvals/defects)")
+	dispatchToken := fs.String("dispatch-token", "", "bearer token for control mutations when --enable-dispatch is set")
 
 	if err := fs.Parse(args); err != nil {
 		return 1
@@ -711,10 +713,29 @@ func serveDispatch(ctx context.Context, args []string, stdout, stderr io.Writer)
 	}
 	defer ledg.Close()
 
-	opencodeCmd := "opencode run --agent build -m openai/gpt-5.6-sol"
-	handler := serve.NewHandler(ledg, *approver, opencodeCmd)
+	token := *dispatchToken
+	if *enableDispatch && token == "" {
+		token = uuid.New().String()
+	}
 
-	fmt.Fprintf(stdout, "lucind-ai serve listening on http://%s (approver: %s, approval timeout: %s)\n", *addr, *approver, *approvalTimeout)
+	hub := serve.NewHub(ledg, "", serve.HubConfig{})
+	go func() {
+		_ = hub.Run(ctx)
+	}()
+
+	opencodeCmd := "opencode run --agent build -m openai/gpt-5.6-sol"
+	config := serve.HandlerConfig{
+		Hub:            hub,
+		EnableDispatch: *enableDispatch,
+		DispatchToken:  token,
+	}
+	handler := serve.NewHandlerWithConfig(ledg, *approver, opencodeCmd, config)
+
+	if *enableDispatch {
+		fmt.Fprintf(stdout, "lucind-ai serve listening on http://%s (approver: %s, approval timeout: %s, dispatch: enabled)\n", *addr, *approver, *approvalTimeout)
+	} else {
+		fmt.Fprintf(stdout, "lucind-ai serve listening on http://%s (approver: %s, approval timeout: %s)\n", *addr, *approver, *approvalTimeout)
+	}
 
 	if err := serve.ListenAndServe(ctx, *addr, handler); err != nil {
 		fmt.Fprintf(stderr, "lucind-ai: %v\n", err)
