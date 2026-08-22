@@ -435,3 +435,138 @@ func TestSDDFlowViewUsesOnlyServerPayloadFields(t *testing.T) {
 		}
 	}
 }
+
+func TestFeatureSwimlanesViewCoversActiveExpiredBlockedPromotedAndReconciliationStates(t *testing.T) {
+	js := readStaticAsset(t, "app.js")
+
+	tests := []struct {
+		name      string
+		contracts []string
+	}{
+		{
+			name: "active state is explicit for feature and live lease",
+			contracts: []string{
+				"featureStatus === 'active'",
+				`card.dataset.status = feature.status`,
+				`card.dataset.featureStatus = feature.featureStatus`,
+				`[data-status="active"]`,
+				`card.dataset.leaseStatus = feature.lease.status`,
+				"badge-feature-status",
+			},
+		},
+		{
+			name: "expired state covers past lease TTL and expired status",
+			contracts: []string{
+				"formatTTL(expiresAt, now",
+				"return 'Expired'",
+				`card.dataset.leaseStatus = feature.lease.status`,
+				`badge-expired`,
+				`data-status="expired"`,
+				`[data-status="expired"]`,
+			},
+		},
+		{
+			name: "blocked state renders attempt status and diagnostic failure reason",
+			contracts: []string{
+				`setAttribute('data-attempt-status', attempt.status)`,
+				`[data-status="blocked"]`,
+				"badge-blocked",
+				"failure-reason",
+				"Failure reason",
+			},
+		},
+		{
+			name: "promoted state renders promoted badge and candidate SHA",
+			contracts: []string{
+				`setAttribute('data-attempt-status', 'promoted')`,
+				`[data-status="promoted"]`,
+				"badge-promoted",
+				"Candidate SHA",
+			},
+		},
+		{
+			name: "reconciliation-required state renders badge and request details",
+			contracts: []string{
+				"reconciliationRequired",
+				`setAttribute('data-reconcile-badge', 'required')`,
+				"Reconciliation required",
+				`data-reconcile-required`,
+				`[data-status="reconciliation-required"]`,
+				"reconcile-card",
+				"data-reconcile-status",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assertContainsAll(t, "app.js", js, tt.contracts...)
+		})
+	}
+}
+
+func TestFeatureSwimlanesRenderParentBaseRefsLeaseTTLOverlapEvidenceAndReconciliationBadges(t *testing.T) {
+	js := readStaticAsset(t, "app.js")
+	assertContainsAll(t, "app.js", js,
+		"function normalizeFeatureSwimlanes",
+		"function renderFeatureSwimlanes",
+		"function ensureFeatureSwimlanesContainer",
+		"Parent / Base refs",
+		"Parent ref",
+		"Base SHA",
+		"Expected parent SHA",
+		"Lease & TTL",
+		"Lease holder",
+		"Lease fence",
+		"Live TTL",
+		"Integration attempts",
+		"Candidate SHA",
+		"Overlap evidence",
+		"overlap-evidence-json",
+		"Reconciliation",
+		"Reconciliation required",
+	)
+}
+
+func TestFeatureSwimlanesNormalizesGoAndSnakeCaseFieldsWithKeyedPatching(t *testing.T) {
+	js := readStaticAsset(t, "app.js")
+	assertContainsAll(t, "app.js", js,
+		"normalizeFeatureSwimlanes",
+		"'parent_ref', 'ParentRef'",
+		"'base_sha', 'BaseSHA'",
+		"'expected_parent_sha', 'ExpectedParentSHA'",
+		"'expires_at', 'ExpiresAt'",
+		"'candidate_sha', 'CandidateSHA'",
+		"'failure_reason', 'FailureReason'",
+		"'evidence_class', 'EvidenceClass'",
+		"'evidence_hash', 'EvidenceHash'",
+		"'evidence_json', 'EvidenceJSON'",
+		"data-feature-key",
+		"createFeatureSwimlaneCard",
+		"updateFeatureSwimlaneCard",
+		"patchFeatureSwimlanes",
+	)
+
+	for _, badReplacement := range []string{
+		"swimlanesContainer.innerHTML",
+		"featureContainer.innerHTML",
+	} {
+		if strings.Contains(js, badReplacement) {
+			t.Errorf("app.js replaces feature container with %q; live refreshes must patch keyed feature swimlane cards", badReplacement)
+		}
+	}
+}
+
+func TestFeatureSwimlanesKeepsDiagnosticsAndJsonAsSafeServerText(t *testing.T) {
+	js := readStaticAsset(t, "app.js")
+	assertContainsAll(t, "app.js", js,
+		"card.replaceChildren",
+		"pre.className = 'overlap-evidence-json'",
+		"pre.textContent = overlap.evidenceJSON",
+		"pre.className = 'failure-reason'",
+		"pre.textContent = attempt.failureReason",
+		"data-features-empty",
+		"No features reported.",
+	)
+}
+
