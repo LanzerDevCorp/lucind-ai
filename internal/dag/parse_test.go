@@ -150,6 +150,45 @@ packets:
 	}
 }
 
+func TestParse_ReadOnlyFieldRoundTrips(t *testing.T) {
+	dir := t.TempDir()
+	bodiesDir := filepath.Join(dir, "bodies")
+	if err := os.MkdirAll(bodiesDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bodiesDir, "apply-impl.md"), []byte("# Goal\nImpl work"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	yamlContent := `change: apply-dag-dispatch
+packets:
+  - id: apply-impl
+    executor: agy
+    routed_by: implementation depends on failing test
+    allowed_paths:
+      - impl/foo.go
+    read_only:
+      - path/a.go
+    depends_on: []
+    body_path: bodies/apply-impl.md
+`
+	dagPath := filepath.Join(dir, "apply-dag.yaml")
+	if err := os.WriteFile(dagPath, []byte(yamlContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	d, err := dag.Parse(dagPath)
+	if err != nil {
+		t.Fatalf("unexpected error parsing sidecar: %v", err)
+	}
+	if len(d.Packets) != 1 {
+		t.Fatalf("expected 1 packet, got %d", len(d.Packets))
+	}
+	if got := d.Packets[0].ReadOnly; len(got) != 1 || got[0] != "path/a.go" {
+		t.Errorf("ReadOnly = %v, want [path/a.go]", got)
+	}
+}
+
 func TestParse_MissingBodyPathFile(t *testing.T) {
 	dir := t.TempDir()
 	yamlContent := `change: test-change

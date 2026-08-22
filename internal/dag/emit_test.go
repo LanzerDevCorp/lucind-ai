@@ -201,6 +201,65 @@ func TestEmit_AgentFieldOmittedWhenEmpty(t *testing.T) {
 	}
 }
 
+func TestEmit_ReadOnlyEmittedWhenSet(t *testing.T) {
+	tempDir := t.TempDir()
+	bodiesDir := filepath.Join(tempDir, "bodies")
+	if err := os.MkdirAll(bodiesDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := "## Goal\n\nImplement to make test pass\n"
+	if err := os.WriteFile(filepath.Join(bodiesDir, "apply-green.md"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	node := dag.Node{
+		ID:           "apply-green",
+		Executor:     "agy",
+		RoutedBy:     "implementation depends on failing test",
+		AllowedPaths: []string{"impl/foo.go"},
+		ReadOnly:     []string{"test/foo_test.go"},
+		BodyPath:     "bodies/apply-green.md",
+	}
+
+	content, err := dag.EmitPacketContent(node, tempDir)
+	if err != nil {
+		t.Fatalf("EmitPacketContent failed: %v", err)
+	}
+
+	if !strings.Contains(content, `read_only: ["test/foo_test.go"]`) {
+		t.Errorf("expected single-line JSON array for read_only in frontmatter, got:\n%s", content)
+	}
+}
+
+func TestEmit_ReadOnlyOmittedWhenEmpty(t *testing.T) {
+	tempDir := t.TempDir()
+	bodiesDir := filepath.Join(tempDir, "bodies")
+	if err := os.MkdirAll(bodiesDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := "## Goal\n\nLedger CRUD implementation\n"
+	if err := os.WriteFile(filepath.Join(bodiesDir, "apply-ledger.md"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	node := dag.Node{
+		ID:           "apply-ledger",
+		Executor:     "agy",
+		RoutedBy:     "schema and CRUD isolated from HTTP",
+		AllowedPaths: []string{"internal/ledger/"},
+		BodyPath:     "bodies/apply-ledger.md",
+	}
+
+	content, err := dag.EmitPacketContent(node, tempDir)
+	if err != nil {
+		t.Fatalf("EmitPacketContent failed: %v", err)
+	}
+
+	if strings.Contains(content, "read_only:") {
+		t.Errorf("expected no read_only line in emitted packet when omitted, got:\n%s", content)
+	}
+}
+
 func TestEmit_FeatureTargetFieldsRoundTrip(t *testing.T) {
 	tempDir := t.TempDir()
 	bodiesDir := filepath.Join(tempDir, "bodies")

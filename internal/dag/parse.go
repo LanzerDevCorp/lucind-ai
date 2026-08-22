@@ -31,6 +31,7 @@ type Node struct {
 	ExpectedParentSHA string   `yaml:"expected_parent_sha,omitempty"`
 	LegacyMain        bool     `yaml:"legacy_main,omitempty"`
 	AllowedPaths      []string `yaml:"allowed_paths"`
+	ReadOnly          []string `yaml:"read_only,omitempty"`
 	DependsOn         []string `yaml:"depends_on"`
 	BodyPath          string   `yaml:"body_path"`
 }

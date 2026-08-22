@@ -10,8 +10,9 @@ import (
 
 // EmitPacketContent formats the frontmatter and body for a single packet Node.
 // The frontmatter includes id, executor, routed_by, model (if set), agent (if
-// set), and a single-line JSON array for allowed_paths. The body is the
-// Markdown at body_path verbatim.
+// set), a single-line JSON array for allowed_paths, and a single-line JSON
+// array for read_only (if non-empty). The body is the Markdown at body_path
+// verbatim.
 func EmitPacketContent(node Node, baseDir string) (string, error) {
 	fullBodyPath := filepath.Join(baseDir, node.BodyPath)
 	bodyBytes, err := os.ReadFile(fullBodyPath)
@@ -50,6 +51,13 @@ func EmitPacketContent(node Node, baseDir string) (string, error) {
 		return "", fmt.Errorf("dag: failed to marshal allowed_paths for %q: %w", node.ID, err)
 	}
 	b.WriteString(fmt.Sprintf("allowed_paths: %s\n", string(pathsJSON)))
+	if len(node.ReadOnly) > 0 {
+		readOnlyJSON, err := json.Marshal(node.ReadOnly)
+		if err != nil {
+			return "", fmt.Errorf("dag: failed to marshal read_only for %q: %w", node.ID, err)
+		}
+		b.WriteString(fmt.Sprintf("read_only: %s\n", string(readOnlyJSON)))
+	}
 	b.WriteString("---\n\n")
 	b.WriteString(strings.TrimLeft(string(bodyBytes), "\n"))
 

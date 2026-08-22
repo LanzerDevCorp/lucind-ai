@@ -233,6 +233,48 @@ func TestWaves_CrossWaveOverlapAllowedWithEdge(t *testing.T) {
 	}
 }
 
+func TestWaves_ReadOnlyDoesNotTriggerFalseOverlap(t *testing.T) {
+	// B's read_only path exactly equals A's allowed_paths entry. A and B are
+	// properly ordered via depends_on. ReadOnly must never enter the
+	// allowed_paths overlap computation, so Waves must succeed.
+	d := dag.DAG{
+		Change: "test-read-only-no-overlap",
+		Packets: []dag.Node{
+			{
+				ID:           "A",
+				Executor:     "agy",
+				RoutedBy:     "writes failing test",
+				AllowedPaths: []string{"test/foo_test.go"},
+				DependsOn:    []string{},
+				BodyPath:     "bodies/a.md",
+			},
+			{
+				ID:           "B",
+				Executor:     "agy",
+				RoutedBy:     "implements to make test pass",
+				AllowedPaths: []string{"impl/foo.go"},
+				ReadOnly:     []string{"test/foo_test.go"},
+				DependsOn:    []string{"A"},
+				BodyPath:     "bodies/b.md",
+			},
+		},
+	}
+
+	waves, err := dag.Waves(d)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(waves) != 2 {
+		t.Fatalf("expected 2 waves, got %d", len(waves))
+	}
+	if len(waves[0]) != 1 || waves[0][0].ID != "A" {
+		t.Errorf("expected wave 0 to have [A], got: %v", packetIDs(waves[0]))
+	}
+	if len(waves[1]) != 1 || waves[1][0].ID != "B" {
+		t.Errorf("expected wave 1 to have [B], got: %v", packetIDs(waves[1]))
+	}
+}
+
 func packetIDs(nodes []dag.Node) []string {
 	ids := make([]string, len(nodes))
 	for i, n := range nodes {
