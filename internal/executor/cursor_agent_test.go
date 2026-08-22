@@ -114,6 +114,126 @@ func TestCursorAgentRunCapturesStdout(t *testing.T) {
 	}
 }
 
+func TestCursorAgentRunStreamsObservedRecordsAndIgnoresUnknownRecords(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping subprocess test in -short mode")
+	}
+
+	stub := writeCursorStub(t, `#!/bin/sh
+printf '%s\n' \
+  '{"type":"system","subtype":"init","session_id":"session-1"}' \
+  '{"type":"thinking","subtype":"delta","text":"checking files","session_id":"session-1","timestamp_ms":42000}' \
+  '{"type":"future-record","payload":{"new":"shape"}}' \
+  '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"tests pass"}]},"session_id":"session-1","timestamp_ms":43000}' \
+  '{"type":"result","subtype":"success","result":"tests pass","session_id":"session-1"}'
+`)
+	progress := make(chan executor.ProgressEvent, 4)
+
+	outcome, err := (executor.CursorAgent{Binary: stub}).Run(context.Background(), executor.Request{
+		Prompt:       "do the thing",
+		WorktreePath: t.TempDir(),
+		Progress:     progress,
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v, want nil", err)
+	}
+	if outcome.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0", outcome.ExitCode)
+	}
+
+	var got []executor.ProgressEvent
+	for len(progress) > 0 {
+		got = append(got, <-progress)
+	}
+	want := []executor.ProgressEvent{
+		{Message: "checking files", At: time.UnixMilli(42000)},
+		{Message: "tests pass", At: time.UnixMilli(43000)},
+	}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Errorf("progress = %#v, want %#v", got, want)
+	}
+}
+
+func TestCursorAgentRunFallsBackToBlockingJSONWhenStreamIsEmpty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping subprocess test in -short mode")
+	}
+
+	formatsFile := filepath.Join(t.TempDir(), "formats.txt")
+	stub := writeCursorStub(t, fmt.Sprintf(`#!/bin/sh
+format=""
+previous=""
+for argument in "$@"; do
+  if [ "$previous" = "--output-format" ]; then format="$argument"; fi
+  previous="$argument"
+done
+printf '%%s\n' "$format" >> %q
+if [ "$format" = "json" ]; then
+  printf '%%s\n' '{"type":"result","subtype":"success"}'
+fi
+`, formatsFile))
+
+	outcome, err := (executor.CursorAgent{Binary: stub}).Run(context.Background(), executor.Request{
+		Prompt:       "do the thing",
+		WorktreePath: t.TempDir(),
+		Progress:     make(chan executor.ProgressEvent, 1),
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v, want nil", err)
+	}
+	if outcome.Stdout != "{\"type\":\"result\",\"subtype\":\"success\"}\n" {
+		t.Errorf("Stdout = %q, want blocking JSON result", outcome.Stdout)
+	}
+	rawFormats, err := os.ReadFile(formatsFile)
+	if err != nil {
+		t.Fatalf("ReadFile(formats.txt) error = %v", err)
+	}
+	if got, want := string(rawFormats), "stream-json\njson\n"; got != want {
+		t.Errorf("formats = %q, want %q", got, want)
+	}
+}
+
+func TestCursorAgentRunFallsBackToBlockingJSONWhenStreamIsUnparseable(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping subprocess test in -short mode")
+	}
+
+	formatsFile := filepath.Join(t.TempDir(), "formats.txt")
+	stub := writeCursorStub(t, fmt.Sprintf(`#!/bin/sh
+format=""
+previous=""
+for argument in "$@"; do
+  if [ "$previous" = "--output-format" ]; then format="$argument"; fi
+  previous="$argument"
+done
+printf '%%s\n' "$format" >> %q
+if [ "$format" = "stream-json" ]; then
+  printf 'not-json\n'
+else
+  printf '%%s\n' '{"type":"result","subtype":"success"}'
+fi
+`, formatsFile))
+
+	outcome, err := (executor.CursorAgent{Binary: stub}).Run(context.Background(), executor.Request{
+		Prompt:       "do the thing",
+		WorktreePath: t.TempDir(),
+		Progress:     make(chan executor.ProgressEvent, 1),
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v, want nil", err)
+	}
+	if outcome.Stdout != "{\"type\":\"result\",\"subtype\":\"success\"}\n" {
+		t.Errorf("Stdout = %q, want blocking JSON result", outcome.Stdout)
+	}
+	rawFormats, err := os.ReadFile(formatsFile)
+	if err != nil {
+		t.Fatalf("ReadFile(formats.txt) error = %v", err)
+	}
+	if got, want := string(rawFormats), "stream-json\njson\n"; got != want {
+		t.Errorf("formats = %q, want %q", got, want)
+	}
+}
+
 func TestCursorAgentRunUsesWorktreeAsWorkingDirectory(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping subprocess test in -short mode")

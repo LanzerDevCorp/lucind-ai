@@ -3,8 +3,11 @@ package executor
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"io"
 	"os/exec"
+	"strings"
 	"time"
 )
 
@@ -65,12 +68,28 @@ func (c CursorAgent) Run(ctx context.Context, req Request) (Outcome, error) {
 		binary = defaultCursorBinary
 	}
 
+	if req.Progress != nil {
+		capture := &cursorStreamCapture{ctx: ctx, progress: req.Progress}
+		outcome, err := c.run(ctx, req, binary, "stream-json", capture)
+		capture.finish()
+		if err != nil || outcome.TimedOut || capture.parseable() {
+			return outcome, err
+		}
+	}
+
+	return c.run(ctx, req, binary, "json", &bytes.Buffer{})
+}
+
+func (c CursorAgent) run(ctx context.Context, req Request, binary, outputFormat string, stdout cursorOutputCapture) (Outcome, error) {
 	args := []string{
 		"--print", req.Prompt,
-		"--output-format", "json",
+		"--output-format", outputFormat,
 		"--trust",
 		"--force",
 		"--approve-mcps",
+	}
+	if outputFormat == "stream-json" {
+		args = append(args, "--stream-partial-output")
 	}
 	if req.Model != "" {
 		args = append(args, "--model", req.Model)
@@ -88,9 +107,9 @@ func (c CursorAgent) Run(ctx context.Context, req Request) (Outcome, error) {
 	cmd.Dir = req.WorktreePath
 	cmd.WaitDelay = waitDelay
 
-	var stderr, stdout bytes.Buffer
+	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
-	cmd.Stdout = &stdout
+	cmd.Stdout = stdout
 
 	err := cmd.Run()
 
@@ -131,4 +150,101 @@ func (c CursorAgent) Run(ctx context.Context, req Request) (Outcome, error) {
 
 	outcome.ExitCode = 0
 	return outcome, nil
+}
+
+type cursorOutputCapture interface {
+	io.Writer
+	String() string
+}
+
+// cursorStreamCapture decodes only record fields observed from the installed
+// cursor-agent. Valid records with unfamiliar shapes are intentionally ignored.
+type cursorStreamCapture struct {
+	ctx       context.Context
+	progress  chan<- ProgressEvent
+	raw       bytes.Buffer
+	pending   []byte
+	records   int
+	malformed bool
+}
+
+func (c *cursorStreamCapture) Write(p []byte) (int, error) {
+	n, err := c.raw.Write(p)
+	c.pending = append(c.pending, p...)
+	for {
+		newline := bytes.IndexByte(c.pending, '\n')
+		if newline < 0 {
+			break
+		}
+		c.decode(c.pending[:newline])
+		c.pending = c.pending[newline+1:]
+	}
+	return n, err
+}
+
+func (c *cursorStreamCapture) String() string {
+	return c.raw.String()
+}
+
+func (c *cursorStreamCapture) finish() {
+	if len(c.pending) > 0 {
+		c.decode(c.pending)
+		c.pending = nil
+	}
+}
+
+func (c *cursorStreamCapture) parseable() bool {
+	return c.records > 0 && !c.malformed
+}
+
+func (c *cursorStreamCapture) decode(line []byte) {
+	if len(bytes.TrimSpace(line)) == 0 {
+		return
+	}
+
+	var record struct {
+		Type        string `json:"type"`
+		Subtype     string `json:"subtype"`
+		Text        string `json:"text"`
+		TimestampMS *int64 `json:"timestamp_ms"`
+		Message     struct {
+			Content []struct {
+				Type string `json:"type"`
+				Text string `json:"text"`
+			} `json:"content"`
+		} `json:"message"`
+	}
+	if err := json.Unmarshal(line, &record); err != nil {
+		c.malformed = true
+		return
+	}
+	c.records++
+
+	var messages []string
+	if record.Type == "thinking" && record.Subtype == "delta" {
+		messages = append(messages, record.Text)
+	}
+	if record.Type == "assistant" {
+		for _, content := range record.Message.Content {
+			if content.Type == "text" {
+				messages = append(messages, content.Text)
+			}
+		}
+	}
+
+	at := time.Now()
+	if record.TimestampMS != nil {
+		at = time.UnixMilli(*record.TimestampMS)
+	}
+	for _, message := range messages {
+		message = strings.TrimSpace(message)
+		if message == "" {
+			continue
+		}
+		select {
+		case c.progress <- ProgressEvent{Message: message, At: at}:
+		case <-c.ctx.Done():
+			return
+		}
+	}
 }
