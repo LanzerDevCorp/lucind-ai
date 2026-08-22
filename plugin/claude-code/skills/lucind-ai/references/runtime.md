@@ -133,3 +133,15 @@ Found the hard way; they produce evidence that looks real and proves nothing.
   without checking the password. Test against the container's network IP instead.
 - **`psql -c` does not interpolate `-v` variables.** For the injection-safe `:'var'` form,
   feed the SQL through stdin.
+- **A handful of `internal/run` and `internal/feature` tests are timing/concurrency-flaky under
+  full-suite load** (`go test ./...`, i.e. `lucind-ai check`), independent of any real content
+  change: `TestLeaseAcquisitionAndMonotonicFence`, `TestLeaseValidationAndStaleMutationRejection`,
+  `TestConcurrentLeaseAcquisition` (SQLite `database is locked` under load) in `internal/feature`;
+  `TestCheckingPhaseRenewsLeaseWhileChecksRun`, `TestExecuteBatchAppliesPerLaneDeadlineIndependently`,
+  `TestExecuteApprovalWaitBlocksUntilDecideApprovePersistsDone`,
+  `TestExecuteBatchConcurrentLedgerWritesDoNotErrorOrLoseData` in `internal/run`. A `lucind-ai
+  check` failure naming any of these looks exactly like a real regression from whatever was just
+  merged. Reproduce in isolation first — `go test ./internal/<pkg>/... -run '<name1>|<name2>' -v
+  -count=3` — before treating it as one; these have passed 3/3 in isolation every time they were
+  investigated. If it passes isolated, just retry the full check. Treat any *new* failing name in
+  these two packages the same way rather than as a surprise — this list only grows.

@@ -516,3 +516,118 @@ This block mirrors the binary's own `usage` string (`cmd/lucind-ai/cli.go:56`). 
 - **Integrate IDs**: After the per-lane reports, stdout includes `integrated_ids:` and `reverted_ids:` (space-separated ids on the same line; an empty list prints the label with no ids). Read those lines — they are not a new report format.
 - **Exit code**: Returns `0` only when every lane in the batch achieves `done` **and** none are listed in `reverted_ids`. Bisection can print `status: done` then revert; a `done` status line is not sufficient. Returns `1` if any lane blocked, deviated, failed, or was reverted.
 
+### Multi-wave apply-DAG orchestration — hazards found on real long runs
+
+Everything below surfaced dispatching a real multi-feature, multi-wave `apply-dag.yaml` plan
+(6 features, ~20 packets, several with 2-3 sequential waves) end to end. None of it is
+hypothetical; each bullet names the exact symptom so it is recognizable on sight instead of
+re-diagnosed from scratch.
+
+**`integrate.Combine()` builds the integration worktree from the primary checkout's `HEAD`
+(`internal/integrate/integrate.go:50`, `worktree.Create(ctx, primaryRoot, "integrate-"+runID)`),
+not from `parent_ref`'s current tip.** For a single feature with multiple sequential waves — or
+any two separate `lucind-ai run` invocations targeting the same feature without the primary
+checkout advancing between them — the second invocation's CAS-promoted result **replaces**
+rather than accumulates the first wave's content, because Combine starts fresh from a HEAD that
+never moved. Symptom: `lucind-ai feature status` shows every attempt `promoted`, but
+`git ls-tree` on the feature's parent ref only contains the *last* wave's files. **Prevention,
+mandatory between every wave of every feature, not just between features:**
+
+1. After a wave's batch reports `integrate: … passed=true`, immediately
+   `git switch dev && git merge --ff-only refs/heads/<parent_ref>` — advance the primary checkout
+   so the next Combine call actually starts from accumulated state.
+2. Before dispatching the next wave, refresh **both** `base_sha` and `expected_parent_sha` (not
+   just `expected_parent_sha`) on every packet in that wave to the new `dev` tip, and
+   `git branch --force <parent_ref> <same SHA>` so the branch, the packets, and `dev` are all one
+   value. A packet's `base_sha` is taken verbatim per-packet (`internal/run/attempt.go`,
+   `internal/run/integrate_feature.go`) — it is never forced to match the feature's ledger
+   `base_sha` from `feature create` time, so a stale `base_sha` here does not error loudly at
+   `feature create`; it silently sets up the next Combine to drop work.
+
+**`allowed_paths` in a hand-authored `apply-dag.yaml` is a guess about filenames, and guesses
+are frequently wrong even when the packet's own scope is correct.** Two recurring shapes:
+
+- The declared test filename doesn't match the package's real convention. A plan that invents
+  `foo_v6_test.go` or `foo_widget_test.go` gets `foo_test.go` back instead, because that is what
+  every other file in the package is named and a competent implementer follows the pattern
+  already there, not the plan's invented one. Check `git show refs/heads/dev:<declared path>` —
+  if it says "does not exist" for the declared name but the *actual* touched path already exists
+  or matches the sibling `.go`/`_test.go` pairing convention, the plan's filename was wrong, not
+  the implementation.
+- A "zero-build-step" or otherwise centralized architecture collapses several planned files into
+  one that already exists. A plan that declares three new files (`app.css`, `store.js`,
+  `fleet.js`) for what is actually one shared, already-existing `app.js` will get `app.js` back
+  from every packet that touches that surface — because the shell one packet built earlier
+  already centralized styling/state/views there, and every later packet correctly extends that
+  same file rather than fragmenting it.
+
+In both shapes the fix is the same and is **not** a redispatch with corrective instructions: edit
+`allowed_paths` in `apply-dag.yaml` to name the paths actually touched (confirmed via
+`git diff --stat HEAD^..HEAD` in the lane's preserved worktree, not against a stale base), re-run
+`lucind-ai split` (safe to re-run — see the frontmatter note below), then either redispatch a lane
+that never produced a valid commit, or directly fast-forward/merge a lane whose worktree already
+holds a real, tested, schema-valid commit rather than throwing that work away.
+
+**When a "disjoint" wave turns out not to be, `lucind-ai split` says so before any quota is
+spent.** If fixing the shape above makes two same-wave packets declare the *same* `allowed_paths`
+(the centralized-file case above, hit by more than one packet in the same wave), `split` refuses:
+`dag: overlapping allowed_paths without a depends_on path: "<a>" and "<b>"`. This is correct,
+not a bug to route around — three lanes independently editing the same file in three separate
+worktrees produces three divergent forks that cannot be cleanly combined. The fix is to
+chain `depends_on` between the now-overlapping packets so `split` emits them as sequential waves
+(one file, one writer at a time) instead of one concurrent wave: `ui-dag depends_on: [ui-fleet]`,
+`ui-flows depends_on: [ui-dag]`, etc. Sequential costs wall-clock time, not correctness.
+
+**A packet's body text is the *only* place `.lucind/result.json` gets written from — the binary
+never synthesizes it from an executor's stdout, for any executor.** `agy`'s `--json-schema` flag
+constrains its own final answer shape; it does not make `agy` write the file, and `opencode` and
+`cursor-agent` have no equivalent flag at all (`internal/executor/opencode.go`,
+`internal/executor/cursor_agent.go` — "schema enforcement is handled by result envelope
+validation rather than flag-level constraints"). If a hand-authored apply packet's body never
+says to write and schema-validate `.lucind/result.json`, the lane can do fully correct,
+fully-tested work and still surface as `blocked`: `dispatch exited 0 but the result envelope
+could not be read … no such file or directory`. Every packet body needs the same closing
+instruction the multi-lens planning fan-out packets already carry (see that convention above):
+"Write the result envelope to `.lucind/result.json` in this worktree. Validate it against
+`.lucind/result.schema.json` before writing." Check this once per feature's packet set before
+first dispatch, not lane by lane after each one blocks.
+
+**`lucind-ai worktree cleanup --lane <id>` removes the worktree directory only — it does not
+delete the `lucind/<id>` git branch.** A retry of the same lane id after cleanup still fails with
+`fatal: a branch named 'lucind/<id>' already exists` unless `git branch -D lucind/<id>` is run
+alongside it. Make the pair one habit, not two separate troubleshooting steps.
+
+**A lane in `reverted_ids` did not lose its work — check before cleaning, not after.**
+`IntegrateFeature` (`internal/run/integrate_feature.go`) demotes reverted lanes "with the
+attempt's own reason and their worktrees are preserved for inspection — the same contract
+Integrate's revert path offers" as a genuinely blocked or failed lane. A revert here almost
+always means the check gate (`go test ./... -race`) hit one of the known-flaky
+`internal/run`/`internal/feature` tests above, unrelated to the reverted lane's own content — the
+lane's commit itself can be entirely correct. Before running `worktree cleanup`/`git branch -D`
+on a reverted lane (the right move for a lane that actually is `blocked`/`failed`/`deviated`),
+inspect it first: `git log -1 <lucind/lane-id>` and `.lucind/result.json` in its preserved
+worktree. If the commit is real and its evidence is valid, integrate it by hand (fast-forward or
+merge onto the parent ref, same as any other already-tested worktree) instead of deleting it and
+burning a full redispatch to redo work that was never actually wrong. If the branch was already
+deleted before this was checked, the commit object frequently still exists as a dangling object
+for a while (`git cat-file -t <sha>` / `git log -1 <sha>`) and can still be recovered — but by
+then a redispatch already in flight is rarely worth aborting to chase it.
+
+**A plain backgrounded `lucind-ai run` can be killed externally mid-dispatch, independent of
+timeout or quota** — observed repeatedly across a long session, with two distinct failure
+shapes: sometimes before the `opencode`/`agy`/`cursor-agent` child process even starts (nothing
+lost, safe to clean up and retry), and sometimes *after* — leaving a real, still-working executor
+child running with no surviving wrapper to ever read its result. Diagnose which one happened
+before reacting: `ps aux | grep -E "opencode run|agy|cursor-agent"` against the worktree path
+named in the truncated log. If nothing is running, clean the worktree/branch and retry. If a
+child is still running and burning CPU, **do not kill it and do not race a second dispatch
+against the same lane id** (the second one will fail on worktree collision the instant the first
+one finishes, which is at least a clean signal, but wastes a redundant quota burn in the
+meantime) — let it finish, then read `.lucind/result.json` and `git log -1` directly from that
+worktree, and if the commit is real and schema-valid, integrate it by hand (fast-forward the
+parent ref if the branch parent still matches the current tip, merge otherwise) instead of
+discarding completed, tested work. Hosting the same dispatch command inside a long-running
+watcher/monitor process rather than a plain backgrounded shell task has not exhibited this
+external-kill behavior in the same session — reach for that instead of a third or fourth
+identical plain-background retry of the same lane.
+
