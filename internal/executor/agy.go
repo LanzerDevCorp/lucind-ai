@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"os/exec"
 	"time"
 )
@@ -99,9 +100,9 @@ func (a Agy) KnownModels() []string {
 // agy exposes no --cwd flag, so the worktree is selected by setting the
 // child process's working directory directly rather than by a flag.
 //
-// The flag set this method always sends -- --output-format json, --mode
-// accept-edits, and --dangerously-skip-permissions -- is not a stylistic
-// choice: it is the non-interactive invocation documented in
+// The flag set this method sends --mode accept-edits and --dangerously-skip-
+// permissions on both the blocking JSON path and the optional stream-json
+// progress path. This is not a stylistic choice: it is the non-interactive invocation documented in
 // plugin/claude-code/skills/lucind-ai/references/runtime.md (see also
 // docs/prd.md section 6, step 4), which is this project's authoritative
 // source for which flags a headless agy dispatch requires and why.
@@ -133,6 +134,33 @@ func (a Agy) KnownModels() []string {
 // by nothing else. Write allowed_paths as the only fence there is, because it
 // is.
 func (a Agy) Run(ctx context.Context, req Request) (Outcome, error) {
+	if req.Progress == nil {
+		return a.runFormat(ctx, req, "json", nil)
+	}
+
+	decoder := newAgyStreamDecoder(req.Progress)
+	outcome, err := a.runFormat(ctx, req, "stream-json", decoder)
+	decoder.finish()
+	if err != nil {
+		return Outcome{}, err
+	}
+	if decoder.terminal {
+		// The terminal result is the stream-json equivalent of blocking JSON's
+		// stdout. Returning only its payload keeps Outcome semantics stable.
+		outcome.Stdout = string(decoder.result)
+		return outcome, nil
+	}
+	if outcome.TimedOut || outcome.OutputTruncated {
+		// The turn may have completed while output was cut off. Never replay it
+		// when the terminal record's absence is not trustworthy.
+		return outcome, nil
+	}
+
+	emitAgyProgress(req.Progress, agyStreamFallbackMessage)
+	return a.runFormat(ctx, req, "json", nil)
+}
+
+func (a Agy) runFormat(ctx context.Context, req Request, format string, stdoutTap io.Writer) (Outcome, error) {
 	binary := a.Binary
 	if binary == "" {
 		binary = defaultBinary
@@ -140,7 +168,7 @@ func (a Agy) Run(ctx context.Context, req Request) (Outcome, error) {
 
 	args := []string{
 		"--print", req.Prompt,
-		"--output-format", "json",
+		"--output-format", format,
 		"--mode", "accept-edits",
 		"--dangerously-skip-permissions",
 	}
@@ -168,7 +196,11 @@ func (a Agy) Run(ctx context.Context, req Request) (Outcome, error) {
 
 	var stderr, stdout bytes.Buffer
 	cmd.Stderr = &stderr
-	cmd.Stdout = &stdout
+	if stdoutTap == nil {
+		cmd.Stdout = &stdout
+	} else {
+		cmd.Stdout = io.MultiWriter(&stdout, stdoutTap)
+	}
 
 	err := cmd.Run()
 

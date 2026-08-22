@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"os/exec"
 	"strings"
 	"time"
@@ -129,9 +130,20 @@ func (o Opencode) Run(ctx context.Context, req Request) (Outcome, error) {
 
 	var stderr, stdout bytes.Buffer
 	cmd.Stderr = &stderr
-	cmd.Stdout = &stdout
+	var streamDecoder *opencodeStreamDecoder
+	if req.Progress == nil {
+		// Preserve the established blocking --format json result path exactly
+		// when callers do not request incremental progress.
+		cmd.Stdout = &stdout
+	} else {
+		streamDecoder = newOpencodeStreamDecoder(req.Progress)
+		cmd.Stdout = io.MultiWriter(&stdout, streamDecoder)
+	}
 
 	err := cmd.Run()
+	if streamDecoder != nil {
+		streamDecoder.finish()
+	}
 
 	outcome := Outcome{Stderr: stderr.String(), Stdout: stdout.String()}
 
