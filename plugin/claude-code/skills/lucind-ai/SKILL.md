@@ -347,7 +347,25 @@ same ledger and classifies (`internal/overlap/overlap.go:623-678`):
   intersecting or nearby hunks, or a hotspot weight over threshold. Blocks promotion, releases the
   lease, and creates one awaiting reconciliation request per feature pair, deduplicated across
   retries. The lanes are demoted with the block as their reason and their worktrees preserved.
-  `lucind-ai reconcile approve|decline|cancel` is the human decision that clears it.
+
+  **Clearing it takes two steps, not one.** `lucind-ai reconcile approve --request <id> --source
+  <feature> --target <feature>` only authorizes a candidate (`reconciliation_candidates`, status
+  `candidate_running`) — it does not itself unblock anything, because approving does not resolve
+  the actual textual conflict. A human resolves it out of band (by hand, or via a bounded `claude
+  -p --model sonnet` session against the candidate's `allowed_paths`), produces a real commit, and
+  registers it with `lucind-ai reconcile resolve --candidate <id> --sha <sha> [--actor <name>]`
+  (`sha` is verified against this repo's real commit graph before being accepted). Retrying the
+  blocked feature's own `lucind-ai run --packet …` afterward promotes that registered SHA instead
+  of the retry's own fresh combined tree — matched by whether the *other* feature's tip has moved
+  since the resolution was registered (`internal/run/attempt.go`'s `evaluateOverlapGate`), not by
+  re-deriving a new hash every retry, since a retry's own candidate SHA is never bit-identical to
+  the one that got blocked. `decline`/`cancel` remain the "this cannot be reconciled" exits, with
+  no candidate ever authorized.
+
+  **The retried lane's own worktree must not already exist.** A blocked lane's worktree is
+  preserved for inspection (by design), so re-dispatching the identical packet id fails with
+  `worktree: target worktree path already exists` until that worktree is removed by hand (`git
+  worktree remove --force <path>`) — there is no `lucind-ai` command for this yet.
 - **warning** — merely shared paths, or a hotspot over the lower threshold. Records evidence, does
   not block.
 - **informational** — a no-op.
@@ -428,6 +446,7 @@ lucind-ai reconcile approve --request <id> --source <feature> --target <feature>
 lucind-ai reconcile decline --request <id> [--actor <name>] [--reason <reason>]
 lucind-ai reconcile cancel --request <id> [--actor <name>] [--reason <reason>]
 lucind-ai reconcile renew --request <id> [--base-sha <sha>] [--source-sha <sha>] [--target-sha <sha>]
+lucind-ai reconcile resolve --candidate <id> --sha <sha> [--actor <name>]
 lucind-ai --version
 ```
 
@@ -440,7 +459,8 @@ This block mirrors the binary's own `usage` string (`cmd/lucind-ai/cli.go:48`). 
 - `lucind-ai check`: Run repository checks once via `lucind-checks.sh` (`internal/integrate.Check`).
 - `lucind-ai serve`: Start the HTTP API/web server for approvals and status monitoring (`--addr`).
 - `lucind-ai feature create|status|recover`: Ledger-side feature records. `create` writes the `features` row from `--id`, `--parent`, `--base-sha` — it does **not** create the git branch. `status` reads features and integration attempts. `recover --attempt <id>` resumes an existing integration attempt.
-- `lucind-ai reconcile approve|decline|cancel|renew --request <id>`: human decision on an overlap request between two feature parents. `approve` names `--source` and `--target` features; `renew` re-anchors a stale request to current SHAs. It does not reconcile ledger state against worktrees or git refs (`cmd/lucind-ai/cli.go:48`).
+- `lucind-ai reconcile approve|decline|cancel|renew --request <id>`: human decision on an overlap request between two feature parents. `approve` names `--source` and `--target` features and authorizes a candidate — it does not by itself clear a block; see **Clearing it takes two steps, not one** above. `renew` re-anchors a stale request to current SHAs. It does not reconcile ledger state against worktrees or git refs (`cmd/lucind-ai/cli.go:48`).
+- `lucind-ai reconcile resolve --candidate <id> --sha <sha>`: registers a human-produced resolution commit against an approved candidate, marking it `integrated`. This is what actually clears a `required`-overlap block on the next retry of the blocked feature's own `lucind-ai run`.
 - `lucind-ai renew`: an undocumented top-level alias for `reconcile renew` — same handler, same flags (`cmd/lucind-ai/cli.go:110`, `runReconcileRenew`). It does not renew lane leases; nothing on the CLI does. Prefer the `reconcile renew` spelling.
 
 ### `run` Flags

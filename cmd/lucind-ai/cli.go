@@ -53,7 +53,7 @@ const attemptOwner = "lucind-ai run"
 // error, so a person driving the binary from a terminal always sees the one
 // invocation that works rather than a stack trace. --packet is repeatable:
 // each occurrence adds one more lane to the batch.
-const usage = "usage: lucind-ai run --packet <path> [--packet <path> ...] [--timeout <duration>] [--approval-timeout <duration>] [--legacy-main] [--expected-parent-sha <sha>]\n       lucind-ai split --dag <path> --out <dir>\n       lucind-ai check [--out <path>]\n       lucind-ai serve [--addr <addr>] [--approver <name>] [--approval-timeout <duration>]\n       lucind-ai feature create --id <id> --parent <ref> --base-sha <sha> [--expected-parent-sha <sha>]\n       lucind-ai feature status [--id <id>]\n       lucind-ai feature recover --attempt <id>\n       lucind-ai reconcile approve --request <id> --source <feature> --target <feature> [--actor <name>]\n       lucind-ai reconcile decline --request <id> [--actor <name>] [--reason <reason>]\n       lucind-ai reconcile cancel --request <id> [--actor <name>] [--reason <reason>]\n       lucind-ai reconcile renew --request <id> [--base-sha <sha>] [--source-sha <sha>] [--target-sha <sha>]\n       lucind-ai --version"
+const usage = "usage: lucind-ai run --packet <path> [--packet <path> ...] [--timeout <duration>] [--approval-timeout <duration>] [--legacy-main] [--expected-parent-sha <sha>]\n       lucind-ai split --dag <path> --out <dir>\n       lucind-ai check [--out <path>]\n       lucind-ai serve [--addr <addr>] [--approver <name>] [--approval-timeout <duration>]\n       lucind-ai feature create --id <id> --parent <ref> --base-sha <sha> [--expected-parent-sha <sha>]\n       lucind-ai feature status [--id <id>]\n       lucind-ai feature recover --attempt <id>\n       lucind-ai reconcile approve --request <id> --source <feature> --target <feature> [--actor <name>]\n       lucind-ai reconcile decline --request <id> [--actor <name>] [--reason <reason>]\n       lucind-ai reconcile cancel --request <id> [--actor <name>] [--reason <reason>]\n       lucind-ai reconcile renew --request <id> [--base-sha <sha>] [--source-sha <sha>] [--target-sha <sha>]\n       lucind-ai reconcile resolve --candidate <id> --sha <sha> [--actor <name>]\n       lucind-ai --version"
 
 // depsFactory constructs run.Deps for runDispatch. In production it is
 // productionDeps; tests may override it to inject test doubles or observe dependency calls.
@@ -973,7 +973,7 @@ func runFeatureRecover(ctx context.Context, args []string, stdout, stderr io.Wri
 // reconcileDispatch dispatches reconcile subcommands (approve, decline, cancel, renew).
 func reconcileDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "lucind-ai: reconcile subcommand requires an action (approve, decline, cancel, renew)")
+		fmt.Fprintln(stderr, "lucind-ai: reconcile subcommand requires an action (approve, decline, cancel, renew, resolve)")
 		fmt.Fprintln(stderr, usage)
 		return 1
 	}
@@ -987,6 +987,8 @@ func reconcileDispatch(ctx context.Context, args []string, stdout, stderr io.Wri
 		return runReconcileCancel(ctx, args[1:], stdout, stderr)
 	case "renew":
 		return runReconcileRenew(ctx, args[1:], stdout, stderr)
+	case "resolve":
+		return runReconcileResolve(ctx, args[1:], stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "lucind-ai: unknown reconcile subcommand %q\n%s\n", args[0], usage)
 		return 1
@@ -1286,5 +1288,84 @@ func runReconcileRenew(ctx context.Context, args []string, stdout, stderr io.Wri
 
 	fmt.Fprintf(stdout, "request:   %s\nstatus:    %s\nrenewed:   from %s\ndirection: %s\nexpires:   %s\n",
 		newReq.ID, newReq.Status, *requestID, newReq.Direction, newReq.ExpiresAt.Format(time.RFC3339))
+	return 0
+}
+
+// runReconcileResolve implements "lucind-ai reconcile resolve": registers a human-produced
+// resolution commit against an approved reconciliation request's candidate, closing the
+// reconciliation loop. This is the human-in-the-loop counterpart to the required-overlap
+// promotion gate in internal/run/attempt.go's evaluateOverlapGate -- once a candidate here is
+// marked integrated with a real commit SHA, a subsequent retry of the blocked feature's own
+// `lucind-ai run` promotes that SHA instead of re-blocking, PROVIDED the other side of the
+// conflict has not moved since (see evaluateOverlapGate's doc comment on that check).
+//
+// --sha is verified against this repository's real commit graph before being accepted: a typo
+// here would otherwise only surface much later, as a confusing git error out of PromoteCAS at
+// promotion time.
+func runReconcileResolve(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("reconcile resolve", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	fs.Usage = func() {
+		fmt.Fprintln(stderr, "usage: lucind-ai reconcile resolve --candidate <id> --sha <sha> [--actor <name>]")
+		fs.PrintDefaults()
+	}
+
+	candidateID := fs.String("candidate", "", "reconciliation candidate identifier")
+	sha := fs.String("sha", "", "commit sha of the human-produced resolution")
+	actor := fs.String("actor", defaultApprover(), "actor identity recording the resolution")
+
+	if err := fs.Parse(args); err != nil {
+		return 1
+	}
+
+	if strings.TrimSpace(*candidateID) == "" {
+		fmt.Fprintln(stderr, "lucind-ai: --candidate is required")
+		fs.Usage()
+		return 1
+	}
+	if strings.TrimSpace(*sha) == "" {
+		fmt.Fprintln(stderr, "lucind-ai: --sha is required")
+		fs.Usage()
+		return 1
+	}
+
+	primaryRoot, err := resolvePrimaryRoot(ctx)
+	if err != nil {
+		fmt.Fprintf(stderr, "lucind-ai: resolve primary repository root: %v\n", err)
+		return 1
+	}
+
+	if worktree.IsLinkedWorktree(primaryRoot) {
+		fmt.Fprintf(stderr, "lucind-ai: refusing to run from inside a linked worktree (%s); run from the primary repository instead\n", primaryRoot)
+		return 1
+	}
+
+	resolvedSHA, err := worktree.ResolveCommitSHA(ctx, worktree.DefaultGitRunner, primaryRoot, *sha)
+	if err != nil {
+		fmt.Fprintf(stderr, "lucind-ai: --sha %q does not resolve to a commit in this repository: %v\n", *sha, err)
+		return 1
+	}
+
+	ledg, err := ledger.Open(ctx, primaryRoot)
+	if err != nil {
+		fmt.Fprintf(stderr, "lucind-ai: open ledger: %v\n", err)
+		return 1
+	}
+	defer ledg.Close()
+
+	act := strings.TrimSpace(*actor)
+	if act == "" {
+		act = defaultApprover()
+	}
+
+	reconcileSvc := reconcile.NewService(ledg)
+	cand, err := reconcileSvc.UpdateCandidateStatus(ctx, *candidateID, reconcile.CandidateStatusIntegrated, resolvedSHA, "")
+	if err != nil {
+		fmt.Fprintf(stderr, "lucind-ai: %v\n", err)
+		return 1
+	}
+
+	fmt.Fprintf(stdout, "candidate: %s\nrequest:   %s\nstatus:    %s\nsha:       %s\nactor:     %s\n",
+		cand.ID, cand.RequestID, cand.Status, cand.CandidateSHA, act)
 	return 0
 }

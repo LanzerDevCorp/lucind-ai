@@ -2518,6 +2518,191 @@ func TestReconcileApproveCLI(t *testing.T) {
 	})
 }
 
+// TestReconcileResolveCLI covers "lucind-ai reconcile candidate resolve": the human-in-the-loop
+// path that closes the reconciliation loop -- see internal/run/gate_test.go's
+// TestApprovedIntegratedCandidateUnblocksPromotion for how a registered resolution actually
+// clears a blocked feature's promotion.
+func TestReconcileResolveCLI(t *testing.T) {
+	primaryRoot := initRepo(t)
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(primaryRoot); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(cwd)
+
+	// A second real commit to stand in for the human's resolved commit -- reconcile resolve
+	// must verify --sha resolves to a real commit in the primary repo before accepting it.
+	if err := os.WriteFile(filepath.Join(primaryRoot, "resolved.txt"), []byte("resolved\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(resolved.txt) error = %v", err)
+	}
+	runGit(t, primaryRoot, "add", "resolved.txt")
+	runGit(t, primaryRoot, "commit", "-m", "resolved commit")
+	resolvedSHA := strings.TrimSpace(string(func() []byte {
+		out, err := exec.Command("git", "-C", primaryRoot, "rev-parse", "HEAD").Output()
+		if err != nil {
+			t.Fatalf("git rev-parse HEAD error = %v", err)
+		}
+		return out
+	}()))
+
+	setupRequest := func(t *testing.T, id string) reconcile.Candidate {
+		t.Helper()
+		ledg, err := ledger.Open(context.Background(), primaryRoot)
+		if err != nil {
+			t.Fatalf("ledger.Open error = %v", err)
+		}
+		defer ledg.Close()
+
+		featSvc := feature.NewService(ledg)
+		_, _ = featSvc.Create(context.Background(), "feat-resolve-src-"+id, "refs/heads/source-"+id, "1111111111111111111111111111111111111111")
+		_, _ = featSvc.Create(context.Background(), "feat-resolve-tgt-"+id, "refs/heads/target-"+id, "2222222222222222222222222222222222222222")
+
+		reconcileSvc := reconcile.NewService(ledg)
+		req, err := reconcileSvc.CreateRequest(context.Background(), reconcile.CreateRequestParams{
+			ID:            "req-resolve-" + id,
+			FeatureID:     "feat-resolve-tgt-" + id,
+			SourceFeature: "feat-resolve-src-" + id,
+			SourceParent:  "refs/heads/source-" + id,
+			TargetFeature: "feat-resolve-tgt-" + id,
+			TargetParent:  "refs/heads/target-" + id,
+			SourceSHA:     "1111111111111111111111111111111111111111",
+			TargetSHA:     "2222222222222222222222222222222222222222",
+			Evidence: &overlap.Evidence{
+				Version:     "1.0",
+				BaseSHA:     "0000000000000000000000000000000000000000",
+				FeatureASHA: "1111111111111111111111111111111111111111",
+				FeatureBSHA: "2222222222222222222222222222222222222222",
+				Class:       overlap.ClassRequired,
+				Signals:     overlap.Signals{ConflictPaths: []string{"pkg/conflict.go"}},
+			},
+			TTL: 15 * time.Minute,
+		})
+		if err != nil {
+			t.Fatalf("CreateRequest error = %v", err)
+		}
+		_, cand, err := reconcileSvc.Approve(context.Background(), reconcile.ApproveParams{
+			RequestID:     req.ID,
+			SourceFeature: "feat-resolve-src-" + id,
+			TargetFeature: "feat-resolve-tgt-" + id,
+			Actor:         "setup",
+		})
+		if err != nil {
+			t.Fatalf("Approve error = %v", err)
+		}
+		return cand
+	}
+
+	t.Run("resolving a running candidate with a real sha marks it integrated", func(t *testing.T) {
+		cand := setupRequest(t, "ok")
+
+		var stdout, stderr bytes.Buffer
+		code := run(context.Background(), []string{
+			"reconcile", "resolve",
+			"--candidate", cand.ID,
+			"--sha", resolvedSHA,
+			"--actor", "test-actor",
+		}, &stdout, &stderr)
+
+		if code != 0 {
+			t.Fatalf("reconcile resolve exit code = %d, want 0; stderr = %q", code, stderr.String())
+		}
+		if !strings.Contains(stdout.String(), resolvedSHA) {
+			t.Errorf("stdout = %q, want it to contain the resolved sha %q", stdout.String(), resolvedSHA)
+		}
+
+		ledg, err := ledger.Open(context.Background(), primaryRoot)
+		if err != nil {
+			t.Fatalf("ledger.Open error = %v", err)
+		}
+		defer ledg.Close()
+
+		got, err := ledg.ReconciliationCandidate(context.Background(), cand.ID)
+		if err != nil {
+			t.Fatalf("ReconciliationCandidate error = %v", err)
+		}
+		if got.Status != string(reconcile.CandidateStatusIntegrated) {
+			t.Errorf("candidate status = %q, want %q", got.Status, reconcile.CandidateStatusIntegrated)
+		}
+		if got.CandidateSHA != resolvedSHA {
+			t.Errorf("candidate_sha = %q, want %q", got.CandidateSHA, resolvedSHA)
+		}
+	})
+
+	t.Run("resolving an already-integrated candidate again is rejected", func(t *testing.T) {
+		cand := setupRequest(t, "twice")
+
+		var stdout1, stderr1 bytes.Buffer
+		if code := run(context.Background(), []string{
+			"reconcile", "resolve", "--candidate", cand.ID, "--sha", resolvedSHA, "--actor", "test-actor",
+		}, &stdout1, &stderr1); code != 0 {
+			t.Fatalf("first reconcile resolve exit code = %d, want 0; stderr = %q", code, stderr1.String())
+		}
+
+		var stdout2, stderr2 bytes.Buffer
+		code := run(context.Background(), []string{
+			"reconcile", "resolve", "--candidate", cand.ID, "--sha", resolvedSHA, "--actor", "test-actor",
+		}, &stdout2, &stderr2)
+		if code == 0 {
+			t.Fatalf("second reconcile resolve exit code = 0, want non-zero (candidate no longer running)")
+		}
+	})
+
+	t.Run("a sha that does not resolve to a real commit is rejected and the candidate stays running", func(t *testing.T) {
+		cand := setupRequest(t, "badsha")
+
+		var stdout, stderr bytes.Buffer
+		code := run(context.Background(), []string{
+			"reconcile", "resolve",
+			"--candidate", cand.ID,
+			"--sha", "0000000000000000000000000000000000000000",
+			"--actor", "test-actor",
+		}, &stdout, &stderr)
+
+		if code == 0 {
+			t.Fatalf("reconcile resolve with a nonexistent sha exit code = 0, want non-zero")
+		}
+
+		ledg, err := ledger.Open(context.Background(), primaryRoot)
+		if err != nil {
+			t.Fatalf("ledger.Open error = %v", err)
+		}
+		defer ledg.Close()
+
+		got, err := ledg.ReconciliationCandidate(context.Background(), cand.ID)
+		if err != nil {
+			t.Fatalf("ReconciliationCandidate error = %v", err)
+		}
+		if got.Status != string(reconcile.CandidateStatusRunning) {
+			t.Errorf("candidate status = %q, want still %q after a rejected sha", got.Status, reconcile.CandidateStatusRunning)
+		}
+	})
+
+	t.Run("missing required flags fails with usage/error", func(t *testing.T) {
+		for _, tc := range []struct {
+			name string
+			args []string
+			want string
+		}{
+			{"missing candidate", []string{"reconcile", "resolve", "--sha", resolvedSHA}, "--candidate"},
+			{"missing sha", []string{"reconcile", "resolve", "--candidate", "cand-1"}, "--sha"},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				var stdout, stderr bytes.Buffer
+				code := run(context.Background(), tc.args, &stdout, &stderr)
+				if code == 0 {
+					t.Fatalf("run(%v) exit code = 0, want non-zero", tc.args)
+				}
+				if !strings.Contains(stderr.String(), tc.want) {
+					t.Errorf("stderr = %q, want it to contain %q", stderr.String(), tc.want)
+				}
+			})
+		}
+	})
+}
+
 func TestReconcileDeclineCancelRenewCLI(t *testing.T) {
 	primaryRoot := initRepo(t)
 	cwd, err := os.Getwd()

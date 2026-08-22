@@ -13,6 +13,7 @@ import (
 	"github.com/LanzerDevCorp/lucind-ai/internal/ledger"
 	"github.com/LanzerDevCorp/lucind-ai/internal/overlap"
 	"github.com/LanzerDevCorp/lucind-ai/internal/packet"
+	"github.com/LanzerDevCorp/lucind-ai/internal/reconcile"
 	"github.com/LanzerDevCorp/lucind-ai/internal/run"
 	"github.com/LanzerDevCorp/lucind-ai/internal/worktree"
 )
@@ -487,5 +488,140 @@ func TestRequiredOverlapCreatesExactlyOneReconciliationRequestPerPair(t *testing
 	}
 	if sourceSHA == "" || targetSHA == "" {
 		t.Errorf("source_sha (%q) or target_sha (%q) is empty", sourceSHA, targetSHA)
+	}
+}
+
+// 5. RED: A required-overlap block, once its reconciliation request is approved and its
+// candidate registered as integrated with a resolved SHA (the human-in-the-loop path — see
+// `lucind-ai reconcile candidate resolve`), no longer blocks a retried attempt: the retry
+// promotes using the candidate's resolved SHA instead of the attempt's own raw candidate SHA,
+// and no duplicate reconciliation_request is created.
+func TestApprovedIntegratedCandidateUnblocksPromotion(t *testing.T) {
+	// Fixed, not time.Now(): the evidence hash must be identical across the initial blocked
+	// attempt and the retry for the resolved candidate to match by evidence_hash -- real
+	// overlap evaluation is deterministic on unchanged content; a mock using wall-clock time
+	// in CreatedAt would (wrongly) produce a different hash every call.
+	evidenceCreatedAt := time.Date(2026, 8, 20, 12, 0, 0, 0, time.UTC)
+	evidenceHash := ""
+	spies := &gateSpies{
+		evaluateOverlapFunc: func(ctx context.Context, repoDir, baseSHA, shaA, shaB string, opts ...overlap.EvaluateOption) (*overlap.Evidence, error) {
+			ev := &overlap.Evidence{
+				Version:     "v1",
+				BaseSHA:     baseSHA,
+				FeatureASHA: shaA,
+				FeatureBSHA: shaB,
+				Class:       overlap.ClassRequired,
+				Rationale:   []string{"predicted Git merge conflict detected in shared.go"},
+				Signals: overlap.Signals{
+					PredictedConflict: true,
+					ConflictPaths:     []string{"shared.go"},
+				},
+				CreatedAt: evidenceCreatedAt,
+			}
+			h, _ := ev.ComputeHash()
+			ev.Hash = h
+			evidenceHash = h
+			return ev, nil
+		},
+	}
+	deps, l, featSvc := newGateTestDeps(t, spies)
+
+	featA, err := featSvc.Create(context.Background(), "feat-resolve-a", "refs/heads/feature-resolve-a", "base-sha-common", "expected-sha-refs/heads/feature-resolve-a")
+	if err != nil {
+		t.Fatalf("featSvc.Create(feat-resolve-a) error = %v", err)
+	}
+	_, err = featSvc.Create(context.Background(), "feat-resolve-b", "refs/heads/feature-resolve-b", "base-sha-common", "expected-sha-refs/heads/feature-resolve-b")
+	if err != nil {
+		t.Fatalf("featSvc.Create(feat-resolve-b) error = %v", err)
+	}
+
+	// Step 1: Feature A attempts promotion and is blocked, creating a reconciliation request.
+	reqA1 := run.AttemptRequest{
+		ID:                "att-resolve-a-1",
+		FeatureID:         featA.ID,
+		ParentRef:         featA.ParentRef,
+		BaseSHA:           featA.BaseSHA,
+		ExpectedParentSHA: featA.ExpectedParentSHA,
+		IdempotencyKey:    "idem-resolve-a-1",
+		Owner:             "owner-resolve-a",
+		Branches:          []string{"lucind/lane-resolve-a-1"},
+	}
+	resA1, err := run.ExecuteAttempt(context.Background(), deps, reqA1)
+	if err != nil {
+		t.Fatalf("ExecuteAttempt(A1) error = %v", err)
+	}
+	if resA1.Status != run.AttemptStatusBlocked {
+		t.Fatalf("resA1.Status = %v, want %v", resA1.Status, run.AttemptStatusBlocked)
+	}
+
+	var reqID string
+	if err := l.DB().QueryRowContext(context.Background(), `SELECT id FROM reconciliation_requests LIMIT 1`).Scan(&reqID); err != nil {
+		t.Fatalf("query reconciliation_request id: %v", err)
+	}
+
+	// Step 2: Approve the request, then register a resolved candidate SHA -- the human-in-the-loop
+	// path this test exists to cover. Uses the same fixed clock as deps.Now so the request's
+	// short TTL (15 minutes from a fixed point in the past) never looks expired mid-test.
+	reconcileSvc := reconcile.NewService(l, reconcile.WithClock(deps.Now))
+	_, _, err = reconcileSvc.Approve(context.Background(), reconcile.ApproveParams{
+		RequestID:     reqID,
+		SourceFeature: "feat-resolve-a",
+		TargetFeature: "feat-resolve-b",
+		Actor:         "test-actor",
+	})
+	if err != nil {
+		t.Fatalf("reconcileSvc.Approve() error = %v", err)
+	}
+
+	cand, err := l.ReconciliationCandidateByRequest(context.Background(), reqID)
+	if err != nil {
+		t.Fatalf("ReconciliationCandidateByRequest() error = %v", err)
+	}
+	const resolvedSHA = "resolved-sha-by-human"
+	if _, err := reconcileSvc.UpdateCandidateStatus(context.Background(), cand.ID, reconcile.CandidateStatusIntegrated, resolvedSHA, ""); err != nil {
+		t.Fatalf("reconcileSvc.UpdateCandidateStatus() error = %v", err)
+	}
+
+	if evidenceHash == "" {
+		t.Fatal("evidenceHash never captured by evaluateOverlapFunc")
+	}
+
+	// Step 3: Feature A retries promotion with a new attempt ID. The resolved candidate must
+	// clear the block and its SHA must be what gets promoted.
+	reqA2 := run.AttemptRequest{
+		ID:                "att-resolve-a-2",
+		FeatureID:         featA.ID,
+		ParentRef:         featA.ParentRef,
+		BaseSHA:           featA.BaseSHA,
+		ExpectedParentSHA: featA.ExpectedParentSHA,
+		IdempotencyKey:    "idem-resolve-a-2",
+		Owner:             "owner-resolve-a-retry",
+		Branches:          []string{"lucind/lane-resolve-a-1"},
+	}
+	resA2, err := run.ExecuteAttempt(context.Background(), deps, reqA2)
+	if err != nil {
+		t.Fatalf("ExecuteAttempt(A2 retry) error = %v", err)
+	}
+	if resA2.Status != run.AttemptStatusPromoted {
+		t.Fatalf("resA2.Status = %v, want %v (resolved candidate must unblock promotion)", resA2.Status, run.AttemptStatusPromoted)
+	}
+	if resA2.CandidateSHA != resolvedSHA {
+		t.Errorf("resA2.CandidateSHA = %q, want %q (must promote the human-resolved SHA, not the raw combined tree)", resA2.CandidateSHA, resolvedSHA)
+	}
+
+	if len(spies.promoteCASCalls) != 1 {
+		t.Fatalf("PromoteCAS called %d times, want 1", len(spies.promoteCASCalls))
+	}
+	if spies.promoteCASCalls[0].CandidateSHA != resolvedSHA {
+		t.Errorf("PromoteCAS candidate_sha = %q, want %q", spies.promoteCASCalls[0].CandidateSHA, resolvedSHA)
+	}
+
+	// No duplicate reconciliation_request must have been created on the cleared retry.
+	var count int
+	if err := l.DB().QueryRowContext(context.Background(), `SELECT COUNT(*) FROM reconciliation_requests`).Scan(&count); err != nil {
+		t.Fatalf("query reconciliation_requests count: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("reconciliation_requests count = %d, want still exactly 1", count)
 	}
 }

@@ -430,16 +430,20 @@ func driveAttemptFromLeased(ctx context.Context, deps Deps, att Attempt, featSvc
 	}
 
 	// 5b. REQUIRED OVERLAP PROMOTION GATE
-	blocked, blockedAtt, err := evaluateOverlapGate(ctx, deps, att, featSvc, req.ParentRef, req.BaseSHA)
+	blocked, gatedAtt, err := evaluateOverlapGate(ctx, deps, att, featSvc, req.ParentRef, req.BaseSHA)
 	if err != nil {
 		return att, fmt.Errorf("run: evaluate overlap gate: %w", err)
 	}
 	if blocked {
-		return blockedAtt, nil
+		return gatedAtt, nil
 	}
 
+	// gatedAtt, not att: a cleared required-overlap block (a human-resolved reconciliation
+	// candidate) overrides CandidateSHA inside the gate to the resolved commit -- promoting att
+	// unchanged here would silently discard that override and promote this attempt's own raw
+	// combined tree instead.
 	// 6. CAS PROMOTION
-	return performCASPromotion(ctx, deps, att, featSvc, req.ParentRef, req.ExpectedParentSHA, wtPath, branchName)
+	return performCASPromotion(ctx, deps, gatedAtt, featSvc, req.ParentRef, req.ExpectedParentSHA, wtPath, branchName)
 }
 
 func performCASPromotion(ctx context.Context, deps Deps, att Attempt, featSvc *feature.Service, parentRef, expectedParentSHA, wtPath, branchName string) (Attempt, error) {
@@ -584,14 +588,15 @@ func recoverAttemptInternal(ctx context.Context, deps Deps, att Attempt) (Attemp
 
 		if att.Status == AttemptStatusCASPending {
 			// CAS definitely never ran! Check gate and execute CAS
-			blocked, blockedAtt, err := evaluateOverlapGate(ctx, deps, att, featSvc, feat.ParentRef, feat.BaseSHA)
+			blocked, gatedAtt, err := evaluateOverlapGate(ctx, deps, att, featSvc, feat.ParentRef, feat.BaseSHA)
 			if err != nil {
 				return att, fmt.Errorf("run: recovery evaluate overlap gate: %w", err)
 			}
 			if blocked {
-				return blockedAtt, nil
+				return gatedAtt, nil
 			}
-			return performCASPromotion(ctx, deps, att, featSvc, feat.ParentRef, feat.ExpectedParentSHA, "", "")
+			// gatedAtt, not att -- see the same note in driveAttemptFromLeased.
+			return performCASPromotion(ctx, deps, gatedAtt, featSvc, feat.ParentRef, feat.ExpectedParentSHA, "", "")
 		}
 
 		// Replay/drive from recorded inputs
@@ -705,19 +710,48 @@ func evaluateOverlapGate(ctx context.Context, deps Deps, att Attempt, featSvc *f
 				return false, att, fmt.Errorf("query existing reconciliation requests: %w", err)
 			}
 
-			alreadyRequested := false
-			for _, reqRow := range existingRequests {
+			var (
+				matched         *ledger.ReconciliationRequestRow
+				matchedOtherSHA string // whichever of matched's stored SHAs corresponds to otherFeat, by orientation
+			)
+			for i := range existingRequests {
+				reqRow := existingRequests[i]
 				if reqRow.Status != string(reconcile.RequestStatusAwaiting) && reqRow.Status != string(reconcile.RequestStatusApproved) {
 					continue
 				}
 				src, _, tgt, _ := reconcile.ParseDirection(reqRow.Direction)
-				if (src == att.FeatureID && tgt == otherFeat.ID) || (src == otherFeat.ID && tgt == att.FeatureID) {
-					alreadyRequested = true
+				if src == att.FeatureID && tgt == otherFeat.ID {
+					matched = &existingRequests[i]
+					matchedOtherSHA = reqRow.TargetSHA
+					break
+				}
+				if src == otherFeat.ID && tgt == att.FeatureID {
+					matched = &existingRequests[i]
+					matchedOtherSHA = reqRow.SourceSHA
 					break
 				}
 			}
 
-			if !alreadyRequested {
+			// A resolved candidate for THIS exact overlap clears the block: a human already
+			// produced a reconciled commit and registered it via `lucind-ai reconcile candidate
+			// resolve`. Matched on the OTHER feature's current tip, not the full evidence hash:
+			// this attempt's own candidate SHA is fresh every retry (a new commit, new
+			// timestamp, same content), so requiring the whole evidence to match byte-for-byte
+			// would never match on a real retry. What must not have moved is the other side of
+			// the conflict -- if otherFeat's tip is still what the human resolved against, their
+			// resolution still applies regardless of this retry's own SHA (which gets replaced
+			// by it below). If otherFeat has since promoted again, its tip differs from what the
+			// request recorded and this falls through to blocking again, same as an unresolved
+			// overlap.
+			if matched != nil && matched.Status == string(reconcile.RequestStatusApproved) && matchedOtherSHA == otherSHA {
+				cand, cErr := deps.Ledger.ReconciliationCandidateByRequest(ctx, matched.ID)
+				if cErr == nil && cand.Status == string(reconcile.CandidateStatusIntegrated) && cand.CandidateSHA != "" {
+					att.CandidateSHA = cand.CandidateSHA
+					continue
+				}
+			}
+
+			if matched == nil {
 				_, err = reconcileSvc.CreateRequest(ctx, reconcile.CreateRequestParams{
 					FeatureID:     att.FeatureID,
 					SourceFeature: att.FeatureID,
@@ -751,4 +785,3 @@ func evaluateOverlapGate(ctx context.Context, deps Deps, att Attempt, featSvc *f
 
 	return false, att, nil
 }
-
