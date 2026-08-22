@@ -221,3 +221,81 @@ func TestApprovalsRemainIndividuallyPatchedAndSubmitted(t *testing.T) {
 		}
 	}
 }
+
+func TestFleetViewCoversEmptyRunningBlockedAndProgressRichStates(t *testing.T) {
+	js := readStaticAsset(t, "app.js")
+
+	tests := []struct {
+		name      string
+		contracts []string
+	}{
+		{
+			name: "empty state is explicit",
+			contracts: []string{
+				"function patchFleetCards",
+				"data-fleet-empty",
+				"No lanes are reporting yet.",
+			},
+		},
+		{
+			name: "running state has text and a non-color symbol",
+			contracts: []string{
+				"running: ['▶', 'Running']",
+				"fleet-status-symbol",
+				"fleet-status-text",
+				"formatElapsed(startedAt, endedAt, now)",
+			},
+		},
+		{
+			name: "blocked state has text and a distinct shape",
+			contracts: []string{
+				"blocked: ['■', 'Blocked']",
+				"card.dataset.status = lane.status",
+				"statusSymbol.setAttribute('aria-hidden', 'true')",
+			},
+		},
+		{
+			name: "progress rich state exposes activity and supplied telemetry",
+			contracts: []string{
+				"Executor",
+				"Model",
+				"SDD phase",
+				"Fanout group",
+				"Feature",
+				"Worktree",
+				"Attempt",
+				"Elapsed",
+				"latest_progress",
+				"Latest activity",
+				"total_tokens",
+				"cost_usd",
+				"tools_per_minute",
+				"Tool rate",
+				"Unavailable",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assertContainsAll(t, "app.js", js, tt.contracts...)
+		})
+	}
+}
+
+func TestFleetViewNormalizesGoAndSnakeCaseFieldsWithKeyedPatching(t *testing.T) {
+	js := readStaticAsset(t, "app.js")
+	assertContainsAll(t, "app.js", js,
+		"function normalizeFleetState",
+		"'run_id', 'RunID'",
+		"'lane_id', 'LaneID'",
+		"'sdd_phase', 'SDDPhase'",
+		"'fanout_group', 'FanoutGroup'",
+		"'worktree_path', 'WorktreePath'",
+		"data-fleet-key",
+		"if (card) updateFleetCard(card, lane)",
+	)
+	if strings.Contains(js, "fleetContainer.innerHTML") {
+		t.Error("app.js replaces the Fleet outlet; live refreshes must patch keyed lane cards")
+	}
+}
