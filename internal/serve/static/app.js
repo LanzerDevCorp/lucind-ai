@@ -194,22 +194,69 @@ function isValidEvidence(ev) {
   return hasFileLine || hasCommandOutput;
 }
 
-function approvalKey(item) {
-  return `${item.RunID}\u0000${item.LaneID}`;
+function normalizeApproval(item) {
+  const runID = String(field(item, 'run_id', 'RunID') || '');
+  const laneID = String(field(item, 'lane_id', 'LaneID') || '');
+  const packetID = String(field(item, 'packet_id', 'PacketID') || '');
+  const approver = String(field(item, 'approver', 'Approver') || '');
+  const evidence = String(field(item, 'evidence', 'Evidence') || '');
+  const decision = String(field(item, 'decision', 'Decision') || 'pending').toLowerCase();
+  const defect = Boolean(field(item, 'defect_surfaced_later', 'DefectSurfacedLater', 'defect', 'Defect'));
+  const requestedAt = field(item, 'requested_at', 'RequestedAt');
+  const decidedAt = field(item, 'decided_at', 'DecidedAt');
+  return {
+    runID,
+    laneID,
+    packetID,
+    approver,
+    evidence,
+    decision,
+    defect,
+    requestedAt,
+    decidedAt,
+    key: `${runID}\u0000${laneID}`
+  };
 }
 
-function createApprovalCard(item) {
+function normalizeApprovals(state) {
+  const raw = [
+    ...asArray(state, 'approvals', 'Approvals'),
+    ...asArray(state, 'pending_approvals_list', 'PendingApprovalsList')
+  ];
+  return raw.map(normalizeApproval).filter(item => Boolean(item.runID && item.laneID));
+}
+
+function approvalKey(item) {
+  const runID = field(item, 'run_id', 'RunID') || item.runID || '';
+  const laneID = field(item, 'lane_id', 'LaneID') || item.laneID || '';
+  return `${runID}\u0000${laneID}`;
+}
+
+function createApprovalCard(rawItem) {
+  const item = normalizeApproval(rawItem);
   const card = document.createElement('article');
   card.className = 'approval-card';
-  card.setAttribute('data-approval-key', approvalKey(item));
+  card.setAttribute('data-approval-key', item.key);
 
   const header = document.createElement('div');
   header.className = 'card-header';
+  const headerInfo = document.createElement('div');
+  headerInfo.className = 'card-header-info';
   const lane = document.createElement('span');
   lane.className = 'lane-id';
   const packet = document.createElement('span');
   packet.className = 'packet-id';
-  header.append(lane, packet);
+  headerInfo.append(lane, packet);
+
+  const badges = document.createElement('div');
+  badges.className = 'approval-badges';
+  const decisionBadge = document.createElement('span');
+  decisionBadge.className = 'badge badge-decision';
+  const defectBadge = document.createElement('span');
+  defectBadge.className = 'badge badge-defect';
+  defectBadge.textContent = 'Defect surfaced';
+  badges.append(decisionBadge, defectBadge);
+  header.append(headerInfo, badges);
 
   const evidenceLabel = document.createElement('div');
   evidenceLabel.className = 'evidence-label';
@@ -219,6 +266,14 @@ function createApprovalCard(item) {
   const noEvidence = document.createElement('div');
   noEvidence.className = 'no-evidence';
   noEvidence.textContent = 'No command output or file:line evidence provided.';
+
+  const meta = document.createElement('div');
+  meta.className = 'approval-meta';
+  const approverInfo = document.createElement('span');
+  approverInfo.className = 'approver-info';
+  const decidedInfo = document.createElement('span');
+  decidedInfo.className = 'decided-info';
+  meta.append(approverInfo, decidedInfo);
 
   const actions = document.createElement('div');
   actions.className = 'card-actions';
@@ -230,48 +285,115 @@ function createApprovalCard(item) {
   rejectButton.type = 'button';
   rejectButton.className = 'btn-reject';
   rejectButton.textContent = 'Reject';
-  actions.append(approveButton, rejectButton);
+  const defectButton = document.createElement('button');
+  defectButton.type = 'button';
+  defectButton.className = 'btn-defect';
+  defectButton.textContent = 'Mark defect';
+  actions.append(approveButton, rejectButton, defectButton);
 
   async function decide(decision) {
     approveButton.disabled = true;
     rejectButton.disabled = true;
-    const accepted = await submitDecision(item.RunID, item.LaneID, decision);
+    const accepted = await submitDecision(card._approvalItem.runID, card._approvalItem.laneID, decision);
     if (!accepted) {
       approveButton.disabled = false;
       rejectButton.disabled = false;
     }
   }
 
+  async function toggleDefect() {
+    defectButton.disabled = true;
+    const nextDefect = !card._approvalItem.defect;
+    const accepted = await submitDefect(card._approvalItem.runID, card._approvalItem.laneID, nextDefect);
+    if (!accepted) {
+      defectButton.disabled = false;
+    }
+  }
+
   approveButton.addEventListener('click', () => void decide('approved'));
   rejectButton.addEventListener('click', () => void decide('rejected'));
-  card.append(header, evidenceLabel, evidence, noEvidence, actions);
-  card._approvalParts = { lane, packet, evidence, noEvidence };
+  defectButton.addEventListener('click', () => void toggleDefect());
+
+  card.append(header, evidenceLabel, evidence, noEvidence, meta, actions);
+  card._approvalParts = {
+    lane,
+    packet,
+    decisionBadge,
+    defectBadge,
+    evidence,
+    noEvidence,
+    meta,
+    approverInfo,
+    decidedInfo,
+    approveButton,
+    rejectButton,
+    defectButton
+  };
   updateApprovalCard(card, item);
   return card;
 }
 
-function updateApprovalCard(card, item) {
+function updateApprovalCard(card, rawItem) {
+  const item = normalizeApproval(rawItem);
+  card._approvalItem = item;
   const parts = card._approvalParts;
-  parts.lane.textContent = `Lane: ${item.LaneID || '-'}`;
-  parts.packet.textContent = `Packet: ${item.PacketID || '-'}`;
-  const evidenceValid = isValidEvidence(item.Evidence);
-  parts.evidence.textContent = evidenceValid ? item.Evidence : '';
+
+  card.setAttribute('data-decision', item.decision);
+  card.setAttribute('data-status', item.decision);
+  card.setAttribute('data-defect', String(item.defect));
+  card.dataset.decision = item.decision;
+  card.dataset.status = item.decision;
+  card.dataset.defect = String(item.defect);
+
+  parts.lane.textContent = `Lane: ${item.laneID || '-'}`;
+  parts.packet.textContent = `Packet: ${item.packetID || '-'}`;
+
+  const isPending = item.decision === 'pending';
+  parts.decisionBadge.textContent = item.decision;
+  parts.decisionBadge.setAttribute('data-decision', item.decision);
+  parts.decisionBadge.dataset.decision = item.decision;
+  parts.defectBadge.setAttribute('data-defect', String(item.defect));
+  parts.defectBadge.hidden = !item.defect;
+
+  const evidenceValid = isValidEvidence(item.evidence);
+  parts.evidence.textContent = evidenceValid ? item.evidence : '';
   parts.evidence.hidden = !evidenceValid;
   parts.noEvidence.hidden = evidenceValid;
+
+  if (item.approver || item.decidedAt) {
+    parts.meta.hidden = false;
+    parts.approverInfo.textContent = item.approver ? `Approver: ${item.approver}` : '';
+    parts.decidedInfo.textContent = item.decidedAt ? `Decided: ${item.decidedAt}` : '';
+  } else {
+    parts.meta.hidden = isPending;
+  }
+
+  if (isPending) {
+    parts.approveButton.disabled = false;
+    parts.rejectButton.disabled = false;
+    parts.approveButton.hidden = false;
+    parts.rejectButton.hidden = false;
+  } else {
+    parts.approveButton.disabled = true;
+    parts.rejectButton.disabled = true;
+  }
+
+  parts.defectButton.textContent = item.defect ? 'Unmark defect' : 'Mark defect';
+  parts.defectButton.dataset.active = String(item.defect);
+  parts.defectButton.disabled = false;
 }
 
-function patchApprovalCards(approvalsContainer, approvals) {
-  const pending = approvals.filter(item => item.Decision === 'pending');
+function patchApprovalCards(approvalsContainer, rawApprovals) {
+  const approvals = Array.isArray(rawApprovals) ? rawApprovals.map(normalizeApproval) : [];
   const currentCards = new Map();
   approvalsContainer.querySelectorAll('[data-approval-key]').forEach(card => {
     currentCards.set(card.getAttribute('data-approval-key'), card);
   });
 
   const activeKeys = new Set();
-  pending.forEach(item => {
-    const key = approvalKey(item);
-    activeKeys.add(key);
-    const card = currentCards.get(key);
+  approvals.forEach(item => {
+    activeKeys.add(item.key);
+    const card = currentCards.get(item.key);
     if (card) {
       updateApprovalCard(card, item);
     } else {
@@ -284,17 +406,18 @@ function patchApprovalCards(approvalsContainer, approvals) {
   });
 
   let emptyState = approvalsContainer.querySelector('[data-empty-state]');
-  if (pending.length === 0 && emptyState === null) {
+  if (approvals.length === 0 && emptyState === null) {
     emptyState = document.createElement('div');
     emptyState.className = 'empty-state';
     emptyState.setAttribute('data-empty-state', '');
     emptyState.textContent = 'No pending approvals.';
     approvalsContainer.appendChild(emptyState);
-  } else if (pending.length > 0 && emptyState !== null) {
+  } else if (approvals.length > 0 && emptyState !== null) {
     emptyState.remove();
   }
 
-  return pending.length;
+  const pendingCount = approvals.filter(item => item.decision === 'pending').length;
+  return pendingCount;
 }
 
 const FLEET_STATUS = {
@@ -1929,6 +2052,28 @@ async function submitDecision(runID, laneID, decision) {
   } catch (error) {
     console.error('Error submitting decision:', error);
     window.alert('Decision failed because the server could not be reached.');
+    return false;
+  }
+}
+
+async function submitDefect(runID, laneID, defect = true) {
+  if (!runID || !laneID) return false;
+  try {
+    const response = await fetch(`/approvals/${encodeURIComponent(runID)}/${encodeURIComponent(laneID)}/defect`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ defect })
+    });
+    if (!response.ok) {
+      const detail = await response.text();
+      window.alert(`Defect update failed: ${detail}`);
+      return false;
+    }
+    await controlRoomStore.refreshState('defect');
+    return true;
+  } catch (error) {
+    console.error('Error submitting defect:', error);
+    window.alert('Defect update failed because the server could not be reached.');
     return false;
   }
 }

@@ -684,4 +684,140 @@ func TestTimelineKeepsDetailsAsSafeServerText(t *testing.T) {
 	)
 }
 
+func TestApprovalsViewCoversPendingDecidedEvidenceDefectAndBulkRefusalStates(t *testing.T) {
+	js := readStaticAsset(t, "app.js")
+	html := readStaticAsset(t, "index.html")
+
+	tests := []struct {
+		name      string
+		contracts []string
+	}{
+		{
+			name: "pending state renders lane packet and active decision actions",
+			contracts: []string{
+				"function createApprovalCard",
+				"function updateApprovalCard",
+				"data-approval-key",
+				"data-decision",
+				"badge-decision",
+				"btn-approve",
+				"btn-reject",
+				"parts.approveButton.disabled = false",
+				"parts.rejectButton.disabled = false",
+				"Approve",
+				"Reject",
+			},
+		},
+		{
+			name: "decided state renders decision status and disables or reflects completed decisions",
+			contracts: []string{
+				"badge-decision",
+				"parts.decisionBadge.textContent = item.decision",
+				"parts.decisionBadge.dataset.decision = item.decision",
+				"parts.approveButton.disabled = true",
+				"parts.rejectButton.disabled = true",
+				"approval-meta",
+				"approver-info",
+				"decided-info",
+			},
+		},
+		{
+			name: "evidence state distinguishes valid command/file:line evidence from missing evidence note",
+			contracts: []string{
+				"function isValidEvidence",
+				"evidence-block",
+				"no-evidence",
+				"No command output or file:line evidence provided.",
+				"Approval evidence",
+				"parts.evidence.textContent = evidenceValid ? item.evidence : ''",
+			},
+		},
+		{
+			name: "defect state exposes defect action and reflects defect flag",
+			contracts: []string{
+				"function submitDefect",
+				"btn-defect",
+				"badge-defect",
+				"data-defect",
+				"Defect surfaced",
+				"Mark defect",
+				"Unmark defect",
+				"`/approvals/${encodeURIComponent(runID)}/${encodeURIComponent(laneID)}/defect`",
+				"JSON.stringify({ defect })",
+			},
+		},
+		{
+			name: "bulk-action refusal enforces individual single-lane decisions and rejects bulk controls",
+			contracts: []string{
+				"function submitDecision",
+				"`/approvals/${encodeURIComponent(runID)}/${encodeURIComponent(laneID)}`",
+				"JSON.stringify({ decision })",
+				"patchApprovalCards",
+				"data-empty-state",
+				"No pending approvals.",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assertContainsAll(t, "app.js", js, tt.contracts...)
+		})
+	}
+
+	// Verify HTML contains container and styles for approval states
+	assertContainsAll(t, "index.html", html,
+		`id="approvals-container"`,
+		`class="approvals-list"`,
+		`[data-decision="approved"]`,
+		`[data-decision="rejected"]`,
+		`[data-decision="timed_out"]`,
+		`[data-defect="true"]`,
+		`badge-decision`,
+		`badge-defect`,
+		`btn-defect`,
+	)
+}
+
+func TestApprovalsNormalizesGoAndSnakeCaseFieldsWithKeyedPatching(t *testing.T) {
+	js := readStaticAsset(t, "app.js")
+	assertContainsAll(t, "app.js", js,
+		"function normalizeApproval",
+		"function normalizeApprovals",
+		"'run_id', 'RunID'",
+		"'lane_id', 'LaneID'",
+		"'packet_id', 'PacketID'",
+		"'approver', 'Approver'",
+		"'evidence', 'Evidence'",
+		"'decision', 'Decision'",
+		"'defect_surfaced_later', 'DefectSurfacedLater'",
+		"'requested_at', 'RequestedAt'",
+		"'decided_at', 'DecidedAt'",
+		"data-approval-key",
+		"if (card) {",
+		"updateApprovalCard(card, item)",
+	)
+
+	for _, badReplacement := range []string{
+		"approvalsContainer.innerHTML",
+		"containerEl.innerHTML",
+	} {
+		if strings.Contains(js, badReplacement) {
+			t.Errorf("app.js replaces approvals container with %q; live refreshes must patch keyed approval cards", badReplacement)
+		}
+	}
+}
+
+func TestApprovalsKeepsEvidenceAndNotesAsSafeServerText(t *testing.T) {
+	js := readStaticAsset(t, "app.js")
+	assertContainsAll(t, "app.js", js,
+		"parts.evidence.textContent = evidenceValid ? item.evidence : ''",
+		"parts.lane.textContent = `Lane: ${item.laneID || '-'}`",
+		"parts.packet.textContent = `Packet: ${item.packetID || '-'}`",
+		"parts.decisionBadge.textContent = item.decision",
+		"parts.approverInfo.textContent = item.approver ? `Approver: ${item.approver}` : ''",
+		"parts.decidedInfo.textContent = item.decidedAt ? `Decided: ${item.decidedAt}` : ''",
+	)
+}
+
 

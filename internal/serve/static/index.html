@@ -297,13 +297,70 @@
       content: "";
     }
 
+    .approval-card[data-decision="approved"]::before { background: var(--live); }
+    .approval-card[data-decision="rejected"]::before { background: var(--danger); }
+    .approval-card[data-decision="timed_out"]::before { background: var(--warning); }
+    .approval-card[data-defect="true"] { border-color: var(--danger); }
+    .approval-card[data-defect="true"]::before { background: var(--danger); }
+
     .card-header {
       display: flex;
       justify-content: space-between;
+      align-items: center;
       gap: 1rem;
       margin-bottom: 1rem;
       padding-bottom: 0.8rem;
       border-bottom: 1px solid var(--line);
+    }
+
+    .card-header-info {
+      display: flex;
+      gap: 0.75rem;
+      align-items: baseline;
+    }
+
+    .approval-badges {
+      display: flex;
+      gap: 0.5rem;
+      align-items: center;
+    }
+
+    .badge-decision {
+      padding: 0.2rem 0.5rem;
+      border: 1px solid var(--line-strong);
+      font-family: var(--font-mono);
+      font-size: 0.68rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      background: var(--surface);
+    }
+
+    .badge-decision[data-decision="pending"] { color: var(--warning); border-color: var(--warning); }
+    .badge-decision[data-decision="approved"] { color: var(--live); border-color: var(--live); }
+    .badge-decision[data-decision="rejected"] { color: var(--danger); border-color: var(--danger); }
+    .badge-decision[data-decision="timed_out"] { color: var(--warning); border-color: var(--warning); }
+
+    .badge-defect {
+      padding: 0.2rem 0.5rem;
+      border: 1px solid var(--danger);
+      background: rgba(255, 112, 104, 0.15);
+      color: var(--danger);
+      font-family: var(--font-mono);
+      font-size: 0.68rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+
+    .approval-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+      margin-top: 0.65rem;
+      color: var(--muted);
+      font-family: var(--font-mono);
+      font-size: 0.72rem;
     }
 
     .lane-id {
@@ -360,6 +417,16 @@
     .card-actions button:disabled { cursor: wait; opacity: 0.55; }
     .btn-approve { background: var(--signal); color: var(--signal-dark); }
     .btn-reject { background: transparent; color: var(--danger); }
+    .btn-defect {
+      background: transparent;
+      color: var(--warning);
+      border-color: var(--line-strong);
+    }
+    .btn-defect[data-active="true"] {
+      background: rgba(255, 112, 104, 0.15);
+      color: var(--danger);
+      border-color: var(--danger);
+    }
 
     .empty-state, .activity-card {
       padding: 2.4rem;
