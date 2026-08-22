@@ -12,7 +12,9 @@ import (
 // The frontmatter includes id, executor, routed_by, model (if set), agent (if
 // set), a single-line JSON array for allowed_paths, and a single-line JSON
 // array for read_only_paths (if non-empty). The body is the Markdown at
-// body_path verbatim.
+// body_path, with any leading YAML frontmatter block of its own stripped --
+// see stripLeadingFrontmatter's doc comment for why that defends against a
+// real dispatch failure, not just a style nit.
 //
 // read_only_paths is deliberately NOT emitted under the key "read_only":
 // internal/packet.Packet already reserves that exact frontmatter key for an
@@ -27,6 +29,7 @@ func EmitPacketContent(node Node, baseDir string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("dag: failed to read body_path for %q: %w", node.ID, err)
 	}
+	bodyBytes = stripLeadingFrontmatter(bodyBytes)
 
 	var b strings.Builder
 	b.WriteString("---\n")
@@ -70,6 +73,38 @@ func EmitPacketContent(node Node, baseDir string) (string, error) {
 	b.WriteString(strings.TrimLeft(string(bodyBytes), "\n"))
 
 	return b.String(), nil
+}
+
+// stripLeadingFrontmatter removes one leading "---\n...\n---\n" YAML block
+// from body, if present, and trims the blank line(s) that follow it.
+//
+// Emit always writes its own frontmatter ahead of the body (built from the
+// Node's fields, carrying the live SHAs a plan author cannot know in
+// advance). If body_path's own content also opens with a frontmatter block
+// -- e.g. because it was authored as a complete standalone packet rather
+// than pure body text, or because outDir and body_path's directory are the
+// same and a prior split already prepended one -- the result is two stacked
+// frontmatter blocks. internal/packet.Parse only consumes the first one, so
+// the second becomes literal body text starting with "---": passed as an
+// executor's prompt, that leading "-" is indistinguishable from a CLI flag
+// to an argv parser expecting a flag or a positional message (confirmed
+// against opencode's yargs-based CLI, which prints its own --help and exits
+// 1 instead of dispatching). Stripping any such block here makes Emit
+// idempotent regardless of how body_path was authored or whether it has
+// already been split once before.
+func stripLeadingFrontmatter(body []byte) []byte {
+	trimmed := strings.TrimLeft(string(body), "\n")
+	if !strings.HasPrefix(trimmed, "---\n") && trimmed != "---" {
+		return body
+	}
+	rest := strings.TrimPrefix(trimmed, "---\n")
+	closing := strings.Index(rest, "\n---")
+	if closing == -1 {
+		return body
+	}
+	after := rest[closing+len("\n---"):]
+	after = strings.TrimPrefix(after, "\n")
+	return []byte(strings.TrimLeft(after, "\n"))
 }
 
 // Emit generates and writes the .md packet files for all nodes in d into outDir.

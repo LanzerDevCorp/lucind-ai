@@ -319,3 +319,56 @@ func TestEmit_FeatureTargetFieldsRoundTrip(t *testing.T) {
 		t.Errorf("round-trip packet mismatch: got %+v, want %+v", p, node)
 	}
 }
+
+// TestEmit_StripsPreexistingFrontmatterFromBody covers a body_path whose own
+// content already opens with a "---" frontmatter block -- e.g. because it
+// was authored as a complete standalone packet, or because a prior split
+// already wrote Emit's own frontmatter into the same file. Without
+// stripping, the emitted body's first line is literally "---", which a
+// yargs-based executor CLI (opencode) parses as an unknown flag rather than
+// the positional prompt, printing its own --help and exiting 1 instead of
+// ever dispatching.
+func TestEmit_StripsPreexistingFrontmatterFromBody(t *testing.T) {
+	tempDir := t.TempDir()
+	bodiesDir := filepath.Join(tempDir, "bodies")
+	if err := os.MkdirAll(bodiesDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// A body_path that is itself a complete standalone packet, stale
+	// frontmatter and all.
+	stale := "---\nid: schema-v6\nexecutor: opencode\nbase_sha: 705cf492348202e3106bd80c12961ad4ea45aafd\n---\n\n# Apply schema-v6\n\nDo the thing.\n"
+	if err := os.WriteFile(filepath.Join(bodiesDir, "schema-v6.md"), []byte(stale), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	node := dag.Node{
+		ID:           "schema-v6",
+		Executor:     "opencode",
+		RoutedBy:     "schema migration",
+		Model:        "openai/gpt-5.6-sol",
+		AllowedPaths: []string{"internal/ledger/schema.go"},
+		DependsOn:    []string{},
+		BodyPath:     "bodies/schema-v6.md",
+	}
+
+	content, err := dag.EmitPacketContent(node, tempDir)
+	if err != nil {
+		t.Fatalf("EmitPacketContent failed: %v", err)
+	}
+
+	p, err := packet.Parse(strings.NewReader(content))
+	if err != nil {
+		t.Fatalf("packet.Parse failed on emitted content: %v", err)
+	}
+
+	if strings.HasPrefix(strings.TrimSpace(p.Body), "---") {
+		t.Fatalf("emitted body still starts with a stale frontmatter block:\n%s", p.Body)
+	}
+	if !strings.Contains(p.Body, "# Apply schema-v6") {
+		t.Errorf("emitted body lost its real content, got:\n%s", p.Body)
+	}
+	if strings.Contains(content, "705cf492348202e3106bd80c12961ad4ea45aafd") {
+		t.Errorf("emitted content still carries the stale body_path's own base_sha, got:\n%s", content)
+	}
+}
