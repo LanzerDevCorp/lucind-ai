@@ -28,6 +28,7 @@ Every packet must open with a YAML frontmatter block enclosed by `---`:
 | `agent` | No | Opencode-only: names a purpose-built opencode agent (e.g. `lucind-dag` for DAG authoring, see `opencode agent list`) passed as `--agent`. Rejected before dispatch on any executor other than `opencode`, since agent selects a system prompt / tool-permission profile that only opencode has. |
 | `read_only` | No | `true` or `false`. Omitted defaults to write. A `true` packet must produce no unique commits and leave a clean worktree. |
 | `allowed_paths` | No | Single-line JSON array of repository-relative paths this packet may touch, e.g. `allowed_paths: ["internal/dag/", "cmd/lucind-ai/cli.go"]`. Omitted (or empty) is today's exact path: no overlap check across the batch, no post-run diff check. A YAML list under the key does not parse — the value after `:` must be one JSON array. |
+| `read_only_paths` | No | Single-line JSON array. Apply-DAG only: paths this node depends on reading (owned by a transitive `depends_on` ancestor's `allowed_paths`) but must not write — expresses a Strict-TDD RED→GREEN contract between two DAG nodes. A distinct key from `read_only` on purpose: that key is already a strict boolean parsed by `internal/packet.Packet`, so a node emitting a path list under it would make `packet.Parse` reject the packet (`ErrInvalidReadOnly`). `internal/dag.Validate` rejects a path here that also appears in the same node's own `allowed_paths`, or that no transitive dependency's `allowed_paths` actually owns. |
 | `feature` | No | Target feature identifier for parent integration. Required when targeting a feature branch unless `legacy_main: true` is set. |
 | `parent_ref` | No | Target parent git reference (e.g. `refs/heads/feature/<id>`). |
 | `base_sha` | No | Immutable commit SHA where the feature branch was created. |
@@ -364,8 +365,20 @@ same ledger and classifies (`internal/overlap/overlap.go:623-678`):
 
   **The retried lane's own worktree must not already exist.** A blocked lane's worktree is
   preserved for inspection (by design), so re-dispatching the identical packet id fails with
-  `worktree: target worktree path already exists` until that worktree is removed by hand (`git
-  worktree remove --force <path>`) — there is no `lucind-ai` command for this yet.
+  `worktree: target worktree path already exists` until that worktree is removed. `lucind-ai
+  worktree cleanup --lane <id>` does this (idempotent: a lane with no worktree on disk is a
+  success, not an error) — no more manual `git worktree remove --force <path>`.
+
+  **N-way conflicts do not silently pick one.** `evaluateOverlapGate` evaluates every other active
+  feature against the attempt's own original candidate SHA, never a SHA already overridden by an
+  earlier resolution in the same pass. If exactly one required conflict resolves, promotion uses
+  that resolved SHA, same as always. If **two or more** resolve simultaneously, the attempt blocks
+  explicitly with a `promotion blocked: N-way reconciliation not supported (…)` reason naming every
+  resolved-against feature, `CandidateSHA` stays the attempt's own original, and the lease is
+  released — instead of the earlier behavior, where the loop mutated `CandidateSHA` in place and
+  only the last resolution in iteration order survived, silently dropping the others. Combining N
+  independent human-resolved merge commits into one candidate is still out of scope; resolve and
+  promote sequentially, one feature pair at a time.
 - **warning** — merely shared paths, or a hotspot over the lower threshold. Records evidence, does
   not block.
 - **informational** — a no-op.
@@ -375,22 +388,31 @@ same ledger and classifies (`internal/overlap/overlap.go:623-678`):
 `lucind-ai feature recover --attempt <id>` resumes it. Until this route existed, that command had
 nothing to recover.
 
-**The lease is not renewed mid-attempt.** It is held across combine and the full check run, so its
-TTL is pinned to the same `--timeout` a lane gets rather than the package's 30-second default,
-which would expire during `lucind-checks.sh` and land a passing attempt in `stale`. A second
+**The lease is renewed while checks run.** It is held across combine and the full check run; a
+background goroutine renews it on a ticker (`Deps.RenewInterval`, defaulting to a third of the
+lease TTL) for the duration of the `lucind-checks.sh` call, then stops the instant that call
+returns — success, failure, or error alike. A renewal failure never aborts the check in flight; the
+`featSvc.ValidateLease` call immediately after checks return is still the one authoritative gate on
+lease loss, so a genuine loss (another owner took it) still surfaces correctly there. A second
 concurrent dispatch on the same feature is blocked, not raced: `feature.AcquireLease` grants only
 on an expired lease, with no same-owner exception (`internal/feature/feature.go:307`).
 
-**Two features at once — what is now true, and what is still unproven.** The structural blocker is
-gone: with CAS promotion there is no shared checkout for two batches to fight over, and because one
-clone means one ledger, the overlap gate can actually see both features. That is a better shape
-than two clones, where the two ledgers would be blind to each other.
+**Two features at once — validated, not just designed.** The structural blocker is gone: with CAS
+promotion there is no shared checkout for two batches to fight over, and because one clone means
+one ledger, the overlap gate can actually see both features. That is a better shape than two
+clones, where the two ledgers would be blind to each other.
 
-It has never been run. Every one of `features`, `integration_attempts`, `feature_leases`,
-`reconciliation_requests`, and `overlap_evidence` was empty when this route was wired. Treat
-concurrency here as designed and unexercised, not as working — the `opencode` executor was in the
-same position, built and tested, and three stacked defects appeared on its first real dispatch,
-each reachable only after fixing the one before it.
+It has been run, twice, from one clone: a disjoint-paths happy path (both features promoted
+cleanly, both leases released) and a deliberately engineered conflict (the `required`-overlap path
+correctly blocked one feature, preserved its worktree, and released its lease). The human-resolution
+loop closing that block (`reconcile approve` → `reconcile resolve` → retry promotes the registered
+SHA) was exercised end to end as well. What stacked defects did surface on those first real runs —
+the reconciliation dead end (`reconcile approve` alone never unblocked anything), the worktree
+retry collision, the unrenewed lease, and the N-way silent-drop bug — are the ones fixed above; the
+`opencode` executor was in the same position (built and tested, three stacked defects on first real
+dispatch) before its own hardening pass. Not yet exercised: three or more features colliding at
+once (the N-way path above blocks it explicitly rather than mishandling it, but no live run has hit
+it), and bisection-equivalent behavior on the feature path, which is absent by design.
 
 **Setup for a feature batch:**
 
@@ -442,15 +464,17 @@ lucind-ai serve [--addr <addr>] [--approver <name>] [--approval-timeout <duratio
 lucind-ai feature create --id <id> --parent <ref> --base-sha <sha> [--expected-parent-sha <sha>]
 lucind-ai feature status [--id <id>]
 lucind-ai feature recover --attempt <id>
+lucind-ai feature renew --id <id> --owner <owner> --fence <fence> [--ttl <duration>]
 lucind-ai reconcile approve --request <id> --source <feature> --target <feature> [--actor <name>]
 lucind-ai reconcile decline --request <id> [--actor <name>] [--reason <reason>]
 lucind-ai reconcile cancel --request <id> [--actor <name>] [--reason <reason>]
 lucind-ai reconcile renew --request <id> [--base-sha <sha>] [--source-sha <sha>] [--target-sha <sha>]
 lucind-ai reconcile resolve --candidate <id> --sha <sha> [--actor <name>]
+lucind-ai worktree cleanup --lane <id>
 lucind-ai --version
 ```
 
-This block mirrors the binary's own `usage` string (`cmd/lucind-ai/cli.go:48`). `feature recover` and every `reconcile` action need a row that only the unwired attempt path creates — see **Multi-feature orchestration** above before reaching for either.
+This block mirrors the binary's own `usage` string (`cmd/lucind-ai/cli.go:56`). `feature recover` and every `reconcile` action need a row that only the attempt path creates — see **Multi-feature orchestration** above before reaching for either.
 
 ### Subcommands
 
@@ -458,10 +482,10 @@ This block mirrors the binary's own `usage` string (`cmd/lucind-ai/cli.go:48`). 
 - `lucind-ai split`: Split an `apply-dag.yaml` sidecar into per-lane packets and print wave dispatch commands.
 - `lucind-ai check`: Run repository checks once via `lucind-checks.sh` (`internal/integrate.Check`).
 - `lucind-ai serve`: Start the HTTP API/web server for approvals and status monitoring (`--addr`).
-- `lucind-ai feature create|status|recover`: Ledger-side feature records. `create` writes the `features` row from `--id`, `--parent`, `--base-sha` — it does **not** create the git branch. `status` reads features and integration attempts. `recover --attempt <id>` resumes an existing integration attempt.
-- `lucind-ai reconcile approve|decline|cancel|renew --request <id>`: human decision on an overlap request between two feature parents. `approve` names `--source` and `--target` features and authorizes a candidate — it does not by itself clear a block; see **Clearing it takes two steps, not one** above. `renew` re-anchors a stale request to current SHAs. It does not reconcile ledger state against worktrees or git refs (`cmd/lucind-ai/cli.go:48`).
+- `lucind-ai feature create|status|recover|renew`: Ledger-side feature records. `create` writes the `features` row from `--id`, `--parent`, `--base-sha` — it does **not** create the git branch. `status` reads features and integration attempts. `recover --attempt <id>` resumes an existing integration attempt. `renew --id <id> --owner <owner> --fence <fence> [--ttl <duration>]` extends a held lane lease's expiry (`feature.Service.RenewLease`) — the actual lease-renewal command; a bare top-level `lucind-ai renew` does not exist (it used to alias `reconcile renew`, which renews a *reconciliation request*, an unrelated concept — the alias was removed to stop that confusion).
+- `lucind-ai reconcile approve|decline|cancel|renew --request <id>`: human decision on an overlap request between two feature parents. `approve` names `--source` and `--target` features and authorizes a candidate — it does not by itself clear a block; see **Clearing it takes two steps, not one** above. `renew` re-anchors a stale request to current SHAs. It does not reconcile ledger state against worktrees or git refs (`cmd/lucind-ai/cli.go:56`).
 - `lucind-ai reconcile resolve --candidate <id> --sha <sha>`: registers a human-produced resolution commit against an approved candidate, marking it `integrated`. This is what actually clears a `required`-overlap block on the next retry of the blocked feature's own `lucind-ai run`.
-- `lucind-ai renew`: an undocumented top-level alias for `reconcile renew` — same handler, same flags (`cmd/lucind-ai/cli.go:110`, `runReconcileRenew`). It does not renew lane leases; nothing on the CLI does. Prefer the `reconcile renew` spelling.
+- `lucind-ai worktree cleanup --lane <id>`: removes a lane's stale linked worktree left behind after a block-for-inspection outcome, so a retry of the identical packet id no longer hits `worktree: target worktree path already exists`. Idempotent — a lane with no worktree on disk succeeds the same way as one that existed.
 
 ### `run` Flags
 
