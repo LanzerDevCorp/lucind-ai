@@ -99,6 +99,23 @@ func NewHandlerWithConfig(l *ledger.Ledger, defaultApprover string, opencodeCmd 
 		value, err := model.GetReconciliationCandidate(r.Context(), id)
 		writeModelResponse(w, value, err)
 	})
+	mux.HandleFunc("/api/approvals", func(w http.ResponseWriter, r *http.Request) {
+		if !requireGET(w, r) {
+			return
+		}
+		approvals, err := l.PendingApprovals(r.Context())
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, "query failed")
+			return
+		}
+		if approvals == nil {
+			approvals = []ledger.Approval{}
+		}
+		writeJSON(w, http.StatusOK, approvals)
+	})
+	mux.HandleFunc("/api/batch/", func(w http.ResponseWriter, r *http.Request) {
+		handleBatchRead(w, r, model)
+	})
 	mux.HandleFunc("/api/stream", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -255,6 +272,30 @@ func handleReconciliationRead(w http.ResponseWriter, r *http.Request, model *Mod
 	writeModelResponse(w, value, err)
 }
 
+func handleBatchRead(w http.ResponseWriter, r *http.Request, model *Model) {
+	if !requireGET(w, r) {
+		return
+	}
+	parts := pathParts(strings.TrimPrefix(r.URL.Path, "/api/batch/"))
+	if len(parts) != 2 || parts[1] != "lanes" || parts[0] == "" {
+		writeJSONError(w, http.StatusNotFound, "not found")
+		return
+	}
+	if _, err := model.GetRun(r.Context(), parts[0]); err != nil {
+		if isModelNotFound(err) {
+			writeJSONError(w, http.StatusNotFound, "not found")
+			return
+		}
+		writeJSONError(w, http.StatusInternalServerError, "query failed")
+		return
+	}
+	value, err := model.ListBatchLanes(r.Context(), parts[0])
+	if err == nil && value == nil {
+		value = []BatchLane{}
+	}
+	writeModelResponse(w, value, err)
+}
+
 func requireGET(w http.ResponseWriter, r *http.Request) bool {
 	if r.Method == http.MethodGet {
 		return true
@@ -293,6 +334,8 @@ func writeModelResponse(w http.ResponseWriter, value any, err error) {
 
 func isModelNotFound(err error) bool {
 	return errors.Is(err, sql.ErrNoRows) ||
+		errors.Is(err, ledger.ErrRunUnknown) ||
+		errors.Is(err, ledger.ErrLaneUnknown) ||
 		errors.Is(err, ledger.ErrOverlapEvidenceNotFound) ||
 		errors.Is(err, ledger.ErrReconciliationRequestNotFound) ||
 		errors.Is(err, ledger.ErrReconciliationCandidateNotFound)

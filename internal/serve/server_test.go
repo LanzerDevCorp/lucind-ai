@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/LanzerDevCorp/lucind-ai/internal/lane"
 	"github.com/LanzerDevCorp/lucind-ai/internal/ledger"
 	"github.com/LanzerDevCorp/lucind-ai/internal/serve"
 )
@@ -311,6 +312,180 @@ func TestModelReadRoutes(t *testing.T) {
 	if rec.Code != http.StatusMethodNotAllowed {
 		t.Errorf("POST /api/features code = %d, want 405", rec.Code)
 	}
+}
+
+func TestGetRoutesReturnJSON(t *testing.T) {
+	ctx := context.Background()
+	l := openServeLedger(t)
+	now := time.Date(2026, 8, 22, 12, 0, 0, 0, time.UTC)
+
+	// Seed run with lanes
+	runWithLanes := "run-with-lanes"
+	if err := l.RegisterRun(ctx, ledger.Run{RunID: runWithLanes, Status: "running", LaneCount: 1, StartedAt: now}); err != nil {
+		t.Fatalf("RegisterRun: %v", err)
+	}
+	if err := l.RegisterLane(ctx, ledger.Lane{
+		RunID:            runWithLanes,
+		LaneID:           "lane-1",
+		PacketID:         "pkt-1",
+		Executor:         "agy",
+		RoutingCondition: "primary",
+		Status:           lane.Done,
+	}); err != nil {
+		t.Fatalf("RegisterLane: %v", err)
+	}
+	if err := l.UpdateLaneMetadata(ctx, ledger.LaneMetadata{RunID: runWithLanes, LaneID: "lane-1", Change: "test"}, now); err != nil {
+		t.Fatalf("UpdateLaneMetadata: %v", err)
+	}
+
+	// Seed run without lanes
+	runEmpty := "run-empty"
+	if err := l.RegisterRun(ctx, ledger.Run{RunID: runEmpty, Status: "pending", LaneCount: 0, StartedAt: now}); err != nil {
+		t.Fatalf("RegisterRun empty: %v", err)
+	}
+
+	// Seed approval
+	if err := l.RequestApproval(ctx, ledger.Approval{
+		RunID:       runWithLanes,
+		LaneID:      "lane-1",
+		PacketID:    "pkt-1",
+		Evidence:    "file.go:10",
+		RequestedAt: now,
+	}); err != nil {
+		t.Fatalf("RequestApproval: %v", err)
+	}
+
+	handler := serve.NewHandler(l, "alice", "opencode run")
+
+	tests := []struct {
+		name      string
+		method    string
+		path      string
+		wantCode  int
+		wantJSON  bool
+		wantEmpty bool
+		checkBody func(t *testing.T, body string)
+	}{
+		{
+			name:     "GET approvals with data returns 200 JSON",
+			method:   http.MethodGet,
+			path:     "/api/approvals",
+			wantCode: http.StatusOK,
+			wantJSON: true,
+			checkBody: func(t *testing.T, body string) {
+				var approvals []ledger.Approval
+				if err := json.Unmarshal([]byte(body), &approvals); err != nil {
+					t.Fatalf("unmarshal approvals: %v", err)
+				}
+				if len(approvals) != 1 || approvals[0].LaneID != "lane-1" {
+					t.Errorf("approvals = %+v, want 1 approval for lane-1", approvals)
+				}
+			},
+		},
+		{
+			name:     "GET batch lanes with data returns 200 JSON",
+			method:   http.MethodGet,
+			path:     "/api/batch/run-with-lanes/lanes",
+			wantCode: http.StatusOK,
+			wantJSON: true,
+			checkBody: func(t *testing.T, body string) {
+				var batch []serve.BatchLane
+				if err := json.Unmarshal([]byte(body), &batch); err != nil {
+					t.Fatalf("unmarshal batch lanes: %v", err)
+				}
+				if len(batch) != 1 || batch[0].LaneID != "lane-1" {
+					t.Errorf("batch = %+v, want 1 batch lane for lane-1", batch)
+				}
+			},
+		},
+		{
+			name:      "GET batch lanes empty run encodes as empty array",
+			method:    http.MethodGet,
+			path:      "/api/batch/run-empty/lanes",
+			wantCode:  http.StatusOK,
+			wantJSON:  true,
+			wantEmpty: true,
+		},
+		{
+			name:     "GET batch lanes unknown run returns 404",
+			method:   http.MethodGet,
+			path:     "/api/batch/unknown-run/lanes",
+			wantCode: http.StatusNotFound,
+			wantJSON: true,
+		},
+		{
+			name:     "GET batch missing run id returns 404",
+			method:   http.MethodGet,
+			path:     "/api/batch/lanes",
+			wantCode: http.StatusNotFound,
+			wantJSON: true,
+		},
+		{
+			name:     "GET batch root returns 404",
+			method:   http.MethodGet,
+			path:     "/api/batch/",
+			wantCode: http.StatusNotFound,
+			wantJSON: true,
+		},
+		{
+			name:     "POST approvals returns 405",
+			method:   http.MethodPost,
+			path:     "/api/approvals",
+			wantCode: http.StatusMethodNotAllowed,
+		},
+		{
+			name:     "POST batch lanes returns 405",
+			method:   http.MethodPost,
+			path:     "/api/batch/run-with-lanes/lanes",
+			wantCode: http.StatusMethodNotAllowed,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(tt.method, tt.path, nil)
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+
+			if rec.Code != tt.wantCode {
+				t.Fatalf("%s %s code = %d, want %d (body: %s)", tt.method, tt.path, rec.Code, tt.wantCode, rec.Body.String())
+			}
+			if tt.wantJSON {
+				if got := rec.Header().Get("Content-Type"); !strings.HasPrefix(got, "application/json") {
+					t.Errorf("%s %s Content-Type = %q, want application/json", tt.method, tt.path, got)
+				}
+				if !json.Valid(rec.Body.Bytes()) {
+					t.Errorf("%s %s body is not valid JSON: %q", tt.method, tt.path, rec.Body.String())
+				}
+			}
+			if tt.wantEmpty {
+				if strings.TrimSpace(rec.Body.String()) != "[]" {
+					t.Errorf("%s %s body = %q, want []", tt.method, tt.path, rec.Body.String())
+				}
+			}
+			if tt.checkBody != nil {
+				tt.checkBody(t, rec.Body.String())
+			}
+		})
+	}
+
+	t.Run("GET approvals empty ledger encodes as empty array", func(t *testing.T) {
+		cleanLedger := openServeLedger(t)
+		cleanHandler := serve.NewHandler(cleanLedger, "alice", "opencode run")
+		req := httptest.NewRequest(http.MethodGet, "/api/approvals", nil)
+		rec := httptest.NewRecorder()
+		cleanHandler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET /api/approvals code = %d, want 200", rec.Code)
+		}
+		if got := rec.Header().Get("Content-Type"); !strings.HasPrefix(got, "application/json") {
+			t.Errorf("Content-Type = %q, want application/json", got)
+		}
+		if strings.TrimSpace(rec.Body.String()) != "[]" {
+			t.Errorf("GET /api/approvals body = %q, want []", rec.Body.String())
+		}
+	})
 }
 
 func TestLegacyHandlerKeepsStateFallbackWithoutStream(t *testing.T) {
