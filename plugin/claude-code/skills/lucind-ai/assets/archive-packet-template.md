@@ -79,14 +79,27 @@ exist only in the primary repository's working directory. This worktree's own `.
 this lane's schema and result. Nothing preserves them but this step, and after the change folder is
 archived there is no longer a natural home for them.
 
-Read them from the primary root named in `## Context` and copy them in with the shell:
+Read them from the primary root named in `## Context` and copy them in with the shell. Check each
+source directory exists before copying — an absent directory is a fact about the run, not a
+failure, and `cp -R <src>/. <dst>/` on a missing source fails hard with no graceful path, so guard
+it rather than let it abort the lane:
 
 ```
-mkdir -p openspec/changes/<change-id>/packets openspec/changes/<change-id>/envelopes
-cp -R <primary-root>/.lucind/packets/.  openspec/changes/<change-id>/packets/
-cp -R <primary-root>/.lucind/results/.  openspec/changes/<change-id>/envelopes/
-diff -r <primary-root>/.lucind/packets openspec/changes/<change-id>/packets
-diff -r <primary-root>/.lucind/results openspec/changes/<change-id>/envelopes
+if [ -d <primary-root>/.lucind/packets ]; then
+  mkdir -p openspec/changes/<change-id>/packets
+  cp -R <primary-root>/.lucind/packets/.  openspec/changes/<change-id>/packets/
+  diff -r <primary-root>/.lucind/packets openspec/changes/<change-id>/packets
+else
+  echo "no packets/ at <primary-root>/.lucind/packets — recording as absent"
+fi
+
+if [ -d <primary-root>/.lucind/results ]; then
+  mkdir -p openspec/changes/<change-id>/envelopes
+  cp -R <primary-root>/.lucind/results/.  openspec/changes/<change-id>/envelopes/
+  diff -r <primary-root>/.lucind/results openspec/changes/<change-id>/envelopes
+else
+  echo "no results/ at <primary-root>/.lucind/results — recording as absent"
+fi
 ```
 
 Copy every packet file whole, frontmatter included — the frontmatter is the record of which
@@ -94,7 +107,8 @@ executor, which model, and which target each lane actually ran with.
 
 If the primary root holds packets from other changes, copy only this change's. If a directory does
 not exist, record that in the report and continue; an absent `results/` is a fact about the run,
-not a failure of this lane.
+not a failure of this lane. Do not create an empty `packets/` or `envelopes/` folder for a source
+that never existed — an empty folder misrepresents "preserved nothing" as "preserved an empty set."
 
 This supersedes the narrower `apply-bodies/` precedent
 (`openspec/changes/archive/2026-08-21-sdd-fan-out-lens/apply-bodies/`), which preserved apply
@@ -109,10 +123,19 @@ For each delta under `openspec/changes/<change-id>/specs/<capability>/spec.md`:
   is why the delta had to carry the whole block: what you write here is what the capability becomes.
 - **REMOVED** requirements are deleted from the live spec.
 - **RENAMED** requirements keep their content under the new name.
-- A capability with no live spec becomes a new full spec file.
+- A capability with no live spec becomes a new full spec file. Do NOT `cp` the delta straight into
+  place: a delta is titled `# Delta for <capability>` and sections its requirements under
+  `## ADDED Requirements`, but a live spec is titled `# <Capability> Specification`, carries a
+  `## Purpose` paragraph, and sections its requirements under `## Requirements` — copying the delta
+  verbatim produces a spec file inconsistent with the rest of `openspec/specs/`. Write the title,
+  Purpose, and `## Requirements` heading, then carry the requirement and scenario bodies over
+  exactly as written (do not reword them). The one exception: if the delta is already authored as
+  a complete spec (title, `## Purpose`, `## Requirements`), a plain `cp`/`diff -r` is correct and
+  preferred over re-typing it.
 
-Editing the live spec is a targeted structural edit, not a copy, so it is the one place Read/Write
-is correct. The mechanical copy rule governs whole-file copies and moves — never confuse the two.
+Editing the live spec — ADDED, MODIFIED, REMOVED, RENAMED, and the new-capability case above — is a
+targeted structural edit, not a copy, so it is the one place Read/Write is correct. The mechanical
+copy rule governs whole-file copies and moves — never confuse the two.
 
 ### 4. Write the archive report
 
@@ -144,13 +167,23 @@ snapshot is written; attribute snapshot claims to their source and time.
 
 ### 5. Move the change folder
 
+Take the pre-move copy after step 4, once `archive-report.md` has been written. Snapshot it to
+`.lucind/archive-premove-snapshot/`, not `/tmp` or anywhere outside the repository: `.lucind/` is
+already this lane's scratch space (`## Return` writes `.lucind/result.json` there) and is
+unconditionally exempt from the `allowed_paths` scope check, so it is the one safe in-repo place
+for a throwaway copy that must not itself land under `openspec/`:
+
 ```
+mkdir -p .lucind/archive-premove-snapshot
+cp -R openspec/changes/<change-id> .lucind/archive-premove-snapshot/<change-id>
 git mv openspec/changes/<change-id> openspec/changes/archive/<archive-date>-<change-id>
-diff -r openspec/changes/archive/<archive-date>-<change-id> <a copy of the pre-move folder>
+diff -r .lucind/archive-premove-snapshot/<change-id> openspec/changes/archive/<archive-date>-<change-id>
 ```
 
-`<archive-date>` is `YYYY-MM-DD`. The archive report is additive and is excluded from the
-comparison — it did not exist in the source folder before this lane wrote it.
+`<archive-date>` is `YYYY-MM-DD`. Because the snapshot is taken after step 4, `archive-report.md`
+is present and identical on both sides of this diff — there is nothing to exclude. (This differs
+from the underlying skill's own ordering, where the report is written after the move and so is
+never part of that comparison at all.)
 
 ### 6. Commit
 
@@ -199,7 +232,7 @@ Write nothing outside this repository.
 
 ## Done criteria
 
-- [ ] **Every copy and move ran through the shell**, and the verbatim `diff -r` output for each one is in the result envelope, empty.
+- [ ] **Every whole-file copy and every folder move ran through the shell**, with the verbatim `diff -r` output for each one in the result envelope, empty. Spec merges — ADDED/MODIFIED/REMOVED/RENAMED, and a new-capability spec authored from an ADDED-style delta — are the named exception in `## Procedure` step 3 and go through Read/Write instead.
 - [ ] **Every packet and result envelope from this change's dispatch is preserved under the change folder**, frontmatter included, or its absence is recorded in the report.
 - [ ] **Every delta requirement reached the live spec with its classification honored**, and every MODIFIED block replaced the whole live block rather than part of it.
 - [ ] **`archive-report.md` exists with every section populated**, and every follow-up is named there.
