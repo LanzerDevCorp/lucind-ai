@@ -1,0 +1,31 @@
+{
+  "packet_id": "ui-features",
+  "status": "done",
+  "summary": "Implemented feature swimlane rendering in the Control Room static UI with parent/base refs, lease holder/fence/live TTL, attempt states, overlap evidence, and reconciliation badges. Added comprehensive view verification tests in static_test.go covering active, expired, blocked, promoted, and reconciliation-required states with keyed in-place DOM patching.",
+  "hard_stops": [],
+  "files_changed": [
+    {
+      "path": "internal/serve/static/app.js",
+      "change": "modified",
+      "why": "Add feature swimlane normalization, styling, keyed DOM patching, and rendering logic into Control Room UI."
+    },
+    {
+      "path": "internal/serve/static_test.go",
+      "change": "modified",
+      "why": "Add view verification tests covering active, expired, blocked, promoted, and reconciliation-required states and field assertions."
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "View tests cover active, expired, blocked, promoted, and reconciliation-required states.",
+      "met": true,
+      "evidence": "go test -v -run 'TestFeatureSwimlanes' ./internal/serve passes: TestFeatureSwimlanesViewCoversActiveExpiredBlockedPromotedAndReconciliationStates asserts active, expired, blocked, promoted, and reconciliation-required state contracts (internal/serve/static_test.go:439-509)."
+    },
+    {
+      "criterion": "Only the declared allowed paths change and the commit is recorded.",
+      "met": true,
+      "evidence": "git diff --stat 2fd04c6..07886fc touches only internal/serve/static/app.js and internal/serve/static_test.go; commit is recorded as 07886fcb6f6764c46b97ab6db04b1f07291ab416."
+    }
+  ],
+  "commit": "07886fcb6f6764c46b97ab6db04b1f07291ab416"
+}
