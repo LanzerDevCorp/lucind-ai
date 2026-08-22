@@ -53,7 +53,7 @@ const attemptOwner = "lucind-ai run"
 // error, so a person driving the binary from a terminal always sees the one
 // invocation that works rather than a stack trace. --packet is repeatable:
 // each occurrence adds one more lane to the batch.
-const usage = "usage: lucind-ai run --packet <path> [--packet <path> ...] [--timeout <duration>] [--approval-timeout <duration>] [--legacy-main] [--expected-parent-sha <sha>]\n       lucind-ai split --dag <path> --out <dir>\n       lucind-ai check [--out <path>]\n       lucind-ai serve [--addr <addr>] [--approver <name>] [--approval-timeout <duration>]\n       lucind-ai feature create --id <id> --parent <ref> --base-sha <sha> [--expected-parent-sha <sha>]\n       lucind-ai feature status [--id <id>]\n       lucind-ai feature recover --attempt <id>\n       lucind-ai reconcile approve --request <id> --source <feature> --target <feature> [--actor <name>]\n       lucind-ai reconcile decline --request <id> [--actor <name>] [--reason <reason>]\n       lucind-ai reconcile cancel --request <id> [--actor <name>] [--reason <reason>]\n       lucind-ai reconcile renew --request <id> [--base-sha <sha>] [--source-sha <sha>] [--target-sha <sha>]\n       lucind-ai reconcile resolve --candidate <id> --sha <sha> [--actor <name>]\n       lucind-ai --version"
+const usage = "usage: lucind-ai run --packet <path> [--packet <path> ...] [--timeout <duration>] [--approval-timeout <duration>] [--legacy-main] [--expected-parent-sha <sha>]\n       lucind-ai split --dag <path> --out <dir>\n       lucind-ai check [--out <path>]\n       lucind-ai serve [--addr <addr>] [--approver <name>] [--approval-timeout <duration>]\n       lucind-ai feature create --id <id> --parent <ref> --base-sha <sha> [--expected-parent-sha <sha>]\n       lucind-ai feature status [--id <id>]\n       lucind-ai feature recover --attempt <id>\n       lucind-ai feature renew --id <id> --owner <owner> --fence <fence> [--ttl <duration>]\n       lucind-ai reconcile approve --request <id> --source <feature> --target <feature> [--actor <name>]\n       lucind-ai reconcile decline --request <id> [--actor <name>] [--reason <reason>]\n       lucind-ai reconcile cancel --request <id> [--actor <name>] [--reason <reason>]\n       lucind-ai reconcile renew --request <id> [--base-sha <sha>] [--source-sha <sha>] [--target-sha <sha>]\n       lucind-ai reconcile resolve --candidate <id> --sha <sha> [--actor <name>]\n       lucind-ai --version"
 
 // depsFactory constructs run.Deps for runDispatch. In production it is
 // productionDeps; tests may override it to inject test doubles or observe dependency calls.
@@ -115,8 +115,6 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return featureDispatch(ctx, args[1:], stdout, stderr)
 	case "reconcile":
 		return reconcileDispatch(ctx, args[1:], stdout, stderr)
-	case "renew":
-		return runReconcileRenew(ctx, args[1:], stdout, stderr)
 	case "--version", "-v":
 		fmt.Fprintf(stdout, "lucind-ai %s (%s, %s/%s)\n", version, runtime.Version(), runtime.GOOS, runtime.GOARCH)
 		return 0
@@ -724,11 +722,11 @@ func serveDispatch(ctx context.Context, args []string, stdout, stderr io.Writer)
 	return 0
 }
 
-// featureDispatch dispatches feature subcommands (create, status, recover).
+// featureDispatch dispatches feature subcommands (create, status, recover, renew).
 func featureDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	_ = reconcile.ErrInvalidDirection
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "lucind-ai: feature subcommand requires an action (create, status, recover)")
+		fmt.Fprintln(stderr, "lucind-ai: feature subcommand requires an action (create, status, recover, renew)")
 		fmt.Fprintln(stderr, usage)
 		return 1
 	}
@@ -740,6 +738,8 @@ func featureDispatch(ctx context.Context, args []string, stdout, stderr io.Write
 		return runFeatureStatus(ctx, args[1:], stdout, stderr)
 	case "recover":
 		return runFeatureRecover(ctx, args[1:], stdout, stderr)
+	case "renew":
+		return runFeatureRenew(ctx, args[1:], stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "lucind-ai: unknown feature subcommand %q\n%s\n", args[0], usage)
 		return 1
@@ -968,6 +968,74 @@ func runFeatureRecover(ctx context.Context, args []string, stdout, stderr io.Wri
 		fmt.Fprintf(stderr, "attempt %s ended with status: %s (reason: %s)\n", att.ID, att.Status, att.FailureReason)
 		return 1
 	}
+}
+
+// runFeatureRenew implements "lucind-ai feature renew": extends a feature
+// lane's held lease (internal/feature.Service.RenewLease), given the exact
+// (owner, fence) that currently holds it. This is distinct from "lucind-ai
+// reconcile renew", which renews a reconciliation request's evidence/TTL
+// instead -- a different concept entirely (see feature.go's Lease vs.
+// reconcile.go's Request).
+func runFeatureRenew(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("feature renew", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	fs.Usage = func() {
+		fmt.Fprintln(stderr, "usage: lucind-ai feature renew --id <id> --owner <owner> --fence <fence> [--ttl <duration>]")
+		fs.PrintDefaults()
+	}
+
+	id := fs.String("id", "", "feature identifier")
+	owner := fs.String("owner", "", "current lease owner")
+	fence := fs.Int64("fence", 0, "current lease fencing token")
+	ttl := fs.Duration("ttl", 0, "renewed lease time-to-live (0 = RenewLease's own default)")
+
+	if err := fs.Parse(args); err != nil {
+		return 1
+	}
+
+	if strings.TrimSpace(*id) == "" {
+		fmt.Fprintln(stderr, "lucind-ai: --id is required")
+		fs.Usage()
+		return 1
+	}
+	if strings.TrimSpace(*owner) == "" {
+		fmt.Fprintln(stderr, "lucind-ai: --owner is required")
+		fs.Usage()
+		return 1
+	}
+	if *fence <= 0 {
+		fmt.Fprintln(stderr, "lucind-ai: --fence is required")
+		fs.Usage()
+		return 1
+	}
+
+	primaryRoot, err := resolvePrimaryRoot(ctx)
+	if err != nil {
+		fmt.Fprintf(stderr, "lucind-ai: resolve primary repository root: %v\n", err)
+		return 1
+	}
+
+	if worktree.IsLinkedWorktree(primaryRoot) {
+		fmt.Fprintf(stderr, "lucind-ai: refusing to run from inside a linked worktree (%s); run from the primary repository instead\n", primaryRoot)
+		return 1
+	}
+
+	ledg, err := ledger.Open(ctx, primaryRoot)
+	if err != nil {
+		fmt.Fprintf(stderr, "lucind-ai: open ledger: %v\n", err)
+		return 1
+	}
+	defer ledg.Close()
+
+	featSvc := feature.NewService(ledg)
+	lease, err := featSvc.RenewLease(ctx, *id, *owner, *fence, *ttl)
+	if err != nil {
+		fmt.Fprintf(stderr, "lucind-ai: %v\n", err)
+		return 1
+	}
+
+	fmt.Fprintf(stdout, "feature:    %s\nowner:      %s\nfence:      %d\nexpires_at: %s\n", lease.FeatureID, lease.Owner, lease.Fence, lease.ExpiresAt.Format(time.RFC3339))
+	return 0
 }
 
 // reconcileDispatch dispatches reconcile subcommands (approve, decline, cancel, renew).
@@ -1223,7 +1291,7 @@ func runReconcileCancel(ctx context.Context, args []string, stdout, stderr io.Wr
 	return 0
 }
 
-// runReconcileRenew implements "lucind-ai reconcile renew" and top-level "lucind-ai renew": renews an expired or awaiting reconciliation request with fresh evidence.
+// runReconcileRenew implements "lucind-ai reconcile renew": renews an expired or awaiting reconciliation request with fresh evidence.
 func runReconcileRenew(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("reconcile renew", flag.ContinueOnError)
 	fs.SetOutput(stderr)

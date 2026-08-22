@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -19,6 +20,7 @@ import (
 	"github.com/LanzerDevCorp/lucind-ai/internal/reconcile"
 	"github.com/LanzerDevCorp/lucind-ai/internal/result"
 	lucindrun "github.com/LanzerDevCorp/lucind-ai/internal/run"
+	"github.com/LanzerDevCorp/lucind-ai/internal/serve"
 	"github.com/LanzerDevCorp/lucind-ai/internal/worktree"
 )
 
@@ -2340,6 +2342,128 @@ func TestFeatureRecoverCLI(t *testing.T) {
 	})
 }
 
+func TestFeatureRenewCLI(t *testing.T) {
+	primaryRoot := initRepo(t)
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(primaryRoot); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(cwd)
+
+	ledg, err := ledger.Open(context.Background(), primaryRoot)
+	if err != nil {
+		t.Fatalf("ledger.Open error = %v", err)
+	}
+
+	featSvc := feature.NewService(ledg)
+	_, err = featSvc.Create(context.Background(), "feat-renew", "refs/heads/feature-renew", "1111111111111111111111111111111111111111")
+	if err != nil {
+		t.Fatalf("featSvc.Create error = %v", err)
+	}
+
+	lease, err := featSvc.AcquireLease(context.Background(), "feat-renew", "renew-owner", 5*time.Minute)
+	if err != nil {
+		t.Fatalf("featSvc.AcquireLease error = %v", err)
+	}
+	ledg.Close()
+
+	t.Run("renews an existing lease and reports a later expiry", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		code := run(context.Background(), []string{
+			"feature", "renew",
+			"--id", "feat-renew",
+			"--owner", "renew-owner",
+			"--fence", fmt.Sprintf("%d", lease.Fence),
+			"--ttl", "10m",
+		}, &stdout, &stderr)
+
+		if code != 0 {
+			t.Fatalf("feature renew exit code = %d, want 0; stderr = %q", code, stderr.String())
+		}
+		if !strings.Contains(stdout.String(), "feat-renew") {
+			t.Errorf("stdout = %q, want feature id feat-renew", stdout.String())
+		}
+		if !strings.Contains(stdout.String(), "renew-owner") {
+			t.Errorf("stdout = %q, want owner renew-owner", stdout.String())
+		}
+
+		ledg2, err := ledger.Open(context.Background(), primaryRoot)
+		if err != nil {
+			t.Fatalf("ledger.Open error = %v", err)
+		}
+		defer ledg2.Close()
+
+		model := serve.NewModel(ledg2)
+		newLease, err := model.GetLease(context.Background(), "feat-renew")
+		if err != nil {
+			t.Fatalf("model.GetLease error = %v", err)
+		}
+		if !newLease.ExpiresAt.After(lease.ExpiresAt) {
+			t.Errorf("renewed expires_at = %v, want it after original %v", newLease.ExpiresAt, lease.ExpiresAt)
+		}
+	})
+
+	t.Run("wrong owner is rejected as stale with non-zero exit", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		code := run(context.Background(), []string{
+			"feature", "renew",
+			"--id", "feat-renew",
+			"--owner", "someone-else",
+			"--fence", fmt.Sprintf("%d", lease.Fence),
+		}, &stdout, &stderr)
+
+		if code == 0 {
+			t.Fatalf("feature renew with wrong owner exit code = 0, want non-zero")
+		}
+		if stderr.String() == "" {
+			t.Errorf("stderr is empty, want an error surfaced")
+		}
+	})
+
+	t.Run("wrong fence is rejected as stale with non-zero exit", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		code := run(context.Background(), []string{
+			"feature", "renew",
+			"--id", "feat-renew",
+			"--owner", "renew-owner",
+			"--fence", fmt.Sprintf("%d", lease.Fence+99),
+		}, &stdout, &stderr)
+
+		if code == 0 {
+			t.Fatalf("feature renew with wrong fence exit code = 0, want non-zero")
+		}
+		if stderr.String() == "" {
+			t.Errorf("stderr is empty, want an error surfaced")
+		}
+	})
+
+	t.Run("missing required flags fails with usage/error", func(t *testing.T) {
+		for _, tc := range []struct {
+			name string
+			args []string
+			want string
+		}{
+			{"missing id", []string{"feature", "renew", "--owner", "o", "--fence", "1"}, "--id"},
+			{"missing owner", []string{"feature", "renew", "--id", "feat-renew", "--fence", "1"}, "--owner"},
+			{"missing fence", []string{"feature", "renew", "--id", "feat-renew", "--owner", "o"}, "--fence"},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				var stdout, stderr bytes.Buffer
+				code := run(context.Background(), tc.args, &stdout, &stderr)
+				if code == 0 {
+					t.Fatalf("run(%v) exit code = 0, want non-zero", tc.args)
+				}
+				if !strings.Contains(stderr.String(), tc.want) {
+					t.Errorf("stderr = %q, want it to contain %q", stderr.String(), tc.want)
+				}
+			})
+		}
+	})
+}
+
 func TestReconcileApproveCLI(t *testing.T) {
 	primaryRoot := initRepo(t)
 	cwd, err := os.Getwd()
@@ -2877,41 +3001,18 @@ func TestReconcileDeclineCancelRenewCLI(t *testing.T) {
 		}
 	})
 
-	t.Run("top-level renew alias also works", func(t *testing.T) {
-		// Create another request for top-level renew test
-		ledg, err := ledger.Open(context.Background(), primaryRoot)
-		if err != nil {
-			t.Fatal(err)
-		}
-		svc := reconcile.NewService(ledg)
-		reqRenew2, err := svc.CreateRequest(context.Background(), reconcile.CreateRequestParams{
-			ID:            "req-renew-2",
-			FeatureID:     "feat-t",
-			SourceFeature: "feat-s",
-			SourceParent:  "refs/heads/source-branch",
-			TargetFeature: "feat-t",
-			TargetParent:  "refs/heads/target-branch",
-			SourceSHA:     sourceSHA,
-			TargetSHA:     targetSHA,
-			Evidence:      ev,
-			TTL:           15 * time.Minute,
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		ledg.Close()
-
+	t.Run("top-level renew is no longer a valid subcommand", func(t *testing.T) {
 		var stdout, stderr bytes.Buffer
 		code := run(context.Background(), []string{
 			"renew",
-			"--request", reqRenew2.ID,
+			"--request", "does-not-matter",
 		}, &stdout, &stderr)
 
-		if code != 0 {
-			t.Fatalf("renew exit code = %d, want 0; stderr = %q", code, stderr.String())
+		if code == 0 {
+			t.Fatalf("top-level renew exit code = %d, want non-zero (unknown subcommand)", code)
 		}
-		if !strings.Contains(stdout.String(), "renewed") && !strings.Contains(stdout.String(), "awaiting") {
-			t.Errorf("stdout = %q, want renew confirmation", stdout.String())
+		if !strings.Contains(stderr.String(), "unknown subcommand") {
+			t.Errorf("stderr = %q, want it to report an unknown subcommand", stderr.String())
 		}
 	})
 }
