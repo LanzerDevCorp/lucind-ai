@@ -53,7 +53,7 @@ const attemptOwner = "lucind-ai run"
 // error, so a person driving the binary from a terminal always sees the one
 // invocation that works rather than a stack trace. --packet is repeatable:
 // each occurrence adds one more lane to the batch.
-const usage = "usage: lucind-ai run --packet <path> [--packet <path> ...] [--timeout <duration>] [--approval-timeout <duration>] [--legacy-main] [--expected-parent-sha <sha>]\n       lucind-ai split --dag <path> --out <dir>\n       lucind-ai check [--out <path>]\n       lucind-ai serve [--addr <addr>] [--approver <name>] [--approval-timeout <duration>]\n       lucind-ai feature create --id <id> --parent <ref> --base-sha <sha> [--expected-parent-sha <sha>]\n       lucind-ai feature status [--id <id>]\n       lucind-ai feature recover --attempt <id>\n       lucind-ai feature renew --id <id> --owner <owner> --fence <fence> [--ttl <duration>]\n       lucind-ai reconcile approve --request <id> --source <feature> --target <feature> [--actor <name>]\n       lucind-ai reconcile decline --request <id> [--actor <name>] [--reason <reason>]\n       lucind-ai reconcile cancel --request <id> [--actor <name>] [--reason <reason>]\n       lucind-ai reconcile renew --request <id> [--base-sha <sha>] [--source-sha <sha>] [--target-sha <sha>]\n       lucind-ai reconcile resolve --candidate <id> --sha <sha> [--actor <name>]\n       lucind-ai --version"
+const usage = "usage: lucind-ai run --packet <path> [--packet <path> ...] [--timeout <duration>] [--approval-timeout <duration>] [--legacy-main] [--expected-parent-sha <sha>]\n       lucind-ai split --dag <path> --out <dir>\n       lucind-ai check [--out <path>]\n       lucind-ai serve [--addr <addr>] [--approver <name>] [--approval-timeout <duration>]\n       lucind-ai feature create --id <id> --parent <ref> --base-sha <sha> [--expected-parent-sha <sha>]\n       lucind-ai feature status [--id <id>]\n       lucind-ai feature recover --attempt <id>\n       lucind-ai feature renew --id <id> --owner <owner> --fence <fence> [--ttl <duration>]\n       lucind-ai reconcile approve --request <id> --source <feature> --target <feature> [--actor <name>]\n       lucind-ai reconcile decline --request <id> [--actor <name>] [--reason <reason>]\n       lucind-ai reconcile cancel --request <id> [--actor <name>] [--reason <reason>]\n       lucind-ai reconcile renew --request <id> [--base-sha <sha>] [--source-sha <sha>] [--target-sha <sha>]\n       lucind-ai reconcile resolve --candidate <id> --sha <sha> [--actor <name>]\n       lucind-ai worktree cleanup --lane <id>\n       lucind-ai --version"
 
 // depsFactory constructs run.Deps for runDispatch. In production it is
 // productionDeps; tests may override it to inject test doubles or observe dependency calls.
@@ -115,6 +115,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return featureDispatch(ctx, args[1:], stdout, stderr)
 	case "reconcile":
 		return reconcileDispatch(ctx, args[1:], stdout, stderr)
+	case "worktree":
+		return worktreeDispatch(ctx, args[1:], stdout, stderr)
 	case "--version", "-v":
 		fmt.Fprintf(stdout, "lucind-ai %s (%s, %s/%s)\n", version, runtime.Version(), runtime.GOOS, runtime.GOARCH)
 		return 0
@@ -1435,5 +1437,67 @@ func runReconcileResolve(ctx context.Context, args []string, stdout, stderr io.W
 
 	fmt.Fprintf(stdout, "candidate: %s\nrequest:   %s\nstatus:    %s\nsha:       %s\nactor:     %s\n",
 		cand.ID, cand.RequestID, cand.Status, cand.CandidateSHA, act)
+	return 0
+}
+
+// worktreeDispatch dispatches worktree subcommands (cleanup).
+func worktreeDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	if len(args) == 0 {
+		fmt.Fprintln(stderr, "lucind-ai: worktree subcommand requires an action (cleanup)")
+		fmt.Fprintln(stderr, usage)
+		return 1
+	}
+
+	switch args[0] {
+	case "cleanup":
+		return runWorktreeCleanup(ctx, args[1:], stdout, stderr)
+	default:
+		fmt.Fprintf(stderr, "lucind-ai: unknown worktree subcommand %q\n%s\n", args[0], usage)
+		return 1
+	}
+}
+
+// runWorktreeCleanup implements "lucind-ai worktree cleanup": removes a
+// lane's stale linked worktree left behind after a block-for-inspection
+// outcome, so the identical packet id can be retried without hitting
+// worktree.ErrWorktreeExists. Idempotent by design: cleanup on a lane with
+// no worktree on disk succeeds the same way as removing one that exists,
+// so success is reported either way without distinguishing the two.
+func runWorktreeCleanup(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("worktree cleanup", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	fs.Usage = func() {
+		fmt.Fprintln(stderr, "usage: lucind-ai worktree cleanup --lane <id>")
+		fs.PrintDefaults()
+	}
+
+	laneID := fs.String("lane", "", "lane identifier whose worktree should be cleaned up")
+	if err := fs.Parse(args); err != nil {
+		return 1
+	}
+
+	if strings.TrimSpace(*laneID) == "" {
+		fmt.Fprintln(stderr, "lucind-ai: --lane is required")
+		fs.Usage()
+		return 1
+	}
+
+	primaryRoot, err := resolvePrimaryRoot(ctx)
+	if err != nil {
+		fmt.Fprintf(stderr, "lucind-ai: resolve primary repository root: %v\n", err)
+		return 1
+	}
+
+	if worktree.IsLinkedWorktree(primaryRoot) {
+		fmt.Fprintf(stderr, "lucind-ai: refusing to run from inside a linked worktree (%s); run from the primary repository instead\n", primaryRoot)
+		return 1
+	}
+
+	if err := worktree.Cleanup(ctx, primaryRoot, *laneID); err != nil {
+		fmt.Fprintf(stderr, "lucind-ai: %v\n", err)
+		return 1
+	}
+
+	fmt.Fprintf(stdout, "worktree: cleaned up lane %s\n", *laneID)
 	return 0
 }

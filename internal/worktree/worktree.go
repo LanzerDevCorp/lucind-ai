@@ -237,6 +237,21 @@ func createWithRunner(ctx context.Context, runner GitRunner, primaryRoot, laneID
 	return Worktree{Path: path, Branch: branch, BaseSHA: recordedSHA}, nil
 }
 
+// Cleanup removes laneID's linked worktree off primaryRoot, if one exists.
+// A retry against an identical packet id fails with ErrWorktreeExists
+// because Create never overwrites or reuses an existing directory -- a lane
+// preserved for inspection after a block leaves exactly that stale
+// directory behind. Cleanup is the operator-facing way to clear it: it is
+// idempotent, so cleaning up a lane with no worktree on disk is a success
+// (nil), not an error.
+func Cleanup(ctx context.Context, primaryRoot, laneID string) error {
+	path := pathFor(primaryRoot, laneID)
+	if _, err := os.Stat(path); err != nil {
+		return nil
+	}
+	return Remove(ctx, primaryRoot, path)
+}
+
 // Remove removes a linked git worktree at path off primaryRoot.
 func Remove(ctx context.Context, primaryRoot, path string) error {
 	if _, err := DefaultGitRunner.Run(ctx, primaryRoot, "worktree", "remove", "--force", path); err != nil {

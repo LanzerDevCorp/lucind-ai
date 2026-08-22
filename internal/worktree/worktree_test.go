@@ -1031,6 +1031,42 @@ func runGitOutput(t *testing.T, dir string, args ...string) string {
 	return string(out)
 }
 
+func TestCleanupRemovesExistingWorktree(t *testing.T) {
+	if testing.Short() {
+		t.Skip("shells out to real git")
+	}
+
+	primaryRoot := initRepo(t)
+
+	wt, err := worktree.Create(context.Background(), primaryRoot, "fix-auth")
+	if err != nil {
+		t.Fatalf("Create() error = %v, want nil", err)
+	}
+
+	if !worktree.IsLinkedWorktree(wt.Path) {
+		t.Fatalf("IsLinkedWorktree(%q) = false, want true before cleanup", wt.Path)
+	}
+
+	if err := worktree.Cleanup(context.Background(), primaryRoot, "fix-auth"); err != nil {
+		t.Fatalf("Cleanup() error = %v, want nil", err)
+	}
+
+	if _, err := os.Stat(wt.Path); !os.IsNotExist(err) {
+		t.Errorf("os.Stat(%q) err = %v, want os.IsNotExist", wt.Path, err)
+	}
+}
+
+func TestCleanupOnLaneWithNoWorktreeIsNoOp(t *testing.T) {
+	if testing.Short() {
+		t.Skip("shells out to real git")
+	}
+
+	primaryRoot := initRepo(t)
+
+	if err := worktree.Cleanup(context.Background(), primaryRoot, "never-created"); err != nil {
+		t.Fatalf("Cleanup() on lane with no worktree error = %v, want nil", err)
+	}
+}
 
 
 

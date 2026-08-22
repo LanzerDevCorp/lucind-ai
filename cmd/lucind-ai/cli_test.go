@@ -2464,6 +2464,58 @@ func TestFeatureRenewCLI(t *testing.T) {
 	})
 }
 
+func TestWorktreeCleanupCLI(t *testing.T) {
+	if testing.Short() {
+		t.Skip("shells out to real git")
+	}
+
+	primaryRoot := initRepo(t)
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(primaryRoot); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(cwd)
+
+	t.Run("cleans up an existing stale worktree", func(t *testing.T) {
+		wt, err := worktree.Create(context.Background(), primaryRoot, "stale-lane")
+		if err != nil {
+			t.Fatalf("worktree.Create error = %v", err)
+		}
+
+		var stdout, stderr bytes.Buffer
+		code := run(context.Background(), []string{"worktree", "cleanup", "--lane", "stale-lane"}, &stdout, &stderr)
+		if code != 0 {
+			t.Fatalf("worktree cleanup exit code = %d, want 0; stderr = %q", code, stderr.String())
+		}
+
+		if _, err := os.Stat(wt.Path); !os.IsNotExist(err) {
+			t.Errorf("os.Stat(%q) err = %v, want os.IsNotExist", wt.Path, err)
+		}
+	})
+
+	t.Run("nonexistent lane is idempotent and still exits 0", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		code := run(context.Background(), []string{"worktree", "cleanup", "--lane", "never-existed"}, &stdout, &stderr)
+		if code != 0 {
+			t.Fatalf("worktree cleanup on nonexistent lane exit code = %d, want 0; stderr = %q", code, stderr.String())
+		}
+	})
+
+	t.Run("missing --lane flag is usage error", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		code := run(context.Background(), []string{"worktree", "cleanup"}, &stdout, &stderr)
+		if code == 0 {
+			t.Fatalf("worktree cleanup without --lane exit code = 0, want non-zero")
+		}
+		if !strings.Contains(stderr.String(), "--lane") {
+			t.Errorf("stderr = %q, want --lane mentioned", stderr.String())
+		}
+	})
+}
+
 func TestReconcileApproveCLI(t *testing.T) {
 	primaryRoot := initRepo(t)
 	cwd, err := os.Getwd()
