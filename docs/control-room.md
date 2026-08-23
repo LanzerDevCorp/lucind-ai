@@ -160,6 +160,13 @@ paths and diff fragments from dispatched lanes — and the readability it buys d
 justify reopening an injection surface the console currently has closed by construction.
 Revisit only with a tokenizer that emits text nodes rather than markup.
 
+**Dual verification dispatch.** A single qualitative verify lane passed a change
+containing dead code. The guidance is recorded as hazard 8 in
+`plugin/claude-code/skills/lucind-ai/SKILL.md`: dispatch two lanes with different
+reference documents, and audit `tasks.md`'s unchecked boxes against the code before
+archiving. Closed as guidance — nothing enforces it mechanically, so an orchestrator that
+does not read the skill will repeat the mistake.
+
 ### Open
 
 **Reconciliation mutation surface.** The console shows reconciliation requests and
@@ -176,7 +183,4 @@ never exercised it. One such test had pinned the exact `Date.now()` call the clo
 above replaced, so fixing the bug required editing the test that guaranteed it. Running
 the client under a JS runtime would make these tests mean what they appear to mean.
 
-**Dual verification dispatch.** A single qualitative verify lane passed a change
-containing dead code. Either dispatch two lanes with different reference documents, or
-point the lane explicitly at `tasks.md`'s unchecked boxes. See "The defect that nearly
-shipped" above.
+
