@@ -1,0 +1,58 @@
+change: control-room-serve
+packets:
+  - id: serve-model
+    executor: opencode
+    routed_by: server model lane selected because v6 ledger APIs exist but rich query data is not exposed over HTTP
+    model: openai/gpt-5.6-sol
+    agent: build
+    feature: control-room-serve
+    parent_ref: refs/heads/control-room/control-room-serve
+    base_sha: 28bbcc3eb08b183928efc4d931798873823d2a51
+    expected_parent_sha: 28bbcc3eb08b183928efc4d931798873823d2a51
+    legacy_main: false
+    allowed_paths: [internal/serve/model.go, internal/serve/model_test.go]
+    read_only_paths: []
+    depends_on: []
+    body_path: packets/serve-model.md
+  - id: serve-hub
+    executor: opencode
+    routed_by: event transport lane selected because SQLite cursors need a non-blocking subscriber fanout for SSE
+    model: openai/gpt-5.6-sol
+    agent: build
+    feature: control-room-serve
+    parent_ref: refs/heads/control-room/control-room-serve
+    base_sha: 28bbcc3eb08b183928efc4d931798873823d2a51
+    expected_parent_sha: 28bbcc3eb08b183928efc4d931798873823d2a51
+    legacy_main: false
+    allowed_paths: [internal/serve/hub.go, internal/serve/hub_test.go]
+    read_only_paths: []
+    depends_on: []
+    body_path: packets/serve-hub.md
+  - id: serve-worktrees
+    executor: opencode
+    routed_by: worktree visibility lane selected because the fleet view needs branch path disk size and stale state
+    model: openai/gpt-5.6-sol
+    agent: build
+    feature: control-room-serve
+    parent_ref: refs/heads/control-room/control-room-serve
+    base_sha: 28bbcc3eb08b183928efc4d931798873823d2a51
+    expected_parent_sha: 28bbcc3eb08b183928efc4d931798873823d2a51
+    legacy_main: false
+    allowed_paths: [internal/serve/worktrees.go, internal/serve/worktrees_test.go]
+    read_only_paths: []
+    depends_on: []
+    body_path: packets/serve-worktrees.md
+  - id: serve-handlers
+    executor: opencode
+    routed_by: HTTP composition lane selected after model transport and worktree payloads exist so routes have terminal consumers
+    model: openai/gpt-5.6-sol
+    agent: build
+    feature: control-room-serve
+    parent_ref: refs/heads/control-room/control-room-serve
+    base_sha: 28bbcc3eb08b183928efc4d931798873823d2a51
+    expected_parent_sha: 28bbcc3eb08b183928efc4d931798873823d2a51
+    legacy_main: false
+    allowed_paths: [internal/serve/handlers.go, internal/serve/server_test.go]
+    read_only_paths: []
+    depends_on: [serve-model, serve-hub, serve-worktrees]
+    body_path: packets/serve-handlers.md

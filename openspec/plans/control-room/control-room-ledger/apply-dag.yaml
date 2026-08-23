@@ -1,0 +1,50 @@
+change: control-room-ledger
+packets:
+  - id: ledger-runs
+    executor: opencode
+    routed_by: run lifecycle API lane selected because schema v6 provides durable run identity and status fields
+    model: openai/gpt-5.6-sol
+    agent: build
+    feature: control-room-ledger
+    parent_ref: refs/heads/control-room/control-room-ledger
+    base_sha: 8dd263066b1b1ba4fcfa5b66d571861531d0be21
+    expected_parent_sha: 8dd263066b1b1ba4fcfa5b66d571861531d0be21
+    legacy_main: false
+    allowed_paths:
+      - internal/ledger/runs.go
+      - internal/ledger/runs_test.go
+    read_only_paths: []
+    depends_on: []
+    body_path: packets/ledger-runs.md
+  - id: ledger-progress
+    executor: opencode
+    routed_by: progress persistence API lane selected because decoded lane events need bounded durable writes and reads
+    model: openai/gpt-5.6-sol
+    agent: build
+    feature: control-room-ledger
+    parent_ref: refs/heads/control-room/control-room-ledger
+    base_sha: 8dd263066b1b1ba4fcfa5b66d571861531d0be21
+    expected_parent_sha: 8dd263066b1b1ba4fcfa5b66d571861531d0be21
+    legacy_main: false
+    allowed_paths:
+      - internal/ledger/progress.go
+      - internal/ledger/progress_test.go
+    read_only_paths: []
+    depends_on: []
+    body_path: packets/ledger-progress.md
+  - id: ledger-lanes
+    executor: opencode
+    routed_by: lane metadata API lane selected because fleet rendering needs model phase fanout feature and path fields persisted
+    model: openai/gpt-5.6-sol
+    agent: build
+    feature: control-room-ledger
+    parent_ref: refs/heads/control-room/control-room-ledger
+    base_sha: 8dd263066b1b1ba4fcfa5b66d571861531d0be21
+    expected_parent_sha: 8dd263066b1b1ba4fcfa5b66d571861531d0be21
+    legacy_main: false
+    allowed_paths:
+      - internal/ledger/lanes_meta.go
+      - internal/ledger/lanes_meta_test.go
+    read_only_paths: []
+    depends_on: []
+    body_path: packets/ledger-lanes.md
