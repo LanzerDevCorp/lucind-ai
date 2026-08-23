@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"os/exec"
 	"time"
 )
@@ -82,7 +83,46 @@ func (c Claude) KnownModels() []string {
 // would create a flag that no packet can ever legally reach. Wiring it is a
 // separate, deliberate change to that validation, not something to smuggle
 // in with a new executor.
+//
+// When req.Progress is set the dispatch switches to --output-format
+// stream-json so the Control Room timeline sees incremental activity. That
+// switch drags one mandatory companion flag with it: claude refuses
+// stream-json without --verbose outright rather than degrading. Verified in
+// the real CLI (2.1.241), which guards the pair with `if (outputFormat ===
+// "stream-json" && !verbose)`, prints `Error: When using --print,
+// --output-format=stream-json requires --verbose` and exits 1 without ever
+// dispatching. Same failure family as --print-timeout, opposite direction:
+// there a flag must never be sent, here one must never be omitted.
+//
+// Unlike Agy.Run, a stream that carries no terminal result record is NOT
+// replayed as a blocking JSON run. That replay is affordable for agy and is
+// not affordable here: this executor is pinned to Opus, so a replay bills a
+// second full run, and the first run's edits are already on disk -- the
+// replay would re-apply work on top of itself. Nothing downstream needs the
+// replay either: Outcome.Stdout is diagnosis-only (internal/run/run.go
+// reads the real envelope from the worktree's .lucind/result.json), and the
+// complete raw stream is captured in Stdout regardless.
 func (c Claude) Run(ctx context.Context, req Request) (Outcome, error) {
+	if req.Progress == nil {
+		return c.runFormat(ctx, req, "json", nil)
+	}
+
+	decoder := newClaudeStreamDecoder(req.Progress)
+	outcome, err := c.runFormat(ctx, req, "stream-json", decoder)
+	decoder.finish()
+	if err != nil {
+		return Outcome{}, err
+	}
+	if decoder.terminal {
+		// The terminal record is byte-identical to what --output-format json
+		// would have printed, so a progress dispatch's Stdout reads exactly
+		// like a blocking one's. Without it, Stdout stays the raw stream.
+		outcome.Stdout = string(decoder.result)
+	}
+	return outcome, nil
+}
+
+func (c Claude) runFormat(ctx context.Context, req Request, format string, stdoutTap io.Writer) (Outcome, error) {
 	binary := c.Binary
 	if binary == "" {
 		binary = defaultClaudeBinary
@@ -90,9 +130,12 @@ func (c Claude) Run(ctx context.Context, req Request) (Outcome, error) {
 
 	args := []string{
 		"--print",
-		"--output-format", "json",
+		"--output-format", format,
 		"--permission-mode", "acceptEdits",
 		"--dangerously-skip-permissions",
+	}
+	if format == "stream-json" {
+		args = append(args, "--verbose")
 	}
 	if req.Model != "" {
 		args = append(args, "--model", req.Model)
@@ -118,7 +161,11 @@ func (c Claude) Run(ctx context.Context, req Request) (Outcome, error) {
 
 	var stderr, stdout bytes.Buffer
 	cmd.Stderr = &stderr
-	cmd.Stdout = &stdout
+	if stdoutTap == nil {
+		cmd.Stdout = &stdout
+	} else {
+		cmd.Stdout = io.MultiWriter(&stdout, stdoutTap)
+	}
 
 	err := cmd.Run()
 
