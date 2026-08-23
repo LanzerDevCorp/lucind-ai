@@ -177,8 +177,20 @@ type Hub struct {
 	subscribers map[uint64]*subscriber
 }
 
-// NewHub constructs a tailer for one run. Run starts periodic polling; a new
-// subscription also performs a synchronized catch-up query immediately.
+// NewHub constructs a tailer scoped to runID. Run starts periodic polling; a
+// new subscription also performs a synchronized catch-up query immediately.
+//
+// An empty runID means "tail every run, unfiltered" rather than "tail the
+// run whose id is the empty string" -- the latter can never match a row,
+// since no run is ever registered with an empty run_id. This is the shape
+// `lucind-ai serve` needs: it has no flag to learn the run id of a
+// `lucind-ai run` process started separately, and that process only prints
+// its run id after serve is already listening, so the only way for a
+// Control Room left open to show that work is to tail unfiltered.
+// events.id is a global autoincrement, so a single monotonic cursor still
+// orders correctly across runs; lane progress cursors are keyed by
+// (run id, lane id) rather than bare lane id, since lane ids are packet ids
+// (see internal/run) and are not unique across concurrent runs.
 func NewHub(l *ledger.Ledger, runID string, config HubConfig) *Hub {
 	pollInterval := config.PollInterval
 	if pollInterval <= 0 {
@@ -228,11 +240,18 @@ func (h *Hub) Subscribe(ctx context.Context, cursor Cursor) (*Subscription, erro
 	if err := cursor.validate(); err != nil {
 		return nil, err
 	}
-	if cursor.RunID != "" && cursor.RunID != h.runID {
-		return nil, fmt.Errorf("serve: cursor run %q does not match hub run %q", cursor.RunID, h.runID)
-	}
-	if cursor.RunID == "" && (cursor.EventID != 0 || len(cursor.Progress) != 0) {
-		return nil, fmt.Errorf("serve: non-empty cursor is not bound to a run")
+	if h.runID != "" {
+		if cursor.RunID != "" && cursor.RunID != h.runID {
+			return nil, fmt.Errorf("serve: cursor run %q does not match hub run %q", cursor.RunID, h.runID)
+		}
+		if cursor.RunID == "" && (cursor.EventID != 0 || len(cursor.Progress) != 0) {
+			return nil, fmt.Errorf("serve: non-empty cursor is not bound to a run")
+		}
+	} else if cursor.RunID != "" {
+		// This hub tails every run unfiltered, so a cursor bound to one
+		// specific run (minted by, or intended for, a single-run hub) cannot
+		// be resumed here -- there is no single run to validate it against.
+		return nil, fmt.Errorf("serve: cursor bound to run %q cannot resume an unfiltered multi-run stream", cursor.RunID)
 	}
 	cursor = cursor.clone()
 
@@ -249,7 +268,7 @@ func (h *Hub) Subscribe(ctx context.Context, cursor Cursor) (*Subscription, erro
 	buffer := make(chan Delivery, h.subscriberBuffer)
 	sub := &subscriber{events: buffer}
 	for _, record := range records {
-		cursor.advance(record)
+		cursor.advance(record, h.runID)
 		h.enqueue(sub, Delivery{Cursor: cursor.clone(), Record: record})
 	}
 
@@ -284,7 +303,7 @@ func (h *Hub) pollLocked(ctx context.Context) error {
 		return err
 	}
 	for _, record := range records {
-		h.cursor.advance(record)
+		h.cursor.advance(record, h.runID)
 		h.broadcast(Delivery{Cursor: h.cursor.clone(), Record: record})
 	}
 	return nil
@@ -338,9 +357,14 @@ func (h *Hub) queueResync(sub *subscriber, cursor Cursor) {
 	}
 }
 
-func (c *Cursor) advance(record Record) {
-	if c.RunID == "" {
-		c.RunID = record.RunID
+// advance folds record into the cursor. boundRunID is the hub's own runID:
+// non-empty for a single-run hub (which always binds the cursor's RunID, as
+// before -- every record it sees already belongs to that run), empty for a
+// hub tailing every run unfiltered (which leaves RunID unset, since no single
+// run identifies the cursor).
+func (c *Cursor) advance(record Record, boundRunID string) {
+	if boundRunID != "" {
+		c.RunID = boundRunID
 	}
 	switch record.Kind {
 	case RecordEvent:
@@ -351,10 +375,21 @@ func (c *Cursor) advance(record Record) {
 		if c.Progress == nil {
 			c.Progress = make(map[string]int64)
 		}
-		if record.Seq > c.Progress[record.LaneID] {
-			c.Progress[record.LaneID] = record.Seq
+		key := progressCursorKey(record.RunID, record.LaneID)
+		if record.Seq > c.Progress[key] {
+			c.Progress[key] = record.Seq
 		}
 	}
+}
+
+// progressCursorKey identifies one lane's progress cursor position. Lane ids
+// are packet ids (see internal/run) and are commonly reused across separate
+// runs -- two independently dispatched runs both naming a lane "lane-a" is
+// the normal case, not an edge case -- so the run id must be part of the key.
+// Keying by bare lane id would let one run's progress silently advance past
+// rows a same-named lane in a different run has not actually delivered yet.
+func progressCursorKey(runID, laneID string) string {
+	return runID + "\x00" + laneID
 }
 
 func (h *Hub) queryAfter(ctx context.Context, cursor Cursor) ([]Record, error) {
@@ -367,12 +402,13 @@ func (h *Hub) queryAfter(ctx context.Context, cursor Cursor) ([]Record, error) {
 		sources = append(sources, events)
 	}
 
-	laneIDs, err := h.progressLaneIDs(ctx)
+	laneKeys, err := h.progressLaneKeys(ctx)
 	if err != nil {
 		return nil, err
 	}
-	for _, laneID := range laneIDs {
-		progress, err := h.queryProgressAfter(ctx, laneID, cursor.Progress[laneID])
+	for _, key := range laneKeys {
+		afterSeq := cursor.Progress[progressCursorKey(key.runID, key.laneID)]
+		progress, err := h.queryProgressAfter(ctx, key.runID, key.laneID, afterSeq)
 		if err != nil {
 			return nil, err
 		}
@@ -383,12 +419,17 @@ func (h *Hub) queryAfter(ctx context.Context, cursor Cursor) ([]Record, error) {
 	return mergeRecordSources(sources), nil
 }
 
+// queryEventsAfter returns lifecycle events with id > afterID. events.id is a
+// global autoincrement across the whole table (not scoped per run), so this
+// stays correct whether or not h.runID filters to one run.
 func (h *Hub) queryEventsAfter(ctx context.Context, afterID int64) ([]Record, error) {
-	rows, err := h.ledger.DB().QueryContext(ctx, `
-		SELECT id, run_id, lane_id, type, detail, at
-		FROM events
-		WHERE run_id = ? AND id > ?
-		ORDER BY id`, h.runID, afterID)
+	query := `SELECT id, run_id, lane_id, type, detail, at FROM events WHERE id > ?`
+	args := []any{afterID}
+	if h.runID != "" {
+		query = `SELECT id, run_id, lane_id, type, detail, at FROM events WHERE run_id = ? AND id > ?`
+		args = []any{h.runID, afterID}
+	}
+	rows, err := h.ledger.DB().QueryContext(ctx, query+` ORDER BY id`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("serve: query events after cursor: %w", err)
 	}
@@ -416,37 +457,48 @@ func (h *Hub) queryEventsAfter(ctx context.Context, afterID int64) ([]Record, er
 	return records, nil
 }
 
-func (h *Hub) progressLaneIDs(ctx context.Context) ([]string, error) {
-	rows, err := h.ledger.DB().QueryContext(ctx, `
-		SELECT DISTINCT lane_id
-		FROM lane_progress
-		WHERE run_id = ?
-		ORDER BY lane_id`, h.runID)
+// laneProgressKey identifies one lane's progress stream by the run it
+// belongs to, not just its lane id (see progressCursorKey).
+type laneProgressKey struct {
+	runID  string
+	laneID string
+}
+
+// progressLaneKeys enumerates every (run id, lane id) pair with progress
+// rows -- every run's when h.runID is empty, or just h.runID's otherwise.
+func (h *Hub) progressLaneKeys(ctx context.Context) ([]laneProgressKey, error) {
+	query := `SELECT DISTINCT run_id, lane_id FROM lane_progress`
+	args := []any{}
+	if h.runID != "" {
+		query += ` WHERE run_id = ?`
+		args = append(args, h.runID)
+	}
+	rows, err := h.ledger.DB().QueryContext(ctx, query+` ORDER BY run_id, lane_id`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("serve: query progress lanes: %w", err)
 	}
 	defer rows.Close()
 
-	var laneIDs []string
+	var keys []laneProgressKey
 	for rows.Next() {
-		var laneID string
-		if err := rows.Scan(&laneID); err != nil {
+		var key laneProgressKey
+		if err := rows.Scan(&key.runID, &key.laneID); err != nil {
 			return nil, fmt.Errorf("serve: scan progress lane: %w", err)
 		}
-		laneIDs = append(laneIDs, laneID)
+		keys = append(keys, key)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("serve: iterate progress lanes: %w", err)
 	}
-	return laneIDs, nil
+	return keys, nil
 }
 
-func (h *Hub) queryProgressAfter(ctx context.Context, laneID string, afterSeq int64) ([]Record, error) {
+func (h *Hub) queryProgressAfter(ctx context.Context, runID, laneID string, afterSeq int64) ([]Record, error) {
 	rows, err := h.ledger.DB().QueryContext(ctx, `
 		SELECT run_id, lane_id, seq, message, at
 		FROM lane_progress
 		WHERE run_id = ? AND lane_id = ? AND seq > ?
-		ORDER BY seq`, h.runID, laneID, afterSeq)
+		ORDER BY seq`, runID, laneID, afterSeq)
 	if err != nil {
 		return nil, fmt.Errorf("serve: query progress after cursor: %w", err)
 	}

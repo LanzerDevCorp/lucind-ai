@@ -234,6 +234,98 @@ func TestHubSlowConsumerResyncDoesNotBlockOtherSubscribers(t *testing.T) {
 	}
 }
 
+// TestHubEmptyRunIDTailsEveryRun reproduces the actual `lucind-ai serve`
+// wiring (cmd/lucind-ai/cli.go constructs its hub with an empty runID because
+// it has no way to learn the run id of a separately-started `lucind-ai run`
+// process). Before the fix, queryEventsAfter filters `WHERE run_id = ?` with
+// that empty string, which never matches a real row, so the stream connects
+// but silently emits nothing forever. An empty runID must mean "tail every
+// run, unfiltered" instead.
+func TestHubEmptyRunIDTailsEveryRun(t *testing.T) {
+	l := openHubLedger(t)
+	base := time.Date(2026, 8, 22, 14, 0, 0, 0, time.UTC)
+	appendHubEvent(t, l, ledger.Event{RunID: "run-a", Type: ledger.EventRunStarted, Detail: "a-started", At: base})
+	appendHubEvent(t, l, ledger.Event{RunID: "run-b", Type: ledger.EventRunStarted, Detail: "b-started", At: base.Add(time.Second)})
+	appendHubProgress(t, l, ledger.LaneProgress{RunID: "run-b", LaneID: "lane-1", Seq: 1, Message: "b-progress", At: base.Add(2 * time.Second)})
+
+	hub := NewHub(l, "", HubConfig{SubscriberBuffer: 8})
+	sub, err := hub.Subscribe(context.Background(), Cursor{})
+	if err != nil {
+		t.Fatalf("Subscribe(empty hub runID): %v", err)
+	}
+	defer sub.Close()
+
+	first := receiveDelivery(t, sub)
+	second := receiveDelivery(t, sub)
+	third := receiveDelivery(t, sub)
+	if first.Resync || second.Resync || third.Resync {
+		t.Fatalf("unexpected resync in tail-all catch-up: %+v %+v %+v", first, second, third)
+	}
+	if first.Record.RunID != "run-a" || first.Record.Detail != "a-started" {
+		t.Fatalf("first record = %+v, want run-a's event", first.Record)
+	}
+	if second.Record.RunID != "run-b" || second.Record.Detail != "b-started" {
+		t.Fatalf("second record = %+v, want run-b's event", second.Record)
+	}
+	if third.Record.RunID != "run-b" || third.Record.Kind != RecordProgress {
+		t.Fatalf("third record = %+v, want run-b's progress", third.Record)
+	}
+}
+
+// TestHubEmptyRunIDPreservesProgressAcrossCollidingLaneIDs guards the sharp
+// edge in "progress is already keyed by lane id": lane ids are packet ids
+// (see internal/run), not globally unique, so two concurrent runs commonly
+// reuse the same lane id (TestHubRejectsCursorFromAnotherRun above seeds
+// exactly this: "lane-a" under both run-a and run-b). A cursor that tracked
+// progress by bare lane id would let run-b's lane-a rows get silently
+// swallowed as "already delivered" once run-a's lane-a advanced the shared
+// key past them. The fix must key progress by (run id, lane id).
+func TestHubEmptyRunIDPreservesProgressAcrossCollidingLaneIDs(t *testing.T) {
+	l := openHubLedger(t)
+	base := time.Date(2026, 8, 22, 14, 30, 0, 0, time.UTC)
+	appendHubProgress(t, l, ledger.LaneProgress{RunID: "run-a", LaneID: "lane-a", Seq: 5, Message: "a5", At: base})
+
+	hub := NewHub(l, "", HubConfig{SubscriberBuffer: 8})
+	sub, err := hub.Subscribe(context.Background(), Cursor{})
+	if err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+	first := receiveDelivery(t, sub)
+	if first.Record.RunID != "run-a" || first.Record.Seq != 5 {
+		t.Fatalf("first delivery = %+v, want run-a lane-a seq 5", first.Record)
+	}
+	resumeCursor := first.Cursor
+	sub.Close()
+
+	// A different run reuses the same lane id at a lower sequence number.
+	appendHubProgress(t, l, ledger.LaneProgress{RunID: "run-b", LaneID: "lane-a", Seq: 1, Message: "b1", At: base.Add(time.Second)})
+
+	resumed, err := hub.Subscribe(context.Background(), resumeCursor)
+	if err != nil {
+		t.Fatalf("Subscribe(resumed): %v", err)
+	}
+	defer resumed.Close()
+	second := receiveDelivery(t, resumed)
+	if second.Resync {
+		t.Fatalf("resumed delivery = %+v, want run-b lane-a progress, not a resync", second)
+	}
+	if second.Record.RunID != "run-b" || second.Record.LaneID != "lane-a" || second.Record.Seq != 1 {
+		t.Fatalf("resumed delivery = %+v, want run-b's lane-a seq 1 (must not be swallowed by run-a's cursor entry)", second.Record)
+	}
+}
+
+// TestHubEmptyRunIDRejectsCursorBoundToOneRun keeps cursor/resync semantics
+// coherent: a cursor minted by (or for) a single-run hub carries a specific
+// RunID and cannot be meaningfully resumed against an unfiltered multi-run
+// tail, so it must be rejected rather than silently reinterpreted.
+func TestHubEmptyRunIDRejectsCursorBoundToOneRun(t *testing.T) {
+	l := openHubLedger(t)
+	hub := NewHub(l, "", HubConfig{SubscriberBuffer: 2})
+	if _, err := hub.Subscribe(context.Background(), Cursor{RunID: "run-a", EventID: 1}); err == nil {
+		t.Fatal("Subscribe(run-bound cursor on tail-all hub) error = nil, want rejection")
+	}
+}
+
 func TestHubSSERejectsMalformedLastEventID(t *testing.T) {
 	l := openHubLedger(t)
 	hub := NewHub(l, "run-bad-cursor", HubConfig{SubscriberBuffer: 2})

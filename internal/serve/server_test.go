@@ -597,6 +597,41 @@ func TestStreamOverflowRequestsDurableResync(t *testing.T) {
 	}
 }
 
+// TestStreamTailsSeparatelyStartedRunWhenHubHasNoRunID mirrors the actual
+// `lucind-ai serve` wiring in cmd/lucind-ai/cli.go, which constructs its Hub
+// with an empty runID because serve has no flag to learn the run id of a
+// `lucind-ai run` process started separately (and that process only prints
+// its run id after serve is already listening). Before the fix, the console
+// showed "Live event stream connected" but the stream matched no rows and
+// never emitted anything. A Control Room left open must show that
+// independently-dispatched work without being told its run id in advance.
+func TestStreamTailsSeparatelyStartedRunWhenHubHasNoRunID(t *testing.T) {
+	l := openServeLedger(t)
+	appendServeEvent(t, l, "run-dispatched-later", "lane dispatched")
+
+	hub := serve.NewHub(l, "", serve.HubConfig{SubscriberBuffer: 8})
+	handler := serve.NewHandlerWithConfig(serve.NewModel(l), "alice", "opencode run", serve.HandlerConfig{Hub: hub})
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	reqCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, server.URL+"/api/stream", nil)
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET /api/stream: %v", err)
+	}
+	defer resp.Body.Close()
+
+	frame := readServerEvent(t, resp.Body)
+	if frame.Event != serve.RecordEvent || !strings.Contains(frame.Data, `"detail":"lane dispatched"`) {
+		t.Fatalf("frame = %+v, want the separately-started run's event, not silence", frame)
+	}
+}
+
 func TestDispatchControlsRequireExplicitEnableSameOriginAndToken(t *testing.T) {
 	l := openServeLedger(t)
 	requestApproval(t, l, "run-control", "lane-control")
