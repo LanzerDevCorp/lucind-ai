@@ -54,15 +54,31 @@ func (o Opencode) DefaultModel() string {
 }
 
 // KnownModels returns every model a packet may deliberately request for
-// Opencode. openai/gpt-5.6-sol, Opencode's own default, is the only entry:
-// this executor exists specifically to reach that model, and it must run
-// strictly on it -- never escalate to another provider's model -- so
-// provider identity and billing stay unambiguous. Extend this list only for
-// a model actually verified against the real opencode CLI, and never with
-// another provider's model -- see internal/executor.Executor.KnownModels's
-// doc comment for why this is not free text.
+// Opencode: openai/gpt-5.6-sol, Opencode's own default, and
+// openai/gpt-5.6-luna. Adding a second entry is not a relaxation of any
+// one-model rule -- there never was one. The invariant this executor must
+// hold is provider-family exclusivity: every model here must belong to the
+// same billed provider (openai/), so a packet's model string can never
+// silently cross into a different provider's billing the way a
+// copy-pasted gemini- or cursor- model would. See
+// internal/executor.Executor.KnownModels's doc comment and
+// cmd/lucind-ai/cli_test.go's TestEveryExecutorOwnsExactlyOneProviderFamily
+// for why that is the actual invariant being protected, not a count cap.
+//
+// luna is added ahead of the fan-out synthesizer's planned move to
+// opencode once its prompt is tuned (see this package's opencode_stream.go
+// for the tool-lifecycle decoding that move depends on), so the model is
+// selectable and dispatchable -- and, critically, instrumented -- before
+// that cutover happens. DefaultModel is deliberately left at sol: adding a
+// model to this list only makes it legal for a packet to request, it does
+// not change what an unspecified packet gets.
+//
+// Extend this list only for a model actually verified against the real
+// opencode CLI, and never with another provider's model. luna was verified
+// against the installed CLI's own model list (`opencode models`, 1.18.21),
+// which includes both openai/gpt-5.6-sol and openai/gpt-5.6-luna.
 func (o Opencode) KnownModels() []string {
-	return []string{"openai/gpt-5.6-sol"}
+	return []string{"openai/gpt-5.6-sol", "openai/gpt-5.6-luna"}
 }
 
 // Run execs opencode with req.Prompt, in req.WorktreePath, bounded by ctx.
