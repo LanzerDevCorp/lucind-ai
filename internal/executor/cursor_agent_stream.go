@@ -38,27 +38,68 @@ type cursorToolPayload struct {
 	} `json:"result"`
 }
 
-// cursorToolRecord is a "tool_call" record. The tool_call object carries
-// exactly one key, which names the variant. Timestamps arrive as JSON strings
-// rather than numbers on this CLI, so they are decoded permissively.
+// cursorToolRecord is a "tool_call" record.
+//
+// The tool_call object is NOT a single-key wrapper. Verified against the
+// installed CLI by capturing a real dispatch's stream: it carries the
+// variant key alongside "hookAdditionalContexts", "toolCallId",
+// "startedAtMs", and -- on a completed record -- "completedAtMs". An
+// earlier version of this decoder required exactly one key and therefore
+// skipped every tool call the CLI ever emitted; the first real synthesis
+// lane produced 4500 progress rows and zero tool events because of it.
+// The variant is identified by its suffix, not by being alone.
+//
+// The timestamps live INSIDE that object, not at the record's top level,
+// and arrive as JSON strings rather than numbers, so they are read from
+// the same map and decoded permissively.
 type cursorToolRecord struct {
-	CallID      string                     `json:"call_id"`
-	ToolCall    map[string]json.RawMessage `json:"tool_call"`
-	StartedAtMS json.RawMessage            `json:"startedAtMs"`
-	EndedAtMS   json.RawMessage            `json:"completedAtMs"`
+	CallID   string                     `json:"call_id"`
+	ToolCall map[string]json.RawMessage `json:"tool_call"`
 }
 
-// variant returns the single key of the tool_call object with its suffix
-// stripped, plus its raw payload. It reports false when the record does not
-// carry exactly one variant, which is the only shape this decoder understands.
+// cursorToolCallIDKey, cursorToolStartedKey and cursorToolCompletedKey are
+// the non-variant keys the tool_call object carries. They are named here so
+// variant() can tell a sibling from the variant it is looking for.
+const (
+	cursorToolCallIDKey    = "toolCallId"
+	cursorToolStartedKey   = "startedAtMs"
+	cursorToolCompletedKey = "completedAtMs"
+)
+
+// variant returns the tool_call object's variant key with its suffix
+// stripped, plus its raw payload. Sibling keys are ignored. It reports
+// false when the object carries no suffixed key at all, or more than one,
+// since neither shape names a single unambiguous tool.
 func (r cursorToolRecord) variant() (name string, payload json.RawMessage, ok bool) {
-	if len(r.ToolCall) != 1 {
-		return "", nil, false
-	}
 	for key, raw := range r.ToolCall {
-		return strings.TrimSuffix(key, cursorToolCallSuffix), raw, true
+		if !strings.HasSuffix(key, cursorToolCallSuffix) {
+			continue
+		}
+		if ok {
+			// Two variants in one record: nothing truthful can be said
+			// about which tool this was, so say nothing.
+			return "", nil, false
+		}
+		name, payload, ok = strings.TrimSuffix(key, cursorToolCallSuffix), raw, true
 	}
-	return "", nil, false
+	return name, payload, ok
+}
+
+// millis returns one of the tool_call object's timestamp entries.
+func (r cursorToolRecord) millis(key string) (int64, bool) {
+	return parseCursorMillis(r.ToolCall[key])
+}
+
+// innerCallID returns the tool_call object's own "toolCallId", which pairs a
+// completed record with its started one just as the top-level "call_id"
+// does. Both are present on a real record; this is the fallback for a build
+// that stops sending the top-level one.
+func (r cursorToolRecord) innerCallID() string {
+	var id string
+	if json.Unmarshal(r.ToolCall[cursorToolCallIDKey], &id) != nil {
+		return ""
+	}
+	return id
 }
 
 // cursorToolTracker remembers the path a started call named so a completed
@@ -81,6 +122,9 @@ func newCursorToolTracker() *cursorToolTracker {
 func (t *cursorToolTracker) key(record cursorToolRecord, name string) string {
 	if record.CallID != "" {
 		return record.CallID
+	}
+	if inner := record.innerCallID(); inner != "" {
+		return inner
 	}
 	return name
 }
@@ -144,11 +188,13 @@ func (t *cursorToolTracker) decodeCursorToolCall(subtype string, record cursorTo
 }
 
 func cursorToolTimestamp(record cursorToolRecord, subtype string) time.Time {
-	raw := record.StartedAtMS
-	if subtype == "completed" && len(record.EndedAtMS) > 0 {
-		raw = record.EndedAtMS
+	key := cursorToolStartedKey
+	if subtype == "completed" {
+		if _, ok := record.millis(cursorToolCompletedKey); ok {
+			key = cursorToolCompletedKey
+		}
 	}
-	if ms, ok := parseCursorMillis(raw); ok {
+	if ms, ok := record.millis(key); ok {
 		return time.UnixMilli(ms)
 	}
 	return time.Time{}
