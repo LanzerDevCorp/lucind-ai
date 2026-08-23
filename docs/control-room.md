@@ -168,6 +168,14 @@ candidates read-only. Whether it should also POST `approve`/`decline`/`cancel`/`
 `--enable-dispatch` now provides exactly the gating such a surface would need, so the
 blocker is a product decision rather than a missing mechanism.
 
+**Static asset tests assert on source text, not behaviour.** Every test covering
+`app.js` greps the file for expected substrings rather than executing it. That catches a
+deleted call site and nothing else: a function can be renamed into agreement with its
+test while its behaviour rots, and refactoring a line of client code breaks tests that
+never exercised it. One such test had pinned the exact `Date.now()` call the clock anchor
+above replaced, so fixing the bug required editing the test that guaranteed it. Running
+the client under a JS runtime would make these tests mean what they appear to mean.
+
 **Dual verification dispatch.** A single qualitative verify lane passed a change
 containing dead code. Either dispatch two lanes with different reference documents, or
 point the lane explicitly at `tasks.md`'s unchecked boxes. See "The defect that nearly
