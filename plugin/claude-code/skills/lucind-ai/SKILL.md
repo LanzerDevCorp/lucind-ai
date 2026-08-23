@@ -631,3 +631,32 @@ watcher/monitor process rather than a plain backgrounded shell task has not exhi
 external-kill behavior in the same session — reach for that instead of a third or fourth
 identical plain-background retry of the same lane.
 
+
+8. **A single qualitative verify lane will pass code that has no consumer.** Observed on a real
+   change: the verify packet carried the done-criterion *"every indirection introduced is
+   demonstrably consumed by a terminal consumer"*, the lane reported `done` with no blocker, and
+   the change contained a model method and its DTO with zero callers anywhere in the repository —
+   the HTTP route meant to expose them was never mounted. No spec named that route, so a
+   spec-compliance reading alone could not surface it, and the lane had no reason to look further.
+
+   Two things catch this, and the second is the cheap one:
+
+   - **Dual dispatch with different reference documents.** `sdd-fan-out-lens` ran `agy` and
+     `cursor-agent` over the same candidate; `agy` checked the divergence against `tasks.md`,
+     concluded the checklist was stale, and passed. `cursor-agent` checked it against the binding
+     spec and blocked on a live requirement violation. Same evidence, opposite verdicts, and only
+     one gates the change. A single-lane verify that happened to draw the permissive one ships the
+     defect.
+   - **Audit `tasks.md`'s unchecked boxes against the code before archiving.** Do not trust the
+     checkbox or the lane's verdict. For each `- [ ]`, grep for the concrete artifact: does the
+     symbol exist, does it have callers *outside its own definition*
+     (`rg '<Symbol>' --glob '!*_test.go'`), does the named test exist? Sort the results into three
+     buckets — done-but-stale (`[x]`), genuinely undelivered (dispatch a remediation lane), and
+     superseded by a better architecture (`[~] SUPERSEDED` with the reason, never `[x]`). The
+     "Open Questions" list at the end of a `tasks.md` is design questions, not implementation
+     tasks; those become archive-report follow-ups and never block.
+
+   The archive packet's Task Completion Gate is what forces this — it blocks on any `- [ ]` and
+   requires explicit, evidenced authorization in its `## Context` before any checkbox is
+   reconciled. Do not route around it; it is the last thing standing between a stale checklist and
+   a shipped defect.

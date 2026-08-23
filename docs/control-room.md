@@ -140,17 +140,35 @@ Note that the `apply-dag.yaml` sidecars are preserved exactly as dispatched, wro
 `allowed_paths` included. They are a record of what ran, not a template to re-run:
 anything re-dispatched from them would deviate the same way it did the first time.
 
-## Open follow-ups
+## Follow-ups
 
 Carried from the final change's archive report.
 
-1. **Reconciliation mutation surface.** The console shows reconciliation requests and
-   candidates read-only. Whether it should also POST `approve`/`decline`/`cancel`/
-   `renew`/`resolve`, or keep pointing at the CLI, was escalated from explore and never
-   answered. `--enable-dispatch` now provides the gating such a surface would need.
-2. **Lease countdown source.** Whether the model should return `remaining_seconds` or
-   `expires_at` plus a server timestamp for the client to difference against.
-3. **Overlap evidence rendering.** `<pre>` plus `escapeHtml`, which is what ships today,
-   versus an inline diff tokenizer for `evidence_json`.
-4. **`NewHandler` model injection.** It constructs `NewModel(l)` internally rather than
-   accepting a `*Model`, which makes it awkward to test against a substitute.
+### Closed
+
+**Lease countdown source.** The question was whether the model should return
+`remaining_seconds` or `expires_at` plus a server timestamp. `expires_at` wins: a
+precomputed `remaining_seconds` is stale the moment it is serialized, and every
+subsequent second of its life is a lie. The console ships `Lease.ExpiresAt` and
+differences against it client-side, with a server-supplied UTC anchor so the countdown
+does not drift with the viewer's own clock.
+
+**Overlap evidence rendering.** The question was `<pre>` plus `escapeHtml` versus an
+inline diff tokenizer for `evidence_json`. Keeping `escapeHtml`. A tokenizer would have
+to reconstruct markup around attacker-influenced content — overlap evidence contains
+paths and diff fragments from dispatched lanes — and the readability it buys does not
+justify reopening an injection surface the console currently has closed by construction.
+Revisit only with a tokenizer that emits text nodes rather than markup.
+
+### Open
+
+**Reconciliation mutation surface.** The console shows reconciliation requests and
+candidates read-only. Whether it should also POST `approve`/`decline`/`cancel`/`renew`/
+`resolve`, or keep pointing at the CLI, was escalated from explore and never answered.
+`--enable-dispatch` now provides exactly the gating such a surface would need, so the
+blocker is a product decision rather than a missing mechanism.
+
+**Dual verification dispatch.** A single qualitative verify lane passed a change
+containing dead code. Either dispatch two lanes with different reference documents, or
+point the lane explicitly at `tasks.md`'s unchecked boxes. See "The defect that nearly
+shipped" above.
