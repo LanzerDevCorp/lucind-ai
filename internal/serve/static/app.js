@@ -800,6 +800,32 @@ function ensureFeatureSwimlanesContainer() {
   return container;
 }
 
+// Lease countdowns are differences against an absolute expires_at, so they are
+// only as trustworthy as the clock they are differenced from. A viewer whose
+// machine is a few minutes fast reads a live lease as expired; a few minutes
+// slow and a dead one still looks held. Neither is acceptable in a console
+// whose job is to show real lease state.
+//
+// Every state payload carries the server's own clock as server_time. We measure
+// the offset once per payload and hand serverNow() to the normalizers instead of
+// Date.now(), so every countdown on screen is anchored to the server rather than
+// to whatever the browser believes. The offset is a single measurement, not a
+// running sync: no extra endpoint, no polling for time.
+let serverClockOffsetMs = 0;
+
+function syncServerClock(state, now = Date.now()) {
+  const raw = state && (state.server_time || state.ServerTime);
+  if (!raw) return serverClockOffsetMs;
+  const parsed = Date.parse(raw);
+  if (Number.isNaN(parsed)) return serverClockOffsetMs;
+  serverClockOffsetMs = parsed - now;
+  return serverClockOffsetMs;
+}
+
+function serverNow(now = Date.now()) {
+  return now + serverClockOffsetMs;
+}
+
 function formatTTL(expiresAt, now = Date.now()) {
   if (!expiresAt) return 'Unavailable';
   const expiry = Date.parse(expiresAt);
@@ -1866,13 +1892,14 @@ function renderState(state) {
     const count = patchApprovalCards(approvalsContainer, state.approvals || []);
     if (pendingCount) pendingCount.textContent = String(count);
   }
-  if (fleetContainer) patchFleetCards(fleetContainer, normalizeFleetState(state, Date.now()));
+  syncServerClock(state);
+  if (fleetContainer) patchFleetCards(fleetContainer, normalizeFleetState(state, serverNow()));
   renderApplyDAG(state.apply_dag);
 
   const sddFlows = Array.isArray(state.sdd_flows) ? state.sdd_flows : [];
   renderSDDFlows(ensureSDDFlowsContainer(), sddFlows);
 
-  const features = normalizeFeatureSwimlanes(state, Date.now());
+  const features = normalizeFeatureSwimlanes(state, serverNow());
   renderFeatureSwimlanes(ensureFeatureSwimlanesContainer(), features);
 
   const timeline = normalizeTimeline(state);

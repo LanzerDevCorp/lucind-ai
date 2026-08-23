@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/LanzerDevCorp/lucind-ai/internal/ledger"
 )
@@ -22,6 +23,12 @@ type ServerState struct {
 	ApproverRate    float64           `json:"approver_rate"`
 	OpencodeCommand string            `json:"opencode_command"`
 	Approvals       []ledger.Approval `json:"approvals"`
+	// ServerTime is this server's clock at the moment the payload was built.
+	// The console's lease countdowns are differences against expires_at, and
+	// a viewer whose machine clock is off would otherwise read a live lease as
+	// expired (or the reverse) with nothing on screen to explain it. The client
+	// measures its offset from this field and anchors every countdown to it.
+	ServerTime time.Time `json:"server_time"`
 }
 
 type decideRequest struct {
@@ -45,15 +52,16 @@ type HandlerConfig struct {
 }
 
 // NewHandler creates a new HTTP handler that serves the approvals UI and API.
-func NewHandler(l *ledger.Ledger, defaultApprover string, opencodeCmd string) http.Handler {
-	return NewHandlerWithConfig(l, defaultApprover, opencodeCmd, HandlerConfig{})
+func NewHandler(m *Model, defaultApprover string, opencodeCmd string) http.Handler {
+	return NewHandlerWithConfig(m, defaultApprover, opencodeCmd, HandlerConfig{})
 }
 
 // NewHandlerWithConfig creates a handler with optional SSE and dispatch
 // control. Dispatch remains disabled unless explicitly enabled with a token.
-func NewHandlerWithConfig(l *ledger.Ledger, defaultApprover string, opencodeCmd string, config HandlerConfig) http.Handler {
+func NewHandlerWithConfig(m *Model, defaultApprover string, opencodeCmd string, config HandlerConfig) http.Handler {
 	mux := http.NewServeMux()
-	model := NewModel(l)
+	model := m
+	l := m.Ledger()
 
 	mux.HandleFunc("/api/features", func(w http.ResponseWriter, r *http.Request) {
 		if !requireGET(w, r) {
@@ -412,6 +420,7 @@ func serveStateJSON(w http.ResponseWriter, r *http.Request, l *ledger.Ledger, de
 		ApproverRate:    rate,
 		OpencodeCommand: opencodeCmd,
 		Approvals:       approvals,
+		ServerTime:      time.Now().UTC(),
 	}
 
 	w.Header().Set("Content-Type", "application/json")

@@ -862,7 +862,7 @@ func TestStaticWiringAllSixViewsLoadAndWireState(t *testing.T) {
 		assertContainsAll(t, "app.js", js,
 			"function renderState(state)",
 			"patchApprovalCards(approvalsContainer, state.approvals || [])",
-			"patchFleetCards(fleetContainer, normalizeFleetState(state, Date.now()))",
+			"patchFleetCards(fleetContainer, normalizeFleetState(state, serverNow()))",
 			"renderApplyDAG(state.apply_dag)",
 			"renderSDDFlows(ensureSDDFlowsContainer(), sddFlows)",
 			"renderFeatureSwimlanes(ensureFeatureSwimlanesContainer(), features)",
@@ -930,3 +930,44 @@ func TestStaticAssetsContainFivePanels(t *testing.T) {
 
 
 
+
+func TestLeaseCountdownIsAnchoredToServerClockNotBrowserClock(t *testing.T) {
+	js := readStaticAsset(t, "app.js")
+
+	// The point of the anchor is that no countdown is computed from the raw
+	// browser clock. Assert both halves: the offset is measured from the
+	// server's own timestamp, and the normalizers that feed every TTL and
+	// lease-status badge are handed serverNow() rather than Date.now().
+	assertContainsAll(t, "app.js", js,
+		"function syncServerClock(state",
+		"state.server_time",
+		"serverClockOffsetMs = parsed - now",
+		"function serverNow(",
+		"return now + serverClockOffsetMs",
+		"syncServerClock(state);",
+		"normalizeFleetState(state, serverNow())",
+		"normalizeFeatureSwimlanes(state, serverNow())",
+	)
+
+	// A stale anchor is as bad as no anchor, so the sync must happen on the
+	// render path that consumes it, ahead of the first normalizer call.
+	syncAt := strings.Index(js, "syncServerClock(state);")
+	fleetAt := strings.Index(js, "normalizeFleetState(state, serverNow())")
+	featuresAt := strings.Index(js, "normalizeFeatureSwimlanes(state, serverNow())")
+	if syncAt < 0 || fleetAt < 0 || featuresAt < 0 {
+		t.Fatalf("anchor call sites missing: sync=%d fleet=%d features=%d", syncAt, fleetAt, featuresAt)
+	}
+	if syncAt > fleetAt || syncAt > featuresAt {
+		t.Errorf("syncServerClock at %d runs after a normalizer (fleet=%d, features=%d) -- the offset would be one payload stale", syncAt, fleetAt, featuresAt)
+	}
+
+	// Nothing that renders a countdown may reach for Date.now() directly.
+	for _, forbidden := range []string{
+		"normalizeFleetState(state, Date.now())",
+		"normalizeFeatureSwimlanes(state, Date.now())",
+	} {
+		if strings.Contains(js, forbidden) {
+			t.Errorf("app.js still contains %q -- that countdown is differenced against the viewer's own clock", forbidden)
+		}
+	}
+}

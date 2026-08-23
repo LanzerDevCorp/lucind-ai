@@ -25,6 +25,16 @@ func NewModel(l *ledger.Ledger) *Model {
 	return &Model{ledger: l}
 }
 
+// Ledger returns the ledger this Model queries. NewHandlerWithConfig takes a
+// *Model rather than a *ledger.Ledger so a caller can hand the handler a
+// substitute, but a handful of its routes -- approvals, decisions, defect
+// marking -- write through the ledger directly rather than through a Model
+// query. Exposing it here keeps the constructor to one dependency instead of
+// making every caller pass both and keep them consistent.
+func (m *Model) Ledger() *ledger.Ledger {
+	return m.ledger
+}
+
 // Feature is the JSON payload for one features row.
 type Feature struct {
 	ID                string    `json:"id"`

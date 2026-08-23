@@ -255,7 +255,7 @@ func TestDecideAlreadyDecidedReturns409Conflict(t *testing.T) {
 func TestModelReadRoutes(t *testing.T) {
 	l := openServeLedger(t)
 	seedModelReadRows(t, l)
-	handler := serve.NewHandler(l, "alice", "opencode run")
+	handler := serve.NewHandler(serve.NewModel(l), "alice", "opencode run")
 
 	tests := []struct {
 		name string
@@ -355,7 +355,7 @@ func TestGetRoutesReturnJSON(t *testing.T) {
 		t.Fatalf("RequestApproval: %v", err)
 	}
 
-	handler := serve.NewHandler(l, "alice", "opencode run")
+	handler := serve.NewHandler(serve.NewModel(l), "alice", "opencode run")
 
 	tests := []struct {
 		name      string
@@ -471,7 +471,7 @@ func TestGetRoutesReturnJSON(t *testing.T) {
 
 	t.Run("GET approvals empty ledger encodes as empty array", func(t *testing.T) {
 		cleanLedger := openServeLedger(t)
-		cleanHandler := serve.NewHandler(cleanLedger, "alice", "opencode run")
+		cleanHandler := serve.NewHandler(serve.NewModel(cleanLedger), "alice", "opencode run")
 		req := httptest.NewRequest(http.MethodGet, "/api/approvals", nil)
 		rec := httptest.NewRecorder()
 		cleanHandler.ServeHTTP(rec, req)
@@ -490,7 +490,7 @@ func TestGetRoutesReturnJSON(t *testing.T) {
 
 func TestLegacyHandlerKeepsStateFallbackWithoutStream(t *testing.T) {
 	l := openServeLedger(t)
-	handler := serve.NewHandler(l, "alice", "opencode run")
+	handler := serve.NewHandler(serve.NewModel(l), "alice", "opencode run")
 
 	stateReq := httptest.NewRequest(http.MethodGet, "/api/state", nil)
 	stateRec := httptest.NewRecorder()
@@ -514,7 +514,7 @@ func TestStreamResumesFromLastEventID(t *testing.T) {
 	appendServeEvent(t, l, runID, "two")
 
 	hub := serve.NewHub(l, runID, serve.HubConfig{SubscriberBuffer: 8})
-	handler := serve.NewHandlerWithConfig(l, "alice", "opencode run", serve.HandlerConfig{Hub: hub})
+	handler := serve.NewHandlerWithConfig(serve.NewModel(l), "alice", "opencode run", serve.HandlerConfig{Hub: hub})
 	server := httptest.NewServer(handler)
 	defer server.Close()
 
@@ -555,7 +555,7 @@ func TestStreamOverflowRequestsDurableResync(t *testing.T) {
 	}
 
 	hub := serve.NewHub(l, runID, serve.HubConfig{SubscriberBuffer: 1})
-	handler := serve.NewHandlerWithConfig(l, "alice", "opencode run", serve.HandlerConfig{Hub: hub})
+	handler := serve.NewHandlerWithConfig(serve.NewModel(l), "alice", "opencode run", serve.HandlerConfig{Hub: hub})
 	server := httptest.NewServer(handler)
 	defer server.Close()
 
@@ -601,7 +601,7 @@ func TestDispatchControlsRequireExplicitEnableSameOriginAndToken(t *testing.T) {
 	requestApproval(t, l, "run-control", "lane-control")
 	body := `{"decision":"approved"}`
 
-	defaultHandler := serve.NewHandler(l, "alice", "opencode run")
+	defaultHandler := serve.NewHandler(serve.NewModel(l), "alice", "opencode run")
 	for _, path := range []string{"/approvals/run-control/lane-control", "/approvals/run-control/lane-control/defect"} {
 		defaultReq := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
 		authorizeControlRequest(defaultReq)
@@ -664,7 +664,7 @@ func openServeLedger(t *testing.T) *ledger.Ledger {
 }
 
 func newDispatchEnabledHandler(l *ledger.Ledger) http.Handler {
-	return serve.NewHandlerWithConfig(l, "alice", "opencode run --agent build -m openai/gpt-5.6-sol", serve.HandlerConfig{
+	return serve.NewHandlerWithConfig(serve.NewModel(l), "alice", "opencode run --agent build -m openai/gpt-5.6-sol", serve.HandlerConfig{
 		EnableDispatch: true,
 		DispatchToken:  controlToken,
 	})
@@ -750,4 +750,33 @@ func readServerEvent(t *testing.T, body io.Reader) serverEvent {
 		t.Fatalf("invalid SSE frame: %+v", frame)
 	}
 	return frame
+}
+
+func TestStateResponseCarriesServerTime(t *testing.T) {
+	l := openServeLedger(t)
+	handler := serve.NewHandler(serve.NewModel(l), "alice", "opencode run")
+
+	before := time.Now().UTC().Add(-time.Second)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/state", nil))
+	after := time.Now().UTC().Add(time.Second)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	var state serve.ServerState
+	if err := json.NewDecoder(rec.Body).Decode(&state); err != nil {
+		t.Fatalf("decode /api/state: %v", err)
+	}
+
+	// The client measures its clock offset from this field; a zero value would
+	// silently anchor every lease countdown to the viewer's own clock instead,
+	// which is exactly the bug the field exists to prevent.
+	if state.ServerTime.IsZero() {
+		t.Fatal("ServerTime is zero -- the client would fall back to the browser clock with nothing on screen to say so")
+	}
+	if state.ServerTime.Before(before) || state.ServerTime.After(after) {
+		t.Errorf("ServerTime = %v, want a timestamp within [%v, %v]", state.ServerTime, before, after)
+	}
 }

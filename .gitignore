@@ -9,3 +9,6 @@
 # os
 Thumbs.db
 .DS_Store
+
+# agy CLI scratch state
+.antigravitycli/

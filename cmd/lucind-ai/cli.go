@@ -729,7 +729,7 @@ func serveDispatch(ctx context.Context, args []string, stdout, stderr io.Writer)
 		EnableDispatch: *enableDispatch,
 		DispatchToken:  token,
 	}
-	handler := serve.NewHandlerWithConfig(ledg, *approver, opencodeCmd, config)
+	handler := serve.NewHandlerWithConfig(serve.NewModel(ledg), *approver, opencodeCmd, config)
 
 	if *enableDispatch {
 		fmt.Fprintf(stdout, "lucind-ai serve listening on http://%s (approver: %s, approval timeout: %s, dispatch: enabled)\n", *addr, *approver, *approvalTimeout)
