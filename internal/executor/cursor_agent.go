@@ -166,6 +166,7 @@ type cursorStreamCapture struct {
 	pending   []byte
 	records   int
 	malformed bool
+	tools     *cursorToolTracker
 }
 
 func (c *cursorStreamCapture) Write(p []byte) (int, error) {
@@ -232,9 +233,29 @@ func (c *cursorStreamCapture) decode(line []byte) {
 		}
 	}
 
+	// Tool lifecycle is decoded separately because it carries its own
+	// timestamps, its own per-variant shape, and the only signal that
+	// distinguishes a lane doing work from a lane thinking about it.
+	var toolAt time.Time
+	if record.Type == "tool_call" {
+		var toolRecord cursorToolRecord
+		if json.Unmarshal(line, &toolRecord) == nil {
+			if c.tools == nil {
+				c.tools = newCursorToolTracker()
+			}
+			if message, decodedAt, ok := c.tools.decodeCursorToolCall(record.Subtype, toolRecord); ok {
+				messages = append(messages, message)
+				toolAt = decodedAt
+			}
+		}
+	}
+
 	at := time.Now()
 	if record.TimestampMS != nil {
 		at = time.UnixMilli(*record.TimestampMS)
+	}
+	if !toolAt.IsZero() {
+		at = toolAt
 	}
 	for _, message := range messages {
 		message = strings.TrimSpace(message)
