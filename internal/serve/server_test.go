@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -778,5 +779,121 @@ func TestStateResponseCarriesServerTime(t *testing.T) {
 	}
 	if state.ServerTime.Before(before) || state.ServerTime.After(after) {
 		t.Errorf("ServerTime = %v, want a timestamp within [%v, %v]", state.ServerTime, before, after)
+	}
+}
+
+// TestStateResponseCarriesFleetFeatureAndTimelineData reproduces the Control
+// Room symptom directly: a ledger with runs, lanes, progress, lifecycle
+// events, features, and their attempts/leases/overlap/reconciliation rows
+// must come back from /api/state under the exact top-level keys app.js reads
+// (see refreshState/renderState in static/app.js), not just the five
+// approval-only fields ServerState used to carry. Before the fix, every one
+// of these keys is absent from the JSON object entirely, which is why the
+// console renders "No lanes are reporting yet", "No SDD flows reported",
+// "No features reported", and "Showing 0 of 0 events" even though the
+// ledger is full.
+func TestStateResponseCarriesFleetFeatureAndTimelineData(t *testing.T) {
+	l := openServeLedger(t)
+	ctx := context.Background()
+	started := time.Date(2026, 8, 22, 9, 0, 0, 0, time.UTC)
+
+	if err := l.RegisterRun(ctx, ledger.Run{
+		RunID: "run-1", FeatureID: "feat-1", Status: "running",
+		TargetRef: "refs/heads/feat-1", LaneCount: 1, StartedAt: started,
+	}); err != nil {
+		t.Fatalf("RegisterRun: %v", err)
+	}
+	if err := l.RegisterLane(ctx, ledger.Lane{
+		RunID: "run-1", LaneID: "lane-a", PacketID: "packet-a",
+		Executor: "opencode", RoutingCondition: "primary", Status: lane.Running,
+	}); err != nil {
+		t.Fatalf("RegisterLane: %v", err)
+	}
+	if err := l.AppendProgress(ctx, ledger.LaneProgress{
+		RunID: "run-1", LaneID: "lane-a", Seq: 1, Message: "chunk-1", At: started.Add(time.Second),
+	}); err != nil {
+		t.Fatalf("AppendProgress: %v", err)
+	}
+	appendServeEvent(t, l, "run-1", "lane dispatched")
+	seedModelReadRows(t, l)
+
+	handler := serve.NewHandler(serve.NewModel(l), "alice", "opencode run")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/state", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /api/state code = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
+	}
+
+	var state map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &state); err != nil {
+		t.Fatalf("decode /api/state: %v", err)
+	}
+
+	for _, key := range []string{
+		"runs", "lanes", "events", "lane_progress", "sdd_flows",
+		"features", "feature_leases", "integration_attempts",
+		"overlap_evidence", "reconciliation_requests", "integration_events",
+	} {
+		value, ok := state[key]
+		if !ok {
+			t.Errorf("state[%q] missing from /api/state", key)
+			continue
+		}
+		arr, ok := value.([]any)
+		if !ok {
+			t.Errorf("state[%q] = %T, want a JSON array", key, value)
+			continue
+		}
+		if len(arr) == 0 {
+			t.Errorf("state[%q] is empty, want at least one row seeded by the fixture", key)
+		}
+	}
+}
+
+// TestStateResponseBoundsRunsAndLanes pins the payload-size safeguard: with
+// far more runs than the documented bound, /api/state must still return only
+// the newest window rather than serializing the whole run history on every
+// poll. Update the expected count here if the documented bound in
+// serveStateJSON's helpers changes.
+func TestStateResponseBoundsRunsAndLanes(t *testing.T) {
+	const (
+		seedRuns   = 60
+		wantAtMost = 50 // must match the documented run-window bound
+	)
+	l := openServeLedger(t)
+	ctx := context.Background()
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	for i := 0; i < seedRuns; i++ {
+		runID := fmt.Sprintf("run-%03d", i)
+		if err := l.RegisterRun(ctx, ledger.Run{
+			RunID: runID, Status: "done", StartedAt: base.Add(time.Duration(i) * time.Minute),
+		}); err != nil {
+			t.Fatalf("RegisterRun(%s): %v", runID, err)
+		}
+	}
+	newestRunID := fmt.Sprintf("run-%03d", seedRuns-1)
+
+	handler := serve.NewHandler(serve.NewModel(l), "alice", "opencode run")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/state", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /api/state code = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
+	}
+
+	var state struct {
+		Runs []map[string]any `json:"runs"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &state); err != nil {
+		t.Fatalf("decode /api/state: %v", err)
+	}
+	if len(state.Runs) == 0 {
+		t.Fatal("state.runs is empty, want the bounded newest-first window")
+	}
+	if len(state.Runs) > wantAtMost {
+		t.Errorf("state.runs has %d entries, want at most %d", len(state.Runs), wantAtMost)
+	}
+	if got := state.Runs[0]["run_id"]; got != newestRunID {
+		t.Errorf("state.runs[0].run_id = %v, want newest run %q (newest-first order)", got, newestRunID)
 	}
 }

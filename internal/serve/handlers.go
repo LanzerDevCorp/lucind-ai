@@ -2,6 +2,7 @@ package serve
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"crypto/subtle"
 	"database/sql"
@@ -11,6 +12,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 
@@ -18,6 +20,15 @@ import (
 )
 
 // ServerState represents the JSON payload returned to the UI or API clients.
+//
+// static/app.js takes all of its rendered data from this single object (see
+// refreshState/renderState in app.js); SSE only tells the client when to
+// re-fetch it. Every field below corresponds to a top-level key app.js reads
+// directly or through its asArray(state, name, altName, ...) fallback helper.
+// Where app.js accepts more than one name for the same concept, exactly one
+// canonical name is emitted here -- never both -- since asArray already
+// falls back through the alternatives and emitting duplicates would double
+// the very payload these bounds exist to keep small.
 type ServerState struct {
 	Approver        string            `json:"approver"`
 	ApproverRate    float64           `json:"approver_rate"`
@@ -29,7 +40,121 @@ type ServerState struct {
 	// expired (or the reverse) with nothing on screen to explain it. The client
 	// measures its offset from this field and anchors every countdown to it.
 	ServerTime time.Time `json:"server_time"`
+
+	// Runs is the newest-first window of run summaries (see stateMaxRuns).
+	Runs []RunSummary `json:"runs"`
+	// Lanes is every lane belonging to a run inside the Runs window (see
+	// stateMaxLanes). app.js correlates each lane back to Runs by run_id.
+	Lanes []Lane `json:"lanes"`
+	// Events is the newest-first window of lifecycle events (the same
+	// `events` table the SSE hub tails) drawn only from runs inside the Runs
+	// window (see stateMaxEvents). Canonical name for app.js's
+	// events/run_events alias pair.
+	Events []ledger.Event `json:"events"`
+	// LaneProgress is the newest-first window of lane progress rows for the
+	// handful of most-recently-started runs (see stateMaxProgressRuns and
+	// stateMaxLaneProgress). Canonical name for app.js's progress/lane_progress
+	// alias pair.
+	LaneProgress []LaneProgress `json:"lane_progress"`
+	// IntegrationEvents is the newest-first window of feature audit events
+	// drawn from the Features window (see stateMaxIntegrationEvents).
+	// Canonical name for app.js's integration_events/audit_events alias pair.
+	IntegrationEvents []AuditEvent `json:"integration_events"`
+	// IntegrationAttempts is the newest-first window of integration attempts
+	// drawn from the Features window (see stateMaxIntegrationAttempts).
+	// Canonical name for app.js's attempts/integration_attempts alias pair.
+	IntegrationAttempts []Attempt `json:"integration_attempts"`
+	// Features is the newest-first window of feature rows (see
+	// stateMaxFeatures). app.js merges this with its feature_swimlanes alias
+	// to build the feature swimlane view; since both sources are unioned
+	// (not a strict first-non-empty fallback), emitting Features alone
+	// already supplies that view in full.
+	Features []Feature `json:"features"`
+	// FeatureLeases is every feature lease, most-recently-updated first (see
+	// stateMaxFeatureLeases). Canonical name for app.js's
+	// leases/feature_leases alias pair.
+	FeatureLeases []Lease `json:"feature_leases"`
+	// OverlapEvidence is the newest-first window of overlap evidence drawn
+	// from the Features window (see stateMaxOverlapEvidence). Canonical name
+	// for app.js's overlap_evidence/overlaps alias pair.
+	OverlapEvidence []OverlapEvidence `json:"overlap_evidence"`
+	// ReconciliationRequests is the newest-first window of reconciliation
+	// requests (each already carrying its own candidates and audit trail)
+	// drawn from the Features window (see stateMaxReconciliationRequests).
+	// Canonical name for app.js's reconciliations/reconciliation_requests
+	// alias pair.
+	ReconciliationRequests []ReconciliationRequest `json:"reconciliation_requests"`
+	// SDDFlows is the run-recency-ordered window of derived SDD flow rollups
+	// (see stateMaxSDDFlows).
+	SDDFlows []SDDFlow `json:"sdd_flows"`
 }
+
+// Bounds applied when assembling /api/state. static/app.js polls this
+// endpoint every 2 seconds while SSE is down, and re-fetches it on every
+// streamed record while SSE is healthy (see connectSSE in app.js), so its
+// cost must stay flat as a ledger accumulates history -- not grow with total
+// lane/event/progress/feature counts. Every collection below applies a
+// "most recent N, newest first" window instead of serializing full history.
+const (
+	// stateMaxRuns bounds how many of the newest runs (Model.ListRuns is
+	// already newest-first) are surfaced. Fifty is generous headroom over a
+	// single active dispatch plus its recent predecessors for context, while
+	// keeping the run-scoped query fan-out below fixed regardless of how many
+	// runs a long-lived project has accumulated.
+	stateMaxRuns = 50
+
+	// stateMaxLanes caps the lanes drawn from the run window above. Lane
+	// count is naturally bounded by the fanout of those runs, but this
+	// ceiling protects against one unusually large fanout dominating the
+	// payload; lanes from the newest runs are kept.
+	stateMaxLanes = 500
+
+	// stateMaxEvents bounds the lifecycle events drawn from the run window
+	// above. events.id is a global autoincrement (see hub.go), so sorting by
+	// id descending is a cheap, deterministic "newest first" with no
+	// timestamp parsing.
+	stateMaxEvents = 200
+
+	// stateMaxProgressRuns further restricts which runs' lanes get a lane
+	// progress lookup. GetLaneProgress has no bulk cross-lane query, so
+	// fetching it is one query per lane; running that fan-out over the full
+	// stateMaxLanes window would mean hundreds of queries every poll for a
+	// project with heavy fanout. Progress is only useful for the currently
+	// active work anyway, so it is restricted to the handful of
+	// most-recently-started runs.
+	stateMaxProgressRuns = 5
+
+	// stateMaxLaneProgress bounds the merged progress rows collected from
+	// the stateMaxProgressRuns window, newest first by their "at" timestamp.
+	stateMaxLaneProgress = 200
+
+	// stateMaxFeatures bounds the features list itself. Features are created
+	// far less often than runs (one per integration feature branch, not per
+	// dispatch), so this is deliberately generous relative to today's usage;
+	// older features age out of every feature-scoped collection below with
+	// them, keeping the story consistent.
+	stateMaxFeatures = 50
+
+	// stateMaxIntegrationEvents, stateMaxIntegrationAttempts,
+	// stateMaxOverlapEvidence, and stateMaxReconciliationRequests bound the
+	// feature-scoped collections, each computed only over the stateMaxFeatures
+	// window above.
+	stateMaxIntegrationEvents      = 200
+	stateMaxIntegrationAttempts    = 200
+	stateMaxOverlapEvidence        = 200
+	stateMaxReconciliationRequests = 200
+
+	// stateMaxFeatureLeases bounds the leases list. A lease is keyed one per
+	// feature today, so this is a defensive ceiling rather than an expected
+	// truncation point.
+	stateMaxFeatureLeases = 200
+
+	// stateMaxSDDFlows bounds the derived SDD flow rollup returned to the
+	// client. Note that Model.ListSDDFlows itself still walks every run in
+	// the ledger internally to compute this rollup (it is not scoped to the
+	// run window above); only the emitted slice is bounded here.
+	stateMaxSDDFlows = 200
+)
 
 type decideRequest struct {
 	Decision  string `json:"decision"`
@@ -161,7 +286,7 @@ func NewHandlerWithConfig(m *Model, defaultApprover string, opencodeCmd string, 
 
 		// If client requests JSON
 		if strings.Contains(r.Header.Get("Accept"), "application/json") || r.URL.Query().Get("format") == "json" {
-			serveStateJSON(w, r, l, defaultApprover, opencodeCmd)
+			serveStateJSON(w, r, model, defaultApprover, opencodeCmd)
 			return
 		}
 
@@ -181,7 +306,7 @@ func NewHandlerWithConfig(m *Model, defaultApprover string, opencodeCmd string, 
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		serveStateJSON(w, r, l, defaultApprover, opencodeCmd)
+		serveStateJSON(w, r, model, defaultApprover, opencodeCmd)
 	})
 
 	mux.HandleFunc("/approvals/", func(w http.ResponseWriter, r *http.Request) {
@@ -399,33 +524,198 @@ func validBearerToken(header, expected string) bool {
 	return subtle.ConstantTimeCompare(providedHash[:], expectedHash[:]) == 1
 }
 
-func serveStateJSON(w http.ResponseWriter, r *http.Request, l *ledger.Ledger, defaultApprover string, opencodeCmd string) {
-	approvals, err := l.PendingApprovals(r.Context())
+func serveStateJSON(w http.ResponseWriter, r *http.Request, model *Model, defaultApprover string, opencodeCmd string) {
+	state, err := buildServerState(r.Context(), model, defaultApprover, opencodeCmd)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("failed to query approvals: %v", err), http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf("failed to build state: %v", err), http.StatusInternalServerError)
 		return
-	}
-	if approvals == nil {
-		approvals = []ledger.Approval{}
-	}
-
-	rate, err := l.ApproverRate(r.Context(), defaultApprover)
-	if err != nil {
-		http.Error(w, fmt.Sprintf("failed to query approver rate: %v", err), http.StatusInternalServerError)
-		return
-	}
-
-	state := ServerState{
-		Approver:        defaultApprover,
-		ApproverRate:    rate,
-		OpencodeCommand: opencodeCmd,
-		Approvals:       approvals,
-		ServerTime:      time.Now().UTC(),
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(state)
+}
+
+// buildServerState assembles the full /api/state payload from model, bounded
+// per the stateMax* constants documented above ServerState. See those
+// constants for why each collection is windowed the way it is.
+func buildServerState(ctx context.Context, model *Model, defaultApprover, opencodeCmd string) (ServerState, error) {
+	l := model.Ledger()
+
+	approvals, err := l.PendingApprovals(ctx)
+	if err != nil {
+		return ServerState{}, fmt.Errorf("query approvals: %w", err)
+	}
+	if approvals == nil {
+		approvals = []ledger.Approval{}
+	}
+
+	rate, err := l.ApproverRate(ctx, defaultApprover)
+	if err != nil {
+		return ServerState{}, fmt.Errorf("query approver rate: %w", err)
+	}
+
+	allRuns, err := model.ListRuns(ctx)
+	if err != nil {
+		return ServerState{}, fmt.Errorf("list runs: %w", err)
+	}
+	runRank := make(map[string]int, len(allRuns))
+	for i, run := range allRuns {
+		runRank[run.RunID] = i
+	}
+	boundedRuns := allRuns
+	if len(boundedRuns) > stateMaxRuns {
+		boundedRuns = boundedRuns[:stateMaxRuns]
+	}
+	progressRunIDs := make(map[string]bool, stateMaxProgressRuns)
+	for i, run := range boundedRuns {
+		if i >= stateMaxProgressRuns {
+			break
+		}
+		progressRunIDs[run.RunID] = true
+	}
+
+	lanes := []Lane{}
+	events := []ledger.Event{}
+	for _, run := range boundedRuns {
+		runLanes, err := model.ListLanes(ctx, run.RunID)
+		if err != nil {
+			return ServerState{}, fmt.Errorf("list lanes for run %q: %w", run.RunID, err)
+		}
+		lanes = append(lanes, runLanes...)
+
+		runEvents, err := l.Events(ctx, run.RunID)
+		if err != nil {
+			return ServerState{}, fmt.Errorf("list events for run %q: %w", run.RunID, err)
+		}
+		events = append(events, runEvents...)
+	}
+	if len(lanes) > stateMaxLanes {
+		lanes = lanes[:stateMaxLanes]
+	}
+	sort.Slice(events, func(i, j int) bool { return events[i].ID > events[j].ID })
+	if len(events) > stateMaxEvents {
+		events = events[:stateMaxEvents]
+	}
+
+	laneProgress := []LaneProgress{}
+	for _, ln := range lanes {
+		if !progressRunIDs[ln.RunID] {
+			continue
+		}
+		progress, err := model.GetLaneProgress(ctx, ln.RunID, ln.LaneID, 0)
+		if err != nil {
+			return ServerState{}, fmt.Errorf("list lane progress for %s/%s: %w", ln.RunID, ln.LaneID, err)
+		}
+		laneProgress = append(laneProgress, progress...)
+	}
+	sort.Slice(laneProgress, func(i, j int) bool { return laneProgress[i].At.After(laneProgress[j].At) })
+	if len(laneProgress) > stateMaxLaneProgress {
+		laneProgress = laneProgress[:stateMaxLaneProgress]
+	}
+
+	allFeatures, err := model.ListFeatures(ctx)
+	if err != nil {
+		return ServerState{}, fmt.Errorf("list features: %w", err)
+	}
+	sort.Slice(allFeatures, func(i, j int) bool { return allFeatures[i].CreatedAt.After(allFeatures[j].CreatedAt) })
+	features := allFeatures
+	if len(features) > stateMaxFeatures {
+		features = features[:stateMaxFeatures]
+	}
+
+	attempts := []Attempt{}
+	overlaps := []OverlapEvidence{}
+	reconciliations := []ReconciliationRequest{}
+	integrationEvents := []AuditEvent{}
+	for _, feature := range features {
+		featureAttempts, err := model.ListAttempts(ctx, feature.ID)
+		if err != nil {
+			return ServerState{}, fmt.Errorf("list attempts for feature %q: %w", feature.ID, err)
+		}
+		attempts = append(attempts, featureAttempts...)
+
+		featureOverlaps, err := model.ListOverlapEvidence(ctx, feature.ID)
+		if err != nil {
+			return ServerState{}, fmt.Errorf("list overlap evidence for feature %q: %w", feature.ID, err)
+		}
+		overlaps = append(overlaps, featureOverlaps...)
+
+		featureReconciliations, err := model.ListReconciliationRequests(ctx, feature.ID)
+		if err != nil {
+			return ServerState{}, fmt.Errorf("list reconciliation requests for feature %q: %w", feature.ID, err)
+		}
+		reconciliations = append(reconciliations, featureReconciliations...)
+
+		featureEvents, err := model.ListAuditEvents(ctx, feature.ID)
+		if err != nil {
+			return ServerState{}, fmt.Errorf("list audit events for feature %q: %w", feature.ID, err)
+		}
+		integrationEvents = append(integrationEvents, featureEvents...)
+	}
+	sort.Slice(attempts, func(i, j int) bool { return attempts[i].CreatedAt.After(attempts[j].CreatedAt) })
+	if len(attempts) > stateMaxIntegrationAttempts {
+		attempts = attempts[:stateMaxIntegrationAttempts]
+	}
+	sort.Slice(overlaps, func(i, j int) bool { return overlaps[i].ID > overlaps[j].ID })
+	if len(overlaps) > stateMaxOverlapEvidence {
+		overlaps = overlaps[:stateMaxOverlapEvidence]
+	}
+	sort.Slice(reconciliations, func(i, j int) bool { return reconciliations[i].UpdatedAt.After(reconciliations[j].UpdatedAt) })
+	if len(reconciliations) > stateMaxReconciliationRequests {
+		reconciliations = reconciliations[:stateMaxReconciliationRequests]
+	}
+	sort.Slice(integrationEvents, func(i, j int) bool { return integrationEvents[i].ID > integrationEvents[j].ID })
+	if len(integrationEvents) > stateMaxIntegrationEvents {
+		integrationEvents = integrationEvents[:stateMaxIntegrationEvents]
+	}
+
+	leases, err := model.ListLeases(ctx)
+	if err != nil {
+		return ServerState{}, fmt.Errorf("list leases: %w", err)
+	}
+	sort.Slice(leases, func(i, j int) bool { return leases[i].UpdatedAt.After(leases[j].UpdatedAt) })
+	if len(leases) > stateMaxFeatureLeases {
+		leases = leases[:stateMaxFeatureLeases]
+	}
+
+	sddFlows, err := model.ListSDDFlows(ctx)
+	if err != nil {
+		return ServerState{}, fmt.Errorf("list sdd flows: %w", err)
+	}
+	sort.SliceStable(sddFlows, func(i, j int) bool {
+		ri, oki := runRank[sddFlows[i].RunID]
+		rj, okj := runRank[sddFlows[j].RunID]
+		if !oki {
+			ri = len(allRuns)
+		}
+		if !okj {
+			rj = len(allRuns)
+		}
+		return ri < rj
+	})
+	if len(sddFlows) > stateMaxSDDFlows {
+		sddFlows = sddFlows[:stateMaxSDDFlows]
+	}
+
+	return ServerState{
+		Approver:               defaultApprover,
+		ApproverRate:           rate,
+		OpencodeCommand:        opencodeCmd,
+		Approvals:              approvals,
+		ServerTime:             time.Now().UTC(),
+		Runs:                   boundedRuns,
+		Lanes:                  lanes,
+		Events:                 events,
+		LaneProgress:           laneProgress,
+		IntegrationEvents:      integrationEvents,
+		IntegrationAttempts:    attempts,
+		Features:               features,
+		FeatureLeases:          leases,
+		OverlapEvidence:        overlaps,
+		ReconciliationRequests: reconciliations,
+		SDDFlows:               sddFlows,
+	}, nil
 }
 
 func handleDecide(w http.ResponseWriter, r *http.Request, l *ledger.Ledger, defaultApprover string, runID, laneID string) {
