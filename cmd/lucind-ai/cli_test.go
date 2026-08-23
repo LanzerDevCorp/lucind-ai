@@ -1177,6 +1177,145 @@ func TestRunSequentialInvocationsProduceDistinctRunIDs(t *testing.T) {
 	}
 }
 
+// TestRunDispatchRegistersRunRowInLedger proves that `lucind-ai run` inserts
+// a runs table row for its own dispatch. Before this fix, ledger.RegisterRun
+// had zero production callers -- the runs table was written only by tests --
+// so ledger.ListRuns (and therefore serve.Model.ListRuns/buildServerState)
+// always returned zero rows despite a ledger full of lanes and events
+// carrying valid run_id values, leaving the Control Room's Fleet card and
+// timeline permanently empty on a live ledger.
+func TestRunDispatchRegistersRunRowInLedger(t *testing.T) {
+	primaryRoot := initRepo(t)
+
+	p1 := filepath.Join(primaryRoot, "packet-1.md")
+	p1Content := "---\n" +
+		"id: lane-1\n" +
+		"executor: agy\n" +
+		"routed_by: test\n" +
+		"legacy_main: true\n" +
+		"expected_parent_sha: 1111111111111111111111111111111111111111\n" +
+		"---\n" +
+		"Task 1\n"
+	if err := os.WriteFile(p1, []byte(p1Content), 0o644); err != nil {
+		t.Fatalf("write packet 1: %v", err)
+	}
+
+	overrideDispatchDeps(t, testDoneExecutor{})
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(primaryRoot); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(cwd)
+
+	before := time.Now().UTC().Add(-time.Second)
+	var stdout, stderr bytes.Buffer
+	code := run(context.Background(), []string{"run", "--packet", p1}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run exit code = %d, want 0; stderr = %q", code, stderr.String())
+	}
+	after := time.Now().UTC().Add(time.Second)
+
+	runID := extractRunID(stdout.String())
+	if runID == "" {
+		t.Fatalf("stdout has no run id line; stdout = %q", stdout.String())
+	}
+
+	l, err := ledger.Open(context.Background(), primaryRoot)
+	if err != nil {
+		t.Fatalf("ledger.Open: %v", err)
+	}
+	defer l.Close()
+
+	got, err := l.GetRun(context.Background(), runID)
+	if err != nil {
+		t.Fatalf("GetRun(%q): %v -- lucind-ai run must register its own run row", runID, err)
+	}
+	if got.Status != string(lane.Done) {
+		t.Errorf("run.Status = %q, want %q after every lane finished done", got.Status, lane.Done)
+	}
+	if got.LaneCount != 1 {
+		t.Errorf("run.LaneCount = %d, want 1", got.LaneCount)
+	}
+	if got.StartedAt.Before(before) || got.StartedAt.After(after) {
+		t.Errorf("run.StartedAt = %v, want within [%v, %v]", got.StartedAt, before, after)
+	}
+	if got.EndedAt == nil {
+		t.Fatal("run.EndedAt is nil, want a terminal timestamp once dispatch concluded")
+	}
+	if got.EndedAt.Before(before) || got.EndedAt.After(after) {
+		t.Errorf("run.EndedAt = %v, want within [%v, %v]", *got.EndedAt, before, after)
+	}
+}
+
+// TestRunDispatchRecordsFailedStatusWhenLaneDoesNotFinishDone proves the run
+// row's terminal status tracks the actual outcome instead of being left at
+// "running" forever when a lane does not finish done. A run row stuck at
+// "running" would overcount serve.Model.GetOverview's ActiveRunCount
+// indefinitely -- the exact "phantom active dispatch" state the console
+// must never show.
+func TestRunDispatchRecordsFailedStatusWhenLaneDoesNotFinishDone(t *testing.T) {
+	primaryRoot := initRepo(t)
+
+	p1 := filepath.Join(primaryRoot, "packet-1.md")
+	p1Content := "---\n" +
+		"id: lane-1\n" +
+		"executor: agy\n" +
+		"routed_by: test\n" +
+		"legacy_main: true\n" +
+		"expected_parent_sha: 1111111111111111111111111111111111111111\n" +
+		"---\n" +
+		"Task 1\n"
+	if err := os.WriteFile(p1, []byte(p1Content), 0o644); err != nil {
+		t.Fatalf("write packet 1: %v", err)
+	}
+
+	overrideDispatchDeps(t, testDoneExecutor{
+		exitCode: 1,
+		envelope: `{"packet_id": "lane-1", "status": "blocked", "summary": "blocked", "hard_stops": [{"hard_stop": "stop", "fired": true, "note": "test block"}]}`,
+	})
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(primaryRoot); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(cwd)
+
+	var stdout, stderr bytes.Buffer
+	code := run(context.Background(), []string{"run", "--packet", p1}, &stdout, &stderr)
+	if code == 0 {
+		t.Fatalf("run exit code = 0, want non-zero after a blocked lane; stdout = %q", stdout.String())
+	}
+
+	runID := extractRunID(stdout.String())
+	if runID == "" {
+		t.Fatalf("stdout has no run id line; stdout = %q", stdout.String())
+	}
+
+	l, err := ledger.Open(context.Background(), primaryRoot)
+	if err != nil {
+		t.Fatalf("ledger.Open: %v", err)
+	}
+	defer l.Close()
+
+	got, err := l.GetRun(context.Background(), runID)
+	if err != nil {
+		t.Fatalf("GetRun(%q): %v", runID, err)
+	}
+	if got.Status == string(lane.Running) {
+		t.Error(`run.Status is still "running" after the dispatch concluded, want a terminal status`)
+	}
+	if got.EndedAt == nil {
+		t.Error("run.EndedAt is nil, want a terminal timestamp even on a non-done outcome")
+	}
+}
+
 const persistEnvelopeFinding = "integrated lane Findings must survive worktree removal"
 
 // TestRunDispatchPersistsIntegratedLaneEnvelopeToPrimaryRoot proves that
@@ -3354,11 +3493,6 @@ func TestReconcileDeclineCancelRenewCLI(t *testing.T) {
 		}
 	})
 }
-
-
-
-
-
 
 // featureDispatchDeps stubs the compare-and-swap promotion path so a
 // feature-targeted dispatch can be driven end to end without a second real

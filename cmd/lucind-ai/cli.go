@@ -292,6 +292,51 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 
 	deps := depsFactory(runID, primaryRoot, ledg, *timeout, *approvalTimeout)
 
+	// Register this run before anything else touches the ledger: every lane
+	// and event ExecuteBatch is about to write carries this runID, and
+	// serve.Model derives its whole run/lane/event/progress window from the
+	// runs table (see internal/serve/handlers.go buildServerState). Without
+	// this row, that data is invisible to the Control Room even though the
+	// lane and event rows themselves are written with a valid run_id.
+	//
+	// runID is a fresh uuid.NewString() minted a few lines above and never
+	// reused across invocations or retries (recovery of a crashed feature
+	// attempt is keyed by attempt id, not run id -- see the "attempt:" line
+	// below), so a duplicate-primary-key error here would mean something is
+	// genuinely wrong (e.g. a UUID collision or manual ledger tampering),
+	// not a benign retry to tolerate: fail the dispatch outright rather than
+	// silently proceed with unreliable run bookkeeping.
+	runFeatureID, runTargetRef := "", ""
+	if featureTargeted {
+		runFeatureID = attemptTarget.FeatureID
+		runTargetRef = attemptTarget.ParentRef
+	}
+	if err := ledg.RegisterRun(ctx, ledger.Run{
+		RunID:     runID,
+		FeatureID: runFeatureID,
+		Status:    string(lane.Running),
+		TargetRef: runTargetRef,
+		LaneCount: len(ps),
+		StartedAt: deps.Now(),
+	}); err != nil {
+		fmt.Fprintf(stderr, "lucind-ai: register run: %v\n", err)
+		return 1
+	}
+
+	// finalStatus is recorded via the deferred UpdateRunStatus below no
+	// matter which return statement this function takes from here on --
+	// every early "return 1" leaves it at this pessimistic default, and only
+	// the success path at the end of this function overwrites it with
+	// lane.Done. This is deliberate: a run row must never linger at
+	// "running" (which serve.Model.GetOverview counts as an active
+	// dispatch) just because a later step returned early.
+	finalStatus := string(lane.Failed)
+	defer func() {
+		if err := ledg.UpdateRunStatus(ctx, runID, finalStatus, deps.Now()); err != nil {
+			fmt.Fprintf(stderr, "lucind-ai: update run status: %v\n", err)
+		}
+	}()
+
 	// N lanes is N simultaneous subscription quota burns. The forecast
 	// only prints for an actual batch (more than one lane): a single
 	// packet is not a quota-multiplying decision worth flagging.
@@ -362,12 +407,15 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 	// Exit 0 requires every lane to have actually reached lane.Done and not
 	// have been reverted by integration. A blocked/deviated/failed/reverted lane
 	// is a real, non-crashing outcome (see printReport), but it must never be
-	// mistaken for success by anything reading the exit code.
+	// mistaken for success by anything reading the exit code. The same
+	// condition drives the run row's terminal status recorded by the
+	// deferred UpdateRunStatus above.
 	for _, r := range batch.Lanes {
 		if r.Status != lane.Done || reverted[r.LaneID] {
 			return 1
 		}
 	}
+	finalStatus = string(lane.Done)
 	return 0
 }
 
