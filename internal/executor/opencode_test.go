@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -313,11 +314,30 @@ func TestOpencodeRunAlwaysPassesMandatoryFlags(t *testing.T) {
 	}
 }
 
-func TestOpencodeKnownModelsIsGptSolOnly(t *testing.T) {
+// TestOpencodeKnownModelsIncludesSolAndLuna pins the model registry to
+// exactly the two verified openai/gpt-5.6 variants Opencode may dispatch:
+// its own default, sol, and luna -- the model the fan-out synthesizer is
+// slated to move to once its prompt is tuned (see opencode.go's
+// KnownModels doc comment). Both were verified against the installed real
+// CLI's own model list (`opencode models`, 1.18.21).
+//
+// Adding luna is not a relaxation of the invariant this test used to pin
+// under its old name (TestOpencodeKnownModelsIsGptSolOnly, "exactly one
+// entry"): the real invariant, per KnownModels' doc comment on the shared
+// Executor interface (executor.go) and
+// TestEveryExecutorOwnsExactlyOneProviderFamily
+// (cmd/lucind-ai/cli_test.go), is provider-family exclusivity -- no two
+// executors may share a model string -- never a cap on how many models one
+// executor may run.
+func TestOpencodeKnownModelsIncludesSolAndLuna(t *testing.T) {
 	o := executor.Opencode{}
 	known := o.KnownModels()
-	if len(known) != 1 || known[0] != o.DefaultModel() {
-		t.Errorf("KnownModels() = %v, want exactly [%q] -- opencode must never escalate to another provider's model", known, o.DefaultModel())
+	want := []string{"openai/gpt-5.6-sol", "openai/gpt-5.6-luna"}
+	if !reflect.DeepEqual(known, want) {
+		t.Errorf("KnownModels() = %v, want %v", known, want)
+	}
+	if o.DefaultModel() != "openai/gpt-5.6-sol" {
+		t.Errorf("DefaultModel() = %q, want %q -- adding luna as selectable must not change the default", o.DefaultModel(), "openai/gpt-5.6-sol")
 	}
 }
 
