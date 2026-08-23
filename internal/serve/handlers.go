@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/LanzerDevCorp/lucind-ai/internal/lane"
 	"github.com/LanzerDevCorp/lucind-ai/internal/ledger"
 )
 
@@ -150,9 +151,12 @@ const (
 	stateMaxFeatureLeases = 200
 
 	// stateMaxSDDFlows bounds the derived SDD flow rollup returned to the
-	// client. Note that Model.ListSDDFlows itself still walks every run in
-	// the ledger internally to compute this rollup (it is not scoped to the
-	// run window above); only the emitted slice is bounded here.
+	// client. Unlike Model.ListSDDFlows (which rediscovers its own run list
+	// from the runs table internally, and so is exactly as blind to a
+	// runs-table-less ledger as everything else here was), this rollup is
+	// computed inline from the same resolveRunWindow lanes already fetched
+	// above, so it is naturally scoped to that same window before this
+	// ceiling is even applied.
 	stateMaxSDDFlows = 200
 )
 
@@ -555,40 +559,70 @@ func buildServerState(ctx context.Context, model *Model, defaultApprover, openco
 		return ServerState{}, fmt.Errorf("query approver rate: %w", err)
 	}
 
-	allRuns, err := model.ListRuns(ctx)
+	runIDs, realRuns, err := resolveRunWindow(ctx, model)
 	if err != nil {
-		return ServerState{}, fmt.Errorf("list runs: %w", err)
+		return ServerState{}, err
 	}
-	runRank := make(map[string]int, len(allRuns))
-	for i, run := range allRuns {
-		runRank[run.RunID] = i
-	}
-	boundedRuns := allRuns
-	if len(boundedRuns) > stateMaxRuns {
-		boundedRuns = boundedRuns[:stateMaxRuns]
+	if len(runIDs) > stateMaxRuns {
+		runIDs = runIDs[:stateMaxRuns]
 	}
 	progressRunIDs := make(map[string]bool, stateMaxProgressRuns)
-	for i, run := range boundedRuns {
+	for i, runID := range runIDs {
 		if i >= stateMaxProgressRuns {
 			break
 		}
-		progressRunIDs[run.RunID] = true
+		progressRunIDs[runID] = true
 	}
 
+	runs := make([]RunSummary, 0, len(runIDs))
 	lanes := []Lane{}
 	events := []ledger.Event{}
-	for _, run := range boundedRuns {
-		runLanes, err := model.ListLanes(ctx, run.RunID)
+	sddFlows := []SDDFlow{}
+	type flowKey struct{ runID, change, phase, fanout string }
+	flowIndex := make(map[flowKey]int)
+	flowStatuses := make(map[flowKey][]lane.Status)
+	for _, runID := range runIDs {
+		runLanes, err := model.ListLanes(ctx, runID)
 		if err != nil {
-			return ServerState{}, fmt.Errorf("list lanes for run %q: %w", run.RunID, err)
+			return ServerState{}, fmt.Errorf("list lanes for run %q: %w", runID, err)
 		}
 		lanes = append(lanes, runLanes...)
 
-		runEvents, err := l.Events(ctx, run.RunID)
+		runEvents, err := l.Events(ctx, runID)
 		if err != nil {
-			return ServerState{}, fmt.Errorf("list events for run %q: %w", run.RunID, err)
+			return ServerState{}, fmt.Errorf("list events for run %q: %w", runID, err)
 		}
 		events = append(events, runEvents...)
+
+		if real, ok := realRuns[runID]; ok {
+			runs = append(runs, real)
+		} else {
+			synthetic, err := synthesizeRunSummary(ctx, l, runID, runLanes, runEvents)
+			if err != nil {
+				return ServerState{}, fmt.Errorf("synthesize run summary for %q: %w", runID, err)
+			}
+			runs = append(runs, synthetic)
+		}
+
+		// Derived inline from the same lanes fetched above, rather than via
+		// Model.ListSDDFlows: that method rediscovers its own run list from
+		// the runs table internally (see its doc comment), so it is exactly
+		// as blind to a runs-table-less ledger as everything else here was.
+		for _, ln := range runLanes {
+			key := flowKey{runID, ln.Change, ln.SDDPhase, ln.FanoutGroup}
+			idx, ok := flowIndex[key]
+			if !ok {
+				idx = len(sddFlows)
+				flowIndex[key] = idx
+				sddFlows = append(sddFlows, SDDFlow{RunID: runID, Change: ln.Change, SDDPhase: ln.SDDPhase, FanoutGroup: ln.FanoutGroup, LaneIDs: []string{}})
+			}
+			sddFlows[idx].LaneCount++
+			sddFlows[idx].LaneIDs = append(sddFlows[idx].LaneIDs, ln.LaneID)
+			flowStatuses[key] = append(flowStatuses[key], lane.Status(ln.Status))
+		}
+	}
+	for key, idx := range flowIndex {
+		sddFlows[idx].Status = rollupStatus(flowStatuses[key])
 	}
 	if len(lanes) > stateMaxLanes {
 		lanes = lanes[:stateMaxLanes]
@@ -596,6 +630,9 @@ func buildServerState(ctx context.Context, model *Model, defaultApprover, openco
 	sort.Slice(events, func(i, j int) bool { return events[i].ID > events[j].ID })
 	if len(events) > stateMaxEvents {
 		events = events[:stateMaxEvents]
+	}
+	if len(sddFlows) > stateMaxSDDFlows {
+		sddFlows = sddFlows[:stateMaxSDDFlows]
 	}
 
 	laneProgress := []LaneProgress{}
@@ -679,32 +716,13 @@ func buildServerState(ctx context.Context, model *Model, defaultApprover, openco
 		leases = leases[:stateMaxFeatureLeases]
 	}
 
-	sddFlows, err := model.ListSDDFlows(ctx)
-	if err != nil {
-		return ServerState{}, fmt.Errorf("list sdd flows: %w", err)
-	}
-	sort.SliceStable(sddFlows, func(i, j int) bool {
-		ri, oki := runRank[sddFlows[i].RunID]
-		rj, okj := runRank[sddFlows[j].RunID]
-		if !oki {
-			ri = len(allRuns)
-		}
-		if !okj {
-			rj = len(allRuns)
-		}
-		return ri < rj
-	})
-	if len(sddFlows) > stateMaxSDDFlows {
-		sddFlows = sddFlows[:stateMaxSDDFlows]
-	}
-
 	return ServerState{
 		Approver:               defaultApprover,
 		ApproverRate:           rate,
 		OpencodeCommand:        opencodeCmd,
 		Approvals:              approvals,
 		ServerTime:             time.Now().UTC(),
-		Runs:                   boundedRuns,
+		Runs:                   runs,
 		Lanes:                  lanes,
 		Events:                 events,
 		LaneProgress:           laneProgress,
@@ -716,6 +734,106 @@ func buildServerState(ctx context.Context, model *Model, defaultApprover, openco
 		ReconciliationRequests: reconciliations,
 		SDDFlows:               sddFlows,
 	}, nil
+}
+
+// resolveRunWindow returns the newest-first run ids to surface in
+// /api/state, and the RunSummary for each one that has an actual runs-table
+// row. It does not trust the runs table alone: lucind-ai run only recently
+// started calling ledger.RegisterRun, and nothing backfills the runs table
+// for a ledger dispatched before that, so a run id can be real (its lanes
+// and events exist and carry it) without ever appearing in Model.ListRuns.
+// Excluding those run ids would leave every lane, event, and lane_progress
+// row they own permanently invisible to the console -- exactly the reported
+// symptom on a live, historical ledger.
+//
+// The ordering favors runs.RunIDsByRecentEvent (events.id is a global
+// autoincrement, so grouping by run_id and taking each run's own max id is
+// a correct, cheap recency signal) over the runs table's own StartedAt
+// ordering, then falls through to ledger.DistinctLaneRunIDs for the
+// residual case of a run whose lanes exist but which has not (yet, or
+// ever) produced a lifecycle event.
+func resolveRunWindow(ctx context.Context, model *Model) (runIDs []string, realRuns map[string]RunSummary, err error) {
+	l := model.Ledger()
+
+	allRuns, err := model.ListRuns(ctx)
+	if err != nil {
+		return nil, nil, fmt.Errorf("list runs: %w", err)
+	}
+	realRuns = make(map[string]RunSummary, len(allRuns))
+	for _, run := range allRuns {
+		realRuns[run.RunID] = run
+	}
+
+	byRecentEvent, err := l.RunIDsByRecentEvent(ctx)
+	if err != nil {
+		return nil, nil, fmt.Errorf("list run ids by recent event: %w", err)
+	}
+	laneRunIDs, err := l.DistinctLaneRunIDs(ctx)
+	if err != nil {
+		return nil, nil, fmt.Errorf("list distinct lane run ids: %w", err)
+	}
+
+	seen := make(map[string]bool, len(allRuns)+len(byRecentEvent)+len(laneRunIDs))
+	ordered := make([]string, 0, len(allRuns)+len(byRecentEvent)+len(laneRunIDs))
+	add := func(id string) {
+		if id == "" || seen[id] {
+			return
+		}
+		seen[id] = true
+		ordered = append(ordered, id)
+	}
+	for _, id := range byRecentEvent {
+		add(id)
+	}
+	for _, run := range allRuns {
+		add(run.RunID)
+	}
+	for _, id := range laneRunIDs {
+		add(id)
+	}
+	return ordered, realRuns, nil
+}
+
+// synthesizeRunSummary builds a best-effort RunSummary for a run id with no
+// runs-table row, using only lanes, events, and approvals that are already
+// known to carry it. Status is derived from the lanes' own statuses (the
+// same rollup Model.ListSDDFlows/summarizeRun use elsewhere) since there is
+// no persisted run-level status to report; FeatureID and TargetRef are
+// taken from the first lane that carries them (metadata is optional per
+// lane, so this is a best effort, not a guarantee); EndedAt is left nil
+// since nothing records when an unregistered run actually finished.
+func synthesizeRunSummary(ctx context.Context, l *ledger.Ledger, runID string, lanes []Lane, events []ledger.Event) (RunSummary, error) {
+	summary := RunSummary{RunID: runID, LaneCount: len(lanes)}
+	var counts LaneStatusCounts
+	for _, ln := range lanes {
+		addLaneStatus(&counts, lane.Status(ln.Status))
+		if summary.FeatureID == "" && ln.Feature != "" {
+			summary.FeatureID = ln.Feature
+		}
+		if ln.StartedAt != nil && (summary.StartedAt.IsZero() || ln.StartedAt.Before(summary.StartedAt)) {
+			summary.StartedAt = *ln.StartedAt
+		}
+	}
+	summary.LaneStatusCounts = counts
+	summary.Status = statusFromCounts(counts)
+	if summary.StartedAt.IsZero() {
+		for _, e := range events {
+			if summary.StartedAt.IsZero() || e.At.Before(summary.StartedAt) {
+				summary.StartedAt = e.At
+			}
+		}
+	}
+
+	approvals, err := l.Approvals(ctx, runID)
+	if err != nil {
+		return RunSummary{}, fmt.Errorf("list run approvals: %w", err)
+	}
+	for _, approval := range approvals {
+		if approval.Decision == ledger.DecisionPending {
+			summary.PendingApprovals++
+		}
+	}
+	return summary, nil
 }
 
 func handleDecide(w http.ResponseWriter, r *http.Request, l *ledger.Ledger, defaultApprover string, runID, laneID string) {

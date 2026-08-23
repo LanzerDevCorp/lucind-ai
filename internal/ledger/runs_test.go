@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/LanzerDevCorp/lucind-ai/internal/lane"
 )
 
 func TestRegisterAndGetRun(t *testing.T) {
@@ -133,5 +135,59 @@ func TestListRunsOrdersNewestFirst(t *testing.T) {
 	}
 	if runs[0].RunID != "newer" || runs[1].RunID != "older" {
 		t.Fatalf("ListRuns IDs = %v, want [newer older]", []string{runs[0].RunID, runs[1].RunID})
+	}
+}
+
+// TestRunIDsByRecentEventOrdersNewestFirstAcrossRuns exercises the fallback
+// serve.buildServerState uses to find run identity when the runs table has
+// no matching row: events.id is a global autoincrement, so grouping by
+// run_id and ordering by each run's own most recent event id recovers a
+// "newest first" run window purely from data that is always written
+// (lucind-ai run stamps every event with its run id whether or not the run
+// itself is registered).
+func TestRunIDsByRecentEventOrdersNewestFirstAcrossRuns(t *testing.T) {
+	l := openTestLedger(t)
+	ctx := context.Background()
+	base := time.Date(2026, 8, 22, 18, 0, 0, 0, time.UTC)
+
+	if err := l.AppendEvent(ctx, Event{RunID: "run-a", Type: EventLaneNote, Detail: "a1", At: base}); err != nil {
+		t.Fatalf("AppendEvent(a1): %v", err)
+	}
+	if err := l.AppendEvent(ctx, Event{RunID: "run-b", Type: EventLaneNote, Detail: "b1", At: base.Add(time.Second)}); err != nil {
+		t.Fatalf("AppendEvent(b1): %v", err)
+	}
+	if err := l.AppendEvent(ctx, Event{RunID: "run-a", Type: EventLaneNote, Detail: "a2", At: base.Add(2 * time.Second)}); err != nil {
+		t.Fatalf("AppendEvent(a2): %v", err)
+	}
+
+	ids, err := l.RunIDsByRecentEvent(ctx)
+	if err != nil {
+		t.Fatalf("RunIDsByRecentEvent: %v", err)
+	}
+	if len(ids) != 2 || ids[0] != "run-a" || ids[1] != "run-b" {
+		t.Fatalf("RunIDsByRecentEvent = %v, want [run-a run-b] (run-a's latest event id is the newest overall)", ids)
+	}
+}
+
+// TestDistinctLaneRunIDsCoversRunsWithLanesButNoEvents guards the residual
+// case RunIDsByRecentEvent cannot see: a run whose lanes were registered but
+// which never (yet) produced a lifecycle event.
+func TestDistinctLaneRunIDsCoversRunsWithLanesButNoEvents(t *testing.T) {
+	l := openTestLedger(t)
+	ctx := context.Background()
+
+	if err := l.RegisterLane(ctx, Lane{
+		RunID: "run-lanes-only", LaneID: "lane-a", PacketID: "packet-a",
+		Executor: "agy", RoutingCondition: "primary", Status: lane.Pending,
+	}); err != nil {
+		t.Fatalf("RegisterLane: %v", err)
+	}
+
+	ids, err := l.DistinctLaneRunIDs(ctx)
+	if err != nil {
+		t.Fatalf("DistinctLaneRunIDs: %v", err)
+	}
+	if len(ids) != 1 || ids[0] != "run-lanes-only" {
+		t.Fatalf("DistinctLaneRunIDs = %v, want [run-lanes-only]", ids)
 	}
 }
