@@ -100,6 +100,68 @@ func (l *Ledger) ListRuns(ctx context.Context) ([]Run, error) {
 	return runs, nil
 }
 
+// RunIDsByRecentEvent returns every run_id present in the events table,
+// ordered by that run's own most recent event id descending (newest first).
+//
+// This exists so a caller can recover a run window even when the runs table
+// has no matching row for a run_id that events (and lanes) already carry --
+// lucind-ai run only started calling RegisterRun recently, and nothing ever
+// backfills the runs table for a ledger dispatched before that. events.id is
+// a global autoincrement across the whole table (not scoped per run), so
+// grouping by run_id and taking MAX(id) is a correct, cheap "most recently
+// active" signal without touching the runs table at all.
+func (l *Ledger) RunIDsByRecentEvent(ctx context.Context) ([]string, error) {
+	rows, err := l.db.QueryContext(ctx, `
+		SELECT run_id
+		FROM events
+		WHERE run_id IS NOT NULL AND run_id != ''
+		GROUP BY run_id
+		ORDER BY MAX(id) DESC`)
+	if err != nil {
+		return nil, fmt.Errorf("ledger: run ids by recent event: %w", err)
+	}
+	defer rows.Close()
+
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("ledger: scan run id by recent event: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("ledger: iterate run ids by recent event: %w", err)
+	}
+	return ids, nil
+}
+
+// DistinctLaneRunIDs returns every run_id present in the lanes table, in no
+// particular recency order (lanes carries no ordering signal comparable to
+// events.id). It exists to cover the residual case RunIDsByRecentEvent
+// cannot: a run whose lanes were registered but which has not (yet, or
+// ever) produced a lifecycle event of its own.
+func (l *Ledger) DistinctLaneRunIDs(ctx context.Context) ([]string, error) {
+	rows, err := l.db.QueryContext(ctx, `SELECT DISTINCT run_id FROM lanes ORDER BY run_id`)
+	if err != nil {
+		return nil, fmt.Errorf("ledger: distinct lane run ids: %w", err)
+	}
+	defer rows.Close()
+
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("ledger: scan distinct lane run id: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("ledger: iterate distinct lane run ids: %w", err)
+	}
+	return ids, nil
+}
+
 func scanRun(scan func(...any) error) (Run, error) {
 	var (
 		run       Run

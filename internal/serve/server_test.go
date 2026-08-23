@@ -885,6 +885,86 @@ func TestStateResponseCarriesFleetFeatureAndTimelineData(t *testing.T) {
 	}
 }
 
+// TestStateResponseSourcesRunWindowFromLanesAndEventsWithoutRunsRow
+// reproduces the live-ledger report directly: a ledger with real lanes,
+// lifecycle events, and lane_progress rows carrying a valid run_id, but
+// zero matching rows in the runs table (exactly what a ledger dispatched
+// before lucind-ai run started calling RegisterRun looks like, and what
+// nothing ever backfills). /api/state must still surface that run's lanes,
+// events, progress, and derived SDD flow -- the runs table row is not the
+// source of truth for what work actually happened.
+func TestStateResponseSourcesRunWindowFromLanesAndEventsWithoutRunsRow(t *testing.T) {
+	l := openServeLedger(t)
+	ctx := context.Background()
+	started := time.Date(2026, 8, 23, 9, 0, 0, 0, time.UTC)
+
+	// Deliberately no l.RegisterRun call for "run-historical".
+	if err := l.RegisterLane(ctx, ledger.Lane{
+		RunID: "run-historical", LaneID: "explore-conflict-triage-fixture-lens-a",
+		PacketID: "packet-a", Executor: "opencode", RoutingCondition: "primary", Status: lane.Done,
+	}); err != nil {
+		t.Fatalf("RegisterLane: %v", err)
+	}
+	if err := l.UpdateLaneMetadata(ctx, ledger.LaneMetadata{
+		RunID: "run-historical", LaneID: "explore-conflict-triage-fixture-lens-a",
+		SDDPhase: "explore", FanoutGroup: "lens-a", Change: "conflict-triage-fixture",
+	}, started); err != nil {
+		t.Fatalf("UpdateLaneMetadata: %v", err)
+	}
+	if err := l.AppendProgress(ctx, ledger.LaneProgress{
+		RunID: "run-historical", LaneID: "explore-conflict-triage-fixture-lens-a",
+		Seq: 1, Message: "chunk-1", At: started.Add(time.Second),
+	}); err != nil {
+		t.Fatalf("AppendProgress: %v", err)
+	}
+	appendServeEvent(t, l, "run-historical", "lane dispatched")
+
+	handler := serve.NewHandler(serve.NewModel(l), "alice", "opencode run")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/state", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /api/state code = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
+	}
+
+	var state map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &state); err != nil {
+		t.Fatalf("decode /api/state: %v", err)
+	}
+
+	for _, key := range []string{"runs", "lanes", "events", "lane_progress", "sdd_flows"} {
+		value, ok := state[key]
+		if !ok {
+			t.Errorf("state[%q] missing from /api/state", key)
+			continue
+		}
+		arr, ok := value.([]any)
+		if !ok {
+			t.Errorf("state[%q] = %T, want a JSON array", key, value)
+			continue
+		}
+		if len(arr) == 0 {
+			t.Errorf("state[%q] is empty even though the ledger has real lane/event/progress rows for this run -- a runs-table row must not be required", key)
+		}
+	}
+
+	if runs, ok := state["runs"].([]any); ok && len(runs) > 0 {
+		row, _ := runs[0].(map[string]any)
+		if row["run_id"] != "run-historical" {
+			t.Errorf("runs[0].run_id = %v, want run-historical", row["run_id"])
+		}
+		if row["lane_count"] != float64(1) {
+			t.Errorf("runs[0].lane_count = %v, want 1 (derived from the one lane actually found)", row["lane_count"])
+		}
+	}
+
+	if flows, ok := state["sdd_flows"].([]any); ok && len(flows) > 0 {
+		flow, _ := flows[0].(map[string]any)
+		if flow["change"] != "conflict-triage-fixture" || flow["sdd_phase"] != "explore" {
+			t.Errorf("sdd_flows[0] = %+v, want change=conflict-triage-fixture sdd_phase=explore", flow)
+		}
+	}
+}
+
 // TestStateResponseBoundsRunsAndLanes pins the payload-size safeguard: with
 // far more runs than the documented bound, /api/state must still return only
 // the newest window rather than serializing the whole run history on every
