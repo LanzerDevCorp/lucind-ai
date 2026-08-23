@@ -352,6 +352,36 @@ func TestRunAcceptsOpencodeExecutor(t *testing.T) {
 	}
 }
 
+// TestRunAcceptsClaudeExecutor proves that a packet specifying
+// "executor: claude" passes the pre-dispatch unsupported executor check.
+func TestRunAcceptsClaudeExecutor(t *testing.T) {
+	factory, ok := supportedExecutors["claude"]
+	if !ok {
+		t.Fatalf("supportedExecutors[%q] not found, want claude to be accepted as a supported executor", "claude")
+	}
+	if factory == nil || factory() == nil {
+		t.Fatalf("supportedExecutors[%q] factory returned nil", "claude")
+	}
+}
+
+// TestEveryExecutorOwnsExactlyOneProviderFamily pins the invariant that made
+// adding a fourth executor safe: each registered executor may run on its own
+// models only, so a model string copied from a sibling packet can never
+// silently dispatch -- and bill -- against a different provider. Adding an
+// executor whose KnownModels overlaps another's would break this.
+func TestEveryExecutorOwnsExactlyOneProviderFamily(t *testing.T) {
+	owner := map[string]string{}
+	for name, factory := range supportedExecutors {
+		for _, model := range factory().KnownModels() {
+			if prior, clash := owner[model]; clash {
+				t.Errorf("model %q is claimed by both %q and %q; every model must belong to exactly one executor", model, prior, name)
+				continue
+			}
+			owner[model] = name
+		}
+	}
+}
+
 // TestRunRepeatablePacketFlagPreservesOrderAndProcessesEachOne proves
 // --packet is genuinely repeatable, not a last-value-wins flag: the FIRST
 // packet given is malformed, so its parse error must surface (naming its

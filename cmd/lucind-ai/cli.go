@@ -64,6 +64,7 @@ var depsFactory = productionDeps
 // fallback to agy — see internal/run's Deps.LookupExecutor field.
 var supportedExecutors = map[string]func() executor.Executor{
 	"agy":          func() executor.Executor { return executor.Agy{} },
+	"claude":       func() executor.Executor { return executor.Claude{} },
 	"cursor-agent": func() executor.Executor { return executor.CursorAgent{} },
 	"opencode":     func() executor.Executor { return executor.Opencode{} },
 }
