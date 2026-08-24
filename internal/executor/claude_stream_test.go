@@ -66,6 +66,83 @@ func TestClaudeRunSendsVerboseWithStreamJSON(t *testing.T) {
 	}
 }
 
+// TestClaudeRunProgressEmitsTokenCostAndToolTelemetry pins structured
+// ProgressEvent fields: TotalTokens is the sum of input+output+cache-read+
+// cache-creation, CostUSD comes from total_cost_usd, and ToolCalls increments
+// once per tool_use start (cumulative on later emits).
+func TestClaudeRunProgressEmitsTokenCostAndToolTelemetry(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping subprocess test in -short mode")
+	}
+
+	stream := strings.Join([]string{
+		`{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Reading the conflict"}]},"session_id":"session-1"}`,
+		`{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_1","name":"Bash","input":{"command":"git status"}}]},"session_id":"session-1"}`,
+		`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"clean"}]},"session_id":"session-1"}`,
+		`{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_2","name":"Write","input":{"file_path":"/tmp/probe.txt"}}]},"session_id":"session-1"}`,
+		`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_2","content":"written"}]},"session_id":"session-1"}`,
+		`{"type":"result","subtype":"success","is_error":false,"num_turns":2,"result":"CLAUDE_STREAM_DONE","session_id":"session-1","total_cost_usd":0.421,"usage":{"input_tokens":64264,"output_tokens":2768,"cache_creation_input_tokens":512,"cache_read_input_tokens":81443}}`,
+	}, "\n")
+	binary, _ := writeClaudeStreamStub(t, stream)
+	progress := make(chan executor.ProgressEvent, 16)
+
+	if _, err := (executor.Claude{Binary: binary}).Run(context.Background(), executor.Request{
+		Prompt:   "probe",
+		Progress: progress,
+	}); err != nil {
+		t.Fatalf("Run() error = %v, want nil", err)
+	}
+
+	var events []executor.ProgressEvent
+	for {
+		select {
+		case event := <-progress:
+			events = append(events, event)
+		default:
+			goto drained
+		}
+	}
+drained:
+	wantMessages := []string{
+		"Reading the conflict",
+		"Tool started: Bash",
+		"Tool finished: Bash",
+		"Edit started: Write (/tmp/probe.txt)",
+		"Edit finished: Write (/tmp/probe.txt)",
+		"Usage: 64264 input, 2768 output, 81443 cache read, 512 cache write tokens, $0.4210",
+	}
+	got := make([]string, len(events))
+	for i, event := range events {
+		got[i] = event.Message
+	}
+	if !reflect.DeepEqual(got, wantMessages) {
+		t.Errorf("progress messages = %#v, want %#v", got, wantMessages)
+	}
+
+	const wantTotalTokens = int64(64264 + 2768 + 81443 + 512) // 148987
+	wantTelemetry := []struct {
+		TotalTokens int64
+		CostUSD     float64
+		ToolCalls   int64
+	}{
+		{0, 0, 0},                 // text
+		{0, 0, 1},                 // Tool started: Bash
+		{0, 0, 1},                 // Tool finished: Bash
+		{0, 0, 2},                 // Edit started: Write
+		{0, 0, 2},                 // Edit finished: Write
+		{wantTotalTokens, 0.421, 2}, // usage
+	}
+	if len(events) != len(wantTelemetry) {
+		t.Fatalf("progress event count = %d, want %d", len(events), len(wantTelemetry))
+	}
+	for i, want := range wantTelemetry {
+		if events[i].TotalTokens != want.TotalTokens || events[i].CostUSD != want.CostUSD || events[i].ToolCalls != want.ToolCalls {
+			t.Errorf("progress[%d] telemetry = {TotalTokens:%d CostUSD:%v ToolCalls:%d}, want %+v (message %q)",
+				i, events[i].TotalTokens, events[i].CostUSD, events[i].ToolCalls, want, events[i].Message)
+		}
+	}
+}
+
 // TestClaudeRunStreamPathKeepsPromptBehindDoubleDash re-pins on the stream
 // path what TestClaudeRunPassesPromptAfterDoubleDash pins on the blocking
 // one. The separator is not per-format defensive style: a Markdown packet

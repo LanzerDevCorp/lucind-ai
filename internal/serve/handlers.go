@@ -12,6 +12,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"sort"
 	"strings"
 	"time"
@@ -264,6 +265,9 @@ func NewHandlerWithConfig(m *Model, defaultApprover string, opencodeCmd string, 
 		}
 		config.Hub.ServeHTTP(w, r)
 	})
+	mux.HandleFunc("/api/packets/", func(w http.ResponseWriter, r *http.Request) {
+		handlePacketBody(w, r, l)
+	})
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
@@ -354,6 +358,40 @@ func NewHandlerWithConfig(m *Model, defaultApprover string, opencodeCmd string, 
 	})
 
 	return mux
+}
+
+func handlePacketBody(w http.ResponseWriter, r *http.Request, l *ledger.Ledger) {
+	if !requireGET(w, r) {
+		return
+	}
+	path := strings.TrimPrefix(r.URL.Path, "/api/packets/")
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		writeJSONError(w, http.StatusNotFound, "not found")
+		return
+	}
+	runID, laneID := parts[0], parts[1]
+	metadata, err := l.GetLaneMetadata(r.Context(), runID, laneID)
+	if err != nil {
+		if errors.Is(err, ledger.ErrLaneUnknown) {
+			writeJSONError(w, http.StatusNotFound, "not found")
+			return
+		}
+		writeJSONError(w, http.StatusInternalServerError, "query failed")
+		return
+	}
+	if metadata.PacketPath == "" {
+		writeJSONError(w, http.StatusNotFound, "not found")
+		return
+	}
+	data, err := os.ReadFile(metadata.PacketPath)
+	if err != nil {
+		writeJSONError(w, http.StatusNotFound, "not found")
+		return
+	}
+	w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(data)
 }
 
 func handleFeatureRead(w http.ResponseWriter, r *http.Request, model *Model) {

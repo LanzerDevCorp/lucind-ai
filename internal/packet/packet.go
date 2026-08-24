@@ -19,13 +19,13 @@ const delimiter = "---"
 // is an instruction the binary would have to invent, which is exactly what
 // dispatch must never do.
 var (
-	ErrNoFrontmatter   = errors.New("packet: document has no closed --- frontmatter block")
-	ErrMissingID       = errors.New("packet: frontmatter is missing a non-empty id")
-	ErrMissingExecutor = errors.New("packet: frontmatter is missing a non-empty executor")
-	ErrMissingRoutedBy = errors.New("packet: frontmatter is missing a non-empty routed_by")
-	ErrEmptyBody       = errors.New("packet: body is empty, there is no prompt to dispatch")
-	ErrInvalidReadOnly = errors.New("packet: frontmatter read_only must be a boolean (true or false)")
-	ErrInvalidLegacyMain = errors.New("packet: frontmatter legacy_main must be a boolean (true or false)")
+	ErrNoFrontmatter       = errors.New("packet: document has no closed --- frontmatter block")
+	ErrMissingID           = errors.New("packet: frontmatter is missing a non-empty id")
+	ErrMissingExecutor     = errors.New("packet: frontmatter is missing a non-empty executor")
+	ErrMissingRoutedBy     = errors.New("packet: frontmatter is missing a non-empty routed_by")
+	ErrEmptyBody           = errors.New("packet: body is empty, there is no prompt to dispatch")
+	ErrInvalidReadOnly     = errors.New("packet: frontmatter read_only must be a boolean (true or false)")
+	ErrInvalidLegacyMain   = errors.New("packet: frontmatter legacy_main must be a boolean (true or false)")
 	ErrInvalidAllowedPaths = errors.New("packet: frontmatter allowed_paths must be a JSON array of strings")
 )
 
@@ -70,6 +70,19 @@ type Packet struct {
 	ExpectedParentSHA string
 	// LegacyMain indicates legacy mode dispatch targeting main.
 	LegacyMain bool
+	// SDDPhase is the optional planning/apply phase declared in frontmatter
+	// (sdd_phase). Omitted or empty keys leave this at "".
+	SDDPhase string
+	// FanoutGroup is the optional fan-out group declared in frontmatter
+	// (fanout_group). Omitted or empty keys leave this at "".
+	FanoutGroup string
+	// Skill is the optional static skill name declared in frontmatter
+	// (skill). Omitted or empty keys leave this at "". Parse never invents
+	// live Skill telemetry — it only reflects the frontmatter key.
+	Skill string
+	// Path is the on-disk packet path. Parse does not set it; the CLI
+	// assigns it from the --packet flag after a successful Parse.
+	Path string
 	// Body is the Markdown prompt, passed to the executor unchanged.
 	Body string
 }
@@ -128,6 +141,12 @@ func Parse(r io.Reader) (Packet, error) {
 			default:
 				return Packet{}, ErrInvalidLegacyMain
 			}
+		case "sdd_phase":
+			p.SDDPhase = strings.TrimSpace(value)
+		case "fanout_group":
+			p.FanoutGroup = strings.TrimSpace(value)
+		case "skill":
+			p.Skill = strings.TrimSpace(value)
 		case "allowed_paths":
 			trimmed := strings.TrimSpace(value)
 			var paths []string

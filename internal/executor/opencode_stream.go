@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -162,16 +163,16 @@ func decodeOpencodeToolUse(part opencodeStreamPart) []ProgressEvent {
 
 	start := time.UnixMilli(part.State.Time.Start)
 	end := time.UnixMilli(part.State.Time.End)
-	events := []ProgressEvent{{Message: fmt.Sprintf("%s started: %s", kind, detail), At: start}}
+	events := []ProgressEvent{{Message: fmt.Sprintf("%s started: %s", kind, detail), At: start, ToolCalls: 1}}
 
 	if part.State.Status == "error" {
 		message := fmt.Sprintf("%s failed: %s", kind, detail)
 		if part.State.Error != "" {
 			message += ": " + part.State.Error
 		}
-		return append(events, ProgressEvent{Message: message, At: end})
+		return append(events, ProgressEvent{Message: message, At: end, ToolCalls: 1})
 	}
-	return append(events, ProgressEvent{Message: fmt.Sprintf("%s finished: %s", kind, detail), At: end})
+	return append(events, ProgressEvent{Message: fmt.Sprintf("%s finished: %s", kind, detail), At: end, ToolCalls: 1})
 }
 
 // formatOpencodeUsage mirrors formatClaudeUsage's and formatAgyUsage's
@@ -225,7 +226,14 @@ func decodeOpencodeRecord(data []byte) ([]ProgressEvent, error) {
 		}
 		events := []ProgressEvent{{Message: message, At: at}}
 		if part.Tokens != nil {
-			events = append(events, ProgressEvent{Message: formatOpencodeUsage(*part.Tokens, part.Cost), At: at})
+			total := int64(part.Tokens.Input + part.Tokens.Output + part.Tokens.Reasoning +
+				part.Tokens.Cache.Read + part.Tokens.Cache.Write)
+			events = append(events, ProgressEvent{
+				Message:     formatOpencodeUsage(*part.Tokens, part.Cost),
+				At:          at,
+				TotalTokens: total,
+				CostUSD:     part.Cost,
+			})
 		}
 		return events, nil
 	case "tool_use":
@@ -246,9 +254,10 @@ func decodeOpencodeRecord(data []byte) ([]ProgressEvent, error) {
 // accepting all bytes so the caller's raw Outcome.Stdout capture remains
 // authoritative regardless of decoder state.
 type opencodeStreamDecoder struct {
-	progress chan<- ProgressEvent
-	pending  []byte
-	noted    bool
+	progress  chan<- ProgressEvent
+	pending   []byte
+	noted     bool
+	toolCalls int64
 }
 
 func newOpencodeStreamDecoder(progress chan<- ProgressEvent) *opencodeStreamDecoder {
@@ -283,6 +292,10 @@ func (d *opencodeStreamDecoder) consume(record []byte) {
 		return
 	}
 	for _, event := range events {
+		if event.ToolCalls > 0 && strings.Contains(event.Message, " started:") {
+			d.toolCalls++
+		}
+		event.ToolCalls = d.toolCalls
 		d.emit(event)
 	}
 }

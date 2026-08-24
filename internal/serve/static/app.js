@@ -534,6 +534,9 @@ function normalizeFleetState(state, now = Date.now()) {
       phase: field(lane, 'sdd_phase', 'SDDPhase') || field(run, 'sdd_phase', 'SDDPhase') || 'Unavailable',
       fanout: field(lane, 'fanout_group', 'FanoutGroup') || field(run, 'fanout_group', 'FanoutGroup') || 'Unavailable',
       feature: field(lane, 'feature', 'Feature', 'feature_id', 'FeatureID') || field(run, 'feature', 'Feature', 'feature_id', 'FeatureID') || 'Unavailable',
+      skill: field(lane, 'skill', 'Skill') || 'Unavailable',
+      packetPath: field(lane, 'packet_path', 'PacketPath') || '',
+      packetHref: `/api/packets/${encodeURIComponent(runID)}/${encodeURIComponent(laneID)}`,
       worktree: field(lane, 'worktree_path', 'WorktreePath', 'worktree', 'Worktree') || 'Unavailable',
       attempt: field(lane, 'attempt', 'Attempt') || 'Unavailable',
       elapsed: formatElapsed(startedAt, endedAt, now),
@@ -572,9 +575,12 @@ function createFleetCard(lane) {
   const statusText = makeFleetPart('span', 'fleet-status-text', status);
   const fields = makeFleetPart('div', 'fleet-fields', card);
   const parts = { laneID, statusSymbol, statusText };
-  [['executor', 'Executor'], ['model', 'Model'], ['phase', 'SDD phase'], ['fanout', 'Fanout group'], ['feature', 'Feature'], ['worktree', 'Worktree'], ['attempt', 'Attempt'], ['elapsed', 'Elapsed']]
+  [['executor', 'Executor'], ['model', 'Model'], ['phase', 'SDD phase'], ['fanout', 'Fanout group'], ['feature', 'Feature'], ['skill', 'Skill'], ['worktree', 'Worktree'], ['attempt', 'Attempt'], ['elapsed', 'Elapsed']]
     .forEach(([name, label]) => { parts[name] = makeFleetField(fields, label); });
   parts.activity = makeFleetField(card, 'Latest activity', 'fleet-activity');
+  const packetLink = makeFleetPart('a', 'fleet-packet-link', card);
+  packetLink.textContent = 'Packet markdown';
+  parts.packetLink = packetLink;
   const indicators = makeFleetPart('div', 'fleet-indicators', card);
   [['tokens', 'Tokens'], ['cost', 'Cost'], ['toolRate', 'Tool rate']]
     .forEach(([name, label]) => { parts[name] = makeFleetField(indicators, label, 'fleet-indicator'); });
@@ -590,8 +596,10 @@ function updateFleetCard(card, lane) {
   parts.laneID.textContent = `Lane: ${lane.laneID}`;
   parts.statusSymbol.textContent = symbol;
   parts.statusText.textContent = label;
-  ['executor', 'model', 'phase', 'fanout', 'feature', 'worktree', 'attempt', 'elapsed', 'activity', 'tokens', 'cost', 'toolRate']
+  ['executor', 'model', 'phase', 'fanout', 'feature', 'skill', 'worktree', 'attempt', 'elapsed', 'activity', 'tokens', 'cost', 'toolRate']
     .forEach(name => { parts[name].textContent = lane[name]; });
+  parts.packetLink.href = lane.packetHref || '#';
+  parts.packetLink.hidden = !lane.packetPath;
 }
 
 function patchFleetCards(container, lanes) {

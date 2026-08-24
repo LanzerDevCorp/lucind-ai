@@ -26,6 +26,8 @@ type LaneMetadata struct {
 	FanoutGroup  string   `json:"fanout_group"`
 	Change       string   `json:"change"`
 	Feature      string   `json:"feature"`
+	Skill        string   `json:"skill"`
+	PacketPath   string   `json:"packet_path"`
 	AllowedPaths []string `json:"allowed_paths"`
 	Dependencies []string `json:"dependencies"`
 	BodyDigest   string   `json:"body_digest"`

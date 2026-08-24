@@ -167,6 +167,7 @@ type cursorStreamCapture struct {
 	records   int
 	malformed bool
 	tools     *cursorToolTracker
+	toolCalls int64
 }
 
 func (c *cursorStreamCapture) Write(p []byte) (int, error) {
@@ -246,6 +247,9 @@ func (c *cursorStreamCapture) decode(line []byte) {
 			if message, decodedAt, ok := c.tools.decodeCursorToolCall(record.Subtype, toolRecord); ok {
 				messages = append(messages, message)
 				toolAt = decodedAt
+				if record.Subtype == "started" {
+					c.toolCalls++
+				}
 			}
 		}
 	}
@@ -263,7 +267,13 @@ func (c *cursorStreamCapture) decode(line []byte) {
 			continue
 		}
 		select {
-		case c.progress <- ProgressEvent{Message: message, At: at}:
+		case c.progress <- ProgressEvent{
+			Message:     message,
+			At:          at,
+			TotalTokens: 0,
+			CostUSD:     0,
+			ToolCalls:   c.toolCalls,
+		}:
 		case <-c.ctx.Done():
 			return
 		}

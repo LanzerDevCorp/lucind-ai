@@ -89,8 +89,48 @@ func TestAgyRunStreamsNormalizedProgressAndPreservesFinalResult(t *testing.T) {
 		"Edit finished: replace_file_content (/tmp/probe.txt)",
 		"Usage: 64264 input, 2768 output, 2115 thinking, 81443 cache read, 67032 total tokens",
 	}
-	if got := progressMessages(progress); !reflect.DeepEqual(got, wantMessages) {
+	var events []executor.ProgressEvent
+	for {
+		select {
+		case event := <-progress:
+			events = append(events, event)
+		default:
+			goto drained
+		}
+	}
+drained:
+	got := make([]string, len(events))
+	for i, event := range events {
+		got[i] = event.Message
+	}
+	if !reflect.DeepEqual(got, wantMessages) {
 		t.Errorf("progress messages = %#v, want %#v", got, wantMessages)
+	}
+	// Telemetry: TotalTokens from agyUsage.TotalTokens, CostUSD always 0,
+	// ToolCalls cumulative on tool starts (ACTIVE), carried on every emit.
+	wantTelemetry := []struct {
+		TotalTokens int64
+		CostUSD     float64
+		ToolCalls   int64
+	}{
+		{0, 0, 0},       // text delta
+		{23459, 0, 0},   // step usage
+		{0, 0, 1},       // Tool started: run_command
+		{0, 0, 1},       // Tool finished: run_command
+		{0, 0, 2},       // Edit started: write_to_file
+		{0, 0, 2},       // Edit finished: write_to_file
+		{0, 0, 3},       // Edit started: replace_file_content
+		{0, 0, 3},       // Edit finished: replace_file_content
+		{67032, 0, 3},   // result usage
+	}
+	if len(events) != len(wantTelemetry) {
+		t.Fatalf("progress event count = %d, want %d", len(events), len(wantTelemetry))
+	}
+	for i, want := range wantTelemetry {
+		if events[i].TotalTokens != want.TotalTokens || events[i].CostUSD != want.CostUSD || events[i].ToolCalls != want.ToolCalls {
+			t.Errorf("progress[%d] telemetry = {TotalTokens:%d CostUSD:%v ToolCalls:%d}, want %+v (message %q)",
+				i, events[i].TotalTokens, events[i].CostUSD, events[i].ToolCalls, want, events[i].Message)
+		}
 	}
 	calls, err := os.ReadFile(callsFile)
 	if err != nil {

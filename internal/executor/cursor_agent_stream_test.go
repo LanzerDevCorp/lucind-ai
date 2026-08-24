@@ -92,6 +92,58 @@ printf '%s\n' \
 	if elapsed := got[1].At.Sub(got[0].At); elapsed != 32*time.Second {
 		t.Errorf("measured tool duration = %v, want 32s", elapsed)
 	}
+	// cursor-agent has no usage stream: tokens and cost stay zero, but tool
+	// starts increment ToolCalls cumulatively.
+	if got[0].TotalTokens != 0 || got[0].CostUSD != 0 || got[0].ToolCalls != 1 {
+		t.Errorf("started telemetry = {TotalTokens:%d CostUSD:%v ToolCalls:%d}, want zeros with ToolCalls=1",
+			got[0].TotalTokens, got[0].CostUSD, got[0].ToolCalls)
+	}
+	if got[1].TotalTokens != 0 || got[1].CostUSD != 0 || got[1].ToolCalls != 1 {
+		t.Errorf("completed telemetry = {TotalTokens:%d CostUSD:%v ToolCalls:%d}, want zeros with ToolCalls=1",
+			got[1].TotalTokens, got[1].CostUSD, got[1].ToolCalls)
+	}
+}
+
+// TestCursorAgentRunEmitsZeroedMetricsAndCountsTools proves cursor-agent
+// emits TotalTokens=0 / CostUSD=0.0 while still counting tool starts, so
+// consumers can rely on the numeric fields being present (never omitted).
+func TestCursorAgentRunEmitsZeroedMetricsAndCountsTools(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping subprocess test in -short mode")
+	}
+
+	got := runCursorStreamEvents(t, `#!/bin/sh
+printf '%s\n' \
+  '{"type":"thinking","subtype":"delta","text":"planning"}' \
+  '{"type":"tool_call","subtype":"started","call_id":"c-0","tool_call":{"shellToolCall":{"args":{"command":"go test ./..."}},"hookAdditionalContexts":[],"toolCallId":"c-0","startedAtMs":"1787500729840"}}' \
+  '{"type":"tool_call","subtype":"completed","call_id":"c-0","tool_call":{"shellToolCall":{"args":{"command":"go test ./..."},"result":{"exitCode":0}},"hookAdditionalContexts":[],"toolCallId":"c-0","startedAtMs":"1787500729840","completedAtMs":"1787500731000"}}' \
+  '{"type":"tool_call","subtype":"started","call_id":"c-1","tool_call":{"grepToolCall":{"args":{"pattern":"RegisterRun"}},"hookAdditionalContexts":[],"toolCallId":"c-1","startedAtMs":"1787500732000"}}' \
+  '{"type":"tool_call","subtype":"completed","call_id":"c-1","tool_call":{"grepToolCall":{"args":{"pattern":"RegisterRun"},"result":{"matches":3}},"hookAdditionalContexts":[],"toolCallId":"c-1","startedAtMs":"1787500732000","completedAtMs":"1787500733000"}}' \
+  '{"type":"result","subtype":"success","result":"done","session_id":"s-1"}'
+`)
+
+	want := []struct {
+		Message     string
+		TotalTokens int64
+		CostUSD     float64
+		ToolCalls   int64
+	}{
+		{"planning", 0, 0, 0},
+		{"Tool started: shell", 0, 0, 1},
+		{"Tool finished: shell", 0, 0, 1},
+		{"Tool started: grep", 0, 0, 2},
+		{"Tool finished: grep", 0, 0, 2},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %d events, want %d: %#v", len(got), len(want), got)
+	}
+	for i, w := range want {
+		if got[i].Message != w.Message || got[i].TotalTokens != w.TotalTokens ||
+			got[i].CostUSD != w.CostUSD || got[i].ToolCalls != w.ToolCalls {
+			t.Errorf("event[%d] = {Message:%q TotalTokens:%d CostUSD:%v ToolCalls:%d}, want %+v",
+				i, got[i].Message, got[i].TotalTokens, got[i].CostUSD, got[i].ToolCalls, w)
+		}
+	}
 }
 
 // TestCursorAgentRunEmitsToolLifecycleEvents closes the gap that made every
@@ -129,6 +181,39 @@ printf '%s\n' \
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("progress = %#v, want %#v", got, want)
+	}
+
+	// cursor-agent has no usage stream: TotalTokens and CostUSD stay 0;
+	// ToolCalls increments on each tool_call started subtype.
+	events := runCursorStreamEvents(t, `#!/bin/sh
+printf '%s\n' \
+  '{"type":"thinking","subtype":"delta","text":"checking files","timestamp_ms":42000}' \
+  '{"type":"tool_call","subtype":"started","call_id":"c-0","tool_call":{"shellToolCall":{"args":{"command":"go test ./..."}},"hookAdditionalContexts":[],"toolCallId":"c-0","startedAtMs":"1787500729840"}}' \
+  '{"type":"tool_call","subtype":"completed","call_id":"c-0","tool_call":{"shellToolCall":{"args":{"command":"go test ./..."},"result":{"exitCode":0}},"hookAdditionalContexts":[],"toolCallId":"c-0","startedAtMs":"1787500729840","completedAtMs":"1787500731000"}}' \
+  '{"type":"tool_call","subtype":"started","call_id":"c-1","tool_call":{"grepToolCall":{"args":{"pattern":"RegisterRun"}},"hookAdditionalContexts":[],"toolCallId":"c-1","startedAtMs":"1787500732000"}}' \
+  '{"type":"tool_call","subtype":"completed","call_id":"c-1","tool_call":{"grepToolCall":{"args":{"pattern":"RegisterRun"},"result":{"matches":3}},"hookAdditionalContexts":[],"toolCallId":"c-1","startedAtMs":"1787500732000","completedAtMs":"1787500733000"}}' \
+  '{"type":"result","subtype":"success","result":"done","session_id":"s-1"}'
+`)
+	wantTelemetry := []struct {
+		Message     string
+		TotalTokens int64
+		CostUSD     float64
+		ToolCalls   int64
+	}{
+		{"checking files", 0, 0, 0},
+		{"Tool started: shell", 0, 0, 1},
+		{"Tool finished: shell", 0, 0, 1},
+		{"Tool started: grep", 0, 0, 2},
+		{"Tool finished: grep", 0, 0, 2},
+	}
+	if len(events) != len(wantTelemetry) {
+		t.Fatalf("progress event count = %d, want %d: %#v", len(events), len(wantTelemetry), events)
+	}
+	for i, want := range wantTelemetry {
+		if events[i].Message != want.Message || events[i].TotalTokens != want.TotalTokens || events[i].CostUSD != want.CostUSD || events[i].ToolCalls != want.ToolCalls {
+			t.Errorf("progress[%d] = {Message:%q TotalTokens:%d CostUSD:%v ToolCalls:%d}, want %+v",
+				i, events[i].Message, events[i].TotalTokens, events[i].CostUSD, events[i].ToolCalls, want)
+		}
 	}
 }
 

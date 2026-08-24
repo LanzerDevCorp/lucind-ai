@@ -17,9 +17,9 @@ func TestAppendProgressBatchAndCursorTail(t *testing.T) {
 	at := time.Date(2026, 8, 22, 10, 0, 0, 0, time.UTC)
 
 	batch := []LaneProgress{
-		{RunID: "run-1", LaneID: "lane-a", Seq: 3, Message: "third", At: at.Add(2 * time.Second)},
-		{RunID: "run-1", LaneID: "lane-a", Seq: 1, Message: "first", At: at},
-		{RunID: "run-1", LaneID: "lane-a", Seq: 2, Message: "second", At: at.Add(time.Second)},
+		{RunID: "run-1", LaneID: "lane-a", Seq: 3, Message: "third", At: at.Add(2 * time.Second), TotalTokens: 30, CostUSD: 0.03, ToolCalls: 3},
+		{RunID: "run-1", LaneID: "lane-a", Seq: 1, Message: "first", At: at, TotalTokens: 10, CostUSD: 0.01, ToolCalls: 1},
+		{RunID: "run-1", LaneID: "lane-a", Seq: 2, Message: "second", At: at.Add(time.Second), TotalTokens: 20, CostUSD: 0.02, ToolCalls: 2},
 	}
 	if err := l.AppendProgressBatch(ctx, batch); err != nil {
 		t.Fatalf("AppendProgressBatch: %v", err)
@@ -32,6 +32,10 @@ func TestAppendProgressBatchAndCursorTail(t *testing.T) {
 	if len(got) != 2 || got[0].Seq != 2 || got[0].Message != "second" ||
 		!got[0].At.Equal(at.Add(time.Second)) || got[1].Seq != 3 || got[1].Message != "third" {
 		t.Fatalf("tail = %+v, want ordered second and third messages", got)
+	}
+	if got[0].TotalTokens != 20 || got[0].CostUSD != 0.02 || got[0].ToolCalls != 2 ||
+		got[1].TotalTokens != 30 || got[1].CostUSD != 0.03 || got[1].ToolCalls != 3 {
+		t.Fatalf("usage tail = %+v, want tokens/cost/tools 20/0.02/2 then 30/0.03/3", got)
 	}
 
 	empty, err := l.GetProgressAfter(ctx, "run-1", "lane-a", 3)
@@ -81,6 +85,9 @@ func TestAppendProgressSequenceValidationAndAtomicity(t *testing.T) {
 		{"empty message", LaneProgress{RunID: "run-1", LaneID: "lane-a", Seq: 1, At: at}},
 		{"negative sequence", LaneProgress{RunID: "run-1", LaneID: "lane-a", Seq: -1, Message: "message", At: at}},
 		{"zero timestamp", LaneProgress{RunID: "run-1", LaneID: "lane-a", Seq: 1, Message: "message"}},
+		{"negative tokens", LaneProgress{RunID: "run-1", LaneID: "lane-a", Seq: 1, Message: "message", At: at, TotalTokens: -1}},
+		{"negative cost", LaneProgress{RunID: "run-1", LaneID: "lane-a", Seq: 1, Message: "message", At: at, CostUSD: -0.01}},
+		{"negative tool calls", LaneProgress{RunID: "run-1", LaneID: "lane-a", Seq: 1, Message: "message", At: at, ToolCalls: -1}},
 	}
 	for _, tt := range invalid {
 		t.Run(tt.name, func(t *testing.T) {

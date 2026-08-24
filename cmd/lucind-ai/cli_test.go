@@ -422,6 +422,34 @@ func TestRunRepeatablePacketFlagPreservesOrderAndProcessesEachOne(t *testing.T) 
 	}
 }
 
+// TestRunPacketFlagPopulatesPacketPath proves the load loop stamps each
+// successfully parsed packet with the --packet path that produced it.
+// Parse itself never invents a filesystem path; only this CLI wiring does.
+func TestRunPacketFlagPopulatesPacketPath(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "packet.md")
+	content := "---\n" +
+		"id: lane-path\n" +
+		"executor: agy\n" +
+		"routed_by: path capture\n" +
+		"---\n" +
+		"Do the thing.\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write packet fixture: %v", err)
+	}
+
+	got, err := loadPacket(path)
+	if err != nil {
+		t.Fatalf("loadPacket(%q) error = %v", path, err)
+	}
+	if got.Path != path {
+		t.Fatalf("Packet.Path = %q, want %q", got.Path, path)
+	}
+	if got.ID != "lane-path" {
+		t.Fatalf("Packet.ID = %q, want lane-path (parse still reflects frontmatter)", got.ID)
+	}
+}
+
 // TestRunMultiplePacketsSecondUnsupportedExecutorIsCaught proves every
 // packet in a batch is checked for a supported executor, not just the
 // first: a valid first packet must not mask an unsupported executor named
@@ -1248,6 +1276,9 @@ func TestRunDispatchRegistersRunRowInLedger(t *testing.T) {
 	}
 	if got.EndedAt.Before(before) || got.EndedAt.After(after) {
 		t.Errorf("run.EndedAt = %v, want within [%v, %v]", *got.EndedAt, before, after)
+	}
+	if got.PID != os.Getpid() {
+		t.Errorf("run.PID = %d, want os.Getpid() %d", got.PID, os.Getpid())
 	}
 }
 
@@ -2094,6 +2125,27 @@ func TestServeFlagsAndSubcommandRecognized(t *testing.T) {
 	code := run(context.Background(), []string{"serve", "--invalid-flag"}, &stdout, &stderr)
 	if code == 0 {
 		t.Fatalf("serve with invalid flag exit code = 0, want non-zero")
+	}
+}
+
+func TestServeStartsSweeperBesideHub(t *testing.T) {
+	src, err := os.ReadFile("cli.go")
+	if err != nil {
+		t.Fatalf("ReadFile(cli.go): %v", err)
+	}
+	text := string(src)
+	hubIdx := strings.Index(text, "hub.Run(ctx)")
+	if hubIdx < 0 {
+		t.Fatal("serveDispatch must launch hub.Run")
+	}
+	sweeperNew := strings.Index(text, "serve.NewSweeper(")
+	sweeperRun := strings.Index(text, "sweeper.Run(ctx)")
+	if sweeperNew < 0 || sweeperRun < 0 {
+		t.Fatal("serveDispatch must construct and launch Sweeper beside Hub")
+	}
+	if sweeperNew < hubIdx-200 || sweeperRun < hubIdx {
+		t.Fatalf("Sweeper launch should sit beside Hub.Run; NewSweeper@%d hub.Run@%d sweeper.Run@%d",
+			sweeperNew, hubIdx, sweeperRun)
 	}
 }
 

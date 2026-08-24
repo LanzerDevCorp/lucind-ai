@@ -342,6 +342,21 @@ func Execute(ctx context.Context, deps Deps, p packet.Packet) (Report, error) {
 	}); err != nil {
 		return report, fmt.Errorf("run: register lane %q: %w", p.ID, err)
 	}
+	if err := deps.Ledger.UpdateLaneMetadata(ctx, ledger.LaneMetadata{
+		RunID:        deps.RunID,
+		LaneID:       p.ID,
+		Model:        p.Model,
+		Agent:        p.Agent,
+		SDDPhase:     p.SDDPhase,
+		FanoutGroup:  p.FanoutGroup,
+		Feature:      p.Feature,
+		Skill:        p.Skill,
+		PacketPath:   p.Path,
+		AllowedPaths: p.AllowedPaths,
+	}, now); err != nil {
+		cause := fmt.Errorf("run: update lane metadata for %q: %w", p.ID, err)
+		return report, recordLaneFailure(ctx, deps, p.ID, now, cause)
+	}
 	if err := deps.Ledger.AppendEvent(ctx, ledger.Event{
 		RunID:  deps.RunID,
 		LaneID: p.ID,
@@ -561,6 +576,7 @@ func writeLaneProgress(
 			}
 			batch = append(batch, ledger.LaneProgress{
 				RunID: runID, LaneID: laneID, Message: event.Message, At: event.At,
+				TotalTokens: event.TotalTokens, CostUSD: event.CostUSD, ToolCalls: event.ToolCalls,
 			})
 			if len(batch) == progressBatchSize {
 				flush()

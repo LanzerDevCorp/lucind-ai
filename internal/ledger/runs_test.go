@@ -20,6 +20,7 @@ func TestRegisterAndGetRun(t *testing.T) {
 		TargetRef: "refs/heads/main",
 		LaneCount: 3,
 		StartedAt: startedAt,
+		PID:       4242,
 	}
 
 	if err := l.RegisterRun(ctx, want); err != nil {
@@ -31,7 +32,7 @@ func TestRegisterAndGetRun(t *testing.T) {
 	}
 
 	if got.RunID != want.RunID || got.FeatureID != want.FeatureID || got.Status != want.Status ||
-		got.TargetRef != want.TargetRef || got.LaneCount != want.LaneCount {
+		got.TargetRef != want.TargetRef || got.LaneCount != want.LaneCount || got.PID != want.PID {
 		t.Fatalf("GetRun = %+v, want fields from %+v", got, want)
 	}
 	if !got.StartedAt.Equal(startedAt) || got.StartedAt.Location() != time.UTC {
@@ -39,6 +40,14 @@ func TestRegisterAndGetRun(t *testing.T) {
 	}
 	if got.EndedAt != nil {
 		t.Errorf("EndedAt = %v, want nil for running run", got.EndedAt)
+	}
+
+	listed, err := l.ListRuns(ctx)
+	if err != nil {
+		t.Fatalf("ListRuns: %v", err)
+	}
+	if len(listed) != 1 || listed[0].PID != want.PID {
+		t.Fatalf("ListRuns = %+v, want one run with PID %d", listed, want.PID)
 	}
 }
 

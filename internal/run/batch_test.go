@@ -366,6 +366,45 @@ func TestExecuteBatchWorktreeCreationFailureStillRegistersLaneAsFailed(t *testin
 	}
 }
 
+// TestExecuteBatchEnsureLaneFailedUpdatesLaneMetadata proves ensureLaneFailed
+// snapshots packet Skill/PacketPath (and sibling dispatch fields) when it
+// registers a never-started lane as failed.
+func TestExecuteBatchEnsureLaneFailedUpdatesLaneMetadata(t *testing.T) {
+	root := t.TempDir()
+	fe := newBatchFakeExecutor()
+	fe.outcomeFor[root+"/lane-b"] = executor.Outcome{ExitCode: 0}
+
+	deps := newBatchTestDeps(t, func(id string) string { return root + "/" + id }, func(id string) []byte {
+		return []byte(laneEnvelopeJSON(id, "done"))
+	}, fe, map[string]bool{"lane-fails-to-start": true})
+
+	failed := batchPacket("lane-fails-to-start")
+	failed.Model = "ensure-model"
+	failed.Agent = "ensure-agent"
+	failed.SDDPhase = "apply"
+	failed.FanoutGroup = "batch"
+	failed.Skill = "lucind-apply"
+	failed.Path = ".lucind/packets/lane-fails-to-start.md"
+	failed.AllowedPaths = []string{"internal/run/batch.go"}
+	ps := []packet.Packet{failed, batchPacket("lane-b")}
+
+	if _, err := run.ExecuteBatch(context.Background(), deps, ps); err != nil {
+		t.Fatalf("ExecuteBatch() error = %v, want nil", err)
+	}
+
+	got, err := deps.Ledger.GetLaneMetadata(context.Background(), "run-1", "lane-fails-to-start")
+	if err != nil {
+		t.Fatalf("GetLaneMetadata() error = %v", err)
+	}
+	if got.Skill != failed.Skill || got.PacketPath != failed.Path {
+		t.Fatalf("metadata skill/packet_path = (%q,%q), want (%q,%q)",
+			got.Skill, got.PacketPath, failed.Skill, failed.Path)
+	}
+	if got.Model != failed.Model || got.SDDPhase != failed.SDDPhase || got.FanoutGroup != failed.FanoutGroup {
+		t.Fatalf("metadata = %+v, want model/sdd_phase/fanout_group from failed packet", got)
+	}
+}
+
 // TestExecuteBatchRecordingFailureKeepsBothCausesOnReport proves that when
 // ensureLaneFailed itself fails — here because it retries RegisterLane with
 // the same unadmitted executor that caused Execute to fail — the operator

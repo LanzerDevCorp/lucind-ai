@@ -21,6 +21,7 @@ type Run struct {
 	LaneCount int
 	StartedAt time.Time
 	EndedAt   *time.Time
+	PID       int
 }
 
 // RegisterRun inserts a run row. A duplicate RunID is returned as the
@@ -29,10 +30,10 @@ type Run struct {
 func (l *Ledger) RegisterRun(ctx context.Context, run Run) error {
 	_, err := l.db.ExecContext(ctx, `
 		INSERT INTO runs (
-			run_id, feature_id, status, target_ref, lane_count, started_at, ended_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+			run_id, feature_id, status, target_ref, lane_count, started_at, ended_at, pid
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 		run.RunID, run.FeatureID, run.Status, run.TargetRef, run.LaneCount,
-		run.StartedAt.UTC().Format(time.RFC3339), formatNullableTimestamp(run.EndedAt),
+		run.StartedAt.UTC().Format(time.RFC3339), formatNullableTimestamp(run.EndedAt), run.PID,
 	)
 	if err != nil {
 		return fmt.Errorf("ledger: register run: %w", err)
@@ -62,7 +63,7 @@ func (l *Ledger) UpdateRunStatus(ctx context.Context, runID, status string, ende
 // GetRun returns the run identified by runID.
 func (l *Ledger) GetRun(ctx context.Context, runID string) (Run, error) {
 	row := l.db.QueryRowContext(ctx, `
-		SELECT run_id, feature_id, status, target_ref, lane_count, started_at, ended_at
+		SELECT run_id, feature_id, status, target_ref, lane_count, started_at, ended_at, pid
 		FROM runs WHERE run_id = ?`, runID)
 
 	run, err := scanRun(row.Scan)
@@ -79,7 +80,7 @@ func (l *Ledger) GetRun(ctx context.Context, runID string) (Run, error) {
 // tie-breaker.
 func (l *Ledger) ListRuns(ctx context.Context) ([]Run, error) {
 	rows, err := l.db.QueryContext(ctx, `
-		SELECT run_id, feature_id, status, target_ref, lane_count, started_at, ended_at
+		SELECT run_id, feature_id, status, target_ref, lane_count, started_at, ended_at, pid
 		FROM runs ORDER BY started_at DESC, run_id ASC`)
 	if err != nil {
 		return nil, fmt.Errorf("ledger: list runs: %w", err)
@@ -170,7 +171,7 @@ func scanRun(scan func(...any) error) (Run, error) {
 	)
 	if err := scan(
 		&run.RunID, &run.FeatureID, &run.Status, &run.TargetRef, &run.LaneCount,
-		&startedAt, &endedAt,
+		&startedAt, &endedAt, &run.PID,
 	); err != nil {
 		return Run{}, err
 	}

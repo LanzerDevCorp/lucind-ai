@@ -71,12 +71,13 @@ type claudeToolCall struct {
 // claudeStreamDecoder accepts arbitrary stdout write boundaries while
 // retaining the terminal result record separately from incremental progress.
 type claudeStreamDecoder struct {
-	progress chan<- ProgressEvent
-	pending  []byte
-	terminal bool
-	result   []byte
-	noted    bool
-	tools    map[string]claudeToolCall
+	progress  chan<- ProgressEvent
+	pending   []byte
+	terminal  bool
+	result    []byte
+	noted     bool
+	tools     map[string]claudeToolCall
+	toolCalls int64
 }
 
 func newClaudeStreamDecoder(progress chan<- ProgressEvent) *claudeStreamDecoder {
@@ -149,7 +150,7 @@ func (d *claudeStreamDecoder) consumeAssistantBlock(block claudeContentBlock) {
 	switch block.Type {
 	case "text":
 		if block.Text != "" {
-			d.emit(block.Text)
+			d.emit(block.Text, 0, 0)
 		}
 	case "tool_use":
 		if block.Name == "" {
@@ -163,7 +164,8 @@ func (d *claudeStreamDecoder) consumeAssistantBlock(block claudeContentBlock) {
 		if block.ID != "" {
 			d.tools[block.ID] = call
 		}
-		d.emit(fmt.Sprintf("%s started: %s", call.kind, call.detail))
+		d.toolCalls++
+		d.emit(fmt.Sprintf("%s started: %s", call.kind, call.detail), 0, 0)
 	}
 }
 
@@ -184,7 +186,7 @@ func (d *claudeStreamDecoder) consumeUserBlock(block claudeContentBlock) {
 	if block.IsError {
 		action = "failed"
 	}
-	d.emit(fmt.Sprintf("%s %s: %s", call.kind, action, call.detail))
+	d.emit(fmt.Sprintf("%s %s: %s", call.kind, action, call.detail), 0, 0)
 }
 
 func (d *claudeStreamDecoder) consumeResult(line []byte, record claudeStreamRecord) {
@@ -202,10 +204,12 @@ func (d *claudeStreamDecoder) consumeResult(line []byte, record claudeStreamReco
 		// claude exits 0 on error_max_turns and error_during_execution, so
 		// a run that stopped short of finishing its work is indistinguishable
 		// from a completed one unless the subtype is said out loud.
-		d.emit("Result: " + record.Subtype)
+		d.emit("Result: "+record.Subtype, 0, 0)
 	}
 	if record.Usage != nil {
-		d.emit(formatClaudeUsage(*record.Usage, record.CostUSD))
+		total := int64(record.Usage.InputTokens + record.Usage.OutputTokens +
+			record.Usage.CacheReadInputTokens + record.Usage.CacheCreationInputTokens)
+		d.emit(formatClaudeUsage(*record.Usage, record.CostUSD), total, record.CostUSD)
 	}
 }
 
@@ -223,12 +227,18 @@ func (d *claudeStreamDecoder) note() {
 		return
 	}
 	d.noted = true
-	d.emit(claudeStreamDegradedMessage)
+	d.emit(claudeStreamDegradedMessage, 0, 0)
 }
 
-func (d *claudeStreamDecoder) emit(message string) {
+func (d *claudeStreamDecoder) emit(message string, totalTokens int64, costUSD float64) {
 	select {
-	case d.progress <- ProgressEvent{Message: message, At: time.Now()}:
+	case d.progress <- ProgressEvent{
+		Message:     message,
+		At:          time.Now(),
+		TotalTokens: totalTokens,
+		CostUSD:     costUSD,
+		ToolCalls:   d.toolCalls,
+	}:
 	default:
 		// Progress is best-effort and must never backpressure the child process.
 	}

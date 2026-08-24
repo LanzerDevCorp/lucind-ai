@@ -10,6 +10,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -1010,5 +1012,111 @@ func TestStateResponseBoundsRunsAndLanes(t *testing.T) {
 	}
 	if got := state.Runs[0]["run_id"]; got != newestRunID {
 		t.Errorf("state.runs[0].run_id = %v, want newest run %q (newest-first order)", got, newestRunID)
+	}
+}
+
+func TestPacketBodyEndpoint(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	l, err := ledger.Open(ctx, root)
+	if err != nil {
+		t.Fatalf("ledger.Open: %v", err)
+	}
+	defer l.Close()
+
+	packetDir := filepath.Join(root, "packets")
+	if err := os.MkdirAll(packetDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	packetPath := filepath.Join(packetDir, "lane-a.md")
+	const body = "---\nlane_id: lane-a\n---\n# Packet body\n"
+	if err := os.WriteFile(packetPath, []byte(body), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	missingPath := filepath.Join(packetDir, "gone.md")
+
+	now := time.Now().UTC()
+	if err := l.RegisterRun(ctx, ledger.Run{
+		RunID: "run-1", FeatureID: "f1", Status: "running", TargetRef: "main", LaneCount: 2, StartedAt: now,
+	}); err != nil {
+		t.Fatalf("RegisterRun: %v", err)
+	}
+	for _, ln := range []ledger.Lane{
+		{RunID: "run-1", LaneID: "lane-a", PacketID: "pkt-a", Executor: "agy", RoutingCondition: "primary", Status: lane.Running},
+		{RunID: "run-1", LaneID: "lane-empty", PacketID: "pkt-empty", Executor: "agy", RoutingCondition: "primary", Status: lane.Running},
+		{RunID: "run-1", LaneID: "lane-missing", PacketID: "pkt-missing", Executor: "agy", RoutingCondition: "primary", Status: lane.Running},
+	} {
+		if err := l.RegisterLane(ctx, ln); err != nil {
+			t.Fatalf("RegisterLane(%s): %v", ln.LaneID, err)
+		}
+	}
+	if err := l.UpdateLaneMetadata(ctx, ledger.LaneMetadata{
+		RunID: "run-1", LaneID: "lane-a", PacketPath: packetPath,
+	}, now); err != nil {
+		t.Fatalf("UpdateLaneMetadata(lane-a): %v", err)
+	}
+	if err := l.UpdateLaneMetadata(ctx, ledger.LaneMetadata{
+		RunID: "run-1", LaneID: "lane-empty", PacketPath: "",
+	}, now); err != nil {
+		t.Fatalf("UpdateLaneMetadata(lane-empty): %v", err)
+	}
+	if err := l.UpdateLaneMetadata(ctx, ledger.LaneMetadata{
+		RunID: "run-1", LaneID: "lane-missing", PacketPath: missingPath,
+	}, now); err != nil {
+		t.Fatalf("UpdateLaneMetadata(lane-missing): %v", err)
+	}
+
+	handler := serve.NewHandler(serve.NewModel(l), "alice", "opencode run")
+
+	t.Run("200 raw markdown", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/packets/run-1/lane-a", nil)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != 200 {
+			t.Fatalf("code = %d, want 200; body=%s", rec.Code, rec.Body.String())
+		}
+		if ct := rec.Header().Get("Content-Type"); ct != "text/markdown; charset=utf-8" {
+			t.Errorf("Content-Type = %q, want text/markdown; charset=utf-8", ct)
+		}
+		if got := rec.Body.String(); got != body {
+			t.Errorf("body = %q, want %q", got, body)
+		}
+	})
+
+	t.Run("404 unknown lane", func(t *testing.T) {
+		assertPacket404(t, handler, "/api/packets/run-1/no-such-lane")
+	})
+
+	t.Run("404 empty packet path", func(t *testing.T) {
+		assertPacket404(t, handler, "/api/packets/run-1/lane-empty")
+	})
+
+	t.Run("404 unreadable file", func(t *testing.T) {
+		assertPacket404(t, handler, "/api/packets/run-1/lane-missing")
+	})
+
+	t.Run("process stays up after 404", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/packets/run-1/lane-a", nil)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != 200 {
+			t.Fatalf("follow-up GET code = %d, want 200 (serve must stay up)", rec.Code)
+		}
+	})
+}
+
+func assertPacket404(t *testing.T, handler http.Handler, path string) {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, path, nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("%s code = %d, want 404; body=%s", path, rec.Code, rec.Body.String())
+	}
+	if ct := rec.Header().Get("Content-Type"); !strings.Contains(ct, "application/json") {
+		t.Errorf("%s Content-Type = %q, want application/json", path, ct)
+	}
+	if !strings.Contains(rec.Body.String(), `"error"`) {
+		t.Errorf("%s body = %q, want JSON error", path, rec.Body.String())
 	}
 }

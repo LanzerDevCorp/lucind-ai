@@ -620,7 +620,8 @@ func TestModelRunLaneAndProgressJSONContract(t *testing.T) {
 	metadata := ledger.LaneMetadata{
 		RunID: "run-1", LaneID: "lane-a", Model: "gpt-5.6", Agent: "builder",
 		SDDPhase: "apply", FanoutGroup: "serve", Change: "control-room",
-		Feature: "feature-1", AllowedPaths: []string{"internal/serve/model.go"},
+		Feature: "feature-1", Skill: "lucind-apply", PacketPath: ".lucind/packets/lane-a.md",
+		AllowedPaths: []string{"internal/serve/model.go"},
 		Dependencies: []string{"ledger-progress"}, BodyDigest: "sha256:abc",
 	}
 	if err := l.UpdateLaneMetadata(ctx, metadata, started); err != nil {
@@ -630,7 +631,21 @@ func TestModelRunLaneAndProgressJSONContract(t *testing.T) {
 		t.Fatalf("RequestApproval: %v", err)
 	}
 	for _, seq := range []int64{3, 1, 2} {
-		if err := l.AppendProgress(ctx, ledger.LaneProgress{RunID: "run-1", LaneID: "lane-a", Seq: seq, Message: fmt.Sprintf("chunk-%d", seq), At: started.Add(time.Duration(seq) * time.Second)}); err != nil {
+		progress := ledger.LaneProgress{
+			RunID: "run-1", LaneID: "lane-a", Seq: seq, Message: fmt.Sprintf("chunk-%d", seq),
+			At: started.Add(time.Duration(seq) * time.Second),
+		}
+		if seq == 2 {
+			progress.TotalTokens = 1000
+			progress.CostUSD = 0.05
+			progress.ToolCalls = 6
+		}
+		if seq == 3 {
+			progress.TotalTokens = 2000
+			progress.CostUSD = 0.10
+			progress.ToolCalls = 12
+		}
+		if err := l.AppendProgress(ctx, progress); err != nil {
 			t.Fatalf("AppendProgress(%d): %v", seq, err)
 		}
 	}
@@ -660,7 +675,7 @@ func TestModelRunLaneAndProgressJSONContract(t *testing.T) {
 	if len(lanes) != 2 || lanes[0].LaneID != "lane-a" || lanes[1].LaneID != "lane-b" {
 		t.Fatalf("ListLanes order = %+v, want lane-a then lane-b", lanes)
 	}
-	assertJSON(t, lanes[0], `{"run_id":"run-1","lane_id":"lane-a","packet_id":"packet-a","executor":"opencode","routing_condition":"primary","status":"running","worktree_path":"","worktree_preserved":false,"attempt":1,"started_at":null,"ended_at":null,"model":"gpt-5.6","agent":"builder","feature":"feature-1","sdd_phase":"apply","fanout_group":"serve","change":"control-room","allowed_paths":["internal/serve/model.go"],"dependencies":["ledger-progress"],"body_digest":"sha256:abc"}`)
+	assertJSON(t, lanes[0], `{"run_id":"run-1","lane_id":"lane-a","packet_id":"packet-a","executor":"opencode","routing_condition":"primary","status":"running","worktree_path":"","worktree_preserved":false,"attempt":1,"started_at":null,"ended_at":null,"model":"gpt-5.6","agent":"builder","feature":"feature-1","sdd_phase":"apply","fanout_group":"serve","change":"control-room","skill":"lucind-apply","packet_path":".lucind/packets/lane-a.md","allowed_paths":["internal/serve/model.go"],"dependencies":["ledger-progress"],"body_digest":"sha256:abc"}`)
 	if got, err := m.GetLane(ctx, "run-1", "lane-a"); err != nil || got.LaneID != lanes[0].LaneID {
 		t.Fatalf("GetLane = %+v, %v; want lane-a", got, err)
 	}
@@ -672,7 +687,9 @@ func TestModelRunLaneAndProgressJSONContract(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetLaneProgress: %v", err)
 	}
-	assertJSON(t, progress, `[{"run_id":"run-1","lane_id":"lane-a","seq":2,"message":"chunk-2","at":"2026-08-22T10:00:02Z"},{"run_id":"run-1","lane_id":"lane-a","seq":3,"message":"chunk-3","at":"2026-08-22T10:00:03Z"}]`)
+	// Lane StartedAt is unset by RegisterLane; tool_rate uses the 1s floor:
+	// 6 / (1/60) = 360, 12 / (1/60) = 720.
+	assertJSON(t, progress, `[{"run_id":"run-1","lane_id":"lane-a","seq":2,"message":"chunk-2","at":"2026-08-22T10:00:02Z","total_tokens":1000,"cost_usd":0.05,"tool_calls":6,"tool_rate":360},{"run_id":"run-1","lane_id":"lane-a","seq":3,"message":"chunk-3","at":"2026-08-22T10:00:03Z","total_tokens":2000,"cost_usd":0.1,"tool_calls":12,"tool_rate":720}]`)
 
 	if _, err := m.GetRun(ctx, "missing"); !errors.Is(err, ledger.ErrRunUnknown) {
 		t.Fatalf("GetRun(missing) error = %v, want ledger.ErrRunUnknown", err)

@@ -191,6 +191,20 @@ func ensureLaneFailed(ctx context.Context, deps Deps, p packet.Packet, now time.
 	}); err != nil {
 		return fmt.Errorf("run: register never-started lane %q: %w", p.ID, err)
 	}
+	if err := deps.Ledger.UpdateLaneMetadata(ctx, ledger.LaneMetadata{
+		RunID:        deps.RunID,
+		LaneID:       p.ID,
+		Model:        p.Model,
+		Agent:        p.Agent,
+		SDDPhase:     p.SDDPhase,
+		FanoutGroup:  p.FanoutGroup,
+		Feature:      p.Feature,
+		Skill:        p.Skill,
+		PacketPath:   p.Path,
+		AllowedPaths: p.AllowedPaths,
+	}, now); err != nil {
+		return fmt.Errorf("run: update lane metadata for never-started lane %q: %w", p.ID, err)
+	}
 	if err := deps.Ledger.AppendEvent(ctx, ledger.Event{
 		RunID:  deps.RunID,
 		LaneID: p.ID,

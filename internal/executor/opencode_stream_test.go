@@ -58,31 +58,31 @@ func TestDecodeOpencodeRecord(t *testing.T) {
 			record: `{"type":"step_finish","timestamp":1787412178422,"part":{"type":"step-finish","reason":"stop","cost":0.0123,"tokens":{"input":120,"output":320,"reasoning":80,"cache":{"read":10,"write":5}}}}`,
 			wantEvents: []ProgressEvent{
 				{Message: "Step finished: stop", At: wantAt},
-				{Message: "Usage: 120 input, 320 output, 80 reasoning, 10 cache read, 5 cache write tokens, $0.0123", At: wantAt},
+				{Message: "Usage: 120 input, 320 output, 80 reasoning, 10 cache read, 5 cache write tokens, $0.0123", At: wantAt, TotalTokens: 535, CostUSD: 0.0123},
 			},
 		},
 		{
 			name:   "tool use completed is reported as Tool kind",
 			record: `{"type":"tool_use","timestamp":1787412178422,"sessionID":"ses_1","part":{"id":"prt_1","tool":"bash","callID":"call_1","state":{"status":"completed","input":{"command":"go test ./..."},"time":{"start":1787500729840,"end":1787500731000}}}}`,
 			wantEvents: []ProgressEvent{
-				{Message: "Tool started: bash", At: time.UnixMilli(1787500729840)},
-				{Message: "Tool finished: bash", At: time.UnixMilli(1787500731000)},
+				{Message: "Tool started: bash", At: time.UnixMilli(1787500729840), ToolCalls: 1},
+				{Message: "Tool finished: bash", At: time.UnixMilli(1787500731000), ToolCalls: 1},
 			},
 		},
 		{
 			name:   "tool use completed edit names the file under Edit kind",
 			record: `{"type":"tool_use","timestamp":1787412178422,"sessionID":"ses_1","part":{"id":"prt_2","tool":"edit","callID":"call_2","state":{"status":"completed","input":{"filePath":"/tmp/probe.txt"},"time":{"start":1787500729840,"end":1787500729920}}}}`,
 			wantEvents: []ProgressEvent{
-				{Message: "Edit started: edit (/tmp/probe.txt)", At: time.UnixMilli(1787500729840)},
-				{Message: "Edit finished: edit (/tmp/probe.txt)", At: time.UnixMilli(1787500729920)},
+				{Message: "Edit started: edit (/tmp/probe.txt)", At: time.UnixMilli(1787500729840), ToolCalls: 1},
+				{Message: "Edit finished: edit (/tmp/probe.txt)", At: time.UnixMilli(1787500729920), ToolCalls: 1},
 			},
 		},
 		{
 			name:   "tool use error reports the failure reason",
 			record: `{"type":"tool_use","timestamp":1787412178422,"sessionID":"ses_1","part":{"id":"prt_3","tool":"bash","callID":"call_3","state":{"status":"error","input":{"command":"exit 1"},"error":"Tool execution failed: exit status 1","time":{"start":1787500732000,"end":1787500732500}}}}`,
 			wantEvents: []ProgressEvent{
-				{Message: "Tool started: bash", At: time.UnixMilli(1787500732000)},
-				{Message: "Tool failed: bash: Tool execution failed: exit status 1", At: time.UnixMilli(1787500732500)},
+				{Message: "Tool started: bash", At: time.UnixMilli(1787500732000), ToolCalls: 1},
+				{Message: "Tool failed: bash: Tool execution failed: exit status 1", At: time.UnixMilli(1787500732500), ToolCalls: 1},
 			},
 		},
 		{

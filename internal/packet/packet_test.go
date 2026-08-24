@@ -129,6 +129,70 @@ func TestParseAgentAbsentLeavesFieldEmpty(t *testing.T) {
 	}
 }
 
+func TestParseObservabilityFrontmatter(t *testing.T) {
+	tests := []struct {
+		name            string
+		extra           string
+		wantSDDPhase    string
+		wantFanoutGroup string
+		wantSkill       string
+	}{
+		{
+			name: "all three keys present",
+			extra: "sdd_phase: apply\n" +
+				"fanout_group: ledger\n" +
+				"skill: lucind-apply\n",
+			wantSDDPhase:    "apply",
+			wantFanoutGroup: "ledger",
+			wantSkill:       "lucind-apply",
+		},
+		{
+			name:            "omitted keys default to empty",
+			extra:           "",
+			wantSDDPhase:    "",
+			wantFanoutGroup: "",
+			wantSkill:       "",
+		},
+		{
+			name: "explicit empty keys are empty strings",
+			extra: "sdd_phase:\n" +
+				"fanout_group:   \n" +
+				"skill:\n",
+			wantSDDPhase:    "",
+			wantFanoutGroup: "",
+			wantSkill:       "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			src := "---\n" +
+				"id: fix-auth\n" +
+				"executor: agy\n" +
+				"routed_by: touches auth, Tier A verification required\n" +
+				tt.extra +
+				"---\n\n" +
+				"## Goal\n"
+			p, err := packet.Parse(strings.NewReader(src))
+			if err != nil {
+				t.Fatalf("Parse() error = %v, want nil", err)
+			}
+			if p.SDDPhase != tt.wantSDDPhase {
+				t.Errorf("SDDPhase = %q, want %q", p.SDDPhase, tt.wantSDDPhase)
+			}
+			if p.FanoutGroup != tt.wantFanoutGroup {
+				t.Errorf("FanoutGroup = %q, want %q", p.FanoutGroup, tt.wantFanoutGroup)
+			}
+			if p.Skill != tt.wantSkill {
+				t.Errorf("Skill = %q, want %q", p.Skill, tt.wantSkill)
+			}
+			if p.Path != "" {
+				t.Errorf("Path = %q, want empty (Parse does not invent a filesystem path)", p.Path)
+			}
+		})
+	}
+}
+
 func TestParseReadOnlyFrontmatter(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -778,12 +842,12 @@ func TestHumanPacketTemplateUntouched(t *testing.T) {
 
 func TestParseFeatureTargetFrontmatter(t *testing.T) {
 	tests := []struct {
-		name                   string
-		src                    string
-		wantFeature            string
-		wantParentRef          string
-		wantBaseSHA            string
-		wantExpectedParentSHA  string
+		name                  string
+		src                   string
+		wantFeature           string
+		wantParentRef         string
+		wantBaseSHA           string
+		wantExpectedParentSHA string
 	}{
 		{
 			name: "all four target fields present",
@@ -1356,9 +1420,6 @@ func TestDesignPacketTemplatesContract(t *testing.T) {
 		}
 	}
 }
-
-
-
 
 func TestSpecPacketTemplatesContract(t *testing.T) {
 	assetsDir := filepath.Join("..", "..", "plugin", "claude-code", "skills", "lucind-ai", "assets")

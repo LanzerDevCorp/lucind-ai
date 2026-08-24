@@ -13,6 +13,8 @@ import (
 	"github.com/LanzerDevCorp/lucind-ai/internal/ledger"
 )
 
+const toolRateFloorMinutes = 1.0 / 60.0
+
 // Model is the shell-free status and audit query surface for feature-parent
 // integration state. It reads the ledger and returns JSON-facing structs for a
 // future localhost UI; it does not run git or shell commands.
@@ -178,6 +180,8 @@ type Lane struct {
 	SDDPhase          string     `json:"sdd_phase"`
 	FanoutGroup       string     `json:"fanout_group"`
 	Change            string     `json:"change"`
+	Skill             string     `json:"skill"`
+	PacketPath        string     `json:"packet_path"`
 	AllowedPaths      []string   `json:"allowed_paths"`
 	Dependencies      []string   `json:"dependencies"`
 	BodyDigest        string     `json:"body_digest"`
@@ -185,11 +189,15 @@ type Lane struct {
 
 // LaneProgress is one JSON-facing cursor-tail item.
 type LaneProgress struct {
-	RunID   string    `json:"run_id"`
-	LaneID  string    `json:"lane_id"`
-	Seq     int64     `json:"seq"`
-	Message string    `json:"message"`
-	At      time.Time `json:"at"`
+	RunID       string    `json:"run_id"`
+	LaneID      string    `json:"lane_id"`
+	Seq         int64     `json:"seq"`
+	Message     string    `json:"message"`
+	At          time.Time `json:"at"`
+	TotalTokens int64     `json:"total_tokens"`
+	CostUSD     float64   `json:"cost_usd"`
+	ToolCalls   int64     `json:"tool_calls"`
+	ToolRate    float64   `json:"tool_rate"`
 }
 
 // BatchOutcome is the JSON-facing barrier result shared by a run's batch lanes.
@@ -327,6 +335,7 @@ func laneDTO(row ledger.Lane, metadata ledger.LaneMetadata) Lane {
 		Attempt: row.Attempt, StartedAt: row.StartedAt, EndedAt: row.EndedAt,
 		Model: metadata.Model, Agent: metadata.Agent, Feature: metadata.Feature,
 		SDDPhase: metadata.SDDPhase, FanoutGroup: metadata.FanoutGroup, Change: metadata.Change,
+		Skill: metadata.Skill, PacketPath: metadata.PacketPath,
 		AllowedPaths: nonNilStrings(metadata.AllowedPaths), Dependencies: nonNilStrings(metadata.Dependencies),
 		BodyDigest: metadata.BodyDigest,
 	}
@@ -338,11 +347,37 @@ func (m *Model) GetLaneProgress(ctx context.Context, runID, laneID string, after
 	if err != nil {
 		return nil, fmt.Errorf("serve: get lane progress: %w", err)
 	}
+	var startedAt *time.Time
+	lanes, err := m.ledger.Lanes(ctx, runID)
+	if err != nil {
+		return nil, fmt.Errorf("serve: get lane progress: %w", err)
+	}
+	for _, ln := range lanes {
+		if ln.LaneID == laneID {
+			startedAt = ln.StartedAt
+			break
+		}
+	}
 	out := make([]LaneProgress, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, LaneProgress{RunID: row.RunID, LaneID: row.LaneID, Seq: row.Seq, Message: row.Message, At: row.At})
+		out = append(out, LaneProgress{
+			RunID: row.RunID, LaneID: row.LaneID, Seq: row.Seq, Message: row.Message, At: row.At,
+			TotalTokens: row.TotalTokens, CostUSD: row.CostUSD, ToolCalls: row.ToolCalls,
+			ToolRate: deriveToolRate(startedAt, row.At, row.ToolCalls),
+		})
 	}
 	return out, nil
+}
+
+func deriveToolRate(startedAt *time.Time, at time.Time, toolCalls int64) float64 {
+	elapsed := 0.0
+	if startedAt != nil {
+		elapsed = at.Sub(*startedAt).Minutes()
+	}
+	if elapsed < toolRateFloorMinutes {
+		elapsed = toolRateFloorMinutes
+	}
+	return float64(toolCalls) / elapsed
 }
 
 // ListBatchLanes derives latest lane notes and the run's barrier outcome.
