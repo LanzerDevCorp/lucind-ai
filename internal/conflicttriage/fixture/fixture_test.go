@@ -205,3 +205,19 @@ func TestFixturePackets_AreBuildScopeTemplatesNotToyWriters(t *testing.T) {
 		}
 	}
 }
+
+// TestFixturePackets_OverlappingBuildScopesRefused drives the real admission
+// check (packet.DisjointAllowedPaths) with two build features whose allowed
+// paths are not prefix-disjoint. The spec scenario is the MUST-fail, not the
+// positive disjointness of the shipped templates.
+func TestFixturePackets_OverlappingBuildScopesRefused(t *testing.T) {
+	a, _ := parsePacketFile(t, "feat_a.md")
+	b, _ := parsePacketFile(t, "feat_b.md")
+	if err := packet.DisjointAllowedPaths([]packet.Packet{a, b}); err != nil {
+		t.Fatalf("shipped feat packets must remain disjoint for separate dispatch: %v", err)
+	}
+	b.AllowedPaths = append(append([]string{}, b.AllowedPaths...), a.AllowedPaths...)
+	if err := packet.DisjointAllowedPaths([]packet.Packet{a, b}); err == nil {
+		t.Fatal("DisjointAllowedPaths(overlapping build features) = nil, want admission failure")
+	}
+}
