@@ -538,12 +538,57 @@ func TestPacketTemplateAssetContract(t *testing.T) {
 }
 
 func TestSkillAssetContract(t *testing.T) {
-	skillPath := filepath.Join("..", "..", "plugin", "claude-code", "skills", "lucind-ai", "SKILL.md")
+	skillDir := filepath.Join("..", "..", "plugin", "claude-code", "skills", "lucind-ai")
+	skillPath := filepath.Join(skillDir, "SKILL.md")
 	data, err := os.ReadFile(skillPath)
 	if err != nil {
 		t.Fatalf("ReadFile(%s) error = %v", skillPath, err)
 	}
-	content := string(data)
+	router := string(data)
+	content := router
+	err = filepath.WalkDir(filepath.Join(skillDir, "references"), func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() || filepath.Ext(path) != ".md" {
+			return nil
+		}
+		data, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return readErr
+		}
+		content += "\n" + string(data)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("read skill references: %v", err)
+	}
+
+	references := []string{
+		"references/core/domain.md",
+		"references/core/safety.md",
+		"references/modes/isolated.md",
+		"references/modes/exclusive.md",
+		"references/strategies/direct.md",
+		"references/strategies/sdd.md",
+		"references/strategies/fan-out.md",
+		"references/coordination/dependencies-defects.md",
+		"references/coordination/recovery-reconciliation.md",
+		"references/contracts/packets-results.md",
+		"references/contracts/acceptance-promotion.md",
+		"references/adapters/executors.md",
+		"references/adapters/claude-agent-teams.md",
+		"references/operations/control-room.md",
+		"references/operations/troubleshooting.md",
+	}
+	for _, reference := range references {
+		if !strings.Contains(router, "`"+reference+"`") {
+			t.Errorf("SKILL.md missing pointer to %s", reference)
+		}
+		if _, statErr := os.Stat(filepath.Join(skillDir, filepath.FromSlash(reference))); statErr != nil {
+			t.Errorf("SKILL.md pointer %s does not resolve: %v", reference, statErr)
+		}
+	}
 
 	// Explore is documented as dispatchable via lucind-ai run.
 	if !strings.Contains(content, "Dispatch via `lucind-ai run`") {
@@ -573,9 +618,9 @@ func TestSkillAssetContract(t *testing.T) {
 		t.Errorf("SKILL.md verify row was modified or removed")
 	}
 
-	// Unrelated section present from earlier in the session is preserved.
-	if !strings.Contains(content, "### Where to author packet files") {
-		t.Errorf("SKILL.md missing 'Where to author packet files' section")
+	// The dirty-primary-root hazard remains explicit after modularization.
+	if !strings.Contains(content, ".lucind/packets/") || !strings.Contains(content, "primary root") {
+		t.Errorf("skill package missing packet location and dirty-primary-root hazard")
 	}
 
 	// Frontmatter table documents the five feature-target keys (2.1-RED).
@@ -618,6 +663,24 @@ func TestSkillAssetContract(t *testing.T) {
 		if !strings.Contains(content, flag) {
 			t.Errorf("SKILL.md invocation/CLI section missing run flag %q", flag)
 		}
+	}
+
+	contextPath := filepath.Join("..", "..", "CONTEXT.md")
+	contextData, err := os.ReadFile(contextPath)
+	if err != nil {
+		t.Fatalf("ReadFile(%s) error = %v", contextPath, err)
+	}
+	parts := strings.SplitN(string(contextData), "## Language\n\n", 2)
+	if len(parts) != 2 {
+		t.Fatalf("CONTEXT.md missing Language glossary")
+	}
+	domainPath := filepath.Join(skillDir, "references", "core", "domain.md")
+	domainData, err := os.ReadFile(domainPath)
+	if err != nil {
+		t.Fatalf("ReadFile(%s) error = %v", domainPath, err)
+	}
+	if !strings.Contains(string(domainData), strings.TrimSpace(parts[1])) {
+		t.Errorf("references/core/domain.md canonical projection drifted from CONTEXT.md")
 	}
 }
 
@@ -713,7 +776,7 @@ func TestPacketTemplateVerifyPointerNote(t *testing.T) {
 }
 
 func TestSkillMDVerifyOperationalWorkflow(t *testing.T) {
-	skillPath := filepath.Join("..", "..", "plugin", "claude-code", "skills", "lucind-ai", "SKILL.md")
+	skillPath := filepath.Join("..", "..", "plugin", "claude-code", "skills", "lucind-ai", "references", "strategies", "sdd.md")
 	data, err := os.ReadFile(skillPath)
 	if err != nil {
 		t.Fatalf("ReadFile(%s) error = %v", skillPath, err)
