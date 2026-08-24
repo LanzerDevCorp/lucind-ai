@@ -8,6 +8,14 @@
       "sessions": 35,
       "memories": 251,
       "prompts": 370
+    },
+    {
+      "id": "da4ed376",
+      "created_by": "lanzerdev",
+      "created_at": "2026-08-24T05:51:40Z",
+      "sessions": 123,
+      "memories": 388,
+      "prompts": 127
     }
   ]
 }
