@@ -12,9 +12,10 @@
 # It also covers a second, cheaper property: that every `file:line` citation
 # a lens lane names in its own `## Citation Manifest` at least resolves to a
 # real location before the lane commits. This is an existence/grep-level
-# check only -- does the file exist, is the cited line within it -- never a
-# claim that the citation supports what the draft says it supports. That
-# semantic re-verification stays the synthesizer's job.
+# check only -- does the file exist, are the cited line(s) within it, and
+# (for a range) is the start line not after the end line -- never a claim
+# that the citation supports what the draft says it supports. That semantic
+# re-verification stays the synthesizer's job.
 #
 # This script judges NOTHING about whether the lane's actual work is good.
 # It does not read the packet's done-criteria and does not decide `status`.
@@ -39,8 +40,15 @@
 #                          exists in --file. Repeatable.
 # --verify-citations      Parse --file's "## Citation Manifest" table and,
 #                          for each `path:line` or `path:line-line` citation,
-#                          check the file exists and has at least that many
-#                          lines. Existence only -- never opens the claim.
+#                          check the file exists and has enough lines to
+#                          contain the WHOLE cited range -- both start and
+#                          end, not just start. A start line after the end
+#                          line (e.g. `path:40-12`) fails as malformed. An en
+#                          dash (U+2013) range separator, seen in real
+#                          model-authored manifests, is normalized to a
+#                          hyphen before parsing so it is validated the same
+#                          way, not silently skipped. Existence/bounds only
+#                          -- never opens the claim.
 # --skip-git              Skip the `git status --porcelain` cleanliness
 #                          check (e.g. when checking content before the
 #                          lane's commit).
@@ -185,7 +193,24 @@ if [ "$verify_citations" -eq 1 ]; then
       seen_any=1
       path="${citation%%:*}"
       linespec="${citation#*:}"
-      startline="${linespec%%-*}"
+
+      # Some model-authored manifests use an en dash (U+2013) as the range
+      # separator instead of a hyphen. Normalize it to a hyphen before
+      # parsing so a range like "12–34" is validated exactly like "12-34" --
+      # otherwise it would silently escape range-end validation through a
+      # different delimiter than the one this check exists to close.
+      linespec=$(printf '%s' "$linespec" | sed 's/–/-/')
+
+      case "$linespec" in
+        *-*)
+          startline="${linespec%%-*}"
+          endline="${linespec#*-}"
+          ;;
+        *)
+          startline="$linespec"
+          endline="$linespec"
+          ;;
+      esac
 
       case "$startline" in
         ''|*[!0-9]*)
@@ -193,6 +218,18 @@ if [ "$verify_citations" -eq 1 ]; then
           continue
           ;;
       esac
+      case "$endline" in
+        ''|*[!0-9]*)
+          echo "SKIP  citation $citation: could not parse the end of the line range"
+          continue
+          ;;
+      esac
+
+      if [ "$startline" -gt "$endline" ]; then
+        echo "FAIL  citation $citation: malformed range, start line $startline is after end line $endline"
+        fail=1
+        continue
+      fi
 
       if [ ! -f "$path" ]; then
         echo "FAIL  citation $citation: file does not exist"
@@ -201,10 +238,10 @@ if [ "$verify_citations" -eq 1 ]; then
       fi
 
       total_lines=$(wc -l < "$path" | tr -d '[:space:]')
-      if [ "$startline" -le "$total_lines" ]; then
+      if [ "$endline" -le "$total_lines" ]; then
         echo "PASS  citation $citation: file exists, has $total_lines lines"
       else
-        echo "FAIL  citation $citation: file has $total_lines lines, cited line $startline is out of range"
+        echo "FAIL  citation $citation: file has $total_lines lines, cited range ends at line $endline which is out of range"
         fail=1
       fi
     done < "$file"
