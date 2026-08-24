@@ -24,6 +24,14 @@ _Avoid_: Super-orchestrator or Change owner
 The boundary within which the Repository Coordinator provides shared authority. The initial stable scope is one local repository on one machine; separate clones and remote machines are outside it.
 _Avoid_: Distributed or cross-machine coordination
 
+**Stability Campaign**:
+The release-validation process that binds one immutable candidate to three consecutive successful Stability Trials and produces the evidence used to decide whether the core is stable.
+_Avoid_: Run or a single test execution
+
+**Stability Trial**:
+One complete execution of the stable concurrent-Change journey within a Stability Campaign. A failed Trial resets the Campaign's consecutive-success count.
+_Avoid_: Stability Campaign or ordinary Run
+
 **Agent**:
 A participant that performs delegated work within a Change and can communicate directly with other Agents in that Change. An Agent cannot independently change scope, priorities, integration decisions, or obligations between Changes; cross-Change effects are coordinated by their Orchestrators.
 _Avoid_: Orchestrator or Change owner
