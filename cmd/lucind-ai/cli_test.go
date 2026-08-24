@@ -3304,6 +3304,35 @@ func TestReconcileResolveCLI(t *testing.T) {
 	})
 }
 
+func TestReconcileResolve_RejectsLinkedWorktree(t *testing.T) {
+	primaryRoot := initRepo(t)
+	linked := filepath.Join(t.TempDir(), "linked")
+	runGit(t, primaryRoot, "worktree", "add", linked, "-b", "linked-resolve")
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(linked); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(cwd)
+
+	var stdout, stderr bytes.Buffer
+	code := run(context.Background(), []string{
+		"reconcile", "resolve",
+		"--candidate", "cand-linked",
+		"--sha", "HEAD",
+		"--actor", "test-actor",
+	}, &stdout, &stderr)
+	if code == 0 {
+		t.Fatalf("reconcile resolve from linked worktree exit code = 0, want non-zero; stdout=%q stderr=%q", stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "linked worktree") {
+		t.Errorf("stderr = %q, want linked worktree refusal", stderr.String())
+	}
+}
+
 func TestReconcileDeclineCancelRenewCLI(t *testing.T) {
 	primaryRoot := initRepo(t)
 	cwd, err := os.Getwd()

@@ -55,10 +55,10 @@ Threat-matrix RED before agent GREEN. Existing `TestScanConflictMarkers` / `Test
 
 ## Phase 3: Three-Hunk Fixture & Disjoint Packets
 
-- [ ] 3.1 RED: `TestFixtureGenerator_ForcesClassRequired` and `TestFixtureGenerator_MissingBaseSHASkipsClassRequired` in `internal/conflicttriage/fixture/fixture_test.go` — shared `base_sha` + 3-hunk toy → `Classify` `ClassRequired` (`overlap.go:93-98,623-659`); missing/divergent `base_sha` does not (`specs/conflict-fixture/spec.md:9-31`). These prove `Classify`, not `evaluateOverlapGate`.
-- [ ] 3.2 GREEN: `GenerateFixture` — two leased features, one `base_sha` (`feature.go:123-124`), 3-hunk toy (1 business, slice-literal union, rename-vs-edit) (`design.md:46-56,85`).
-- [ ] 3.3 Packet templates under `internal/conflicttriage/fixture/packets/` (including `claude_judge.md`, `opencode_judge.md`) with prefix-disjoint `allowed_paths` and valid `parent_ref` (`disjoint.go:29-48`; `feature.go:101-113`; `integrate_feature.go:17,26-78`).
-- [ ] 3.4 RED then GREEN in one unit: `TestReconcileResolve_RejectsLinkedWorktree` in `cmd/lucind-ai/cli_test.go` (`worktree.go:278-292`; `cli.go:1478-1481`); fixture-driven retry in `internal/run/attempt_test.go` — matching tip adopts SHA and CAS (`attempt.go:821-828,870`; `integrate.go:151-173`); tip drift re-blocks (`attempt.go:848-855`; `specs/reconciliation-approval/spec.md:5-20`). Stub-driven unblock already exists (`gate_test.go` `TestApprovedIntegratedCandidateUnblocksPromotion`).
+- [x] 3.1 RED: `TestFixtureGenerator_ForcesClassRequired` and `TestFixtureGenerator_MissingBaseSHASkipsClassRequired` in `internal/conflicttriage/fixture/fixture_test.go` — shared `base_sha` + 3-hunk toy → `Classify` `ClassRequired` (`overlap.go:93-98,623-659`); missing/divergent `base_sha` does not (`specs/conflict-fixture/spec.md:9-31`). These prove `Classify`, not `evaluateOverlapGate`.
+- [x] 3.2 GREEN: `GenerateFixture` — two leased features, one `base_sha` (`feature.go:123-124`), 3-hunk toy (1 business, slice-literal union, rename-vs-edit) (`design.md:46-56,85`).
+- [x] 3.3 Packet templates under `internal/conflicttriage/fixture/packets/` (including `claude_judge.md`, `opencode_judge.md`) with prefix-disjoint `allowed_paths` and valid `parent_ref` (`disjoint.go:29-48`; `feature.go:101-113`; `integrate_feature.go:17,26-78`).
+- [x] 3.4 RED then GREEN in one unit: `TestReconcileResolve_RejectsLinkedWorktree` in `cmd/lucind-ai/cli_test.go` (`worktree.go:278-292`; `cli.go:1478-1481`); fixture-driven retry in `internal/run/attempt_test.go` — matching tip adopts SHA and CAS (`attempt.go:821-828,870`; `integrate.go:151-173`); tip drift re-blocks (`attempt.go:848-855`; `specs/reconciliation-approval/spec.md:5-20`). Stub-driven unblock already exists (`gate_test.go` `TestApprovedIntegratedCandidateUnblocksPromotion`).
 
 ## Phase 4: Dual-Judge Rubric & Verification
 
