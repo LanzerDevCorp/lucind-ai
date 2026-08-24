@@ -38,16 +38,26 @@ var ErrEmptySHA = errors.New("integrate: candidate sha and expected sha must not
 // Combine creates a temporary linked worktree for runID off primaryRoot,
 // merges each branch in branches in order via "git merge --no-ff", and
 // returns the worktree path and branch name on success.
+// parentRef and baseSHA are the feature's declared target, and are empty
+// for a legacy dispatch -- empty means "no start point", which branches
+// the integration worktree from the primary checkout's current HEAD,
+// exactly as before feature targets existed. A feature batch must instead
+// start at its own base_sha, or the combined tree is built on top of
+// whatever primaryRoot happens to have checked out rather than the
+// feature's actual parent.
 // If any merge fails, Combine aborts the merge, removes the worktree,
 // deletes the created integration branch, and returns ErrMergeConflict
 // wrapped with the failing branch name and git's output.
 // The caller never has to clean up after a failed Combine call.
-func Combine(ctx context.Context, primaryRoot, runID string, branches []string) (worktreePath, branchName string, err error) {
-	return combine(ctx, primaryRoot, runID, branches, resolve.RealInvoker)
+func Combine(ctx context.Context, primaryRoot, runID, parentRef, baseSHA string, branches []string) (worktreePath, branchName string, err error) {
+	return combine(ctx, primaryRoot, runID, parentRef, baseSHA, branches, resolve.RealInvoker)
 }
 
-func combine(ctx context.Context, primaryRoot, runID string, branches []string, invoke resolve.Invoker) (worktreePath, branchName string, err error) {
-	wt, err := worktree.Create(ctx, primaryRoot, "integrate-"+runID)
+// combine is Combine's implementation, parameterized over an Invoker for
+// conflict resolution. See Combine's doc comment for the meaning of
+// parentRef and baseSHA.
+func combine(ctx context.Context, primaryRoot, runID, parentRef, baseSHA string, branches []string, invoke resolve.Invoker) (worktreePath, branchName string, err error) {
+	wt, err := worktree.CreateWithParent(ctx, primaryRoot, "integrate-"+runID, parentRef, baseSHA)
 	if err != nil {
 		return "", "", fmt.Errorf("integrate: combine create worktree: %w", err)
 	}

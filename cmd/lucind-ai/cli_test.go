@@ -1148,7 +1148,7 @@ func TestRunSequentialInvocationsProduceDistinctRunIDs(t *testing.T) {
 		deps.LookupExecutor = func(name string) (executor.Executor, error) {
 			return testDoneExecutor{}, nil
 		}
-		deps.CombineTree = func(ctx context.Context, primaryRoot, runID string, branches []string) (string, string, error) {
+		deps.CombineTree = func(ctx context.Context, primaryRoot, runID, parentRef, baseSHA string, branches []string) (string, string, error) {
 			return t.TempDir(), "integration-branch", nil
 		}
 		deps.RunChecks = func(ctx context.Context, worktreePath string) (bool, string, error) {
@@ -1386,7 +1386,7 @@ func TestRunDispatchPersistsIntegratedLaneEnvelopeToPrimaryRoot(t *testing.T) {
 		deps.LookupExecutor = func(name string) (executor.Executor, error) {
 			return testDoneExecutorWithFindings{}, nil
 		}
-		deps.CombineTree = func(ctx context.Context, primaryRoot, runID string, branches []string) (string, string, error) {
+		deps.CombineTree = func(ctx context.Context, primaryRoot, runID, parentRef, baseSHA string, branches []string) (string, string, error) {
 			return t.TempDir(), "integration-branch", nil
 		}
 		deps.RunChecks = func(ctx context.Context, worktreePath string) (bool, string, error) {
@@ -1605,7 +1605,7 @@ func overrideDispatchDeps(t *testing.T, exec executor.Executor) {
 		deps.LookupExecutor = func(name string) (executor.Executor, error) {
 			return exec, nil
 		}
-		deps.CombineTree = func(ctx context.Context, primaryRoot, runID string, branches []string) (string, string, error) {
+		deps.CombineTree = func(ctx context.Context, primaryRoot, runID, parentRef, baseSHA string, branches []string) (string, string, error) {
 			return t.TempDir(), "integration-branch", nil
 		}
 		deps.RunChecks = func(ctx context.Context, worktreePath string) (bool, string, error) {
@@ -3595,7 +3595,7 @@ func featureDispatchDeps(t *testing.T, promoted *[]string) func(string, string, 
 		deps.LookupExecutor = func(name string) (executor.Executor, error) {
 			return testDoneExecutor{}, nil
 		}
-		deps.CombineTree = func(ctx context.Context, primaryRoot, runID string, branches []string) (string, string, error) {
+		deps.CombineTree = func(ctx context.Context, primaryRoot, runID, parentRef, baseSHA string, branches []string) (string, string, error) {
 			return t.TempDir(), "integration-branch", nil
 		}
 		deps.RunChecks = func(ctx context.Context, worktreePath string) (bool, string, error) {

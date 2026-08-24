@@ -42,7 +42,7 @@ func Integrate(ctx context.Context, deps Deps, batch BatchReport) (IntegrateRepo
 		branches[i] = worktree.BranchFor(id)
 	}
 
-	worktreePath, branchName, err := deps.CombineTree(ctx, deps.PrimaryRoot, deps.RunID, branches)
+	worktreePath, branchName, err := deps.CombineTree(ctx, deps.PrimaryRoot, deps.RunID, "", "", branches)
 	if err != nil {
 		return handleRedBatch(ctx, deps, batch, err.Error(), now)
 	}
@@ -102,7 +102,7 @@ func handleRedBatch(ctx context.Context, deps Deps, batch BatchReport, triggerRe
 		branches[i] = worktree.BranchFor(id)
 	}
 
-	worktreePath, branchName, err := deps.CombineTree(ctx, deps.PrimaryRoot, deps.RunID, branches)
+	worktreePath, branchName, err := deps.CombineTree(ctx, deps.PrimaryRoot, deps.RunID, "", "", branches)
 	if err != nil {
 		revertLanes(ctx, deps, batch.Outcome.Integrate, err.Error(), now)
 		return IntegrateReport{
@@ -260,7 +260,7 @@ func tryCombine(ctx context.Context, deps Deps, laneIDs []string) bool {
 		branches[i] = worktree.BranchFor(id)
 	}
 
-	worktreePath, branchName, err := deps.CombineTree(ctx, deps.PrimaryRoot, deps.RunID, branches)
+	worktreePath, branchName, err := deps.CombineTree(ctx, deps.PrimaryRoot, deps.RunID, "", "", branches)
 	if err != nil {
 		return false
 	}

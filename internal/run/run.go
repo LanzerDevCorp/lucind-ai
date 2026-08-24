@@ -190,7 +190,15 @@ type Deps struct {
 	HasUniqueLaneCommits func(ctx context.Context, worktreePath, baseSHA string) (bool, error)
 	PorcelainEmpty       func(ctx context.Context, worktreePath string) (bool, error)
 
-	CombineTree        func(ctx context.Context, primaryRoot, runID string, branches []string) (worktreePath, branchName string, err error)
+	// CombineTree creates the integration worktree and merges branches into
+	// it. parentRef and baseSHA are the packet's declared feature target,
+	// and are empty for a legacy dispatch -- empty means "no start point",
+	// which branches the integration worktree from the primary checkout's
+	// current HEAD, exactly as before feature targets existed. A feature
+	// batch must instead start at its own base_sha, or the combined tree
+	// is built on top of whatever primaryRoot happens to have checked out
+	// rather than the feature's actual parent.
+	CombineTree        func(ctx context.Context, primaryRoot, runID, parentRef, baseSHA string, branches []string) (worktreePath, branchName string, err error)
 	RunChecks          func(ctx context.Context, worktreePath string) (passed bool, output string, err error)
 	PromoteTarget      func(ctx context.Context, primaryRoot, integrationBranch string) error
 	DiscardCombined    func(ctx context.Context, primaryRoot, worktreePath, branchName string) error

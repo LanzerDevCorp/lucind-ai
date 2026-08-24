@@ -395,7 +395,7 @@ func driveAttemptFromLeased(ctx context.Context, deps Deps, att Attempt, featSvc
 	if combineFunc == nil {
 		combineFunc = integrate.Combine
 	}
-	wtPath, branchName, err := combineFunc(ctx, deps.PrimaryRoot, req.ID, req.Branches)
+	wtPath, branchName, err := combineFunc(ctx, deps.PrimaryRoot, req.ID, req.ParentRef, req.BaseSHA, req.Branches)
 	if err != nil {
 		now = updateNow(deps)
 		att.Status = AttemptStatusFailed

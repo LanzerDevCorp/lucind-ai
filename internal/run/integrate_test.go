@@ -79,7 +79,7 @@ func newIntegrateTestDeps(t *testing.T, rec *integrateRecorder) (run.Deps, *ledg
 		PrimaryRoot: "/primary/root",
 		Ledger:      l,
 		Now:         func() time.Time { return now },
-		CombineTree: func(_ context.Context, primaryRoot, runID string, branches []string) (string, string, error) {
+		CombineTree: func(_ context.Context, primaryRoot, runID, _, _ string, branches []string) (string, string, error) {
 			rec.mu.Lock()
 			rec.combineCalls = append(rec.combineCalls, struct {
 				PrimaryRoot string

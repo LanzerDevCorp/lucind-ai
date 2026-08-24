@@ -25,15 +25,19 @@ type attemptSpies struct {
 	mu sync.Mutex
 
 	createWorktreeCalls []string
-	combineCalls        []string
-	checkCalls          []string
-	promoteCASCalls     []struct {
+	combineCalls        []struct {
+		RunID     string
+		ParentRef string
+		BaseSHA   string
+	}
+	checkCalls      []string
+	promoteCASCalls []struct {
 		ParentRef    string
 		CandidateSHA string
 		ExpectedSHA  string
 	}
 
-	combineFunc func(ctx context.Context, primaryRoot, runID string, branches []string) (string, string, error)
+	combineFunc func(ctx context.Context, primaryRoot, runID, parentRef, baseSHA string, branches []string) (string, string, error)
 	checkFunc   func(ctx context.Context, worktreePath string) (bool, string, error)
 	promoteFunc func(ctx context.Context, primaryRoot, parentRef, candidateSHA, expectedSHA string) error
 	refSHAFunc  func(ctx context.Context, primaryRoot, ref string) (string, error)
@@ -62,13 +66,17 @@ func newAttemptTestDeps(t *testing.T, spies *attemptSpies) (run.Deps, *ledger.Le
 			spies.mu.Unlock()
 			return worktree.Worktree{Path: primaryRoot + "/wt/" + laneID, Branch: "lucind/" + laneID, BaseSHA: "base-sha-1"}, nil
 		},
-		CombineTree: func(ctx context.Context, primaryRoot, runID string, branches []string) (string, string, error) {
+		CombineTree: func(ctx context.Context, primaryRoot, runID, parentRef, baseSHA string, branches []string) (string, string, error) {
 			spies.mu.Lock()
-			spies.combineCalls = append(spies.combineCalls, runID)
+			spies.combineCalls = append(spies.combineCalls, struct {
+				RunID     string
+				ParentRef string
+				BaseSHA   string
+			}{RunID: runID, ParentRef: parentRef, BaseSHA: baseSHA})
 			fn := spies.combineFunc
 			spies.mu.Unlock()
 			if fn != nil {
-				return fn(ctx, primaryRoot, runID, branches)
+				return fn(ctx, primaryRoot, runID, parentRef, baseSHA, branches)
 			}
 			return primaryRoot + "/integrate-" + runID, "integrate-" + runID, nil
 		},
@@ -184,6 +192,51 @@ func TestAttemptReplayTerminalReturnsStoredResultWithoutSpies(t *testing.T) {
 				t.Errorf("PromoteCAS called %d times, want 0", len(spies.promoteCASCalls))
 			}
 		})
+	}
+}
+
+// TestAttemptCombinePassesFeatureParentRefAndBaseSHA guards against the
+// integration worktree being branched from primaryRoot's current checkout
+// instead of the feature's declared parent: it asserts CombineTree receives
+// req.ParentRef and req.BaseSHA, not empty strings.
+func TestAttemptCombinePassesFeatureParentRefAndBaseSHA(t *testing.T) {
+	spies := &attemptSpies{}
+	deps, _, featSvc := newAttemptTestDeps(t, spies)
+
+	featID := "feat-parent-thread"
+	_, err := featSvc.Create(context.Background(), featID, "refs/heads/feature-parent", "base-sha-parent", "expected-parent-sha-1")
+	if err != nil {
+		t.Fatalf("featSvc.Create() error = %v", err)
+	}
+
+	req := run.AttemptRequest{
+		ID:                "att-parent-thread-1",
+		FeatureID:         featID,
+		ParentRef:         "refs/heads/feature-parent",
+		BaseSHA:           "base-sha-parent",
+		ExpectedParentSHA: "expected-parent-sha-1",
+		IdempotencyKey:    "key-parent-thread",
+		Owner:             "owner-parent",
+		Branches:          []string{"lucind/lane-1"},
+	}
+
+	res, err := run.ExecuteAttempt(context.Background(), deps, req)
+	if err != nil {
+		t.Fatalf("ExecuteAttempt() error = %v", err)
+	}
+	if res.Status != run.AttemptStatusPromoted {
+		t.Fatalf("res.Status = %v, want %v", res.Status, run.AttemptStatusPromoted)
+	}
+
+	if len(spies.combineCalls) != 1 {
+		t.Fatalf("CombineTree calls = %d, want 1", len(spies.combineCalls))
+	}
+	got := spies.combineCalls[0]
+	if got.ParentRef != req.ParentRef {
+		t.Errorf("CombineTree ParentRef = %q, want %q (req.ParentRef)", got.ParentRef, req.ParentRef)
+	}
+	if got.BaseSHA != req.BaseSHA {
+		t.Errorf("CombineTree BaseSHA = %q, want %q (req.BaseSHA)", got.BaseSHA, req.BaseSHA)
 	}
 }
 
@@ -348,7 +401,7 @@ func TestAttemptStateTransitionSequenceAndFailures(t *testing.T) {
 
 	t.Run("failure during combine stage", func(t *testing.T) {
 		spies := &attemptSpies{
-			combineFunc: func(ctx context.Context, primaryRoot, runID string, branches []string) (string, string, error) {
+			combineFunc: func(ctx context.Context, primaryRoot, runID, parentRef, baseSHA string, branches []string) (string, string, error) {
 				return "", "", fmt.Errorf("%w: conflict in file.go", integrate.ErrMergeConflict)
 			},
 		}

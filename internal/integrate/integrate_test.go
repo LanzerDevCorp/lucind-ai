@@ -73,7 +73,7 @@ func TestCombineHappyPath(t *testing.T) {
 	// Return to main
 	runGit(t, primaryRoot, "checkout", "main")
 
-	wtPath, branchName, err := integrate.Combine(context.Background(), primaryRoot, "run-happy", []string{"lucind/lane-1", "lucind/lane-2"})
+	wtPath, branchName, err := integrate.Combine(context.Background(), primaryRoot, "run-happy", "", "", []string{"lucind/lane-1", "lucind/lane-2"})
 	if err != nil {
 		t.Fatalf("Combine() error = %v, want nil", err)
 	}
@@ -106,6 +106,52 @@ func TestCombineHappyPath(t *testing.T) {
 	}
 	if string(f2Data) != "lane 2 content\n" {
 		t.Errorf("file2.txt content = %q, want %q", string(f2Data), "lane 2 content\n")
+	}
+}
+
+func TestCombineBranchesFromFeatureParentNotPrimaryHEAD(t *testing.T) {
+	if testing.Short() {
+		t.Skip("shells out to real git")
+	}
+
+	primaryRoot := initRepo(t)
+
+	// Create a feature parent branch representing where a feature's lanes
+	// were rooted (its declared base_sha).
+	runGit(t, primaryRoot, "checkout", "-b", "feature/foo")
+	if err := os.WriteFile(filepath.Join(primaryRoot, "feature_base.txt"), []byte("feature base\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(feature_base.txt) error = %v", err)
+	}
+	runGit(t, primaryRoot, "add", "feature_base.txt")
+	runGit(t, primaryRoot, "commit", "-m", "feature base commit")
+	baseSHA := runGit(t, primaryRoot, "rev-parse", "HEAD")
+
+	// Advance primaryRoot's checked-out branch (main) past the feature's
+	// parent, simulating dev moving on while the feature's lanes ran.
+	runGit(t, primaryRoot, "checkout", "main")
+	if err := os.WriteFile(filepath.Join(primaryRoot, "dev_only.txt"), []byte("dev moved on\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(dev_only.txt) error = %v", err)
+	}
+	runGit(t, primaryRoot, "add", "dev_only.txt")
+	runGit(t, primaryRoot, "commit", "-m", "dev commit unrelated to the feature")
+
+	runID := "run-parent-fix"
+	wtPath, branchName, err := integrate.Combine(context.Background(), primaryRoot, runID, "refs/heads/feature/foo", baseSHA, nil)
+	if err != nil {
+		t.Fatalf("Combine() error = %v, want nil", err)
+	}
+	defer func() {
+		_ = worktree.Remove(context.Background(), primaryRoot, wtPath)
+		_ = worktree.DeleteBranch(context.Background(), primaryRoot, branchName)
+	}()
+
+	gotHead := runGit(t, wtPath, "rev-parse", "HEAD")
+	if gotHead != baseSHA {
+		t.Errorf("integration worktree HEAD = %q, want %q (feature's base SHA, not primaryRoot's current checkout)", gotHead, baseSHA)
+	}
+
+	if _, statErr := os.Stat(filepath.Join(wtPath, "dev_only.txt")); !os.IsNotExist(statErr) {
+		t.Errorf("integration worktree contains dev_only.txt, want it absent: the combined tree must not swallow unrelated commits from primaryRoot's current checkout")
 	}
 }
 
@@ -147,7 +193,7 @@ func TestCombineErrMergeConflictSentinel(t *testing.T) {
 		return "", errors.New("cannot resolve")
 	}
 
-	_, _, err := integrate.CombineWithInvoker(context.Background(), primaryRoot, "run-sentinel", []string{"lucind/lane-c1", "lucind/lane-c2"}, neverResolves)
+	_, _, err := integrate.CombineWithInvoker(context.Background(), primaryRoot, "run-sentinel", "", "", []string{"lucind/lane-c1", "lucind/lane-c2"}, neverResolves)
 	if err == nil {
 		t.Fatal("Combine() error = nil, want non-nil ErrMergeConflict")
 	}
@@ -198,7 +244,7 @@ func TestCombineConflictCleansUp(t *testing.T) {
 		return "", errors.New("cannot resolve")
 	}
 
-	_, _, err := integrate.CombineWithInvoker(context.Background(), primaryRoot, runID, []string{"lucind/lane-ca", "lucind/lane-cb"}, neverResolves)
+	_, _, err := integrate.CombineWithInvoker(context.Background(), primaryRoot, runID, "", "", []string{"lucind/lane-ca", "lucind/lane-cb"}, neverResolves)
 	if err == nil {
 		t.Fatal("Combine() error = nil, want ErrMergeConflict")
 	}
@@ -260,7 +306,7 @@ func TestCombineConflictResolved(t *testing.T) {
 		return "resolved", nil
 	}
 
-	wtPath, branchName, err := integrate.CombineWithInvoker(context.Background(), primaryRoot, runID, []string{"lucind/lane-res-a", "lucind/lane-res-b"}, fakeInvoker)
+	wtPath, branchName, err := integrate.CombineWithInvoker(context.Background(), primaryRoot, runID, "", "", []string{"lucind/lane-res-a", "lucind/lane-res-b"}, fakeInvoker)
 	if err != nil {
 		t.Fatalf("CombineWithInvoker() error = %v, want nil", err)
 	}
@@ -322,7 +368,7 @@ func TestCombineConflictResolutionFailsCleansUp(t *testing.T) {
 		return "failed to resolve", errors.New("resolution error")
 	}
 
-	_, _, err := integrate.CombineWithInvoker(context.Background(), primaryRoot, runID, []string{"lucind/lane-fail-a", "lucind/lane-fail-b"}, fakeInvoker)
+	_, _, err := integrate.CombineWithInvoker(context.Background(), primaryRoot, runID, "", "", []string{"lucind/lane-fail-a", "lucind/lane-fail-b"}, fakeInvoker)
 	if err == nil {
 		t.Fatal("CombineWithInvoker() error = nil, want ErrMergeConflict")
 	}
@@ -352,7 +398,7 @@ func TestCombineWorktreeCreateError(t *testing.T) {
 
 	// Invalid primary root that does not exist
 	nonExistentRoot := filepath.Join(t.TempDir(), "non-existent")
-	_, _, err := integrate.Combine(context.Background(), nonExistentRoot, "run-err", []string{"branch1"})
+	_, _, err := integrate.Combine(context.Background(), nonExistentRoot, "run-err", "", "", []string{"branch1"})
 	if err == nil {
 		t.Fatal("Combine() error = nil, want non-nil when Create fails")
 	}
