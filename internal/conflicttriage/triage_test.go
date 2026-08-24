@@ -202,6 +202,49 @@ func TestTriageAgent_BusinessHunkPinsHighRisk(t *testing.T) {
 	}
 }
 
+func TestTriageAgent_EmptyVerifyCommandIsReplaced(t *testing.T) {
+	ctx := context.Background()
+	l := openTriageLedger(t)
+	svc := reconcile.NewService(l)
+	cand := approveRunningCandidate(t, svc, "cand-empty-cmd")
+	repo, baseSHA := initTriageRepo(t)
+
+	invoker := func(ctx context.Context, worktreePath, prompt string) (string, error) {
+		payload := conflicttriage.TriagePayload{
+			CauseSummary: "empty verify command",
+			HunkDecisions: []conflicttriage.HunkDecision{{
+				HunkID:     "hunk-business",
+				Kind:       conflicttriage.HunkKindBusiness,
+				Resolution: conflicttriage.ResolutionArbitrary,
+				Rationale:  "arbitrary",
+			}},
+			RiskBand:     conflicttriage.RiskHigh,
+			VerifyBudget: "~4 min: ",
+			ProposedSHA:  "deadbeef",
+		}
+		raw, err := json.Marshal(payload)
+		if err != nil {
+			return "", err
+		}
+		return string(raw), nil
+	}
+
+	result, err := conflicttriage.RunTriage(ctx, conflicttriage.RunOptions{
+		CandidateID:  cand.ID,
+		WorktreePath: repo,
+		BaseSHA:      baseSHA,
+		AllowedPaths: []string{"toy.go"},
+		Invoker:      invoker,
+		Service:      svc,
+	})
+	if err != nil {
+		t.Fatalf("RunTriage() error = %v, want nil", err)
+	}
+	if result.Payload.VerifyBudget != conflicttriage.VerifyBudgetExample {
+		t.Errorf("VerifyBudget = %q, want %q (empty command after min: is not a concrete command)", result.Payload.VerifyBudget, conflicttriage.VerifyBudgetExample)
+	}
+}
+
 func TestTriageAgent_InvariantViolationsFailCandidate(t *testing.T) {
 	ctx := context.Background()
 	l := openTriageLedger(t)
@@ -243,6 +286,66 @@ func TestTriageAgent_InvariantViolationsFailCandidate(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatalf("RunTriage() error = nil, want invariant failure")
+	}
+
+	got, err := svc.GetCandidate(ctx, cand.ID)
+	if err != nil {
+		t.Fatalf("GetCandidate: %v", err)
+	}
+	if got.Status != reconcile.CandidateStatusFailed {
+		t.Errorf("Status = %v, want %v", got.Status, reconcile.CandidateStatusFailed)
+	}
+	if got.Output == "" {
+		t.Errorf("Output empty after invariant failure, want JSON retained for auditability")
+	}
+	if got.CandidateSHA != "" {
+		t.Errorf("CandidateSHA = %q, want empty", got.CandidateSHA)
+	}
+}
+
+func TestTriageAgent_OutOfScopeEditsFailCandidate(t *testing.T) {
+	ctx := context.Background()
+	l := openTriageLedger(t)
+	svc := reconcile.NewService(l)
+	cand := approveRunningCandidate(t, svc, "cand-out-of-scope")
+	repo, baseSHA := initTriageRepo(t)
+
+	invoker := func(ctx context.Context, worktreePath, prompt string) (string, error) {
+		if err := os.WriteFile(filepath.Join(worktreePath, "outside.go"), []byte("package outside\n"), 0o644); err != nil {
+			return "", err
+		}
+		payload := conflicttriage.TriagePayload{
+			CauseSummary: "out of scope edit",
+			HunkDecisions: []conflicttriage.HunkDecision{{
+				HunkID:     "hunk-business",
+				Kind:       conflicttriage.HunkKindBusiness,
+				Resolution: conflicttriage.ResolutionArbitrary,
+				Rationale:  "arbitrary",
+			}},
+			RiskBand:     conflicttriage.RiskHigh,
+			VerifyBudget: conflicttriage.VerifyBudgetExample,
+			ProposedSHA:  "deadbeef",
+		}
+		raw, err := json.Marshal(payload)
+		if err != nil {
+			return "", err
+		}
+		return string(raw), nil
+	}
+
+	_, err := conflicttriage.RunTriage(ctx, conflicttriage.RunOptions{
+		CandidateID:  cand.ID,
+		WorktreePath: repo,
+		BaseSHA:      baseSHA,
+		AllowedPaths: []string{"toy.go"},
+		Invoker:      invoker,
+		Service:      svc,
+	})
+	if err == nil {
+		t.Fatal("RunTriage() error = nil, want out-of-scope invariant failure")
+	}
+	if !errors.Is(err, resolve.ErrOutOfScopeEdits) {
+		t.Errorf("error = %v, want ErrOutOfScopeEdits", err)
 	}
 
 	got, err := svc.GetCandidate(ctx, cand.ID)

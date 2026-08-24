@@ -132,3 +132,54 @@ func TestRubric_RejectsUniformHunkScoring(t *testing.T) {
 		t.Fatalf("Passed = true, want false for uniform hunk scoring")
 	}
 }
+
+func TestRubric_PresentsGenerateFixtureEvidence(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping subprocess stub test in -short mode")
+	}
+	ctx := context.Background()
+	l := openFixtureLedger(t)
+	repo := t.TempDir()
+	if _, err := fixture.GenerateFixture(ctx, fixture.GeneratorOptions{
+		RepoRoot:   repo,
+		Ledger:     l,
+		FeatureAID: "feat-conflict-a",
+		FeatureBID: "feat-conflict-b",
+		ParentRefA: "refs/heads/feature-conflict-a",
+		ParentRefB: "refs/heads/feature-conflict-b",
+		SharedBase: true,
+	}); err != nil {
+		t.Fatalf("GenerateFixture: %v", err)
+	}
+
+	payload := distinctPayloadJSON(t)
+	claudeArgv := filepath.Join(t.TempDir(), "claude-argv.txt")
+	opencodeArgv := filepath.Join(t.TempDir(), "opencode-argv.txt")
+	claudeStub := writeJudgeStub(t, "claude-stub.sh", "#!/bin/sh\nfor a in \"$@\"; do echo \"$a\" >> \""+claudeArgv+"\"; done\nprintf '%s\\n' '"+payload+"'\nexit 0\n")
+	opencodeStub := writeJudgeStub(t, "opencode-stub.sh", "#!/bin/sh\nfor a in \"$@\"; do echo \"$a\" >> \""+opencodeArgv+"\"; done\nprintf '%s\\n' '"+payload+"'\nexit 0\n")
+
+	if _, err := fixture.EvaluateRubric(ctx, fixture.RubricOptions{
+		Claude:       executor.Claude{Binary: claudeStub, WaitDelay: 50 * time.Millisecond},
+		Opencode:     executor.Opencode{Binary: opencodeStub, WaitDelay: 50 * time.Millisecond},
+		WorktreePath: repo,
+	}); err != nil {
+		t.Fatalf("EvaluateRubric: %v", err)
+	}
+
+	claudeArgs, err := os.ReadFile(claudeArgv)
+	if err != nil {
+		t.Fatalf("claude argv: %v", err)
+	}
+	opencodeArgs, err := os.ReadFile(opencodeArgv)
+	if err != nil {
+		t.Fatalf("opencode argv: %v", err)
+	}
+	for _, mark := range []string{"tier A", "enterprise", "from-a", "from-b", "HelperRenamed", "edited-by-b"} {
+		if !strings.Contains(string(claudeArgs), mark) {
+			t.Errorf("claude prompt missing fixture evidence %q; argv=%q", mark, claudeArgs)
+		}
+		if !strings.Contains(string(opencodeArgs), mark) {
+			t.Errorf("opencode prompt missing fixture evidence %q; argv=%q", mark, opencodeArgs)
+		}
+	}
+}
