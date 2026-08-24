@@ -3,7 +3,9 @@ package fixture_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -220,4 +222,58 @@ func TestFixturePackets_OverlappingBuildScopesRefused(t *testing.T) {
 	if err := packet.DisjointAllowedPaths([]packet.Packet{a, b}); err == nil {
 		t.Fatal("DisjointAllowedPaths(overlapping build features) = nil, want admission failure")
 	}
+}
+
+func TestFixtureGenerator_BothSidesCompileAndPassOwnTests(t *testing.T) {
+	ctx := context.Background()
+	l := openFixtureLedger(t)
+	repo := t.TempDir()
+
+	fix, err := fixture.GenerateFixture(ctx, fixture.GeneratorOptions{
+		RepoRoot:   repo,
+		Ledger:     l,
+		FeatureAID: "feat-conflict-a",
+		FeatureBID: "feat-conflict-b",
+		ParentRefA: "refs/heads/feature-conflict-a",
+		ParentRefB: "refs/heads/feature-conflict-b",
+		SharedBase: true,
+	})
+	if err != nil {
+		t.Fatalf("GenerateFixture: %v", err)
+	}
+
+	branchA := strings.TrimPrefix(fix.FeatureA.ParentRef, "refs/heads/")
+	branchB := strings.TrimPrefix(fix.FeatureB.ParentRef, "refs/heads/")
+	if err := gitCheckout(t, repo, branchA); err != nil {
+		t.Fatalf("checkout %s: %v", branchA, err)
+	}
+	if out, err := goTest(t, repo); err != nil {
+		t.Fatalf("go test on feature A: %v\n%s", err, out)
+	}
+	if err := gitCheckout(t, repo, branchB); err != nil {
+		t.Fatalf("checkout %s: %v", branchB, err)
+	}
+	if out, err := goTest(t, repo); err != nil {
+		t.Fatalf("go test on feature B: %v\n%s", err, out)
+	}
+}
+
+func gitCheckout(t *testing.T, repo, branch string) error {
+	t.Helper()
+	cmd := exec.Command("git", "checkout", branch)
+	cmd.Dir = repo
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%w\n%s", err, out)
+	}
+	return nil
+}
+
+func goTest(t *testing.T, repo string) (string, error) {
+	t.Helper()
+	cmd := exec.Command("go", "test", ".")
+	cmd.Dir = repo
+	cmd.Env = append(os.Environ(), "GO111MODULE=on")
+	out, err := cmd.CombinedOutput()
+	return string(out), err
 }
