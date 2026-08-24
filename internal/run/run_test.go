@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -89,6 +90,51 @@ func testPacket() packet.Packet {
 		BaseSHA:           "b000000000000000000000000000000000000000",
 		ExpectedParentSHA: "b000000000000000000000000000000000000000",
 		Body:              "do the thing",
+		Model:             "test-model",
+		Agent:             "test-agent",
+		SDDPhase:          "apply",
+		FanoutGroup:       "ledger",
+		Skill:             "lucind-apply",
+		Path:              ".lucind/packets/lane-a.md",
+	}
+}
+
+// TestExecuteUpdatesLaneMetadataAfterRegisterLane proves Execute snapshots
+// packet dispatch context (including Skill and PacketPath) via
+// UpdateLaneMetadata immediately after RegisterLane.
+func TestExecuteUpdatesLaneMetadataAfterRegisterLane(t *testing.T) {
+	exec := progressExecutor{run: func(_ context.Context, req executor.Request) (executor.Outcome, error) {
+		return executor.Outcome{ExitCode: 0}, nil
+	}}
+	wtPath := t.TempDir()
+	deps := newTestDeps(t, wtPath, func(string) fs.FS {
+		return fstest.MapFS{resultEnvelopePathForTest(): {Data: []byte(doneEnvelopeJSON)}}
+	}, exec)
+
+	p := testPacket()
+	p.AllowedPaths = []string{"internal/run/run.go"}
+	if _, err := run.Execute(context.Background(), deps, p); err != nil {
+		t.Fatalf("Execute() error = %v, want nil", err)
+	}
+
+	got, err := deps.Ledger.GetLaneMetadata(context.Background(), deps.RunID, p.ID)
+	if err != nil {
+		t.Fatalf("GetLaneMetadata() error = %v", err)
+	}
+	if got.Model != p.Model || got.Agent != p.Agent || got.Feature != p.Feature {
+		t.Fatalf("metadata model/agent/feature = (%q,%q,%q), want (%q,%q,%q)",
+			got.Model, got.Agent, got.Feature, p.Model, p.Agent, p.Feature)
+	}
+	if got.SDDPhase != p.SDDPhase || got.FanoutGroup != p.FanoutGroup {
+		t.Fatalf("metadata sdd_phase/fanout_group = (%q,%q), want (%q,%q)",
+			got.SDDPhase, got.FanoutGroup, p.SDDPhase, p.FanoutGroup)
+	}
+	if got.Skill != p.Skill || got.PacketPath != p.Path {
+		t.Fatalf("metadata skill/packet_path = (%q,%q), want (%q,%q)",
+			got.Skill, got.PacketPath, p.Skill, p.Path)
+	}
+	if !reflect.DeepEqual(got.AllowedPaths, p.AllowedPaths) {
+		t.Fatalf("metadata AllowedPaths = %v, want %v", got.AllowedPaths, p.AllowedPaths)
 	}
 }
 
@@ -174,6 +220,39 @@ func TestExecuteProgressWriterFlushesAtBatchSize(t *testing.T) {
 	}
 	if len(got) != eventCount {
 		t.Fatalf("persisted progress count = %d, want %d", len(got), eventCount)
+	}
+}
+
+// TestExecuteProgressWriterForwardsTelemetryFields proves writeLaneProgress
+// copies TotalTokens/CostUSD/ToolCalls from ProgressEvent onto LaneProgress
+// so decoder telemetry survives the ledger round-trip.
+func TestExecuteProgressWriterForwardsTelemetryFields(t *testing.T) {
+	exec := progressExecutor{run: func(_ context.Context, req executor.Request) (executor.Outcome, error) {
+		req.Progress <- executor.ProgressEvent{
+			Message: "usage", At: time.Unix(1, 0),
+			TotalTokens: 23459, CostUSD: 0.12, ToolCalls: 3,
+		}
+		return executor.Outcome{ExitCode: 0}, nil
+	}}
+
+	wtPath := t.TempDir()
+	deps := newTestDeps(t, wtPath, func(string) fs.FS {
+		return fstest.MapFS{resultEnvelopePathForTest(): {Data: []byte(doneEnvelopeJSON)}}
+	}, exec)
+
+	if _, err := run.Execute(context.Background(), deps, testPacket()); err != nil {
+		t.Fatalf("Execute() error = %v, want nil", err)
+	}
+	got, err := deps.Ledger.GetProgressAfter(context.Background(), deps.RunID, "lane-a", 0)
+	if err != nil {
+		t.Fatalf("GetProgressAfter() error = %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("persisted progress count = %d, want 1", len(got))
+	}
+	if got[0].TotalTokens != 23459 || got[0].CostUSD != 0.12 || got[0].ToolCalls != 3 {
+		t.Fatalf("telemetry = tokens %d cost %v tools %d, want 23459 / 0.12 / 3",
+			got[0].TotalTokens, got[0].CostUSD, got[0].ToolCalls)
 	}
 }
 

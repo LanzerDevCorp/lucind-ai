@@ -46,10 +46,11 @@ type agyResult struct {
 // agyStreamDecoder accepts arbitrary stdout write boundaries while retaining
 // the terminal result separately from incremental progress records.
 type agyStreamDecoder struct {
-	progress chan<- ProgressEvent
-	pending  []byte
-	terminal bool
-	result   []byte
+	progress  chan<- ProgressEvent
+	pending   []byte
+	terminal  bool
+	result    []byte
+	toolCalls int64
 }
 
 func newAgyStreamDecoder(progress chan<- ProgressEvent) *agyStreamDecoder {
@@ -107,10 +108,10 @@ func (d *agyStreamDecoder) consumeStep(raw json.RawMessage) {
 	switch step.StepType {
 	case "agent_response":
 		if step.TextDelta != "" {
-			d.emit(step.TextDelta)
+			d.emit(step.TextDelta, 0, 0)
 		}
 		if step.Usage != nil {
-			d.emit(formatAgyUsage(*step.Usage))
+			d.emit(formatAgyUsage(*step.Usage), int64(step.Usage.TotalTokens), 0)
 		}
 	case "tool":
 		name := step.ToolName
@@ -130,7 +131,10 @@ func (d *agyStreamDecoder) consumeStep(raw json.RawMessage) {
 		}
 		action := map[string]string{"ACTIVE": "started", "DONE": "finished", "ERROR": "failed"}[step.State]
 		if action != "" {
-			d.emit(fmt.Sprintf("%s %s: %s%s", kind, action, name, suffix))
+			if step.State == "ACTIVE" {
+				d.toolCalls++
+			}
+			d.emit(fmt.Sprintf("%s %s: %s%s", kind, action, name, suffix), 0, 0)
 		}
 	}
 }
@@ -147,7 +151,7 @@ func (d *agyStreamDecoder) consumeResult(raw json.RawMessage) {
 	d.result = append(compact.Bytes(), '\n')
 	d.terminal = true
 	if result.Usage != nil {
-		d.emit(formatAgyUsage(*result.Usage))
+		d.emit(formatAgyUsage(*result.Usage), int64(result.Usage.TotalTokens), 0)
 	}
 }
 
@@ -161,9 +165,15 @@ func formatAgyUsage(usage agyUsage) string {
 		usage.InputTokens, usage.OutputTokens, usage.ThinkingTokens, usage.CacheReadTokens, usage.TotalTokens)
 }
 
-func (d *agyStreamDecoder) emit(message string) {
+func (d *agyStreamDecoder) emit(message string, totalTokens int64, costUSD float64) {
 	select {
-	case d.progress <- ProgressEvent{Message: message, At: time.Now()}:
+	case d.progress <- ProgressEvent{
+		Message:     message,
+		At:          time.Now(),
+		TotalTokens: totalTokens,
+		CostUSD:     costUSD,
+		ToolCalls:   d.toolCalls,
+	}:
 	default:
 		// Progress is best-effort and must never backpressure the child process.
 	}

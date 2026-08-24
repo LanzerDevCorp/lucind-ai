@@ -43,22 +43,22 @@ Apply order: Unit 1 (schema) → Unit 2 → Unit 3. Unit 3 must not start until 
 
 ## Phase 2: CLI capture, decoders, dispatch wiring
 
-- [ ] 2.1 RED: In `cmd/lucind-ai/cli_test.go` (packet-flag seams `TestRunMissingPacketFlagIsUsageError`, `TestRunRepeatablePacketFlagPreservesOrderAndProcessesEachOne`) assert `--packet` paths populate `Packet.Path`.
-- [ ] 2.2 GREEN: In the load loop (`cli.go:160-174`) set `p.Path` from the flag after `Parse`. Prove: `go test ./cmd/lucind-ai -run Packet`.
-- [ ] 2.3 RED: Extend `TestRunDispatchRegistersRunRowInLedger` so `RegisterRun` records `os.Getpid()`.
-- [ ] 2.4 GREEN: In `runDispatch` (`cli.go:314-324`) pass `PID: os.Getpid()`. Depends on 1.10. Prove: `go test ./cmd/lucind-ai -run TestRunDispatch`.
-- [ ] 2.5 RED: `agy_stream_test.go:49-102` — `ProgressEvent.TotalTokens` from `agyUsage.TotalTokens` (`agy_stream.go:12-18`), `CostUSD=0`, tool counts from `consumeStep` (`:101-136`).
-- [ ] 2.6 GREEN: Add fields on `ProgressEvent` (`executor.go:18-21`); map in `agyStreamDecoder`.
-- [ ] 2.7 RED: Claude fixtures after `TestClaudeRunSendsVerboseWithStreamJSON` (`claude_stream_test.go:42-67`, argv only today) — sum input+output+cache-read+cache-creation (`claude_stream.go:17-22`), `CostUSD` (`:35`), tool counts (`:148-168,:190-210`).
-- [ ] 2.8 GREEN: Update `claudeStreamDecoder` (`:71-80` and consume paths).
-- [ ] 2.9 RED: `opencode_stream_test.go:30-70` — sum input+output+reasoning+cache (`opencode_stream.go:104-113,:120-127`), `CostUSD` from the part, tools (`:141-175,:197-240`).
-- [ ] 2.10 GREEN: Update `opencodeStreamDecoder`.
-- [ ] 2.11 RED: `cursor_agent_stream_test.go:1-60` — tokens/cost `0`/`0.0`, tools counted (`cursor_agent.go:239-270` emits `{Message, At}` only today).
-- [ ] 2.12 GREEN: Emit zeros + tool counts from `cursorStreamCapture`. Prove 2.5–2.12: `go test ./internal/executor -run 'Stream|Decode|Cursor'`.
-- [ ] 2.13 RED: `run_test.go:140-190` — `writeLaneProgress` forwards telemetry onto `ledger.LaneProgress`.
-- [ ] 2.14 GREEN: Map fields in `writeLaneProgress` (`run.go:562-564`). Prove: `go test ./internal/run -run Progress`.
-- [ ] 2.15 RED: `run_test.go` (`testPacket` at `:79-93`) — `Execute` and `ensureLaneFailed` call `UpdateLaneMetadata`.
-- [ ] 2.16 GREEN: After `RegisterLane` in `Execute` (`run.go:334-358`) and `ensureLaneFailed` (`batch.go:167-217`) call `UpdateLaneMetadata` with packet fields plus `Skill`/`PacketPath`. Prove: `go test ./internal/run -run UpdateLaneMetadata`.
+- [x] 2.1 RED: In `cmd/lucind-ai/cli_test.go` (packet-flag seams `TestRunMissingPacketFlagIsUsageError`, `TestRunRepeatablePacketFlagPreservesOrderAndProcessesEachOne`) assert `--packet` paths populate `Packet.Path`.
+- [x] 2.2 GREEN: In the load loop (`cli.go:160-174`) set `p.Path` from the flag after `Parse`. Prove: `go test ./cmd/lucind-ai -run Packet`.
+- [x] 2.3 RED: Extend `TestRunDispatchRegistersRunRowInLedger` so `RegisterRun` records `os.Getpid()`.
+- [x] 2.4 GREEN: In `runDispatch` (`cli.go:314-324`) pass `PID: os.Getpid()`. Depends on 1.10. Prove: `go test ./cmd/lucind-ai -run TestRunDispatch`.
+- [x] 2.5 RED: `agy_stream_test.go:49-102` — `ProgressEvent.TotalTokens` from `agyUsage.TotalTokens` (`agy_stream.go:12-18`), `CostUSD=0`, tool counts from `consumeStep` (`:101-136`).
+- [x] 2.6 GREEN: Add fields on `ProgressEvent` (`executor.go:18-21`); map in `agyStreamDecoder`.
+- [x] 2.7 RED: Claude fixtures after `TestClaudeRunSendsVerboseWithStreamJSON` (`claude_stream_test.go:42-67`, argv only today) — sum input+output+cache-read+cache-creation (`claude_stream.go:17-22`), `CostUSD` (`:35`), tool counts (`:148-168,:190-210`).
+- [x] 2.8 GREEN: Update `claudeStreamDecoder` (`:71-80` and consume paths).
+- [x] 2.9 RED: `opencode_stream_test.go:30-70` — sum input+output+reasoning+cache (`opencode_stream.go:104-113,:120-127`), `CostUSD` from the part, tools (`:141-175,:197-240`).
+- [x] 2.10 GREEN: Update `opencodeStreamDecoder`.
+- [x] 2.11 RED: `cursor_agent_stream_test.go:1-60` — tokens/cost `0`/`0.0`, tools counted (`cursor_agent.go:239-270` emits `{Message, At}` only today).
+- [x] 2.12 GREEN: Emit zeros + tool counts from `cursorStreamCapture`. Prove 2.5–2.12: `go test ./internal/executor -run 'Stream|Decode|Cursor'`.
+- [x] 2.13 RED: `run_test.go:140-190` — `writeLaneProgress` forwards telemetry onto `ledger.LaneProgress`.
+- [x] 2.14 GREEN: Map fields in `writeLaneProgress` (`run.go:562-564`). Prove: `go test ./internal/run -run Progress`.
+- [x] 2.15 RED: `run_test.go` (`testPacket` at `:79-93`) — `Execute` and `ensureLaneFailed` call `UpdateLaneMetadata`.
+- [x] 2.16 GREEN: After `RegisterLane` in `Execute` (`run.go:334-358`) and `ensureLaneFailed` (`batch.go:167-217`) call `UpdateLaneMetadata` with packet fields plus `Skill`/`PacketPath`. Prove: `go test ./internal/run -run UpdateLaneMetadata`.
 
 ## Phase 3: Serve, UI, sweeper
 

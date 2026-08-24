@@ -93,6 +93,23 @@ func (p *packetPaths) Set(v string) error {
 	return nil
 }
 
+// loadPacket opens path, parses it as a dispatch packet, and stamps
+// Packet.Path with the filesystem path that produced it. Parse itself never
+// invents a path; only this CLI load step does.
+func loadPacket(path string) (packet.Packet, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return packet.Packet{}, fmt.Errorf("open packet %q: %w", path, err)
+	}
+	defer f.Close()
+	p, err := packet.Parse(f)
+	if err != nil {
+		return packet.Packet{}, fmt.Errorf("parse packet %q: %w", path, err)
+	}
+	p.Path = path
+	return p, nil
+}
+
 // run parses args, wires internal/run.Deps from the real world, dispatches
 // every named packet as its own lane through internal/run.ExecuteBatch, and
 // reports the outcome to stdout/stderr. It returns a process exit code
@@ -159,15 +176,9 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 
 	ps := make([]packet.Packet, 0, len(packetFlags))
 	for _, path := range packetFlags {
-		f, err := os.Open(path)
+		p, err := loadPacket(path)
 		if err != nil {
-			fmt.Fprintf(stderr, "lucind-ai: open packet %q: %v\n", path, err)
-			return 1
-		}
-		p, err := packet.Parse(f)
-		f.Close()
-		if err != nil {
-			fmt.Fprintf(stderr, "lucind-ai: parse packet %q: %v\n", path, err)
+			fmt.Fprintf(stderr, "lucind-ai: %v\n", err)
 			return 1
 		}
 		ps = append(ps, p)
@@ -318,6 +329,7 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 		TargetRef: runTargetRef,
 		LaneCount: len(ps),
 		StartedAt: deps.Now(),
+		PID:       os.Getpid(),
 	}); err != nil {
 		fmt.Fprintf(stderr, "lucind-ai: register run: %v\n", err)
 		return 1

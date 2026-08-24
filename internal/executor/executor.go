@@ -16,8 +16,11 @@ import (
 
 // ProgressEvent is one timestamped progress message emitted during a dispatch.
 type ProgressEvent struct {
-	Message string
-	At      time.Time
+	Message     string
+	At          time.Time
+	TotalTokens int64
+	CostUSD     float64
+	ToolCalls   int64
 }
 
 // Request is one dispatch: a prompt to run, in a worktree, on a model.
