@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/LanzerDevCorp/lucind-ai/internal/conflicttriage"
 	"github.com/LanzerDevCorp/lucind-ai/internal/executor"
@@ -73,7 +74,7 @@ func EvaluateRubric(ctx context.Context, opts RubricOptions) (RubricResult, erro
 
 func runJudge(ctx context.Context, exec executor.Executor, name, model, worktree string) (JudgeResult, error) {
 	outcome, err := exec.Run(ctx, executor.Request{
-		Prompt:       rubricPrompt(),
+		Prompt:       rubricPrompt(worktree),
 		WorktreePath: worktree,
 		Model:        model,
 	})
@@ -305,8 +306,35 @@ func uniformHunkScoring(hs []conflicttriage.HunkDecision) bool {
 	return sameKind || sameResolution
 }
 
-func rubricPrompt() string {
-	return "Grade this three-hunk fixture. Separate the business hunk from the two mechanical controls " +
+func rubricPrompt(worktree string) string {
+	prompt := "Grade this three-hunk fixture. Separate the business hunk from the two mechanical controls " +
 		"(slice-literal union and rename-versus-edit) and declare ARBITRARY on the business hunk. " +
 		"Do not grade proposed_sha. Do not time a human. Emit JSON matching TriagePayload.\n"
+	if ev := toyEvidence(worktree); ev != "" {
+		prompt += "\nFixture evidence (both sides of " + ToyPath + "):\n" + ev
+	}
+	return prompt
+}
+
+func toyEvidence(worktree string) string {
+	if worktree == "" {
+		return ""
+	}
+	refs, err := gitOut(worktree, "for-each-ref", "--format=%(refname:short)", "refs/heads")
+	if err != nil || refs == "" {
+		return ""
+	}
+	var b strings.Builder
+	for _, ref := range strings.Split(refs, "\n") {
+		ref = strings.TrimSpace(ref)
+		if ref == "" {
+			continue
+		}
+		body, err := gitOut(worktree, "show", ref+":"+ToyPath)
+		if err != nil {
+			continue
+		}
+		fmt.Fprintf(&b, "\n--- %s ---\n%s\n", ref, body)
+	}
+	return b.String()
 }
