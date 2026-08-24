@@ -11,7 +11,7 @@ Load this module for dirty roots, stale worktrees, failed or reverted Lanes, tim
 | Missing `.lucind/result.json` after executor exit 0 | The packet omitted the explicit write-and-validate instruction. Preserve any valid commit, repair the packet contract, and avoid discarding completed work. |
 | `allowed_paths` mismatch | Inspect `git diff --stat HEAD^..HEAD` in the preserved Lane. Correct guessed filenames in the DAG, resplit, and order newly overlapping scopes. |
 | Worktree path or branch already exists | Cleanup removes the worktree but can leave `lucind/<id>`; inspect evidence, then remove both before same-ID retry. |
-| ID appears in `reverted_ids` | Inspect `.lucind/result.json` and `git log -1 lucind/<id>` before cleanup. Reverted means excluded by integration recovery, not lost work. |
+| ID appears in `reverted_ids` | Reverted means excluded by integration recovery, not lost work: inspect `.lucind/result.json` and `git log -1 lucind/<id>` to confirm the Lane's own work is intact. Fix the cause first (most commonly the base itself was red — confirm with `lucind-ai check`), then run `lucind-ai integrate retry --run <run-id>` to re-integrate the preserved Lane branches with no redispatch. Only a Lane with a preserved worktree and a `"done"` envelope qualifies. |
 | Wrapper died but executor may remain | Check the worktree-associated process. If alive, let it finish and inspect its envelope and commit; do not race a duplicate dispatch. |
 | Synthesis timeout | Read partial branch work before rerun; use at least 30 minutes for synthesis Lanes. |
 
@@ -21,7 +21,7 @@ Load this module for dirty roots, stale worktrees, failed or reverted Lanes, tim
 - Hand-authored DAG paths often predict nonexistent test filenames or miss a centralized existing file. Ground paths in repository convention and actual diffs.
 - If corrected paths overlap, add DAG dependencies. The unordered-overlap error is a safety result, not a reason to bypass validation.
 - A Lane body is the only actor instructed to write the result envelope. Executor schema flags do not create the file.
-- If a branch was deleted before a reverted commit was inspected, the object may remain temporarily recoverable by SHA. Verify it with git before spending quota on redispatch.
+- If a branch was deleted before a reverted commit was inspected, the object may remain temporarily recoverable by SHA. Verify it with git, then prefer `lucind-ai integrate retry --run <run-id>` over redispatch: a Lane that already reached `"done"` with a preserved worktree does not need to re-run through an executor.
 
 ## Verification traps
 

@@ -2941,6 +2941,119 @@ func TestFeatureRenewCLI(t *testing.T) {
 	})
 }
 
+// TestFeatureDisableCLI covers "lucind-ai feature disable": the supported way
+// to retire a feature registered against a base that turned out to be
+// unusable, so it stops counting as active and its ID can be reused with a
+// corrected anchor -- see internal/feature.Service.reactivateDisabled.
+func TestFeatureDisableCLI(t *testing.T) {
+	primaryRoot := initRepo(t)
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(primaryRoot); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(cwd)
+
+	redBaseSHA := "1111111111111111111111111111111111111111"
+	greenBaseSHA := "4444444444444444444444444444444444444444"
+
+	ledg, err := ledger.Open(context.Background(), primaryRoot)
+	if err != nil {
+		t.Fatalf("ledger.Open error = %v", err)
+	}
+	featSvc := feature.NewService(ledg)
+	if _, err := featSvc.Create(context.Background(), "feat-stale", "refs/heads/feature-stale", redBaseSHA); err != nil {
+		t.Fatalf("featSvc.Create error = %v", err)
+	}
+	ledg.Close()
+
+	t.Run("disables an active feature", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		code := run(context.Background(), []string{"feature", "disable", "--id", "feat-stale"}, &stdout, &stderr)
+		if code != 0 {
+			t.Fatalf("feature disable exit code = %d, want 0; stderr = %q", code, stderr.String())
+		}
+		if !strings.Contains(stdout.String(), "feat-stale") || !strings.Contains(stdout.String(), "disabled") {
+			t.Errorf("stdout = %q, want it to report feat-stale disabled", stdout.String())
+		}
+
+		ledg2, err := ledger.Open(context.Background(), primaryRoot)
+		if err != nil {
+			t.Fatalf("ledger.Open error = %v", err)
+		}
+		defer ledg2.Close()
+
+		f, err := feature.NewService(ledg2).Get(context.Background(), "feat-stale")
+		if err != nil {
+			t.Fatalf("Get after disable error = %v", err)
+		}
+		if f.Status != feature.StatusDisabled {
+			t.Errorf("f.Status = %v, want disabled", f.Status)
+		}
+
+		active, err := ledg2.ActiveFeatures(context.Background())
+		if err != nil {
+			t.Fatalf("ActiveFeatures error = %v", err)
+		}
+		for _, af := range active {
+			if af.ID == "feat-stale" {
+				t.Errorf("ActiveFeatures still lists disabled feature %q", af.ID)
+			}
+		}
+	})
+
+	t.Run("feature create re-anchors and reactivates the disabled id with a new base", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		code := run(context.Background(), []string{
+			"feature", "create",
+			"--id", "feat-stale",
+			"--parent", "refs/heads/feature-stale-corrected",
+			"--base-sha", greenBaseSHA,
+		}, &stdout, &stderr)
+		if code != 0 {
+			t.Fatalf("feature create (re-anchor) exit code = %d, want 0; stderr = %q", code, stderr.String())
+		}
+
+		ledg2, err := ledger.Open(context.Background(), primaryRoot)
+		if err != nil {
+			t.Fatalf("ledger.Open error = %v", err)
+		}
+		defer ledg2.Close()
+
+		f, err := feature.NewService(ledg2).Get(context.Background(), "feat-stale")
+		if err != nil {
+			t.Fatalf("Get after re-anchor error = %v", err)
+		}
+		if f.Status != feature.StatusActive || f.BaseSHA != greenBaseSHA || f.ParentRef != "refs/heads/feature-stale-corrected" {
+			t.Errorf("reanchored feature = %+v, want active with base_sha %s", f, greenBaseSHA)
+		}
+	})
+
+	t.Run("disabling an unknown id fails with non-zero exit", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		code := run(context.Background(), []string{"feature", "disable", "--id", "feat-does-not-exist"}, &stdout, &stderr)
+		if code == 0 {
+			t.Fatalf("feature disable on unknown id exit code = 0, want non-zero")
+		}
+		if stderr.String() == "" {
+			t.Errorf("stderr is empty, want an error surfaced")
+		}
+	})
+
+	t.Run("missing --id fails with usage/error", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		code := run(context.Background(), []string{"feature", "disable"}, &stdout, &stderr)
+		if code == 0 {
+			t.Fatalf("feature disable without --id exit code = 0, want non-zero")
+		}
+		if !strings.Contains(stderr.String(), "--id") {
+			t.Errorf("stderr = %q, want it to contain %q", stderr.String(), "--id")
+		}
+	})
+}
+
 func TestWorktreeCleanupCLI(t *testing.T) {
 	if testing.Short() {
 		t.Skip("shells out to real git")
@@ -3749,5 +3862,169 @@ func TestRunDispatchRejectsMixedFeatureTargets(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "same feature target") {
 		t.Errorf("stderr = %q, want it to explain that one batch promotes onto one feature target", stderr.String())
+	}
+}
+
+// TestIntegrateRetryCLI proves the Defect B fix end to end: a lane that
+// reaches its own "done" but is reverted only because the batch-level
+// checks fail (e.g. the base was red, unrelated to the lane's own work) can
+// be re-integrated later, once the base is fixed, WITHOUT redispatching the
+// lane -- "lucind-ai integrate retry" rebuilds the batch straight from the
+// ledger and the lane's own preserved worktree/result envelope.
+func TestIntegrateRetryCLI(t *testing.T) {
+	primaryRoot := initRepo(t)
+
+	p1 := filepath.Join(primaryRoot, "packet-1.md")
+	p1Content := "---\n" +
+		"id: lane-retry-1\n" +
+		"executor: agy\n" +
+		"routed_by: test\n" +
+		"feature: feat-retry\n" +
+		"parent_ref: refs/heads/feature-retry\n" +
+		"base_sha: 1111111111111111111111111111111111111111\n" +
+		"expected_parent_sha: 1111111111111111111111111111111111111111\n" +
+		"---\n" +
+		"Task 1\n"
+	if err := os.WriteFile(p1, []byte(p1Content), 0o644); err != nil {
+		t.Fatalf("write packet 1: %v", err)
+	}
+
+	var (
+		checksPass bool
+		promoted   []string
+	)
+	origFactory := depsFactory
+	t.Cleanup(func() { depsFactory = origFactory })
+	depsFactory = func(runID, primaryRoot string, ledg *ledger.Ledger, timeout, approvalTimeout time.Duration) lucindrun.Deps {
+		deps := origFactory(runID, primaryRoot, ledg, timeout, approvalTimeout)
+		deps.CreateWorktree = func(ctx context.Context, primaryRoot, laneID, parentRef, baseSHA string) (worktree.Worktree, error) {
+			return worktree.Worktree{Path: t.TempDir(), Branch: "branch-" + laneID}, nil
+		}
+		deps.HasUniqueLaneCommits = func(ctx context.Context, worktreePath, baseSHA string) (bool, error) {
+			return true, nil
+		}
+		deps.PorcelainEmpty = func(ctx context.Context, worktreePath string) (bool, error) {
+			return true, nil
+		}
+		deps.LookupExecutor = func(name string) (executor.Executor, error) {
+			return testDoneExecutor{envelope: `{"packet_id": "lane-retry-1", "status": "done", "summary": "done", "hard_stops": []}`}, nil
+		}
+		deps.CombineTree = func(ctx context.Context, primaryRoot, runID, parentRef, baseSHA string, branches []string) (string, string, error) {
+			return t.TempDir(), "integration-branch", nil
+		}
+		// checksPass simulates the base itself going from red to green
+		// between the original dispatch and the later retry, with no
+		// change at all to the lane's own work.
+		deps.RunChecks = func(ctx context.Context, worktreePath string) (bool, string, error) {
+			if checksPass {
+				return true, "", nil
+			}
+			return false, "base is red", nil
+		}
+		deps.ResolveRefSHA = func(ctx context.Context, primaryRoot, ref string) (string, error) {
+			return "1111111111111111111111111111111111111111", nil
+		}
+		deps.ResolveCandidateSHA = func(ctx context.Context, primaryRoot, worktreePath, branch string) (string, error) {
+			return "2222222222222222222222222222222222222222", nil
+		}
+		deps.PromoteCAS = func(ctx context.Context, primaryRoot, parentRef, candidateSHA, expectedSHA string) error {
+			promoted = append(promoted, parentRef+" "+expectedSHA+"->"+candidateSHA)
+			return nil
+		}
+		deps.PromoteTarget = func(ctx context.Context, primaryRoot, integrationBranch string) error {
+			t.Errorf("PromoteTarget called on a feature-targeted batch; promotion must go through the compare-and-swap attempt path")
+			return nil
+		}
+		deps.DiscardCombined = func(ctx context.Context, primaryRoot, worktreePath, branchName string) error {
+			return nil
+		}
+		deps.RemoveLaneWorktree = func(ctx context.Context, primaryRoot, worktreePath, branch string) error {
+			return nil
+		}
+		return deps
+	}
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(primaryRoot); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(cwd)
+
+	// Original dispatch: the lane itself reaches "done", but the base is
+	// red, so the batch-level checks fail and the lane is reverted.
+	checksPass = false
+	var stdout, stderr bytes.Buffer
+	code := run(context.Background(), []string{"run", "--packet", p1}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("initial run exit code = %d, want 1 (reverted); stderr = %q stdout = %q", code, stderr.String(), stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "reverted_ids: lane-retry-1") {
+		t.Fatalf("initial run stdout = %q, want lane-retry-1 in reverted_ids", stdout.String())
+	}
+	if len(promoted) != 0 {
+		t.Fatalf("PromoteCAS calls = %v, want none from the reverted first attempt", promoted)
+	}
+
+	runID := extractRunID(stdout.String())
+	if runID == "" {
+		t.Fatalf("could not extract run id from stdout: %q", stdout.String())
+	}
+
+	// The base is fixed; retry integration for the SAME run, with no
+	// redispatch of lane-retry-1.
+	checksPass = true
+	var retryStdout, retryStderr bytes.Buffer
+	retryCode := run(context.Background(), []string{"integrate", "retry", "--run", runID}, &retryStdout, &retryStderr)
+	if retryCode != 0 {
+		t.Fatalf("integrate retry exit code = %d, want 0; stderr = %q stdout = %q", retryCode, retryStderr.String(), retryStdout.String())
+	}
+	if !strings.Contains(retryStdout.String(), "integrated_ids: lane-retry-1") {
+		t.Errorf("retry stdout = %q, want lane-retry-1 in integrated_ids", retryStdout.String())
+	}
+	if len(promoted) != 1 {
+		t.Fatalf("PromoteCAS calls = %v, want exactly one compare-and-swap promotion from the retry", promoted)
+	}
+	want := "refs/heads/feature-retry 1111111111111111111111111111111111111111->2222222222222222222222222222222222222222"
+	if promoted[0] != want {
+		t.Errorf("PromoteCAS call = %q, want %q", promoted[0], want)
+	}
+}
+
+// TestIntegrateRetryCLIRequiresRun proves --run is validated before any
+// ledger or git work happens.
+func TestIntegrateRetryCLIRequiresRun(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := run(context.Background(), []string{"integrate", "retry"}, &stdout, &stderr)
+	if code == 0 {
+		t.Fatalf("integrate retry without --run exit code = 0, want non-zero")
+	}
+	if !strings.Contains(stderr.String(), "--run") {
+		t.Errorf("stderr = %q, want it to contain %q", stderr.String(), "--run")
+	}
+}
+
+// TestIntegrateRetryCLIUnknownRun proves an unknown run id is reported
+// clearly rather than silently doing nothing.
+func TestIntegrateRetryCLIUnknownRun(t *testing.T) {
+	primaryRoot := initRepo(t)
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(primaryRoot); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(cwd)
+
+	var stdout, stderr bytes.Buffer
+	code := run(context.Background(), []string{"integrate", "retry", "--run", "run-does-not-exist"}, &stdout, &stderr)
+	if code == 0 {
+		t.Fatalf("integrate retry with unknown run exit code = 0, want non-zero")
+	}
+	if stderr.String() == "" {
+		t.Errorf("stderr is empty, want an error surfaced")
 	}
 }
