@@ -117,7 +117,7 @@ per unique citation.
 
 | citation | claim |
 |---|---|
-| `internal/run/attempt.go:743-747` | ErrNoMergeBase makes evaluateOverlapGate continue |
+| `path/to/example_file.ext:12-34` | <YOUR OWN real citation and claim from THIS draft -- never copy this placeholder row verbatim> |
 
 Rules:
 
