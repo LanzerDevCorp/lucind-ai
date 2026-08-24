@@ -783,6 +783,10 @@ func serveDispatch(ctx context.Context, args []string, stdout, stderr io.Writer)
 	go func() {
 		_ = hub.Run(ctx)
 	}()
+	sweeper := serve.NewSweeper(ledg, serve.SweeperConfig{})
+	go func() {
+		_ = sweeper.Run(ctx)
+	}()
 
 	opencodeCmd := "opencode run --agent build -m openai/gpt-5.6-sol"
 	config := serve.HandlerConfig{

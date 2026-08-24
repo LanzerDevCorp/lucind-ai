@@ -292,6 +292,10 @@ func TestFleetViewNormalizesGoAndSnakeCaseFieldsWithKeyedPatching(t *testing.T) 
 		"'sdd_phase', 'SDDPhase'",
 		"'fanout_group', 'FanoutGroup'",
 		"'worktree_path', 'WorktreePath'",
+		"'skill', 'Skill'",
+		"'packet_path', 'PacketPath'",
+		"/api/packets/",
+		"Packet markdown",
 		"data-fleet-key",
 		"if (card) updateFleetCard(card, lane)",
 	)

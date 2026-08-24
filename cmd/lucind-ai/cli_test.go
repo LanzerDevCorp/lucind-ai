@@ -2128,6 +2128,27 @@ func TestServeFlagsAndSubcommandRecognized(t *testing.T) {
 	}
 }
 
+func TestServeStartsSweeperBesideHub(t *testing.T) {
+	src, err := os.ReadFile("cli.go")
+	if err != nil {
+		t.Fatalf("ReadFile(cli.go): %v", err)
+	}
+	text := string(src)
+	hubIdx := strings.Index(text, "hub.Run(ctx)")
+	if hubIdx < 0 {
+		t.Fatal("serveDispatch must launch hub.Run")
+	}
+	sweeperNew := strings.Index(text, "serve.NewSweeper(")
+	sweeperRun := strings.Index(text, "sweeper.Run(ctx)")
+	if sweeperNew < 0 || sweeperRun < 0 {
+		t.Fatal("serveDispatch must construct and launch Sweeper beside Hub")
+	}
+	if sweeperNew < hubIdx-200 || sweeperRun < hubIdx {
+		t.Fatalf("Sweeper launch should sit beside Hub.Run; NewSweeper@%d hub.Run@%d sweeper.Run@%d",
+			sweeperNew, hubIdx, sweeperRun)
+	}
+}
+
 func startTestServe(t *testing.T, primaryRoot string, args []string) (string, func()) {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")

@@ -62,21 +62,21 @@ Apply order: Unit 1 (schema) → Unit 2 → Unit 3. Unit 3 must not start until 
 
 ## Phase 3: Serve, UI, sweeper
 
-- [ ] 3.1 RED: `model_test.go:599-669` — `Lane`/`laneDTO` JSON includes `skill`, `packet_path`.
-- [ ] 3.2 GREEN: Add those fields on `Lane` and `laneDTO` (`model.go:163-184,:322-333`).
-- [ ] 3.3 RED: Same contract test — `serve.LaneProgress` emits `total_tokens`, `cost_usd`, `tool_calls`, derived `tool_rate` (tools/min, 1s floor, elapsed from lane `StartedAt` to progress `At`).
-- [ ] 3.4 GREEN: Extend `LaneProgress` and `GetLaneProgress` (`model.go:186-193,:336-346`). Prove 3.1–3.4: `go test ./internal/serve -run TestModelRunLaneAndProgressJSONContract`.
-- [ ] 3.5 RED: In `server_test.go` (httptest pattern `TestBulkRequestBodyReturns400` at `:47-100`, not packet coverage today) 200 raw markdown; 404 unknown lane / empty path / unreadable file; process does not abort.
-- [ ] 3.6 GREEN: Register `GET /api/packets/{runID}/{laneID}` in `handlers.go` using the two-segment parse (`:316-350`) and `/api/` 404 fallback (`:352-354`); 200 `text/markdown; charset=utf-8` or 404 via `writeJSONError`. Prove: `go test ./internal/serve -run TestPacketBodyEndpoint`.
-- [ ] 3.7 RED: `static_test.go:286-300` — `app.js` normalizes `skill` and renders a packet markdown link.
-- [ ] 3.8 GREEN: Extend `normalizeFleetState` (`app.js:534-536`) and fleet cards (`:575-593`). Prove: `go test ./internal/serve -run TestFleetView`.
-- [ ] 3.9 RED: `internal/serve/sweeper_test.go` — `TestSweeper_LivePIDRetained`: live PID (`err == nil`) leaves `running` (`run.go:355-358`).
-- [ ] 3.10 RED: `TestSweeper_DeadPIDReconciled`: `ESRCH`/`os.ErrProcessDone` → `lane.Failed` (`status.go:11-17`) via `SetStatus` (`ledger.go:452-484`) plus `EventLaneNote` “orphaned: driving process no longer running” (`:366-378,:440-446`).
-- [ ] 3.11 RED: `TestSweeper_ZeroPIDIgnored`: `pid <= 0` skips probe, leaves `running`.
-- [ ] 3.12 RED: `TestSweeper_RecycledPIDAndEPERM`: `EPERM` is alive; recycled live PID is not failed (design: no second identity check).
-- [ ] 3.13 GREEN: Create `internal/serve/sweeper.go` — `Sweeper.Run(ctx)` immediate sweep then 10s ticker (pattern `Hub.Run` at `hub.go:213-235`, not `defaultPollInterval` at `:24`); `os.FindProcess(pid).Signal(syscall.Signal(0))`; Linux-only. Prove: `go test ./internal/serve -run TestSweeper_`.
-- [ ] 3.14 RED: Assert `serveDispatch` starts Sweeper beside Hub (seam `startTestServe` / `cli.go:770-774`).
-- [ ] 3.15 GREEN: Launch `go func() { _ = sweeper.Run(ctx) }()` in `serveDispatch`. Prove: `go test ./cmd/lucind-ai -run TestServe`.
+- [x] 3.1 RED: `model_test.go:599-669` — `Lane`/`laneDTO` JSON includes `skill`, `packet_path`.
+- [x] 3.2 GREEN: Add those fields on `Lane` and `laneDTO` (`model.go:163-184,:322-333`).
+- [x] 3.3 RED: Same contract test — `serve.LaneProgress` emits `total_tokens`, `cost_usd`, `tool_calls`, derived `tool_rate` (tools/min, 1s floor, elapsed from lane `StartedAt` to progress `At`).
+- [x] 3.4 GREEN: Extend `LaneProgress` and `GetLaneProgress` (`model.go:186-193,:336-346`). Prove 3.1–3.4: `go test ./internal/serve -run TestModelRunLaneAndProgressJSONContract`.
+- [x] 3.5 RED: In `server_test.go` (httptest pattern `TestBulkRequestBodyReturns400` at `:47-100`, not packet coverage today) 200 raw markdown; 404 unknown lane / empty path / unreadable file; process does not abort.
+- [x] 3.6 GREEN: Register `GET /api/packets/{runID}/{laneID}` in `handlers.go` using the two-segment parse (`:316-350`) and `/api/` 404 fallback (`:352-354`); 200 `text/markdown; charset=utf-8` or 404 via `writeJSONError`. Prove: `go test ./internal/serve -run TestPacketBodyEndpoint`.
+- [x] 3.7 RED: `static_test.go:286-300` — `app.js` normalizes `skill` and renders a packet markdown link.
+- [x] 3.8 GREEN: Extend `normalizeFleetState` (`app.js:534-536`) and fleet cards (`:575-593`). Prove: `go test ./internal/serve -run TestFleetView`.
+- [x] 3.9 RED: `internal/serve/sweeper_test.go` — `TestSweeper_LivePIDRetained`: live PID (`err == nil`) leaves `running` (`run.go:355-358`).
+- [x] 3.10 RED: `TestSweeper_DeadPIDReconciled`: `ESRCH`/`os.ErrProcessDone` → `lane.Failed` (`status.go:11-17`) via `SetStatus` (`ledger.go:452-484`) plus `EventLaneNote` “orphaned: driving process no longer running” (`:366-378,:440-446`).
+- [x] 3.11 RED: `TestSweeper_ZeroPIDIgnored`: `pid <= 0` skips probe, leaves `running`.
+- [x] 3.12 RED: `TestSweeper_RecycledPIDAndEPERM`: `EPERM` is alive; recycled live PID is not failed (design: no second identity check).
+- [x] 3.13 GREEN: Create `internal/serve/sweeper.go` — `Sweeper.Run(ctx)` immediate sweep then 10s ticker (pattern `Hub.Run` at `hub.go:213-235`, not `defaultPollInterval` at `:24`); `os.FindProcess(pid).Signal(syscall.Signal(0))`; Linux-only. Prove: `go test ./internal/serve -run TestSweeper_`.
+- [x] 3.14 RED: Assert `serveDispatch` starts Sweeper beside Hub (seam `startTestServe` / `cli.go:770-774`).
+- [x] 3.15 GREEN: Launch `go func() { _ = sweeper.Run(ctx) }()` in `serveDispatch`. Prove: `go test ./cmd/lucind-ai -run TestServe`.
 
 ## Dependency order
 
