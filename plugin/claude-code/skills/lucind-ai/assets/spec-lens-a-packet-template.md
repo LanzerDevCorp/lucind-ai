@@ -151,12 +151,74 @@ in `## Open Questions` and follow this packet.
 
 Write nothing outside this repository, so there is nothing to revert.
 
+## Citation manifest (REQUIRED — excluded from the word budget)
+
+Close this draft with a `## Citation Manifest` section: every `file:line` the draft cites, one row
+per unique citation.
+
+| citation | claim |
+|---|---|
+| `internal/run/attempt.go:743-747` | ErrNoMergeBase makes evaluateOverlapGate continue |
+
+Rules:
+
+- **One row per UNIQUE citation.** A range cited three times in the prose appears once here.
+- **Group by file**, files alphabetical, line numbers ascending within each file.
+- **The claim is what YOU assert that range shows** — one line, stated plainly, no hedging. Not a
+  description of the file; the specific thing you are using it as evidence for.
+- **This section does not count against the word budget.** Never trim analysis to make room for
+  it, and never trim it to fit the budget.
+- **The manifest is a worklist, not a certificate.** Listing a citation here asserts nothing about
+  its correctness — the synthesizer opens and checks every single one. Writing a row does not
+  spare you from getting the citation right; it makes getting it wrong cheaper to catch.
+
+## Mechanical self-check (REQUIRED — replaces narrating these facts)
+
+Run `./lucind-lane-check.sh` from the repo root twice. It is a deterministic script, not a judge:
+it reports whether these facts hold; it does not decide whether your draft is good, and it does
+not replace your own judgment against `## Done criteria` below.
+
+**Before you commit**, while content is still cheap to fix:
+
+```
+./lucind-lane-check.sh --file openspec/changes/<change-id>/spec-lens-a.md --budget 1000 \
+  --exclude-section "Citation Manifest" \
+  --require-section "Assumed requirements" --require-section "Capability Map" \
+  --require-section "Open Questions" --require-section "Citation Manifest" \
+  --verify-citations --skip-git --skip-result
+```
+
+The four classification sections are deliberately **not** required here: the skeleton tells you to
+omit any that has no entries, and a change that only adds requirements legitimately carries
+`## ADDED Requirements` alone. Requiring them would make the script contradict the packet. Whether
+the right classification sections are present for *this* change stays your judgment.
+
+`--verify-citations` is an existence/grep-level check over your own `## Citation Manifest`: does
+the cited file exist, does it have enough lines to contain the cited range. It asserts nothing
+about whether the range supports your claim — the synthesizer still opens and checks every
+citation itself in the next phase. A FAIL here is cheaper to fix now than after synthesis catches
+it.
+
+**After you commit and write `.lucind/result.json`**, confirm the bookkeeping:
+
+```
+./lucind-lane-check.sh --file openspec/changes/<change-id>/spec-lens-a.md
+```
+
+Paste the report's PASS/FAIL lines into `done_criteria[].evidence` in your envelope instead of
+narrating the same facts in prose.
+
 ## Done criteria
 
+- [ ] **A `## Citation Manifest` section lists every unique citation, grouped by file, with the claim each one supports.**
+- [ ] **`lucind-lane-check.sh --verify-citations` was run before committing and reported no FAIL against this draft's own manifest.**
 - [ ] **Every capability-map row is classified new or existing**, and every "existing" row cites the live spec with `file:line` that resolves in this worktree.
 - [ ] **Every requirement carries an RFC 2119 keyword** and states observable behavior rather than implementation.
-- [ ] **`spec-lens-a.md` exists, is under 1000 words, and carries `## Assumed requirements` and `## Capability Map`.**
-- [ ] **The work is committed with a conventional commit and no AI attribution** (`git status --porcelain` empty and `git log --oneline -1`).
+- [ ] **`spec-lens-a.md` exists, is under 1000 words excluding the Citation Manifest, and carries `## Assumed requirements`, `## Capability Map`, and `## Citation Manifest`.**
+- [ ] **The work is committed with a conventional commit and no AI attribution**, confirmed by the final
+      `lucind-lane-check.sh` run reporting a clean `git status --porcelain` and a valid `.lucind/result.json`.
+      Check `git log -1 --format=%B` after committing: some executors' commit wrappers append a
+      `Co-authored-by:` trailer the message never contained. Strip it if present.
 
 ## Hard stops
 

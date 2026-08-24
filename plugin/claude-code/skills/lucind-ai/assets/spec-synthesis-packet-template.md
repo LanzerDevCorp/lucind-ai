@@ -156,14 +156,88 @@ file, and `.lucind/result.json`.
 
 Write nothing outside this repository.
 
+## Using the lens citation manifests
+
+Each lens draft ends with a `## Citation Manifest` table. Treat the union of the three manifests as
+your **verification worklist, never as evidence**. A manifest row was written by the same lane that
+made the claim, so a wrong citation arrives with a confident row beside it. The property that makes
+this fan-out trustworthy is that you open every cited range yourself and check it against the real
+code in this worktree. That property is not negotiable and the manifests do not relax it.
+
+Each lens also ran a cheap pre-commit existence check over its own manifest (does the file exist,
+is the line within range) before it committed. That check catches a citation that cannot possibly
+be right; it says nothing about whether the range actually supports the claim. Do not treat a lens
+having run that check as a reason to verify its citations any less thoroughly — it changes what
+kind of wrong citation you are likely to find, not how many you must open.
+
+What the manifests are for is speed without loss:
+
+- **Deduplicate across the three.** Verify each unique citation exactly once, not once per prose
+  mention.
+- **Batch by file.** Open each cited file once and check every citation into it, instead of
+  jumping between files in prose order.
+- **Verify the claim, not the line's existence.** A row states what the lens asserts that range
+  shows. A range that exists but does not support the claim is a dropped citation.
+- **A citation in a lens's prose but missing from its manifest is still yours to verify.** An
+  incomplete manifest does not shrink your obligation.
+
+Record each entry's outcome — verified, dropped, or retargeted — in `## Dropped Citations`.
+
+## Commit discipline (REQUIRED — two commits, not one)
+
+**Commit the delta spec tree the moment it is written, before you begin the notes file.** Then write the
+notes and commit them as a second conventional commit.
+
+This is not bookkeeping. A synthesis lane that dies on the wall clock after its first commit
+leaves finished work on its branch, recoverable by whoever re-dispatches it. A lane that dies
+before a single end-of-run commit leaves an untracked file that `lucind-ai worktree cleanup`
+deletes without warning — which has already cost this project one full synthesis run. Two commits
+convert a timeout from lost work into resumable work.
+
+Both commits are conventional, with no AI attribution. Check `git log -1 --format=%B` after each
+one: some executors' commit wrappers append a `Co-authored-by:` trailer the message never
+contained. Strip it if present.
+
+## Mechanical self-check (REQUIRED — replaces narrating these facts)
+
+Run `./lucind-lane-check.sh` from the repo root, bracketing each commit. It is a deterministic
+script, not a judge: it reports whether these facts hold; it does not decide whether your synthesis
+is good, and it does not replace your own judgment against `## Done criteria` below.
+
+**Right after the first commit** (the delta tree, before you start the notes file):
+
+```
+./lucind-lane-check.sh --file openspec/changes/<change-id>/specs/<capability>/spec.md --skip-result
+```
+
+Point `--file` at any one delta spec. What this run is for is the `git status --porcelain` check
+(the default, not skipped): a FAIL means the first commit did not actually land the whole tree —
+catch that before you start the notes file, not after the second commit buries it. Deliberately
+**no `--budget`**: the 1800-word cap is tree-wide and this script counts one file at a time, so
+the budget stays your own judgment rather than something a per-file count could mislead you about.
+
+**After the second commit and writing `.lucind/result.json`**:
+
+```
+./lucind-lane-check.sh --file openspec/changes/<change-id>/spec-synthesis-notes.md \
+  --require-section "Unresolved Contradictions" --require-section "Coverage Gaps" \
+  --require-section "Dropped Citations" --require-section "Requirement Divergence"
+```
+
+Paste both reports' PASS/FAIL lines into `done_criteria[].evidence` in your envelope instead of
+narrating the same facts in prose. The tree-wide word budget and the spine coverage are substantive
+judgments the script cannot make — they stay yours.
+
 ## Done criteria
 
+- [ ] **The delta spec tree was committed as its own commit before `spec-synthesis-notes.md` was started**, confirmed by the mid-flow `lucind-lane-check.sh` run reporting a clean `git status --porcelain`.
 - [ ] **Every `file:line` citation surviving into the delta tree was opened and confirmed in this worktree**, and every dropped claim is listed under `## Dropped Citations`.
 - [ ] **Every `MODIFIED` block matches the live requirement scenario for scenario**, with only the intended edits applied — verified by opening the live spec, not by trusting lens C.
 - [ ] **Every requirement carries an RFC 2119 keyword and at least one GIVEN / WHEN / THEN scenario.**
 - [ ] **The delta tree's authored content is under 1800 words excluding verbatim copied blocks**, and every spine item is satisfied or reported under `## Coverage Gaps`.
-- [ ] **`spec-synthesis-notes.md` exists with exactly the four required sections**, each either populated or explicitly "None".
-- [ ] **The work is committed with a conventional commit and no AI attribution** (`git status --porcelain` empty and `git log --oneline -1`).
+- [ ] **`spec-synthesis-notes.md` exists with exactly the four required sections**, each either populated or explicitly "None", confirmed by the final `lucind-lane-check.sh` run.
+- [ ] **The work is committed with two conventional commits and no AI attribution**, confirmed by the final
+      `lucind-lane-check.sh` run reporting a clean `git status --porcelain` and a valid `.lucind/result.json`.
 
 ## Hard stops
 

@@ -22,9 +22,9 @@ Every packet must open with a YAML frontmatter block enclosed by `---`:
 | Key | Required | Description |
 |---|---|---|
 | `id` | Yes | Unique identifier for the lane. Names the branch (`lucind/<id>`) and worktree directory. |
-| `executor` | Yes | Execution runtime to dispatch (currently `agy`, `cursor-agent`, or `opencode`). |
+| `executor` | Yes | Execution runtime to dispatch (currently `agy`, `cursor-agent`, `opencode`, or `claude` — see `supportedExecutors` in `cmd/lucind-ai/cli.go`; an unlisted value is a routing error, never a silent fallback to `agy`). |
 | `routed_by` | Yes | The explicit condition that triggered this routing decision — never the executor name. |
-| `model` | No | Model name passed to executor. Omitted, each executor supplies its own default (`agy`: `gemini-3.7-flash-high`; `cursor-agent`: `cursor-grok-4.6-high`; `opencode`: `openai/gpt-5.6-sol`) — do not hardcode `gemini-3.7-flash-high` for a `cursor-agent` packet, it bills against Cursor's separate, more limited "Other Models" quota instead of the included "Cursor Models" quota. |
+| `model` | No | Model name passed to executor. Omitted, each executor supplies its own default (`agy`: `gemini-3.7-flash-high`; `cursor-agent`: `cursor-grok-4.6-high`; `opencode`: `openai/gpt-5.6-sol`; `claude`: `claude-opus-5`) — do not hardcode `gemini-3.7-flash-high` for a `cursor-agent` packet, it bills against Cursor's separate, more limited "Other Models" quota instead of the included "Cursor Models" quota. Each executor's `KnownModels()` is the closed list a packet may request, and every entry belongs to that executor's own provider family so a model string can never cross into another provider's billing. `opencode` is the only executor with two: `openai/gpt-5.6-sol` (its default) and `openai/gpt-5.6-luna`. `claude` is pinned to the full `claude-opus-5` rather than the CLI's `opus` alias, which silently re-points at whatever the latest Opus is and would make a dispatch's billed model unreproducible from the packet alone. |
 | `agent` | No | Opencode-only: names a purpose-built opencode agent (e.g. `lucind-dag` for DAG authoring, see `opencode agent list`) passed as `--agent`. Rejected before dispatch on any executor other than `opencode`, since agent selects a system prompt / tool-permission profile that only opencode has. |
 | `read_only` | No | `true` or `false`. Omitted defaults to write. A `true` packet must produce no unique commits and leave a clean worktree. |
 | `allowed_paths` | No | Single-line JSON array of repository-relative paths this packet may touch, e.g. `allowed_paths: ["internal/dag/", "cmd/lucind-ai/cli.go"]`. Omitted (or empty) is today's exact path: no overlap check across the batch, no post-run diff check. A YAML list under the key does not parse — the value after `:` must be one JSON array. |
@@ -154,6 +154,10 @@ Wave N+1 is dispatched only when wave N exits 0: every lane `done`, and none lis
    - **Unanimous Pass** (`done`/`done`): synthesizes `openspec/changes/<id>/verify.md` with overall status `PASSED`, consolidates complementary findings, updates `state.yaml` to `verify: { status: done }`.
    - **Disagreement / Disputed Defects** (`blocked`/`deviated`): confirmed spec violations mark overall verdict `BLOCKED` with remediation tasks in `state.yaml`; demonstrable false positives are refuted with concrete `file:line` evidence in `verify.md` without blocking.
    - **Lane Failure** (`failed` due to timeout/infra): re-dispatches the single failing lane before synthesis.
+     **Read the dead lane's partial work before discarding it.** A synthesis lane that times out has usually
+     already committed a draft (see the two-commit discipline in the synthesis packet templates), and a lane
+     that has not still leaves its branch. Re-dispatching from scratch without looking throws that away. The
+     correctable mistake is not re-dispatching — it is deciding without looking.
    - **Irreconcilable Ambiguity**: contradictory interpretations of underspecified requirements unresolvable from specs/design set overall verdict `BLOCKED` and escalate decision options to the human.
 
 ### Multi-lens planning fan-out convention (explore, propose, design, specs, tasks)
@@ -481,6 +485,14 @@ This block mirrors the binary's own `usage` string (`cmd/lucind-ai/cli.go:56`). 
 - `lucind-ai run`: Dispatch one or more packet lanes concurrently in isolated worktrees.
 - `lucind-ai split`: Split an `apply-dag.yaml` sidecar into per-lane packets and print wave dispatch commands.
 - `lucind-ai check`: Run repository checks once via `lucind-checks.sh` (`internal/integrate.Check`).
+
+**Two check scripts, different jobs.** `lucind-checks.sh` is the full-tree repository check — build, vet, format, and the whole test suite — and is what `lucind-ai check` and `Integrate` run. `lucind-lane-check.sh` is a *lane's mechanical self-check on its own artifact*: word count against a budget (with sections excludable), required sections present, every `file:line` in a `## Citation Manifest` resolving to a file long enough to contain it, a clean `git status --porcelain`, and a present, parseable `.lucind/result.json`. It is deterministic bookkeeping, not judgment — it never decides whether a draft is good. Planning-phase packet templates invoke it so a lane stops narrating word counts and section lists in prose and pastes the PASS/FAIL report into `done_criteria[].evidence` instead. Its `--verify-citations` pass is existence-level only; the synthesizer still opens every cited range itself.
+
+```
+lucind-lane-check.sh --file <path> [--budget <n>] [--exclude-section "<heading>"]...
+         [--require-section "<heading>"]... [--verify-citations]
+         [--skip-git] [--result <path>] [--skip-result]
+```
 - `lucind-ai serve`: Start the HTTP API/web server for approvals and status monitoring (`--addr`).
 - `lucind-ai feature create|status|recover|renew`: Ledger-side feature records. `create` writes the `features` row from `--id`, `--parent`, `--base-sha` — it does **not** create the git branch. `status` reads features and integration attempts. `recover --attempt <id>` resumes an existing integration attempt. `renew --id <id> --owner <owner> --fence <fence> [--ttl <duration>]` extends a held lane lease's expiry (`feature.Service.RenewLease`) — the actual lease-renewal command; a bare top-level `lucind-ai renew` does not exist (it used to alias `reconcile renew`, which renews a *reconciliation request*, an unrelated concept — the alias was removed to stop that confusion).
 - `lucind-ai reconcile approve|decline|cancel|renew --request <id>`: human decision on an overlap request between two feature parents. `approve` names `--source` and `--target` features and authorizes a candidate — it does not by itself clear a block; see **Clearing it takes two steps, not one** above. `renew` re-anchors a stale request to current SHAs. It does not reconcile ledger state against worktrees or git refs (`cmd/lucind-ai/cli.go:56`).
@@ -492,7 +504,7 @@ This block mirrors the binary's own `usage` string (`cmd/lucind-ai/cli.go:56`). 
 | Flag | Type | Default | Description |
 |---|---|---|---|
 | `--packet <path>` | String (repeatable) | *(required)* | Path to a packet file. Each instance adds one concurrent lane. |
-| `--timeout <duration>` | Duration | `20m` | Wall-clock budget granted to each lane independently. |
+| `--timeout <duration>` | Duration | `20m` | Wall-clock budget granted to each lane independently. **Synthesis lanes need an explicit larger budget.** Measured fan-out synthesis lanes have run 8.9-19.2 minutes, so the default is roughly a coin flip and has already killed one real `propose` synthesis mid-draft. Dispatch synthesis with `--timeout 30m` or more; lens lanes finish in 2-5 minutes and are fine on the default. See `docs/synthesis-lane-experiment.md`. |
 | `--approval-timeout <duration>` | Duration | `30m` | Wall-clock timeout when waiting on operator approval before aborting. |
 | `--legacy-main` | Bool | `false` | Dispatch in legacy mode targeting `main` without feature target metadata. |
 | `--expected-parent-sha <sha>` | String | `""` | Specify expected commit SHA of parent reference before merging. |
