@@ -21,7 +21,7 @@ Use this skill to choose and execute a human-approved Execution Strategy for one
 - Run from the primary repository root. Linked-worktree dispatch is refused.
 - Put packets under `.lucind/packets/`; tracked packet files dirty the primary checkout and can block integration.
 - Treat `.lucind/` as ignored runtime state and `openspec/changes/<id>/` as tracked Change history.
-- Never infer unbuilt capability from the domain vocabulary. Today, feature attempts, Ownership Leases, compare-and-swap Promotion, overlap gating, recovery, and reconciliation are production-wired; issue #4 defect automation and Claude Agent Teams launching are not.
+- Never infer unbuilt capability from the domain vocabulary. Today, feature attempts, Ownership Leases, compare-and-swap Promotion, overlap gating, recovery, reconciliation, feature retire/re-anchor (`feature disable`), and no-redispatch integration retry (`integrate retry`) are production-wired; issue #4 defect automation and Claude Agent Teams launching are not.
 - Feature-targeted (Isolated Mode) candidate construction resolves each candidate from its own declared `base_sha`/`parent_ref`, ancestry-checked against `parent_ref`; it does not depend on primary-checkout `HEAD` (`integration-target-isolation`, merged `77f6f00`). The `legacy_main`/no-target path still branches from primary `HEAD` by design — that is Exclusive Mode's contract, not a defect.
 - `lucind-ai split` emits apply waves but does not schedule them. Unordered overlapping `allowed_paths` are rejected.
 - Integration bisection is post-execution recovery, not a scheduler or pre-dispatch safety mechanism.

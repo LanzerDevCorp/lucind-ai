@@ -14,6 +14,7 @@ Load this module for any repository write, dispatch boundary, or safety decision
 
 ## Dispatch safety
 
+- Confirm the intended base is green before `feature create`, not after. Run `lucind-ai check` on the exact commit you are about to declare as `base_sha` and require it to pass first. Every wave's integration candidate is built starting AT `base_sha` (`internal/run/attempt.go:398` passes it into `CombineTree`, which resolves in `internal/worktree/worktree.go:221`'s `git worktree add -b <branch> <path> <resolvedSHA>`), so a red base poisons every wave's checks regardless of what any Lane did — and once registered, an active feature's `base_sha` is immutable (see `../modes/isolated.md`), so the only way out is `feature disable` and re-create against a corrected base.
 - Validate preconditions before dispatch. A precondition that depends on a later packet step means the packet is misordered and must block.
 - Preserve sibling execution on one Lane failure; Lanes have independent clocks and do not cancel siblings.
 - Treat `allowed_paths` omitted or empty truthfully: current runtime performs neither cross-batch overlap checks nor post-run diff checks for that packet.

@@ -150,6 +150,106 @@ func TestFeatureBaseSHAAndParentRefImmutable(t *testing.T) {
 	}
 }
 
+// TestFeatureDisableThenCreateReanchorsAndReactivates covers the "retire and
+// recreate" path for a feature registered against a base that turned out to be
+// unusable: Disable frees the ID (excludes it from ActiveFeatures/the overlap
+// gate), and a subsequent Create against the SAME id but a DIFFERENT
+// parentRef/baseSHA reactivates it under the new anchor instead of returning
+// ErrFeatureImmutable. An still-active feature must keep rejecting a changed
+// anchor (see TestFeatureBaseSHAAndParentRefImmutable) -- only a disabled one
+// may be re-anchored.
+func TestFeatureDisableThenCreateReanchorsAndReactivates(t *testing.T) {
+	ctx := context.Background()
+	svc, l := newTestService(t)
+
+	feat, err := svc.Create(ctx, "feat-retire", "refs/heads/feature-red-base", "sha-red-base")
+	if err != nil {
+		t.Fatalf("initial Create: %v", err)
+	}
+	if feat.Status != StatusActive {
+		t.Fatalf("initial feat.Status = %v, want active", feat.Status)
+	}
+
+	// While active, a changed anchor is still rejected.
+	if _, err := svc.Create(ctx, "feat-retire", "refs/heads/feature-green-base", "sha-green-base"); !errors.Is(err, ErrFeatureImmutable) {
+		t.Fatalf("Create against active feature with changed anchor = %v, want ErrFeatureImmutable", err)
+	}
+
+	if err := svc.Disable(ctx, "feat-retire"); err != nil {
+		t.Fatalf("Disable: %v", err)
+	}
+
+	// A disabled feature must not appear in ActiveFeatures (the set the
+	// overlap gate iterates).
+	active, err := l.ActiveFeatures(ctx)
+	if err != nil {
+		t.Fatalf("ActiveFeatures: %v", err)
+	}
+	for _, f := range active {
+		if f.ID == "feat-retire" {
+			t.Fatalf("ActiveFeatures still contains disabled feature %q", f.ID)
+		}
+	}
+
+	// Re-create the SAME id against a corrected, different base -- this must
+	// succeed and reactivate the feature rather than returning
+	// ErrFeatureImmutable.
+	reanchored, err := svc.Create(ctx, "feat-retire", "refs/heads/feature-green-base", "sha-green-base")
+	if err != nil {
+		t.Fatalf("Create after Disable (re-anchor) failed: %v", err)
+	}
+	if reanchored.Status != StatusActive {
+		t.Errorf("reanchored.Status = %v, want active", reanchored.Status)
+	}
+	if reanchored.ParentRef != "refs/heads/feature-green-base" || reanchored.BaseSHA != "sha-green-base" {
+		t.Errorf("reanchored feature = %+v, want new anchor refs/heads/feature-green-base / sha-green-base", reanchored)
+	}
+	if reanchored.ID != "feat-retire" {
+		t.Errorf("reanchored.ID = %q, want feat-retire (ID reused, not a new registration)", reanchored.ID)
+	}
+
+	// The reactivated feature is active again and appears in ActiveFeatures.
+	got, err := svc.Get(ctx, "feat-retire")
+	if err != nil {
+		t.Fatalf("Get after re-anchor: %v", err)
+	}
+	if got.Status != StatusActive || got.BaseSHA != "sha-green-base" {
+		t.Errorf("Get after re-anchor = %+v, want active with base_sha sha-green-base", got)
+	}
+
+	active, err = l.ActiveFeatures(ctx)
+	if err != nil {
+		t.Fatalf("ActiveFeatures after re-anchor: %v", err)
+	}
+	found := false
+	for _, f := range active {
+		if f.ID == "feat-retire" {
+			found = true
+			if f.BaseSHA != "sha-green-base" {
+				t.Errorf("ActiveFeatures row base_sha = %q, want sha-green-base", f.BaseSHA)
+			}
+		}
+	}
+	if !found {
+		t.Errorf("ActiveFeatures does not contain reactivated feature feat-retire")
+	}
+
+	// Audit trail records the reactivation.
+	events, err := l.IntegrationEvents(ctx, "feat-retire")
+	if err != nil {
+		t.Fatalf("IntegrationEvents: %v", err)
+	}
+	hasReactivated := false
+	for _, e := range events {
+		if e.Type == "feature_reactivated" {
+			hasReactivated = true
+		}
+	}
+	if !hasReactivated {
+		t.Errorf("expected a feature_reactivated audit event, events = %+v", events)
+	}
+}
+
 func TestFeatureCreateRejectsMainAndLucindNamespaces(t *testing.T) {
 	ctx := context.Background()
 	svc, _ := newTestService(t)

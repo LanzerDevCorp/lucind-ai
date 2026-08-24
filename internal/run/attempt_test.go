@@ -514,6 +514,76 @@ func TestAttemptStateTransitionSequenceAndFailures(t *testing.T) {
 	})
 }
 
+// TestAttemptFailureReleasesLeaseForImmediateRetry proves that a definitively
+// failed attempt (combine or checks failure -- the "base was red" scenario
+// that motivates "lucind-ai integrate retry") releases its feature lease
+// immediately, rather than holding it until FeatureLeaseTTL naturally
+// expires. Without this, a subsequent attempt on the same feature -- a fresh
+// redispatch, or a retry of the already-completed lane branches -- would be
+// rejected with ErrLeaseHeld for no reason: nothing is still using the lease
+// once the attempt that held it is terminal.
+func TestAttemptFailureReleasesLeaseForImmediateRetry(t *testing.T) {
+	cases := []struct {
+		name  string
+		spies *attemptSpies
+	}{
+		{
+			name: "combine failure",
+			spies: &attemptSpies{
+				combineFunc: func(ctx context.Context, primaryRoot, runID, parentRef, baseSHA string, branches []string) (string, string, error) {
+					return "", "", fmt.Errorf("%w: conflict in file.go", integrate.ErrMergeConflict)
+				},
+			},
+		},
+		{
+			name: "checks failure",
+			spies: &attemptSpies{
+				checkFunc: func(ctx context.Context, worktreePath string) (bool, string, error) {
+					return false, "base is red", nil
+				},
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			deps, _, featSvc := newAttemptTestDeps(t, tc.spies)
+
+			featID := "feat-release-on-failure-" + strings.ReplaceAll(tc.name, " ", "-")
+			_, err := featSvc.Create(context.Background(), featID, "refs/heads/feature-rel", "base-sha-1", "expected-parent-sha-1")
+			if err != nil {
+				t.Fatalf("featSvc.Create() error = %v", err)
+			}
+
+			req := run.AttemptRequest{
+				ID:                "att-release-1-" + tc.name,
+				FeatureID:         featID,
+				ParentRef:         "refs/heads/feature-rel",
+				BaseSHA:           "base-sha-1",
+				ExpectedParentSHA: "expected-parent-sha-1",
+				IdempotencyKey:    "key-release-1-" + tc.name,
+				Owner:             "owner-first",
+				Branches:          []string{"lucind/lane-1"},
+			}
+
+			res, err := run.ExecuteAttempt(context.Background(), deps, req)
+			if err != nil {
+				t.Fatalf("ExecuteAttempt() unexpected hard error = %v", err)
+			}
+			if res.Status != run.AttemptStatusFailed {
+				t.Fatalf("res.Status = %v, want %v", res.Status, run.AttemptStatusFailed)
+			}
+
+			// A second, unrelated owner must be able to acquire the lease
+			// immediately -- no TTL wait required -- proving the first
+			// attempt's failure released it rather than leaving it held.
+			if _, err := featSvc.AcquireLease(context.Background(), featID, "owner-second", 30*time.Second); err != nil {
+				t.Errorf("AcquireLease() by a second owner immediately after a failed attempt = %v, want success (lease should have been released on failure)", err)
+			}
+		})
+	}
+}
+
 func TestAttemptInterruptionAndRecoveryRefMatch(t *testing.T) {
 	spies := &attemptSpies{}
 	deps, l, featSvc := newAttemptTestDeps(t, spies)

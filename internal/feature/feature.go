@@ -113,8 +113,17 @@ func ValidateParentRef(parentRef string) error {
 }
 
 // Create records a new feature, transitioning created -> active and emitting audit events.
-// If the feature already exists with identical parentRef and baseSHA, it returns the existing feature.
-// If existing parentRef or baseSHA differ, ErrFeatureImmutable is returned.
+// If the feature already exists and is active, its parentRef and baseSHA are immutable:
+// identical values return the existing feature idempotently, and differing values
+// return ErrFeatureImmutable. This protects any attempt already recorded against that
+// anchor from having its base silently moved out from under it.
+//
+// If the feature already exists but has been disabled (see Disable), Create instead
+// reactivates it under the given parentRef/baseSHA -- which may differ from the
+// disabled feature's original anchor. This is the supported "retire and recreate"
+// path: an active feature's anchor cannot be re-pointed in place, but once a feature
+// has been explicitly retired via "lucind-ai feature disable", its ID is free to be
+// re-anchored to a corrected base and reused rather than orphaned forever.
 func (s *Service) Create(ctx context.Context, id, parentRef, baseSHA string, expectedParentSHA ...string) (Feature, error) {
 	if strings.TrimSpace(id) == "" {
 		return Feature{}, ErrFeatureIDRequired
@@ -134,6 +143,9 @@ func (s *Service) Create(ctx context.Context, id, parentRef, baseSHA string, exp
 	// Check if already exists
 	existing, err := s.Get(ctx, id)
 	if err == nil {
+		if existing.Status == StatusDisabled {
+			return s.reactivateDisabled(ctx, existing, parentRef, baseSHA, expParentSHA)
+		}
 		if existing.ParentRef != parentRef || existing.BaseSHA != baseSHA {
 			return Feature{}, ErrFeatureImmutable
 		}
@@ -193,6 +205,42 @@ func (s *Service) Create(ctx context.Context, id, parentRef, baseSHA string, exp
 	}, nil
 }
 
+// reactivateDisabled re-anchors a previously disabled feature to a (possibly new)
+// parentRef/baseSHA and transitions it back to active, freeing the ID for reuse
+// instead of leaving it permanently blocked by ErrFeatureImmutable. It is only
+// reachable from Create when the existing row's status is StatusDisabled.
+func (s *Service) reactivateDisabled(ctx context.Context, existing Feature, parentRef, baseSHA, expParentSHA string) (Feature, error) {
+	now := time.Now().UTC()
+	nowStr := formatTimestamp(now)
+
+	err := s.ledger.WriteWithAudit(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, `
+			UPDATE features SET parent_ref = ?, base_sha = ?, expected_parent_sha = ?, status = ?, updated_at = ?
+			WHERE id = ?`,
+			parentRef, baseSHA, expParentSHA, string(StatusActive), nowStr, existing.ID,
+		)
+		return err
+	}, ledger.IntegrationEvent{
+		FeatureID: existing.ID,
+		Type:      "feature_reactivated",
+		Detail:    fmt.Sprintf("parent_ref=%s base_sha=%s (previous_base_sha=%s)", parentRef, baseSHA, existing.BaseSHA),
+		At:        now,
+	})
+	if err != nil {
+		return Feature{}, fmt.Errorf("feature: reactivate disabled feature %q: %w", existing.ID, err)
+	}
+
+	return Feature{
+		ID:                existing.ID,
+		ParentRef:         parentRef,
+		BaseSHA:           baseSHA,
+		ExpectedParentSHA: expParentSHA,
+		Status:            StatusActive,
+		CreatedAt:         existing.CreatedAt,
+		UpdatedAt:         now,
+	}, nil
+}
+
 // Activate transitions a created feature to active state.
 func (s *Service) Activate(ctx context.Context, id string) error {
 	feat, err := s.Get(ctx, id)
@@ -220,7 +268,10 @@ func (s *Service) Activate(ctx context.Context, id string) error {
 	})
 }
 
-// Disable transitions an active feature to disabled state.
+// Disable transitions an active feature to disabled state. A disabled feature is
+// excluded from Ledger.ActiveFeatures (and therefore from the overlap gate's active
+// set), and its ID becomes eligible for re-anchoring via Create -- see
+// reactivateDisabled.
 func (s *Service) Disable(ctx context.Context, id string) error {
 	feat, err := s.Get(ctx, id)
 	if err != nil {
