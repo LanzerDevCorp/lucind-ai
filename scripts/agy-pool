@@ -1,0 +1,264 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+GEMINI_DIR="$HOME/.gemini"
+POOL_DIR="$GEMINI_DIR/profiles"
+POOL_CONF="$POOL_DIR/pool.conf"
+STATE_FILE="$POOL_DIR/.state"
+LOG_FILE="$POOL_DIR/rotate.log"
+CREDS_FILE="$GEMINI_DIR/oauth_creds.json"
+ACCOUNTS_FILE="$GEMINI_DIR/google_accounts.json"
+
+DEFAULT_ACCOUNTS=(
+  "lanzerdev20@gmail.com"
+  "ponenofeik5@gmail.com"
+  "lucindadsanchez@gmail.com"
+  "corp.systems.lanzer@gmail.com"
+  "corp.systems.lucinda@gmail.com"
+)
+
+slug_of() {
+  local email="$1"
+  echo "${email%%@*}"
+}
+
+ensure_pool_dir() {
+  mkdir -p "$POOL_DIR"
+}
+
+require_conf() {
+  if [[ ! -f "$POOL_CONF" ]]; then
+    echo "agy-pool: no existe $POOL_CONF — corré 'agy-pool init' primero" >&2
+    exit 1
+  fi
+}
+
+active_email() {
+  if [[ ! -f "$ACCOUNTS_FILE" ]]; then
+    echo ""
+    return 0
+  fi
+  if command -v python3 >/dev/null 2>&1; then
+    python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("active",""))' "$ACCOUNTS_FILE" 2>/dev/null || echo ""
+  else
+    grep -o '"active"[[:space:]]*:[[:space:]]*"[^"]*"' "$ACCOUNTS_FILE" | head -1 | sed -E 's/.*"active"[[:space:]]*:[[:space:]]*"([^"]*)".*/\1/'
+  fi
+}
+
+log() {
+  ensure_pool_dir
+  echo "$(date -Iseconds) $*" >> "$LOG_FILE"
+}
+
+pool_lines() {
+  require_conf
+  grep -v '^[[:space:]]*$' "$POOL_CONF"
+}
+
+pool_count() {
+  pool_lines | wc -l | tr -d '[:space:]'
+}
+
+pool_index_of() {
+  local email="$1"
+  local i=0
+  while IFS= read -r line; do
+    if [[ "$line" == "$email" ]]; then
+      echo "$i"
+      return 0
+    fi
+    i=$((i + 1))
+  done < <(pool_lines)
+  echo "-1"
+}
+
+# Internal: atomically activates the saved profile for <email> and records
+# the rotation pointer. Shared by `use` and `next` so both stay in sync and
+# both take the same flock around the state-file mutation.
+swap_in() {
+  local email="$1"
+  local slug profile_dir
+  slug=$(slug_of "$email")
+  profile_dir="$POOL_DIR/$slug"
+
+  if [[ ! -f "$profile_dir/oauth_creds.json" || ! -f "$profile_dir/google_accounts.json" ]]; then
+    echo "agy-pool: no hay perfil guardado para $email — corré 'agy-pool save $email' primero (logueado como esa cuenta)" >&2
+    exit 1
+  fi
+
+  ensure_pool_dir
+  exec 9>"$STATE_FILE.lock"
+  flock 9
+
+  cp "$profile_dir/oauth_creds.json" "$CREDS_FILE.tmp"
+  mv -f "$CREDS_FILE.tmp" "$CREDS_FILE"
+  chmod 600 "$CREDS_FILE"
+
+  cp "$profile_dir/google_accounts.json" "$ACCOUNTS_FILE.tmp"
+  mv -f "$ACCOUNTS_FILE.tmp" "$ACCOUNTS_FILE"
+
+  local idx
+  idx=$(pool_index_of "$email")
+  echo "$idx" > "$STATE_FILE"
+
+  flock -u 9
+  exec 9>&-
+
+  log "use $email"
+  echo "Cuenta activa: $email"
+}
+
+cmd_init() {
+  ensure_pool_dir
+  if [[ -f "$POOL_CONF" ]]; then
+    echo "pool.conf ya existe, no se sobreescribe"
+    exit 0
+  fi
+  printf '%s\n' "${DEFAULT_ACCOUNTS[@]}" > "$POOL_CONF"
+  echo "Creado $POOL_CONF con ${#DEFAULT_ACCOUNTS[@]} cuentas"
+}
+
+cmd_add() {
+  local email="${1:-}"
+  if [[ -z "$email" ]]; then
+    echo "agy-pool add <email>" >&2
+    exit 1
+  fi
+  ensure_pool_dir
+  touch "$POOL_CONF"
+  if grep -qxF "$email" "$POOL_CONF"; then
+    echo "$email ya está en el pool"
+    exit 0
+  fi
+  echo "$email" >> "$POOL_CONF"
+  echo "Agregado $email a $POOL_CONF"
+}
+
+cmd_list() {
+  require_conf
+  local cur
+  cur=$(active_email)
+  while IFS= read -r email; do
+    local slug saved marker
+    slug=$(slug_of "$email")
+    if [[ -f "$POOL_DIR/$slug/oauth_creds.json" ]]; then
+      saved="guardado: sí"
+    else
+      saved="guardado: no"
+    fi
+    if [[ "$email" == "$cur" ]]; then
+      marker="*"
+    else
+      marker=" "
+    fi
+    echo "$marker $email ($saved)"
+  done < <(pool_lines)
+}
+
+cmd_save() {
+  require_conf
+  local email="${1:-}"
+  local force="${2:-}"
+  if [[ -z "$email" ]]; then
+    echo "agy-pool save <email> [--force]" >&2
+    exit 1
+  fi
+  if ! grep -qxF "$email" "$POOL_CONF"; then
+    echo "agy-pool: $email no está en el pool — corré 'agy-pool add $email' primero" >&2
+    exit 1
+  fi
+  local cur
+  cur=$(active_email)
+  if [[ "$cur" != "$email" && "$force" != "--force" ]]; then
+    echo "agy-pool: la cuenta activa actual es '$cur', no '$email' — logueate como $email primero, o pasá --force" >&2
+    exit 1
+  fi
+  if [[ ! -f "$CREDS_FILE" ]]; then
+    echo "agy-pool: no existe $CREDS_FILE" >&2
+    exit 1
+  fi
+  local slug profile_dir
+  slug=$(slug_of "$email")
+  profile_dir="$POOL_DIR/$slug"
+  mkdir -p "$profile_dir"
+  install -m 600 "$CREDS_FILE" "$profile_dir/oauth_creds.json"
+  cp "$ACCOUNTS_FILE" "$profile_dir/google_accounts.json"
+  log "save $email"
+  echo "Guardado perfil de $email en $profile_dir"
+}
+
+cmd_use() {
+  require_conf
+  local email="${1:-}"
+  if [[ -z "$email" ]]; then
+    echo "agy-pool use <email>" >&2
+    exit 1
+  fi
+  swap_in "$email"
+}
+
+cmd_current() {
+  active_email
+}
+
+cmd_next() {
+  require_conf
+  local emails=()
+  while IFS= read -r line; do
+    emails+=("$line")
+  done < <(pool_lines)
+  local count=${#emails[@]}
+  if [[ "$count" -eq 0 ]]; then
+    echo "agy-pool: el pool está vacío" >&2
+    exit 1
+  fi
+  local last=-1
+  if [[ -f "$STATE_FILE" ]]; then
+    last=$(cat "$STATE_FILE" 2>/dev/null || echo -1)
+    [[ "$last" =~ ^-?[0-9]+$ ]] || last=-1
+  fi
+  local idx=$(( (last + 1) % count ))
+  local next_email="${emails[$idx]}"
+  swap_in "$next_email" >/dev/null
+  echo "$next_email"
+}
+
+cmd_count() {
+  pool_count
+}
+
+usage() {
+  cat >&2 <<EOF
+Uso: agy-pool <subcomando> [args]
+
+Subcomandos:
+  init                     crea pool.conf con las cuentas por defecto
+  add <email>              agrega una cuenta al pool
+  list                     lista las cuentas y cuál está activa
+  save <email> [--force]   guarda las credenciales activas como perfil de <email>
+  use <email>              activa el perfil guardado de <email>
+  current                  imprime la cuenta activa
+  next                     rota a la siguiente cuenta del pool
+  count                    imprime cuántas cuentas hay en el pool
+EOF
+}
+
+main() {
+  local sub="${1:-}"
+  if [[ $# -gt 0 ]]; then
+    shift
+  fi
+  case "$sub" in
+    init) cmd_init "$@" ;;
+    add) cmd_add "$@" ;;
+    list) cmd_list "$@" ;;
+    save) cmd_save "$@" ;;
+    use) cmd_use "$@" ;;
+    current) cmd_current "$@" ;;
+    next) cmd_next "$@" ;;
+    count) cmd_count "$@" ;;
+    *) usage; exit 1 ;;
+  esac
+}
+
+main "$@"
