@@ -49,9 +49,9 @@ Same-wave pairs: none dispatched. If a DAG were added later, Unit 1 files vs Uni
 
 Threat-matrix RED before agent GREEN. Existing `TestScanConflictMarkers` / `TestEnforceAllowedPaths` (`candidate_test.go:16-49,51-93`) do not cover these cases. Push state and PR commands are N/A (`design.md:104-110`) — no RED tasks.
 
-- [ ] 2.1 RED: `TestScanConflictMarkers_DocumentationAndScriptPaths` (scan docs/scripts as text, skip NUL binaries, never exec — `candidate.go:48-95,80`); `TestEnforceAllowedPaths_ExplicitWorktreeCwd` (`git -C worktreePath`, `candidate.go:107-133`); `TestEnforceAllowedPaths_StagedAndUntrackedDisjoint` (4-way union vs `base_sha`, `ErrOutOfScopeEdits` — `candidate.go:100-145`).
-- [ ] 2.2 RED: `internal/conflicttriage/triage_test.go` — `TestTriageAgent_BusinessHunkPinsHighRisk` (ARBITRARY + `high` + verify budget, no `ErrSemanticAmbiguity`); `TestTriageAgent_InvariantViolationsFailCandidate` (`specs/conflict-triage/spec.md:9-30`; `candidate.go:26,303-312`).
-- [ ] 2.3 GREEN: `internal/conflicttriage/triage.go` `RunTriage` using `TriageInvoker`, JSON in `Candidate.Output` only (`proposed_sha`, never `CandidateSHA`), fail-open, then the two invariant helpers. Do not name a production executor/model.
+- [x] 2.1 RED: `TestScanConflictMarkers_DocumentationAndScriptPaths` (scan docs/scripts as text, skip NUL binaries, never exec — `candidate.go:48-95,80`); `TestEnforceAllowedPaths_ExplicitWorktreeCwd` (`git -C worktreePath`, `candidate.go:107-133`); `TestEnforceAllowedPaths_StagedAndUntrackedDisjoint` (4-way union vs `base_sha`, `ErrOutOfScopeEdits` — `candidate.go:100-145`).
+- [x] 2.2 RED: `internal/conflicttriage/triage_test.go` — `TestTriageAgent_BusinessHunkPinsHighRisk` (ARBITRARY + `high` + verify budget, no `ErrSemanticAmbiguity`); `TestTriageAgent_InvariantViolationsFailCandidate` (`specs/conflict-triage/spec.md:9-30`; `candidate.go:26,303-312`).
+- [x] 2.3 GREEN: `internal/conflicttriage/triage.go` `RunTriage` using `TriageInvoker`, JSON in `Candidate.Output` only (`proposed_sha`, never `CandidateSHA`), fail-open, then the two invariant helpers. Do not name a production executor/model.
 
 ## Phase 3: Three-Hunk Fixture & Disjoint Packets
 
