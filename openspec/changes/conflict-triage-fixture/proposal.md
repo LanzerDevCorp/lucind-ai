@@ -149,3 +149,45 @@ These stay open until the fixture produces data. Do not guess in design.
 
 1. Exact non-decreasing risk formula and thresholds, including mixed business+mechanical hunks.
 2. Which executor/model runs **production** triage (judges are `opencode`/`openai/gpt-5.6-sol` and `claude`/`claude-opus-5`; production runtime is a separate decision).
+
+## Accepted Deviations
+
+Recorded 2026-08-24, after apply and before verify. These are decisions, not defects: verify must
+not report them as spec violations.
+
+### 1. Delivered as one feature, not two
+
+**The proposal specified** two path-disjoint features — `conflict-triage-agent`
+(`parent_ref: feature/conflict-triage-agent`, owning `internal/conflicttriage/**`) and
+`conflict-fixture` (`parent_ref: feature/conflict-fixture`, owning `internal/conflicttriage/fixture/`,
+the judge packets, and the rubric) — promoted through two separate `lucind-ai run` dispatches, per
+`## Approach`.
+
+**What was delivered** is one change on a single feature, `conflict-triage-fixture`. Every planning
+phase and the apply itself dispatched in legacy mode (`--legacy-main --expected-parent-sha`), which
+branches each lane from the current HEAD and ff-merges the batch back into the primary checkout —
+so all of it landed on `dev`, interleaved with an unrelated concurrent change.
+
+**Why it is accepted.** The two-feature split existed to exercise the multi-feature admission
+machinery, not because the product needs the boundary: nothing in `conflict-triage`,
+`conflict-fixture`, or `triage-evaluation-rubric` depends on being promoted separately. The single
+`internal/conflicttriage/` tree with a `fixture/` subpackage is the same code either way, and
+`tasks.md` enumerates `allowed_paths` as files precisely so the work units stay prefix-disjoint
+inside one tree.
+
+**What it costs, stated plainly.** This change no longer exercises what the split was for: the
+mixed-target refusal (`internal/run/integrate_feature.go:17,41`), cross-feature prefix-disjoint
+`allowed_paths`, per-feature leases, or CAS promotion onto a feature parent. That machinery remains
+unverified by this change's own delivery and is now owed a separate exercise.
+
+**What is unaffected.** The deliberate `ClassRequired` collision is produced by the fixture between
+two features *it* registers at runtime (`internal/conflicttriage/fixture/fixture.go`). It never
+depended on how this change itself was delivered, and the fixture's own two-feature requirement
+stands unchanged.
+
+### 2. Verify runs on a real feature target
+
+Verify is the first phase dispatched against a registered feature
+(`parent_ref: feature/conflict-triage-fixture`) rather than in legacy mode, so its lanes promote by
+compare-and-swap on the feature parent instead of merging into the primary checkout. This is a
+partial exercise only: judgment lanes are `read_only: true` and carry no commits to promote.
