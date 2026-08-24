@@ -1,0 +1,364 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Architecture review for lucind-ai</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script type="module">
+      import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+      mermaid.initialize({ startOnLoad: true, theme: "neutral", securityLevel: "loose" });
+    </script>
+    <style>
+      body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      .serif { font-family: Georgia, "Times New Roman", serif; }
+      .seam { stroke-dasharray: 4 4; }
+      .leak { stroke: #dc2626; }
+      .deep-box {
+        background: linear-gradient(135deg, #0f172a, #1e293b);
+      }
+      .mass-bar { transition: none; }
+      .arrow-head {
+        fill: none; stroke: #94a3b8; stroke-width: 1.5;
+      }
+    </style>
+  </head>
+  <body class="bg-stone-50 text-slate-900">
+    <main class="max-w-5xl mx-auto px-6 py-14 space-y-16">
+
+      <header class="space-y-4 border-b border-slate-200 pb-8">
+        <div class="flex items-baseline justify-between flex-wrap gap-2">
+          <h1 class="serif text-3xl font-semibold tracking-tight">Architecture review — lucind-ai</h1>
+          <span class="text-sm text-slate-500">2026-08-23 · scope: internal/run, internal/integrate</span>
+        </div>
+        <p class="text-sm text-slate-500 max-w-2xl">
+          No <code class="font-mono text-xs bg-slate-100 px-1 rounded">CONTEXT.md</code> or
+          <code class="font-mono text-xs bg-slate-100 px-1 rounded">docs/adr/</code> exist in this repo yet,
+          so nothing here contradicts a recorded decision — these are all open candidates.
+        </p>
+        <div class="flex flex-wrap gap-x-6 gap-y-2 text-xs text-slate-500 pt-2">
+          <span class="flex items-center gap-1.5"><span class="inline-block w-4 h-2.5 border border-slate-400 rounded-sm"></span> module</span>
+          <span class="flex items-center gap-1.5"><span class="inline-block w-4 h-2.5 rounded-sm deep-box"></span> deep module</span>
+          <span class="flex items-center gap-1.5"><span class="inline-block w-4 border-t-2 border-dashed border-slate-400"></span> seam</span>
+          <span class="flex items-center gap-1.5"><span class="inline-block w-4 border-t-2 border-red-500"></span> leakage</span>
+        </div>
+      </header>
+
+      <section id="candidates" class="space-y-16">
+
+        <!-- CARD 1 -->
+        <article class="space-y-5">
+          <div class="flex items-center gap-3 flex-wrap">
+            <h2 class="serif text-xl font-semibold">1. Collapse the <code class="font-mono text-lg">Deps</code> god-interface</h2>
+            <span class="text-xs font-medium px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">Strong</span>
+            <span class="text-xs font-medium px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-300">mock-only today</span>
+          </div>
+          <p class="font-mono text-xs text-slate-500">internal/run/run.go:155–229 · wired once at cmd/lucind-ai/cli.go:664–667</p>
+
+          <div class="grid md:grid-cols-2 gap-4">
+            <div class="rounded-lg border border-slate-200 bg-white p-3">
+              <p class="text-xs uppercase tracking-wider text-slate-400 mb-2">Before — shallow</p>
+              <pre class="mermaid text-xs">
+flowchart TB
+  D[run.Deps<br/>interface]
+  D -.-> A[CreateWorktree]
+  D -.-> B[CombineTree]
+  D -.-> C[RunChecks]
+  D -.-> E[PromoteTarget]
+  D -.-> F[PromoteCAS]
+  D -.-> G[ResolveRefSHA]
+  D -.-> H[ResolveCandidateSHA]
+  D -.-> I[EvaluateOverlap]
+  D -.-> J[PersistEnvelope]
+  D -.-> K[...16 more]
+  classDef shallow fill:#fff,stroke:#94a3b8,stroke-width:1px,color:#475569;
+  class D,A,B,C,E,F,G,H,I,J,K shallow
+              </pre>
+            </div>
+            <div class="rounded-lg border border-slate-200 bg-white p-3">
+              <p class="text-xs uppercase tracking-wider text-slate-400 mb-2">After — deep</p>
+              <pre class="mermaid text-xs">
+flowchart TB
+  W[Workspace seam<br/>worktree+combine+checks]:::deep
+  P[Promotion seam<br/>CAS+target]:::deep
+  G[Gate seam<br/>overlap+reconcile]:::deep
+  Real[real git adapter]
+  Fake[test fake adapter]
+  W --> Real
+  W --> Fake
+  P --> Real
+  P --> Fake
+  G --> Real
+  G --> Fake
+  classDef deep fill:#0f172a,color:#fff,stroke:#0f172a;
+              </pre>
+            </div>
+          </div>
+
+          <div class="grid md:grid-cols-2 gap-6 text-sm">
+            <div>
+              <p class="font-medium text-slate-700 mb-1">Problem</p>
+              <p class="text-slate-600">
+                <code class="font-mono text-xs">Deps</code> has ~25 function-valued fields — effectively every side
+                effect the whole system performs, hidden behind nothing. Every test that exercises
+                <code class="font-mono text-xs">Integrate</code>, <code class="font-mono text-xs">driveAttemptFromLeased</code>,
+                or the overlap gate fakes <code class="font-mono text-xs">CombineTree</code>,
+                <code class="font-mono text-xs">RunChecks</code>, and <code class="font-mono text-xs">PromoteCAS</code>
+                completely. The real composition — bisection driving real <code class="font-mono text-xs">git merge --no-ff</code>
+                and real CAS — is wired exactly once, at <code class="font-mono text-xs">cli.go</code>, and never tested.
+              </p>
+            </div>
+            <div>
+              <p class="font-medium text-slate-700 mb-1">Solution</p>
+              <p class="text-slate-600">
+                Group the 25 fields into a few deep seams by responsibility — a Workspace seam
+                (worktree/combine/checks), a Promotion seam (CAS/target), a Gate seam (overlap/reconcile) —
+                each with one real adapter and one test adapter, so two real adapters exist for at least one
+                seam and the hypothetical/real distinction stops being guesswork.
+              </p>
+            </div>
+          </div>
+
+          <ul class="text-sm text-slate-600 flex flex-wrap gap-x-6 gap-y-1">
+            <li>✓ Forces the missing real-composition test into existence</li>
+            <li>✓ Also closes finding 6 (bisect only proven against fakes)</li>
+            <li>✓ 25-field threading shrinks to 3 seams at every call site</li>
+          </ul>
+        </article>
+
+        <!-- CARD 2 -->
+        <article class="space-y-5">
+          <div class="flex items-center gap-3 flex-wrap">
+            <h2 class="serif text-xl font-semibold">2. Name the two integration-failure protocols</h2>
+            <span class="text-xs font-medium px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">Strong</span>
+            <span class="text-xs font-medium px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-300">local-substitutable</span>
+          </div>
+          <p class="font-mono text-xs text-slate-500">internal/run/integrate.go:31–301 · internal/run/integrate_feature.go:100–140 · internal/run/attempt.go</p>
+
+          <div class="rounded-lg border border-slate-200 bg-white p-4">
+            <pre class="mermaid text-xs">
+sequenceDiagram
+  participant Caller
+  participant Legacy as Integrate (bisection)
+  participant Feature as IntegrateFeature (CAS+lease)
+  participant Git as internal/integrate
+
+  Note over Caller: which path? decided implicitly<br/>by batch type
+  Caller->>Legacy: legacy batch
+  Legacy->>Git: combine, check
+  Legacy->>Legacy: bisect / tryCombine
+  Legacy->>Legacy: revertLanes (own semantics)
+  Caller->>Feature: feature batch
+  Feature->>Git: combine, check
+  Feature->>Feature: CAS promote + lease
+  Feature->>Feature: own revert/report semantics
+            </pre>
+          </div>
+
+          <div class="grid md:grid-cols-2 gap-6 text-sm">
+            <div>
+              <p class="font-medium text-slate-700 mb-1">Problem</p>
+              <p class="text-slate-600">
+                "What happens when integration fails" bifurcates on hidden context (legacy vs. feature batch),
+                and each path independently reimplements revert semantics and
+                <code class="font-mono text-xs">IntegrateReport</code> construction over the same
+                <code class="font-mono text-xs">internal/integrate</code> git primitives underneath.
+              </p>
+            </div>
+            <div>
+              <p class="font-medium text-slate-700 mb-1">Solution</p>
+              <p class="text-slate-600">
+                Keep bisection as a real strategy difference, but make the dispatch explicit at one seam,
+                and factor the shared combine → check → build-report → revert-or-promote scaffolding so the
+                two paths differ only in bisection strategy, not in bookkeeping.
+              </p>
+            </div>
+          </div>
+
+          <ul class="text-sm text-slate-600 flex flex-wrap gap-x-6 gap-y-1">
+            <li>✓ One place answers "how does failure reporting work"</li>
+            <li>✓ Bisection becomes a swappable seam, not a forked codepath</li>
+          </ul>
+        </article>
+
+        <!-- CARD 3 -->
+        <article class="space-y-5">
+          <div class="flex items-center gap-3 flex-wrap">
+            <h2 class="serif text-xl font-semibold">3. Give <code class="font-mono text-lg">ledger.Ledger</code> an attempts API instead of leaking <code class="font-mono text-lg">DB()</code></h2>
+            <span class="text-xs font-medium px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">Strong</span>
+            <span class="text-xs font-medium px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-300">adapter</span>
+          </div>
+          <p class="font-mono text-xs text-slate-500">internal/ledger/ledger.go:817 (DB()) · internal/run/attempt.go:122–211</p>
+
+          <div class="grid md:grid-cols-2 gap-4">
+            <div class="rounded-lg border border-slate-200 bg-white p-4 flex flex-col justify-center gap-2">
+              <p class="text-xs uppercase tracking-wider text-slate-400">Before</p>
+              <div class="flex items-center gap-2 text-xs font-mono">
+                <span class="px-2 py-1 border border-slate-400 rounded">ledger</span>
+                <span class="text-red-500 leak">──DB()──▶</span>
+                <span class="px-2 py-1 border border-slate-400 rounded">run.attempt.go<br/>hand-written SQL</span>
+              </div>
+              <p class="text-xs text-slate-500">SetStatus/AppendEvent/RegisterLane exist for lanes — attempts get raw *sql.DB instead.</p>
+            </div>
+            <div class="rounded-lg border border-slate-200 bg-white p-4 flex flex-col justify-center gap-2">
+              <p class="text-xs uppercase tracking-wider text-slate-400">After</p>
+              <div class="flex items-center gap-2 text-xs font-mono">
+                <span class="px-3 py-2 rounded deep-box text-white">ledger<br/>GetAttempt / InsertAttempt / UpdateAttempt</span>
+                <span class="text-slate-400">◀──</span>
+                <span class="px-2 py-1 border border-slate-400 rounded">run.attempt.go</span>
+              </div>
+              <p class="text-xs text-slate-500">Same pattern lanes already use.</p>
+            </div>
+          </div>
+
+          <div class="grid md:grid-cols-2 gap-6 text-sm">
+            <div>
+              <p class="font-medium text-slate-700 mb-1">Problem</p>
+              <p class="text-slate-600">
+                <code class="font-mono text-xs">ledger.DB()</code> hands out the raw <code class="font-mono text-xs">*sql.DB</code>,
+                so <code class="font-mono text-xs">run</code> hand-writes SELECT/INSERT/UPDATE against
+                <code class="font-mono text-xs">integration_attempts</code> directly — <code class="font-mono text-xs">ledger</code>'s
+                interface here hides nothing about that table.
+              </p>
+            </div>
+            <div>
+              <p class="font-medium text-slate-700 mb-1">Solution</p>
+              <p class="text-slate-600">
+                Add <code class="font-mono text-xs">GetAttempt</code>/<code class="font-mono text-xs">GetAttemptByIdempotencyKey</code>/
+                <code class="font-mono text-xs">InsertAttempt</code>/<code class="font-mono text-xs">UpdateAttempt</code> to
+                <code class="font-mono text-xs">ledger</code>'s real interface; delete <code class="font-mono text-xs">DB()</code>
+                usage from <code class="font-mono text-xs">run</code>.
+              </p>
+            </div>
+          </div>
+
+          <ul class="text-sm text-slate-600 flex flex-wrap gap-x-6 gap-y-1">
+            <li>✓ Schema changes land in one package</li>
+            <li>✓ Test surface becomes ledger's fake, not a real *sql.DB stood up in run's tests</li>
+          </ul>
+        </article>
+
+        <!-- CARD 4 -->
+        <article class="space-y-5">
+          <div class="flex items-center gap-3 flex-wrap">
+            <h2 class="serif text-xl font-semibold">4. Extract the overlap gate into a directly-testable seam</h2>
+            <span class="text-xs font-medium px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-300">Worth exploring</span>
+            <span class="text-xs font-medium px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-300">locality</span>
+          </div>
+          <p class="font-mono text-xs text-slate-500">internal/run/attempt.go:687–894 (evaluateOverlapGate) · internal/run/gate_test.go</p>
+
+          <div class="rounded-lg border border-slate-200 bg-white p-4">
+            <pre class="mermaid text-xs">
+flowchart LR
+  T[gate_test.go] --> E[ExecuteAttempt /<br/>RecoverAttempt<br/>full state machine]
+  E --> L[real ledger]
+  E --> R[real reconcile.Service]
+  E -.buried 210 lines.-> O[evaluateOverlapGate<br/>unexported]
+  classDef leak stroke:#dc2626,stroke-width:2px;
+  class E leak
+            </pre>
+          </div>
+
+          <div class="grid md:grid-cols-2 gap-6 text-sm">
+            <div>
+              <p class="font-medium text-slate-700 mb-1">Problem</p>
+              <p class="text-slate-600">
+                A 210-line unexported function with three-deep nesting fans out to
+                <code class="font-mono text-xs">overlap</code>, <code class="font-mono text-xs">reconcile</code>, and
+                <code class="font-mono text-xs">ledger</code>, but is unreachable except by driving a full
+                <code class="font-mono text-xs">ExecuteAttempt</code>/<code class="font-mono text-xs">RecoverAttempt</code>
+                with a real ledger and real <code class="font-mono text-xs">reconcile.Service</code> — confirmed in
+                <code class="font-mono text-xs">gate_test.go:41–117</code>.
+              </p>
+            </div>
+            <div>
+              <p class="font-medium text-slate-700 mb-1">Solution</p>
+              <p class="text-slate-600">
+                Export a direct seam (e.g. <code class="font-mono text-xs">gate.Evaluate(ctx, deps, params) Result</code>)
+                that <code class="font-mono text-xs">gate_test.go</code> can call without constructing the whole
+                attempt state machine.
+              </p>
+            </div>
+          </div>
+
+          <ul class="text-sm text-slate-600 flex flex-wrap gap-x-6 gap-y-1">
+            <li>✓ "What does the lane gate check" answerable from one real unit test</li>
+            <li>✓ gate_test.go stops being an integration test in disguise</li>
+          </ul>
+        </article>
+
+        <!-- CARD 5 -->
+        <article class="space-y-5">
+          <div class="flex items-center gap-3 flex-wrap">
+            <h2 class="serif text-xl font-semibold">5. Unify the combine → check → re-validate → CAS-promote protocol</h2>
+            <span class="text-xs font-medium px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-300">Worth exploring</span>
+            <span class="text-xs font-medium px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-300">duplication</span>
+          </div>
+          <p class="font-mono text-xs text-slate-500">internal/integrate/candidate.go:48–275 · internal/run/attempt.go:376–570</p>
+
+          <div class="rounded-lg border border-slate-200 bg-white p-4 grid md:grid-cols-2 gap-4 items-center">
+            <div class="space-y-1 text-xs font-mono">
+              <p class="text-slate-400 uppercase tracking-wider not-italic font-sans mb-1">Before — two copies</p>
+              <div class="border border-slate-300 rounded p-2">ResolveAndPromoteCandidate<br/>validate → worktree → combine → checks → re-validate → CAS</div>
+              <div class="border border-slate-300 rounded p-2">driveAttemptFromLeased + performCASPromotion<br/>validate → worktree → combine → checks → re-validate → CAS</div>
+            </div>
+            <div class="text-xs font-mono">
+              <p class="text-slate-400 uppercase tracking-wider not-italic font-sans mb-1">After — one protocol</p>
+              <div class="rounded p-3 deep-box text-white">
+                fail-closed protocol<br/>(validate → combine → checks →<br/>re-validate → CAS)
+                <div class="mt-2 text-[10px] text-slate-300">parameterized by: ref source, lease vs. reconcile context</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="grid md:grid-cols-2 gap-6 text-sm">
+            <div>
+              <p class="font-medium text-slate-700 mb-1">Problem</p>
+              <p class="text-slate-600">
+                Both functions independently implement the same fail-closed sequence — pre-flight validate,
+                worktree, combine, mandatory checks, re-validate both refs immediately before CAS to close the
+                TOCTOU window, then promote. Deletion test: removing either and reusing the other fails without
+                a rewrite — a correctness fix to the staleness re-check has to be found and applied twice by
+                inspection, not by the compiler.
+              </p>
+            </div>
+            <div>
+              <p class="font-medium text-slate-700 mb-1">Solution</p>
+              <p class="text-slate-600">
+                Extract the shared protocol as one deep module parameterized by what actually varies
+                (ref sources, lease vs. reconcile context), so both callers configure the same implementation.
+              </p>
+            </div>
+          </div>
+
+          <ul class="text-sm text-slate-600 flex flex-wrap gap-x-6 gap-y-1">
+            <li>✓ TOCTOU-window fix lands once, not twice</li>
+            <li>✓ Passes the deletion test after the change: deleting one caller stops breaking the other</li>
+          </ul>
+        </article>
+
+        <div class="rounded-lg border border-slate-200 bg-white p-4 text-sm text-slate-600">
+          <span class="font-medium text-slate-700">Checked, not flagged:</span>
+          <code class="font-mono text-xs">parseDiffNameStatusZ</code> / <code class="font-mono text-xs">parseLSFilesZ</code>
+          (<code class="font-mono text-xs">internal/run/gitpaths.go</code>) look like pure helpers extracted purely for
+          testability, but both the parsing edge cases and the real git-backed caller
+          (<code class="font-mono text-xs">enforceAllowedPaths</code>) are exercised directly — this one passes the
+          deletion test cleanly and isn't a candidate.
+        </div>
+
+      </section>
+
+      <section id="top-recommendation" class="border-t border-slate-200 pt-8 space-y-3">
+        <h2 class="serif text-xl font-semibold">Top recommendation</h2>
+        <p class="text-sm text-slate-600 max-w-2xl">
+          Start with <span class="font-medium text-slate-800">#1, collapsing <code class="font-mono text-xs">Deps</code></span>.
+          It's the root cause behind the biggest coverage gap in the package — every composed behavior in
+          <code class="font-mono text-xs">internal/run</code> is currently proven only against fakes — and fixing it also
+          closes finding 6 (bisection's real-git behavior) for free. #3 (<code class="font-mono text-xs">ledger.DB()</code>)
+          is the cheapest independent win and can land in parallel. #2, #4, and #5 all get easier to see clearly once
+          #1 forces the real seams into existence.
+        </p>
+      </section>
+
+    </main>
+  </body>
+</html>
