@@ -1,0 +1,64 @@
+{
+  "packet_id": "verify-lane-status-observability-agy",
+  "status": "done",
+  "summary": "Completed qualitative verification of change lane-status-observability against specifications, edge cases, and test quality. Verified that all introduced indirections (frontmatter metadata, packet paths, PID recording, progress telemetry, and sweeper) are demonstrably consumed by their terminal consumers, and confirmed clean worktree state matching the birth point.",
+  "hard_stops": [
+    {
+      "hard_stop": "Executing mechanical test/build commands when mechanical results are already provided.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Any credential value would need to be chosen, generated, or written.",
+      "fired": false
+    },
+    {
+      "hard_stop": "A done-criterion turns out to be impossible, or already true for a reason the packet did not anticipate.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Two reasonable interpretations exist for a spec requirement and the specification does not say which.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": ".lucind/result.json",
+      "change": "created",
+      "why": "Qualitative evaluation result envelope"
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every indirection introduced is demonstrably consumed by a terminal consumer. Verification citations trace to concrete symbols, spec requirements, or tests.",
+      "met": true,
+      "evidence": "1. Packet frontmatter (SDDPhase, FanoutGroup, Skill): parsed in internal/packet/packet.go:145-149, forwarded in internal/run/run.go:350-353, persisted in internal/ledger/lanes_meta.go:70-79, exposed via internal/serve/model.go:336-338 and /api/state, consumed in DOM rendering by internal/serve/static/app.js:534-537, 578-600. 2. PacketPath: set in cmd/lucind-ai/cli.go:109, persisted in internal/ledger/lanes_meta.go:30, consumed by handlePacketBody in internal/serve/handlers.go:387 via os.ReadFile and rendered as a link in app.js:538, 601-602. 3. Run PID: recorded in cmd/lucind-ai/cli.go:332 via os.Getpid(), stored in runs table (internal/ledger/schema.go:319), consumed by Sweeper in internal/serve/sweeper.go:82-85 using processAlive(pid) with syscall.Signal(0). 4. Telemetry (TotalTokens, CostUSD, ToolCalls): decoded across all 4 executors in internal/executor/{agy_stream,claude_stream,opencode_stream,cursor_agent}.go, forwarded by internal/run/run.go:578-580, persisted in internal/ledger/progress.go:59-75, exposed by internal/serve/model.go:363-366, and rendered on fleet cards in app.js:545-547, 585-600. 5. ToolRate: derived in internal/serve/model.go:366, 372-381 and displayed formatted in app.js:547."
+    },
+    {
+      "criterion": "The worktree carries no unique commits and no working-tree changes relative to the lane's birth point (git status --porcelain empty AND HEAD equals git merge-base HEAD \u003cprimary HEAD\u003e).",
+      "met": true,
+      "evidence": "git status --porcelain returned empty; git rev-parse HEAD (677ff5792ed6c57a0cdec838d598f87bfd3dd901) equals git merge-base HEAD 677ff57."
+    },
+    {
+      "criterion": "Qualitative evaluation completed (.lucind/result.json populated with status, summary, and structured findings).",
+      "met": true,
+      "evidence": "Populated .lucind/result.json with status done, qualitative assessment across all 6 specs and 4 executors, and structured findings."
+    }
+  ],
+  "findings": [
+    {
+      "finding": "lanes.started_at is never written by RegisterLane or SetStatus in internal/ledger/ledger.go, so deriveToolRate in internal/serve/model.go:372-381 receives nil startedAt and applies the 1-second floor (toolRateFloorMinutes), computing toolCalls / (1/60) = toolCalls * 60 tools/min unconditionally. This is a pre-existing ledger lifecycle gap accurately anticipated and safely handled by deriveToolRate's fallback logic; it does not constitute a spec violation for lane-status-observability and is correctly tracked as follow-up GitHub issue #1.",
+      "evidence": "internal/ledger/ledger.go:463-484; internal/serve/model.go:372-381",
+      "affects": "internal/serve/model.go tool_rate precision and dashboard tool rate display until lanes.started_at is populated on lane start in internal/ledger."
+    },
+    {
+      "finding": "TestServeStartsSweeperBesideHub in cmd/lucind-ai/cli_test.go:2131-2150 verifies sweeper initialization in serveDispatch by reading and parsing the source code text of cli.go (os.ReadFile('cli.go')) rather than asserting runtime goroutine dispatch or HTTP server lifecycle behavior. While sweeper mechanics are thoroughly tested in internal/serve/sweeper_test.go, this CLI wiring assertion relies on static string matching.",
+      "evidence": "cmd/lucind-ai/cli_test.go:2132-2149",
+      "affects": "cmd/lucind-ai unit test fidelity for serve subcommand background worker startup."
+    }
+  ],
+  "session_id": "cb2f962c-35a2-4713-8396-ed9890719eaf"
+}
