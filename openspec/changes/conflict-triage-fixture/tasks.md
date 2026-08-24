@@ -40,10 +40,10 @@ Same-wave pairs: none dispatched. If a DAG were added later, Unit 1 files vs Uni
 
 ## Phase 1: Foundation Models & Output Persistence
 
-- [ ] 1.1 Create `internal/conflicttriage/types.go` with `TriagePayload`, `HunkDecision`, bands `low`/`medium`/`high`, verify-budget `~N min: <cmd>` (`design.md:66-72,81`). Do not encode a numeric risk formula.
-- [ ] 1.2 Create `internal/conflicttriage/invoker.go` with `TriageInvoker` func type (`design.md:83,100`).
-- [ ] 1.3 RED: `TestUpdateCandidateOutputOnly` in `internal/reconcile/reconcile_test.go` — persist JSON to `Candidate.Output` without changing status or `CandidateSHA` (`reconcile.go:105`; `schema.go:163`; `UpdateCandidateStatus` SQL at `reconcile.go:873-876` does not touch `output`).
-- [ ] 1.4 GREEN: `Service.UpdateCandidateOutput` via `ledger.UpdateReconciliationCandidate` (`ledger.go:1314-1338`). Do not reuse `UpdateCandidateStatus` (`reconcile.go:848-908`).
+- [x] 1.1 Create `internal/conflicttriage/types.go` with `TriagePayload`, `HunkDecision`, bands `low`/`medium`/`high`, verify-budget `~N min: <cmd>` (`design.md:66-72,81`). Do not encode a numeric risk formula.
+- [x] 1.2 Create `internal/conflicttriage/invoker.go` with `TriageInvoker` func type (`design.md:83,100`).
+- [x] 1.3 RED: `TestUpdateCandidateOutputOnly` in `internal/reconcile/reconcile_test.go` — persist JSON to `Candidate.Output` without changing status or `CandidateSHA` (`reconcile.go:105`; `schema.go:163`; `UpdateCandidateStatus` SQL at `reconcile.go:873-876` does not touch `output`).
+- [x] 1.4 GREEN: `Service.UpdateCandidateOutput` via `ledger.UpdateReconciliationCandidate` (`ledger.go:1314-1338`). Do not reuse `UpdateCandidateStatus` (`reconcile.go:848-908`).
 
 ## Phase 2: Advisory Triage Agent & Invariants
 

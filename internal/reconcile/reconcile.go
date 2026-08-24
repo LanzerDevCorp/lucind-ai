@@ -907,6 +907,43 @@ func (s *Service) UpdateCandidateStatus(ctx context.Context, candidateID string,
 	return cand, nil
 }
 
+// UpdateCandidateOutput persists JSON into Candidate.Output without changing
+// status or CandidateSHA. UpdateCandidateStatus SQL does not touch output.
+func (s *Service) UpdateCandidateOutput(ctx context.Context, candidateID, output string) (Candidate, error) {
+	cand, err := s.GetCandidate(ctx, candidateID)
+	if err != nil {
+		return Candidate{}, err
+	}
+
+	now := s.clock()
+	row := ledger.ReconciliationCandidateRow{
+		ID:            cand.ID,
+		RequestID:     cand.RequestID,
+		Status:        string(cand.Status),
+		AllowedPaths:  strings.Join(cand.AllowedPaths, ","),
+		Model:         cand.Model,
+		Config:        cand.Config,
+		Output:        output,
+		Checks:        cand.Checks,
+		CandidateSHA:  cand.CandidateSHA,
+		FailureReason: cand.FailureReason,
+		CreatedAt:     cand.CreatedAt,
+		UpdatedAt:     now,
+	}
+	if err := s.ledger.UpdateReconciliationCandidate(ctx, row); err != nil {
+		if errors.Is(err, ledger.ErrReconciliationCandidateNotFound) {
+			return Candidate{}, ErrCandidateNotFound
+		}
+		return Candidate{}, fmt.Errorf("reconcile: update candidate output: %w", err)
+	}
+
+	updated, err := s.GetCandidate(ctx, candidateID)
+	if err != nil {
+		return Candidate{}, err
+	}
+	return updated, nil
+}
+
 func toCandidate(r ledger.ReconciliationCandidateRow) Candidate {
 	var allowedPaths []string
 	if r.AllowedPaths != "" {
