@@ -163,3 +163,45 @@ func contains(ss []string, want string) bool {
 	}
 	return false
 }
+
+func parsePacketFile(t *testing.T, name string) (packet.Packet, string) {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join("packets", name))
+	if err != nil {
+		t.Fatalf("ReadFile(%s): %v", name, err)
+	}
+	p, err := packet.Parse(strings.NewReader(string(raw)))
+	if err != nil {
+		t.Fatalf("Parse(%s): %v", name, err)
+	}
+	return p, string(raw)
+}
+
+// TestFixturePackets_AreBuildScopeTemplatesNotToyWriters locks the reading
+// the tree already settled: feat_a/feat_b are sequential disjoint build-scope
+// templates. GenerateFixture writes ToyPath via git; these packets must not
+// grant it, and a reader must hit that fact before assuming allowed_paths.
+func TestFixturePackets_AreBuildScopeTemplatesNotToyWriters(t *testing.T) {
+	for _, name := range []string{"feat_a.md", "feat_b.md"} {
+		p, raw := parsePacketFile(t, name)
+		if packet.PathInScope(fixture.ToyPath, p.AllowedPaths) {
+			t.Errorf("%s allowed_paths %v cover ToyPath %q; build-scope templates must not grant the toy", name, p.AllowedPaths, fixture.ToyPath)
+		}
+		lines := strings.Split(raw, "\n")
+		if len(lines) < 2 || strings.TrimSpace(lines[0]) != "---" {
+			t.Fatalf("%s: want --- frontmatter opener, got %q", name, raw)
+		}
+		if !strings.HasPrefix(strings.TrimSpace(lines[1]), "#") {
+			t.Errorf("%s: want a # comment before frontmatter keys so a reader hits it before assuming allowed_paths, got %q", name, lines[1])
+		}
+		if !strings.Contains(lines[1], fixture.ToyPath) {
+			t.Errorf("%s leading comment %q must name %s before allowed_paths is assumed", name, lines[1], fixture.ToyPath)
+		}
+		if !strings.Contains(p.Body, "GenerateFixture") {
+			t.Errorf("%s body must say GenerateFixture writes the toy independently, got %q", name, p.Body)
+		}
+		if strings.Contains(p.RoutedBy, "of the three-hunk overlap toy") {
+			t.Errorf("%s routed_by %q still describes these packets as the toy's dispatch shape", name, p.RoutedBy)
+		}
+	}
+}
