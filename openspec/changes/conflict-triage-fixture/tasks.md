@@ -62,8 +62,8 @@ Threat-matrix RED before agent GREEN. Existing `TestScanConflictMarkers` / `Test
 
 ## Phase 4: Dual-Judge Rubric & Verification
 
-- [ ] 4.1 RED: `TestRubric_GradesDistinctThreeHunkClassification` and `TestRubric_RejectsUniformHunkScoring` in `internal/conflicttriage/fixture/rubric_test.go` (`specs/triage-evaluation-rubric/spec.md:9-30`).
-- [ ] 4.2 GREEN: `EvaluateRubric` offline A/B on registered `claude`/`claude-opus-5` and `opencode`/`openai/gpt-5.6-sol` (`cli.go:65-70`; `claude.go:35-52`; `opencode.go:53-65`). Isolation via stubs, not live APIs. Do not grade `proposed_sha` or human timing. Production triage runtime stays open.
+- [x] 4.1 RED: `TestRubric_GradesDistinctThreeHunkClassification` and `TestRubric_RejectsUniformHunkScoring` in `internal/conflicttriage/fixture/rubric_test.go` (`specs/triage-evaluation-rubric/spec.md:9-30`).
+- [x] 4.2 GREEN: `EvaluateRubric` offline A/B on registered `claude`/`claude-opus-5` and `opencode`/`openai/gpt-5.6-sol` (`cli.go:65-70`; `claude.go:35-52`; `opencode.go:53-65`). Isolation via stubs, not live APIs. Do not grade `proposed_sha` or human timing. Production triage runtime stays open.
 
 ## Dependency Order
 
