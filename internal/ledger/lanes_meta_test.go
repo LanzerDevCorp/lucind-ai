@@ -26,6 +26,8 @@ func TestUpdateAndGetLaneMetadata(t *testing.T) {
 		FanoutGroup:  "ledger",
 		Change:       "control-room-ledger",
 		Feature:      "control-room/control-room-ledger",
+		Skill:        "lucind-apply",
+		PacketPath:   ".lucind/packets/apply-lane-status-observability.md",
 		AllowedPaths: []string{"internal/ledger/lanes_meta.go", "internal/ledger/lanes_meta_test.go"},
 		Dependencies: []string{"schema-v6"},
 		BodyDigest:   "sha256:0123456789abcdef",
@@ -199,6 +201,9 @@ func TestGetLaneMetadataWithoutAuditReturnsV6Columns(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("GetLaneMetadata() = %+v, want v6-column fallback %+v", got, want)
+	}
+	if got.Skill != "" || got.PacketPath != "" {
+		t.Fatalf("v6 fallback Skill/PacketPath = (%q, %q), want empty", got.Skill, got.PacketPath)
 	}
 }
 

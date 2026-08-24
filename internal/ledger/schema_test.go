@@ -30,10 +30,10 @@ func TestMigrateV5ToV6PreservesRowsAndAddsSchema(t *testing.T) {
 	}
 
 	assertTableColumns(t, l.db, "runs", []string{
-		"run_id", "feature_id", "status", "target_ref", "lane_count", "started_at", "ended_at",
+		"run_id", "feature_id", "status", "target_ref", "lane_count", "started_at", "ended_at", "pid",
 	})
 	assertTableColumns(t, l.db, "lane_progress", []string{
-		"run_id", "lane_id", "seq", "message", "at",
+		"run_id", "lane_id", "seq", "message", "at", "total_tokens", "cost_usd", "tool_calls",
 	})
 	assertTableColumns(t, l.db, "lanes", []string{
 		"run_id", "lane_id", "packet_id", "executor", "routing_condition", "status",
@@ -198,6 +198,215 @@ func TestSchemaV6ReopenIsIdempotent(t *testing.T) {
 	if runCount != 1 || progressCount != 1 {
 		t.Errorf("preserved rows after reopen = runs %d progress %d, want 1 and 1", runCount, progressCount)
 	}
+}
+
+func TestMigrateV6ToV7PreservesRowsAndAddsSchema(t *testing.T) {
+	ctx := context.Background()
+	root := createV6SchemaFixture(t, ctx)
+
+	l, err := Open(ctx, root)
+	if err != nil {
+		t.Fatalf("Open v6 database: %v", err)
+	}
+	defer l.Close()
+
+	var versionCount int
+	if err := l.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM schema_migrations WHERE version = 7`).Scan(&versionCount); err != nil {
+		t.Fatalf("query v7 migration: %v", err)
+	}
+	if versionCount != 1 {
+		t.Fatalf("version 7 migration count = %d, want 1", versionCount)
+	}
+
+	assertTableColumns(t, l.db, "runs", []string{
+		"run_id", "feature_id", "status", "target_ref", "lane_count", "started_at", "ended_at", "pid",
+	})
+	assertTableColumns(t, l.db, "lane_progress", []string{
+		"run_id", "lane_id", "seq", "message", "at", "total_tokens", "cost_usd", "tool_calls",
+	})
+
+	for _, table := range []string{"runs", "lane_progress"} {
+		var strict int
+		if err := l.db.QueryRowContext(ctx, `SELECT strict FROM pragma_table_list WHERE name = ?`, table).Scan(&strict); err != nil {
+			t.Fatalf("query %s strict flag: %v", table, err)
+		}
+		if strict != 1 {
+			t.Errorf("%s strict = %d, want 1", table, strict)
+		}
+	}
+
+	var (
+		featureID, status, targetRef, startedAt string
+		laneCount, pid                          int
+		endedAt                                 sql.NullString
+	)
+	if err := l.db.QueryRowContext(ctx, `
+		SELECT feature_id, status, target_ref, lane_count, started_at, ended_at, pid
+		FROM runs WHERE run_id = 'run-v6'
+	`).Scan(&featureID, &status, &targetRef, &laneCount, &startedAt, &endedAt, &pid); err != nil {
+		t.Fatalf("query preserved run: %v", err)
+	}
+	if featureID != "feature-v6" || status != "running" || targetRef != "refs/heads/main" ||
+		laneCount != 2 || startedAt != "2026-08-23T04:00:00Z" || endedAt.Valid {
+		t.Errorf("v6 run changed during migration: feature=%q status=%q target=%q lanes=%d started=%q ended=%v",
+			featureID, status, targetRef, laneCount, startedAt, endedAt)
+	}
+	if pid != 0 {
+		t.Errorf("migrated run pid = %d, want 0", pid)
+	}
+
+	var message, at string
+	var totalTokens, toolCalls int
+	var costUSD float64
+	if err := l.db.QueryRowContext(ctx, `
+		SELECT message, at, total_tokens, cost_usd, tool_calls
+		FROM lane_progress WHERE run_id = 'run-v6' AND lane_id = 'lane-v6' AND seq = 1
+	`).Scan(&message, &at, &totalTokens, &costUSD, &toolCalls); err != nil {
+		t.Fatalf("query preserved progress: %v", err)
+	}
+	if message != "v6 progress" || at != "2026-08-23T04:01:00Z" {
+		t.Errorf("v6 progress changed during migration: message=%q at=%q", message, at)
+	}
+	if totalTokens != 0 || costUSD != 0 || toolCalls != 0 {
+		t.Errorf("migrated progress usage = tokens %d cost %v tools %d, want 0, 0, 0", totalTokens, costUSD, toolCalls)
+	}
+}
+
+func TestSchemaV7ConstraintsAndIndexes(t *testing.T) {
+	ctx := context.Background()
+	l := openTestLedger(t)
+
+	if _, err := l.db.ExecContext(ctx, `
+		INSERT INTO runs (run_id, feature_id, status, target_ref, lane_count, started_at)
+		VALUES ('run-1', 'feature-1', 'running', 'refs/heads/main', 2, '2026-08-23T05:00:00Z')
+	`); err != nil {
+		t.Fatalf("insert run omitting pid: %v", err)
+	}
+	var pid int
+	if err := l.db.QueryRowContext(ctx, `SELECT pid FROM runs WHERE run_id = 'run-1'`).Scan(&pid); err != nil {
+		t.Fatalf("query default pid: %v", err)
+	}
+	if pid != 0 {
+		t.Errorf("default pid = %d, want 0", pid)
+	}
+	if _, err := l.db.ExecContext(ctx, `
+		INSERT INTO runs (run_id, feature_id, status, target_ref, lane_count, started_at, pid)
+		VALUES ('run-neg', 'feature-1', 'running', 'refs/heads/main', 1, '2026-08-23T05:01:00Z', -1)
+	`); err == nil {
+		t.Fatal("negative pid insert succeeded, want CHECK constraint error")
+	}
+
+	if _, err := l.db.ExecContext(ctx, `
+		INSERT INTO lane_progress (run_id, lane_id, seq, message, at)
+		VALUES ('run-1', 'lane-1', 1, 'started', '2026-08-23T05:02:00Z')
+	`); err != nil {
+		t.Fatalf("insert lane progress omitting usage: %v", err)
+	}
+	var totalTokens, toolCalls int
+	var costUSD float64
+	if err := l.db.QueryRowContext(ctx, `
+		SELECT total_tokens, cost_usd, tool_calls FROM lane_progress
+		WHERE run_id = 'run-1' AND lane_id = 'lane-1' AND seq = 1
+	`).Scan(&totalTokens, &costUSD, &toolCalls); err != nil {
+		t.Fatalf("query default usage: %v", err)
+	}
+	if totalTokens != 0 || costUSD != 0 || toolCalls != 0 {
+		t.Errorf("default usage = tokens %d cost %v tools %d, want 0, 0, 0", totalTokens, costUSD, toolCalls)
+	}
+	if _, err := l.db.ExecContext(ctx, `
+		INSERT INTO lane_progress (run_id, lane_id, seq, message, at, total_tokens)
+		VALUES ('run-1', 'lane-1', 2, 'neg-tokens', '2026-08-23T05:03:00Z', -1)
+	`); err == nil {
+		t.Fatal("negative total_tokens insert succeeded, want CHECK constraint error")
+	}
+	if _, err := l.db.ExecContext(ctx, `
+		INSERT INTO lane_progress (run_id, lane_id, seq, message, at, cost_usd)
+		VALUES ('run-1', 'lane-1', 3, 'neg-cost', '2026-08-23T05:04:00Z', -0.01)
+	`); err == nil {
+		t.Fatal("negative cost_usd insert succeeded, want CHECK constraint error")
+	}
+	if _, err := l.db.ExecContext(ctx, `
+		INSERT INTO lane_progress (run_id, lane_id, seq, message, at, tool_calls)
+		VALUES ('run-1', 'lane-1', 4, 'neg-tools', '2026-08-23T05:05:00Z', -1)
+	`); err == nil {
+		t.Fatal("negative tool_calls insert succeeded, want CHECK constraint error")
+	}
+
+	assertIndexColumns(t, l.db, "idx_lane_progress_run_lane_seq", []string{"run_id", "lane_id", "seq"})
+}
+
+func TestSchemaV7ReopenIsIdempotent(t *testing.T) {
+	ctx := context.Background()
+	root := createV6SchemaFixture(t, ctx)
+
+	l1, err := Open(ctx, root)
+	if err != nil {
+		t.Fatalf("first Open: %v", err)
+	}
+	if _, err := l1.db.ExecContext(ctx, `
+		INSERT INTO runs (run_id, feature_id, status, target_ref, lane_count, started_at, pid)
+		VALUES ('run-reopen-v7', 'feature-reopen', 'running', 'main', 1, '2026-08-23T06:00:00Z', 4242)
+	`); err != nil {
+		t.Fatalf("insert run before reopen: %v", err)
+	}
+	var firstAppliedAt string
+	if err := l1.db.QueryRowContext(ctx, `SELECT applied_at FROM schema_migrations WHERE version = 7`).Scan(&firstAppliedAt); err != nil {
+		t.Fatalf("query first v7 applied_at: %v", err)
+	}
+	if err := l1.Close(); err != nil {
+		t.Fatalf("first Close: %v", err)
+	}
+
+	l2, err := Open(ctx, root)
+	if err != nil {
+		t.Fatalf("second Open: %v", err)
+	}
+	defer l2.Close()
+
+	var migrationCount int
+	var secondAppliedAt string
+	if err := l2.db.QueryRowContext(ctx, `
+		SELECT COUNT(*), MIN(applied_at) FROM schema_migrations WHERE version = 7
+	`).Scan(&migrationCount, &secondAppliedAt); err != nil {
+		t.Fatalf("query v7 migration after reopen: %v", err)
+	}
+	if migrationCount != 1 || secondAppliedAt != firstAppliedAt {
+		t.Errorf("v7 migration after reopen = count %d applied_at %q, want count 1 applied_at %q", migrationCount, secondAppliedAt, firstAppliedAt)
+	}
+
+	var pid int
+	if err := l2.db.QueryRowContext(ctx, `SELECT pid FROM runs WHERE run_id = 'run-reopen-v7'`).Scan(&pid); err != nil {
+		t.Fatalf("query run after reopen: %v", err)
+	}
+	if pid != 4242 {
+		t.Errorf("preserved pid after reopen = %d, want 4242", pid)
+	}
+}
+
+func createV6SchemaFixture(t *testing.T, ctx context.Context) string {
+	t.Helper()
+	root := createV5SchemaFixture(t, ctx)
+	dbPath := ledgerpath.Resolve(root)
+
+	db, err := sql.Open("sqlite", "file:"+dbPath+"?_pragma=foreign_keys(1)")
+	if err != nil {
+		t.Fatalf("open v6 fixture: %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.ExecContext(ctx, migrateV5ToV6DDL); err != nil {
+		t.Fatalf("apply v6 fixture schema: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO schema_migrations (version, applied_at) VALUES (6, '2026-08-23T00:00:00Z');
+		INSERT INTO runs (run_id, feature_id, status, target_ref, lane_count, started_at)
+		VALUES ('run-v6', 'feature-v6', 'running', 'refs/heads/main', 2, '2026-08-23T04:00:00Z');
+		INSERT INTO lane_progress (run_id, lane_id, seq, message, at)
+		VALUES ('run-v6', 'lane-v6', 1, 'v6 progress', '2026-08-23T04:01:00Z');
+	`); err != nil {
+		t.Fatalf("seed v6 fixture: %v", err)
+	}
+	return root
 }
 
 func createV5SchemaFixture(t *testing.T, ctx context.Context) string {

@@ -30,16 +30,16 @@ Apply order: Unit 1 (schema) → Unit 2 → Unit 3. Unit 3 must not start until 
 
 ## Phase 1: Schema, frontmatter, metadata, PID column
 
-- [ ] 1.1 RED: In `internal/ledger/schema_test.go` (v6 seams at `:14-97,:99-144,:146-201`) add `TestMigrateV6ToV7PreservesRowsAndAddsSchema`, `TestSchemaV7ConstraintsAndIndexes`, `TestSchemaV7ReopenIsIdempotent` — row preservation, `runs.pid=0` / usage 0, CHECK `>= 0`, reopen idempotent.
-- [ ] 1.2 GREEN: Bump `schemaVersion` to 7 (`schema.go:10`), add verbatim `migrateV6ToV7DDL` below, wire the `currentVersion < 7` step in `migrate` (`schema.go:313-409`). Prove: `go test ./internal/ledger -run 'Migrate|Schema'`.
-- [ ] 1.3 RED: In `progress_test.go:14-49,:51-108` assert `TotalTokens`, `CostUSD`, `ToolCalls` round-trip and negative metrics error.
-- [ ] 1.4 GREEN: Add those fields to `ledger.LaneProgress` (`progress.go:15-20`), validate `>= 0` in `validateProgress` (`:87-102`), update insert/select (`:55-73,:105-133`). Prove: `go test ./internal/ledger -run Progress`.
-- [ ] 1.5 RED: In `internal/packet/packet_test.go` (seams `:15-48,:50-90`) parse optional `sdd_phase`, `fanout_group`, `skill`; omitted and explicit-empty keys → `""`; no live Skill telemetry.
-- [ ] 1.6 GREEN: Add `SDDPhase`, `FanoutGroup`, `Skill`, `Path` to `Packet` (`packet.go:33-75`); parse the three keys in `Parse` (`:94-138`). Prove: `go test ./internal/packet -run Parse`.
-- [ ] 1.7 RED: In `lanes_meta_test.go:15-81,:177-203` round-trip `Skill` and `PacketPath` on `UpdateLaneMetadata`/`GetLaneMetadata`; v6 fallback leaves them empty.
-- [ ] 1.8 GREEN: Add `Skill` and `PacketPath` to `LaneMetadata` (`lanes_meta.go:20-32`); persist via existing snapshot (`:39-83,:89-128`). Prove: `go test ./internal/ledger -run LaneMetadata`.
-- [ ] 1.9 RED: In `runs_test.go:12-43` assert `Run.PID` via `RegisterRun`/`GetRun`/`ListRuns`/`scanRun`.
-- [ ] 1.10 GREEN: Add `PID int` to `Run` (`runs.go:16-24`); insert/select/scan `pid` (`:29-41,:63-76,:80-101,:165-188`). Depends on 1.2. Prove: `go test ./internal/ledger -run 'RegisterAndGetRun'`.
+- [x] 1.1 RED: In `internal/ledger/schema_test.go` (v6 seams at `:14-97,:99-144,:146-201`) add `TestMigrateV6ToV7PreservesRowsAndAddsSchema`, `TestSchemaV7ConstraintsAndIndexes`, `TestSchemaV7ReopenIsIdempotent` — row preservation, `runs.pid=0` / usage 0, CHECK `>= 0`, reopen idempotent.
+- [x] 1.2 GREEN: Bump `schemaVersion` to 7 (`schema.go:10`), add verbatim `migrateV6ToV7DDL` below, wire the `currentVersion < 7` step in `migrate` (`schema.go:313-409`). Prove: `go test ./internal/ledger -run 'Migrate|Schema'`.
+- [x] 1.3 RED: In `progress_test.go:14-49,:51-108` assert `TotalTokens`, `CostUSD`, `ToolCalls` round-trip and negative metrics error.
+- [x] 1.4 GREEN: Add those fields to `ledger.LaneProgress` (`progress.go:15-20`), validate `>= 0` in `validateProgress` (`:87-102`), update insert/select (`:55-73,:105-133`). Prove: `go test ./internal/ledger -run Progress`.
+- [x] 1.5 RED: In `internal/packet/packet_test.go` (seams `:15-48,:50-90`) parse optional `sdd_phase`, `fanout_group`, `skill`; omitted and explicit-empty keys → `""`; no live Skill telemetry.
+- [x] 1.6 GREEN: Add `SDDPhase`, `FanoutGroup`, `Skill`, `Path` to `Packet` (`packet.go:33-75`); parse the three keys in `Parse` (`:94-138`). Prove: `go test ./internal/packet -run Parse`.
+- [x] 1.7 RED: In `lanes_meta_test.go:15-81,:177-203` round-trip `Skill` and `PacketPath` on `UpdateLaneMetadata`/`GetLaneMetadata`; v6 fallback leaves them empty.
+- [x] 1.8 GREEN: Add `Skill` and `PacketPath` to `LaneMetadata` (`lanes_meta.go:20-32`); persist via existing snapshot (`:39-83,:89-128`). Prove: `go test ./internal/ledger -run LaneMetadata`.
+- [x] 1.9 RED: In `runs_test.go:12-43` assert `Run.PID` via `RegisterRun`/`GetRun`/`ListRuns`/`scanRun`.
+- [x] 1.10 GREEN: Add `PID int` to `Run` (`runs.go:16-24`); insert/select/scan `pid` (`:29-41,:63-76,:80-101,:165-188`). Depends on 1.2. Prove: `go test ./internal/ledger -run 'RegisterAndGetRun'`.
 
 ## Phase 2: CLI capture, decoders, dispatch wiring
 

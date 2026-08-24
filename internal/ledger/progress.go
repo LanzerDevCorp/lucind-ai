@@ -17,6 +17,9 @@ type LaneProgress struct {
 	Seq           int64
 	Message       string
 	At            time.Time
+	TotalTokens   int64
+	CostUSD       float64
+	ToolCalls     int64
 }
 
 // ProgressErrorReporter observes a best-effort append failure.
@@ -53,18 +56,21 @@ func (l *Ledger) AppendProgressBatch(ctx context.Context, batch []LaneProgress) 
 		var err error
 		if progress.Seq == 0 {
 			_, err = tx.ExecContext(ctx, `
-				INSERT INTO lane_progress (run_id, lane_id, seq, message, at)
-				SELECT ?, ?, COALESCE(MAX(seq), 0) + 1, ?, ?
+				INSERT INTO lane_progress (run_id, lane_id, seq, message, at, total_tokens, cost_usd, tool_calls)
+				SELECT ?, ?, COALESCE(MAX(seq), 0) + 1, ?, ?, ?, ?, ?
 				FROM lane_progress WHERE run_id = ? AND lane_id = ?`,
 				progress.RunID, progress.LaneID, progress.Message,
-				progress.At.UTC().Format(time.RFC3339), progress.RunID, progress.LaneID,
+				progress.At.UTC().Format(time.RFC3339),
+				progress.TotalTokens, progress.CostUSD, progress.ToolCalls,
+				progress.RunID, progress.LaneID,
 			)
 		} else {
 			_, err = tx.ExecContext(ctx, `
-				INSERT INTO lane_progress (run_id, lane_id, seq, message, at)
-				VALUES (?, ?, ?, ?, ?)`,
+				INSERT INTO lane_progress (run_id, lane_id, seq, message, at, total_tokens, cost_usd, tool_calls)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 				progress.RunID, progress.LaneID, progress.Seq, progress.Message,
 				progress.At.UTC().Format(time.RFC3339),
+				progress.TotalTokens, progress.CostUSD, progress.ToolCalls,
 			)
 		}
 		if err != nil {
@@ -96,6 +102,12 @@ func validateProgress(progress LaneProgress) error {
 		return fmt.Errorf("%w: sequence must not be negative", ErrInvalidProgress)
 	case progress.At.IsZero():
 		return fmt.Errorf("%w: timestamp is required", ErrInvalidProgress)
+	case progress.TotalTokens < 0:
+		return fmt.Errorf("%w: total_tokens must not be negative", ErrInvalidProgress)
+	case progress.CostUSD < 0:
+		return fmt.Errorf("%w: cost_usd must not be negative", ErrInvalidProgress)
+	case progress.ToolCalls < 0:
+		return fmt.Errorf("%w: tool_calls must not be negative", ErrInvalidProgress)
 	default:
 		return nil
 	}
@@ -104,7 +116,7 @@ func validateProgress(progress LaneProgress) error {
 // GetProgressAfter returns seq > afterSeq in ascending sequence order.
 func (l *Ledger) GetProgressAfter(ctx context.Context, runID, laneID string, afterSeq int64) ([]LaneProgress, error) {
 	rows, err := l.db.QueryContext(ctx, `
-		SELECT run_id, lane_id, seq, message, at
+		SELECT run_id, lane_id, seq, message, at, total_tokens, cost_usd, tool_calls
 		FROM lane_progress
 		WHERE run_id = ? AND lane_id = ? AND seq > ?
 		ORDER BY seq ASC`, runID, laneID, afterSeq)
@@ -117,7 +129,8 @@ func (l *Ledger) GetProgressAfter(ctx context.Context, runID, laneID string, aft
 	for rows.Next() {
 		var progress LaneProgress
 		var at string
-		if err := rows.Scan(&progress.RunID, &progress.LaneID, &progress.Seq, &progress.Message, &at); err != nil {
+		if err := rows.Scan(&progress.RunID, &progress.LaneID, &progress.Seq, &progress.Message, &at,
+			&progress.TotalTokens, &progress.CostUSD, &progress.ToolCalls); err != nil {
 			return nil, fmt.Errorf("ledger: scan progress row: %w", err)
 		}
 		progress.At, err = time.Parse(time.RFC3339, at)

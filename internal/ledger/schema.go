@@ -7,7 +7,7 @@ import (
 )
 
 // schemaVersion is the migration version this schema represents.
-const schemaVersion = 6
+const schemaVersion = 7
 
 const schemaMigrationsDDL = `
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -307,6 +307,56 @@ CREATE INDEX IF NOT EXISTS idx_lane_progress_run_lane_seq
   ON lane_progress(run_id, lane_id, seq);
 `
 
+const migrateV6ToV7DDL = `
+CREATE TABLE runs_new (
+  run_id     TEXT    PRIMARY KEY,
+  feature_id TEXT    NOT NULL,
+  status     TEXT    NOT NULL,
+  target_ref TEXT    NOT NULL,
+  lane_count INTEGER NOT NULL CHECK (lane_count >= 0),
+  started_at TEXT    NOT NULL,
+  ended_at   TEXT,
+  pid        INTEGER NOT NULL DEFAULT 0 CHECK (pid >= 0)
+) STRICT;
+
+INSERT INTO runs_new (
+  run_id, feature_id, status, target_ref, lane_count, started_at, ended_at
+)
+SELECT
+  run_id, feature_id, status, target_ref, lane_count, started_at, ended_at
+FROM runs ORDER BY started_at, run_id;
+
+DROP TABLE runs;
+
+ALTER TABLE runs_new RENAME TO runs;
+
+CREATE TABLE lane_progress_new (
+  run_id       TEXT    NOT NULL,
+  lane_id      TEXT    NOT NULL,
+  seq          INTEGER NOT NULL,
+  message      TEXT    NOT NULL,
+  at           TEXT    NOT NULL,
+  total_tokens INTEGER NOT NULL DEFAULT 0 CHECK (total_tokens >= 0),
+  cost_usd     REAL    NOT NULL DEFAULT 0.0 CHECK (cost_usd >= 0.0),
+  tool_calls   INTEGER NOT NULL DEFAULT 0 CHECK (tool_calls >= 0),
+  PRIMARY KEY (run_id, lane_id, seq)
+) STRICT;
+
+INSERT INTO lane_progress_new (
+  run_id, lane_id, seq, message, at
+)
+SELECT
+  run_id, lane_id, seq, message, at
+FROM lane_progress ORDER BY run_id, lane_id, seq;
+
+DROP TABLE lane_progress;
+
+ALTER TABLE lane_progress_new RENAME TO lane_progress;
+
+CREATE INDEX IF NOT EXISTS idx_lane_progress_run_lane_seq
+  ON lane_progress(run_id, lane_id, seq);
+`
+
 // migrate applies the schema inside one transaction and records the
 // migration version. It is idempotent: re-running it against an already
 // migrated database (e.g. a second Open on the same file) is a safe no-op.
@@ -403,6 +453,19 @@ func migrate(ctx context.Context, db *sql.DB) error {
 			return err
 		}
 		currentVersion = 6
+	}
+
+	if currentVersion < 7 {
+		if _, err := tx.ExecContext(ctx, migrateV6ToV7DDL); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)`,
+			7, time.Now().UTC().Format(time.RFC3339),
+		); err != nil {
+			return err
+		}
+		currentVersion = 7
 	}
 
 	return tx.Commit()
