@@ -10,11 +10,13 @@ Every packet in one batch must name identical values for `feature`, `parent_ref`
 
 Feature attempts, Ownership Leases, CAS Promotion, active-feature overlap gates, durable recovery, and reconciliation are production-wired. Promotion updates the named ref without merging into the checked-out branch.
 
-## Verified limitation
+## Candidate isolation
 
-Feature-targeted candidate construction still depends on mutable primary-checkout `HEAD`. This means current behavior does not yet satisfy the canonical promise that arbitrary Isolated Mode Changes can safely coexist. Do not claim general N-Orchestrator safety until the separate `integration-target-isolation` Change lands.
+Feature-targeted candidate construction resolves each candidate from the packet's own `base_sha`, ancestry-checked against `parent_ref`, and checks out that exact commit — it does not depend on mutable primary-checkout `HEAD`. This landed in the `integration-target-isolation` Change (`internal/worktree/worktree.go` `createWithRunner`, merged `77f6f00`); see `internal/integrate/integrate.go:60` and the ancestry-rejection test `internal/worktree/worktree_test.go:841` (`TestCreateWithParentAncestryCheck`).
 
-The packet's immutable target fields still matter, but they do not remove that candidate-base dependency. Between separate runs or apply waves targeting the same feature, follow the recovery sequencing in `../coordination/recovery-reconciliation.md`; otherwise a later candidate can replace rather than accumulate earlier work.
+The `legacy_main`/no-target path (empty `parent_ref` and `base_sha`) still branches from primary `HEAD` by design — that is Exclusive Mode's contract, not a limitation of Isolated Mode.
+
+The packet's immutable target fields are what make this isolation possible. Between separate runs or apply waves targeting the same feature, still follow the recovery sequencing in `../coordination/recovery-reconciliation.md`: each packet's `base_sha` is a static declared value, not an automatically-tracked moving tip, so a stale `base_sha` can still replace rather than accumulate earlier work if it isn't refreshed.
 
 ## Admission and Promotion
 
