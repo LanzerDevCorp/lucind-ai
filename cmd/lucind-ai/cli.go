@@ -53,7 +53,7 @@ const attemptOwner = "lucind-ai run"
 // error, so a person driving the binary from a terminal always sees the one
 // invocation that works rather than a stack trace. --packet is repeatable:
 // each occurrence adds one more lane to the batch.
-const usage = "usage: lucind-ai run --packet <path> [--packet <path> ...] [--timeout <duration>] [--approval-timeout <duration>] [--legacy-main] [--expected-parent-sha <sha>]\n       lucind-ai split --dag <path> --out <dir>\n       lucind-ai check [--out <path>]\n       lucind-ai serve [--addr <addr>] [--approver <name>] [--approval-timeout <duration>] [--enable-dispatch] [--dispatch-token <token>]\n       lucind-ai feature create --id <id> --parent <ref> --base-sha <sha> [--expected-parent-sha <sha>]\n       lucind-ai feature status [--id <id>]\n       lucind-ai feature recover --attempt <id>\n       lucind-ai feature renew --id <id> --owner <owner> --fence <fence> [--ttl <duration>]\n       lucind-ai feature disable --id <id>\n       lucind-ai reconcile approve --request <id> --source <feature> --target <feature> [--actor <name>]\n       lucind-ai reconcile decline --request <id> [--actor <name>] [--reason <reason>]\n       lucind-ai reconcile cancel --request <id> [--actor <name>] [--reason <reason>]\n       lucind-ai reconcile renew --request <id> [--base-sha <sha>] [--source-sha <sha>] [--target-sha <sha>]\n       lucind-ai reconcile resolve --candidate <id> --sha <sha> [--actor <name>]\n       lucind-ai worktree cleanup --lane <id>\n       lucind-ai --version"
+const usage = "usage: lucind-ai run --packet <path> [--packet <path> ...] [--timeout <duration>] [--approval-timeout <duration>] [--legacy-main] [--expected-parent-sha <sha>]\n       lucind-ai split --dag <path> --out <dir>\n       lucind-ai check [--out <path>]\n       lucind-ai serve [--addr <addr>] [--approver <name>] [--approval-timeout <duration>] [--enable-dispatch] [--dispatch-token <token>]\n       lucind-ai feature create --id <id> --parent <ref> --base-sha <sha> [--expected-parent-sha <sha>]\n       lucind-ai feature status [--id <id>]\n       lucind-ai feature recover --attempt <id>\n       lucind-ai feature renew --id <id> --owner <owner> --fence <fence> [--ttl <duration>]\n       lucind-ai feature disable --id <id>\n       lucind-ai reconcile approve --request <id> --source <feature> --target <feature> [--actor <name>]\n       lucind-ai reconcile decline --request <id> [--actor <name>] [--reason <reason>]\n       lucind-ai reconcile cancel --request <id> [--actor <name>] [--reason <reason>]\n       lucind-ai reconcile renew --request <id> [--base-sha <sha>] [--source-sha <sha>] [--target-sha <sha>]\n       lucind-ai reconcile resolve --candidate <id> --sha <sha> [--actor <name>]\n       lucind-ai worktree cleanup --lane <id>\n       lucind-ai integrate retry --run <run-id> [--lane <id> ...] [--timeout <duration>] [--approval-timeout <duration>]\n       lucind-ai --version"
 
 // depsFactory constructs run.Deps for runDispatch. In production it is
 // productionDeps; tests may override it to inject test doubles or observe dependency calls.
@@ -135,6 +135,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return reconcileDispatch(ctx, args[1:], stdout, stderr)
 	case "worktree":
 		return worktreeDispatch(ctx, args[1:], stdout, stderr)
+	case "integrate":
+		return integrateDispatch(ctx, args[1:], stdout, stderr)
 	case "--version", "-v":
 		fmt.Fprintf(stdout, "lucind-ai %s (%s, %s/%s)\n", version, runtime.Version(), runtime.GOOS, runtime.GOARCH)
 		return 0
@@ -1643,5 +1645,142 @@ func runWorktreeCleanup(ctx context.Context, args []string, stdout, stderr io.Wr
 	}
 
 	fmt.Fprintf(stdout, "worktree: cleaned up lane %s\n", *laneID)
+	return 0
+}
+
+// integrateDispatch dispatches integrate subcommands (retry).
+func integrateDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	if len(args) == 0 {
+		fmt.Fprintln(stderr, "lucind-ai: integrate subcommand requires an action (retry)")
+		fmt.Fprintln(stderr, usage)
+		return 1
+	}
+
+	switch args[0] {
+	case "retry":
+		return runIntegrateRetry(ctx, args[1:], stdout, stderr)
+	default:
+		fmt.Fprintf(stderr, "lucind-ai: unknown integrate subcommand %q\n%s\n", args[0], usage)
+		return 1
+	}
+}
+
+// runIntegrateRetry implements "lucind-ai integrate retry": re-runs the
+// combine/check/promote step over lane branches that already reached their
+// own "done" in a previous "lucind-ai run" but were reverted because that
+// batch's aggregate integration step failed (e.g. the base was red, unrelated
+// to the lanes' own work) -- without redispatching any AI lane.
+//
+// It reconstructs the batch directly from durable state
+// (run.RebuildBatchForRetry: the ledger's lane rows plus each lane's own
+// preserved worktree and on-disk result envelope), then feeds it through the
+// exact same run.Integrate / run.IntegrateFeature path "lucind-ai run" itself
+// uses -- so a retry gets the identical bisection, checks, and (for a
+// feature-targeted run) compare-and-swap promotion semantics. A
+// feature-targeted run re-reads its feature's CURRENT parent_ref/base_sha
+// from the ledger at retry time, so re-anchoring the feature first (see
+// "lucind-ai feature disable" then "feature create") is enough to retry
+// against a corrected base.
+//
+// --lane may be repeated to hand-pick specific lane IDs; every one named
+// must qualify (preserved worktree, "done" envelope) or the retry fails
+// closed naming which lane and why. Omitted, every qualifying lane in the
+// run is included automatically.
+func runIntegrateRetry(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("integrate retry", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	fs.Usage = func() {
+		fmt.Fprintln(stderr, "usage: lucind-ai integrate retry --run <run-id> [--lane <id> ...] [--timeout <duration>] [--approval-timeout <duration>]")
+		fs.PrintDefaults()
+	}
+
+	runID := fs.String("run", "", "run id whose completed, reverted lanes should be re-integrated")
+	var laneFlags packetPaths
+	fs.Var(&laneFlags, "lane", "lane id to retry (repeatable; omit to auto-select every done+preserved lane in the run)")
+	timeout := fs.Duration("timeout", defaultTimeout, "wall clock budget granted to the combine/check step")
+	approvalTimeout := fs.Duration("approval-timeout", 0, "approval timeout budget granted to lane gates (0 = no wait / bypass)")
+
+	if err := fs.Parse(args); err != nil {
+		return 1
+	}
+
+	if strings.TrimSpace(*runID) == "" {
+		fmt.Fprintln(stderr, "lucind-ai: --run is required")
+		fs.Usage()
+		return 1
+	}
+
+	primaryRoot, err := resolvePrimaryRoot(ctx)
+	if err != nil {
+		fmt.Fprintf(stderr, "lucind-ai: resolve primary repository root: %v\n", err)
+		return 1
+	}
+
+	if worktree.IsLinkedWorktree(primaryRoot) {
+		fmt.Fprintf(stderr, "lucind-ai: refusing to run from inside a linked worktree (%s); run from the primary repository instead\n", primaryRoot)
+		return 1
+	}
+
+	ledg, err := ledger.Open(ctx, primaryRoot)
+	if err != nil {
+		fmt.Fprintf(stderr, "lucind-ai: open ledger: %v\n", err)
+		return 1
+	}
+	defer ledg.Close()
+
+	runRow, err := ledg.GetRun(ctx, *runID)
+	if err != nil {
+		fmt.Fprintf(stderr, "lucind-ai: %v\n", err)
+		return 1
+	}
+
+	deps := depsFactory(*runID, primaryRoot, ledg, *timeout, *approvalTimeout)
+
+	batch, err := lucindrun.RebuildBatchForRetry(ctx, deps, *runID, []string(laneFlags))
+	if err != nil {
+		fmt.Fprintf(stderr, "lucind-ai: %v\n", err)
+		return 1
+	}
+
+	fmt.Fprintf(stdout, "retrying integration for run %s: %d lane(s): %s\n", *runID, len(batch.Outcome.Integrate), strings.Join(batch.Outcome.Integrate, ", "))
+
+	var (
+		integrateReport lucindrun.IntegrateReport
+		attempt         lucindrun.Attempt
+	)
+	if runRow.FeatureID != "" {
+		featSvc := feature.NewService(ledg)
+		feat, ferr := featSvc.Get(ctx, runRow.FeatureID)
+		if ferr != nil {
+			fmt.Fprintf(stderr, "lucind-ai: get feature %q: %v\n", runRow.FeatureID, ferr)
+			return 1
+		}
+
+		attemptID := uuid.NewString()
+		integrateReport, attempt, err = lucindrun.IntegrateFeature(ctx, deps, batch, lucindrun.AttemptRequest{
+			ID:                attemptID,
+			FeatureID:         feat.ID,
+			ParentRef:         feat.ParentRef,
+			BaseSHA:           feat.BaseSHA,
+			ExpectedParentSHA: feat.ExpectedParentSHA,
+			IdempotencyKey:    attemptID,
+			Owner:             attemptOwner,
+		})
+	} else {
+		integrateReport, err = lucindrun.Integrate(ctx, deps, batch)
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "lucind-ai: %v\n", err)
+		return 1
+	}
+
+	printIntegrateReport(stdout, integrateReport)
+	if attempt.ID != "" {
+		fmt.Fprintf(stdout, "attempt:   %s (%s)\n", attempt.ID, attempt.Status)
+	}
+
+	if !integrateReport.Passed {
+		return 1
+	}
 	return 0
 }

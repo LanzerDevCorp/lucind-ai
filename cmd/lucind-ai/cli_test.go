@@ -3864,3 +3864,167 @@ func TestRunDispatchRejectsMixedFeatureTargets(t *testing.T) {
 		t.Errorf("stderr = %q, want it to explain that one batch promotes onto one feature target", stderr.String())
 	}
 }
+
+// TestIntegrateRetryCLI proves the Defect B fix end to end: a lane that
+// reaches its own "done" but is reverted only because the batch-level
+// checks fail (e.g. the base was red, unrelated to the lane's own work) can
+// be re-integrated later, once the base is fixed, WITHOUT redispatching the
+// lane -- "lucind-ai integrate retry" rebuilds the batch straight from the
+// ledger and the lane's own preserved worktree/result envelope.
+func TestIntegrateRetryCLI(t *testing.T) {
+	primaryRoot := initRepo(t)
+
+	p1 := filepath.Join(primaryRoot, "packet-1.md")
+	p1Content := "---\n" +
+		"id: lane-retry-1\n" +
+		"executor: agy\n" +
+		"routed_by: test\n" +
+		"feature: feat-retry\n" +
+		"parent_ref: refs/heads/feature-retry\n" +
+		"base_sha: 1111111111111111111111111111111111111111\n" +
+		"expected_parent_sha: 1111111111111111111111111111111111111111\n" +
+		"---\n" +
+		"Task 1\n"
+	if err := os.WriteFile(p1, []byte(p1Content), 0o644); err != nil {
+		t.Fatalf("write packet 1: %v", err)
+	}
+
+	var (
+		checksPass bool
+		promoted   []string
+	)
+	origFactory := depsFactory
+	t.Cleanup(func() { depsFactory = origFactory })
+	depsFactory = func(runID, primaryRoot string, ledg *ledger.Ledger, timeout, approvalTimeout time.Duration) lucindrun.Deps {
+		deps := origFactory(runID, primaryRoot, ledg, timeout, approvalTimeout)
+		deps.CreateWorktree = func(ctx context.Context, primaryRoot, laneID, parentRef, baseSHA string) (worktree.Worktree, error) {
+			return worktree.Worktree{Path: t.TempDir(), Branch: "branch-" + laneID}, nil
+		}
+		deps.HasUniqueLaneCommits = func(ctx context.Context, worktreePath, baseSHA string) (bool, error) {
+			return true, nil
+		}
+		deps.PorcelainEmpty = func(ctx context.Context, worktreePath string) (bool, error) {
+			return true, nil
+		}
+		deps.LookupExecutor = func(name string) (executor.Executor, error) {
+			return testDoneExecutor{envelope: `{"packet_id": "lane-retry-1", "status": "done", "summary": "done", "hard_stops": []}`}, nil
+		}
+		deps.CombineTree = func(ctx context.Context, primaryRoot, runID, parentRef, baseSHA string, branches []string) (string, string, error) {
+			return t.TempDir(), "integration-branch", nil
+		}
+		// checksPass simulates the base itself going from red to green
+		// between the original dispatch and the later retry, with no
+		// change at all to the lane's own work.
+		deps.RunChecks = func(ctx context.Context, worktreePath string) (bool, string, error) {
+			if checksPass {
+				return true, "", nil
+			}
+			return false, "base is red", nil
+		}
+		deps.ResolveRefSHA = func(ctx context.Context, primaryRoot, ref string) (string, error) {
+			return "1111111111111111111111111111111111111111", nil
+		}
+		deps.ResolveCandidateSHA = func(ctx context.Context, primaryRoot, worktreePath, branch string) (string, error) {
+			return "2222222222222222222222222222222222222222", nil
+		}
+		deps.PromoteCAS = func(ctx context.Context, primaryRoot, parentRef, candidateSHA, expectedSHA string) error {
+			promoted = append(promoted, parentRef+" "+expectedSHA+"->"+candidateSHA)
+			return nil
+		}
+		deps.PromoteTarget = func(ctx context.Context, primaryRoot, integrationBranch string) error {
+			t.Errorf("PromoteTarget called on a feature-targeted batch; promotion must go through the compare-and-swap attempt path")
+			return nil
+		}
+		deps.DiscardCombined = func(ctx context.Context, primaryRoot, worktreePath, branchName string) error {
+			return nil
+		}
+		deps.RemoveLaneWorktree = func(ctx context.Context, primaryRoot, worktreePath, branch string) error {
+			return nil
+		}
+		return deps
+	}
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(primaryRoot); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(cwd)
+
+	// Original dispatch: the lane itself reaches "done", but the base is
+	// red, so the batch-level checks fail and the lane is reverted.
+	checksPass = false
+	var stdout, stderr bytes.Buffer
+	code := run(context.Background(), []string{"run", "--packet", p1}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("initial run exit code = %d, want 1 (reverted); stderr = %q stdout = %q", code, stderr.String(), stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "reverted_ids: lane-retry-1") {
+		t.Fatalf("initial run stdout = %q, want lane-retry-1 in reverted_ids", stdout.String())
+	}
+	if len(promoted) != 0 {
+		t.Fatalf("PromoteCAS calls = %v, want none from the reverted first attempt", promoted)
+	}
+
+	runID := extractRunID(stdout.String())
+	if runID == "" {
+		t.Fatalf("could not extract run id from stdout: %q", stdout.String())
+	}
+
+	// The base is fixed; retry integration for the SAME run, with no
+	// redispatch of lane-retry-1.
+	checksPass = true
+	var retryStdout, retryStderr bytes.Buffer
+	retryCode := run(context.Background(), []string{"integrate", "retry", "--run", runID}, &retryStdout, &retryStderr)
+	if retryCode != 0 {
+		t.Fatalf("integrate retry exit code = %d, want 0; stderr = %q stdout = %q", retryCode, retryStderr.String(), retryStdout.String())
+	}
+	if !strings.Contains(retryStdout.String(), "integrated_ids: lane-retry-1") {
+		t.Errorf("retry stdout = %q, want lane-retry-1 in integrated_ids", retryStdout.String())
+	}
+	if len(promoted) != 1 {
+		t.Fatalf("PromoteCAS calls = %v, want exactly one compare-and-swap promotion from the retry", promoted)
+	}
+	want := "refs/heads/feature-retry 1111111111111111111111111111111111111111->2222222222222222222222222222222222222222"
+	if promoted[0] != want {
+		t.Errorf("PromoteCAS call = %q, want %q", promoted[0], want)
+	}
+}
+
+// TestIntegrateRetryCLIRequiresRun proves --run is validated before any
+// ledger or git work happens.
+func TestIntegrateRetryCLIRequiresRun(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := run(context.Background(), []string{"integrate", "retry"}, &stdout, &stderr)
+	if code == 0 {
+		t.Fatalf("integrate retry without --run exit code = 0, want non-zero")
+	}
+	if !strings.Contains(stderr.String(), "--run") {
+		t.Errorf("stderr = %q, want it to contain %q", stderr.String(), "--run")
+	}
+}
+
+// TestIntegrateRetryCLIUnknownRun proves an unknown run id is reported
+// clearly rather than silently doing nothing.
+func TestIntegrateRetryCLIUnknownRun(t *testing.T) {
+	primaryRoot := initRepo(t)
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(primaryRoot); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(cwd)
+
+	var stdout, stderr bytes.Buffer
+	code := run(context.Background(), []string{"integrate", "retry", "--run", "run-does-not-exist"}, &stdout, &stderr)
+	if code == 0 {
+		t.Fatalf("integrate retry with unknown run exit code = 0, want non-zero")
+	}
+	if stderr.String() == "" {
+		t.Errorf("stderr is empty, want an error surfaced")
+	}
+}

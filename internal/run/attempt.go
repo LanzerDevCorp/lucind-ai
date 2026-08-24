@@ -402,6 +402,12 @@ func driveAttemptFromLeased(ctx context.Context, deps Deps, att Attempt, featSvc
 		att.FailureReason = fmt.Sprintf("combine failed: %v", err)
 		att.UpdatedAt = now
 		_ = updateAttemptWithAudit(ctx, deps.Ledger, att, "attempt_failed", att.FailureReason)
+		// A definitively failed attempt is terminal and will never resume; holding its
+		// lease until FeatureLeaseTTL naturally expires would block every other attempt
+		// on this feature -- a fresh redispatch or a "lucind-ai integrate retry" of the
+		// already-completed lane branches -- for no reason, since nothing is still using
+		// it. Release it now so the feature is immediately available again.
+		_ = featSvc.ReleaseLease(ctx, att.FeatureID, att.Owner, att.Fence)
 		return att, nil
 	}
 
@@ -454,6 +460,9 @@ func driveAttemptFromLeased(ctx context.Context, deps Deps, att Attempt, featSvc
 		att.FailureReason = fmt.Sprintf("checks failed: %s", reason)
 		att.UpdatedAt = now
 		_ = updateAttemptWithAudit(ctx, deps.Ledger, att, "attempt_failed", att.FailureReason)
+		// See the combine-failure branch above: this attempt is terminal, so its lease
+		// is released immediately rather than held until FeatureLeaseTTL expires.
+		_ = featSvc.ReleaseLease(ctx, att.FeatureID, att.Owner, att.Fence)
 		return att, nil
 	}
 
@@ -539,7 +548,8 @@ func performCASPromotion(ctx context.Context, deps Deps, att Attempt, featSvc *f
 
 	if err := promoteCASFunc(ctx, deps.PrimaryRoot, parentRef, att.CandidateSHA, expectedParentSHA); err != nil {
 		now := updateNow(deps)
-		if errors.Is(err, integrate.ErrStaleCAS) {
+		stale := errors.Is(err, integrate.ErrStaleCAS)
+		if stale {
 			att.Status = AttemptStatusStale
 		} else {
 			att.Status = AttemptStatusFailed
@@ -547,6 +557,16 @@ func performCASPromotion(ctx context.Context, deps Deps, att Attempt, featSvc *f
 		att.FailureReason = fmt.Sprintf("promotion CAS failed: %v", err)
 		att.UpdatedAt = now
 		_ = updateAttemptWithAudit(ctx, deps.Ledger, att, "attempt_failed", att.FailureReason)
+		if !stale {
+			// See driveAttemptFromLeased's combine/checks failure branches: a
+			// non-stale CAS failure is terminal, so its lease is released
+			// immediately rather than held until FeatureLeaseTTL expires. A
+			// stale result is left untouched here: the parent ref already moved
+			// out from under this attempt, so its lease may already be invalid
+			// or superseded, and ReleaseLease's own owner/fence check makes it
+			// a safe no-op either way.
+			_ = featSvc.ReleaseLease(ctx, att.FeatureID, att.Owner, att.Fence)
+		}
 		return att, nil
 	}
 
