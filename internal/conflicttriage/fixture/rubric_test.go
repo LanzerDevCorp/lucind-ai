@@ -110,6 +110,79 @@ func TestRubric_GradesDistinctThreeHunkClassification(t *testing.T) {
 	}
 }
 
+func TestRubric_ParsesPayloadAmongConcatenatedJSONObjects(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping subprocess stub test in -short mode")
+	}
+	ctx := context.Background()
+	payload := distinctPayloadJSON(t)
+
+	// Reproduces the real opencode CLI (v1.18.21, "run --format json"):
+	// several back-to-back top-level JSON objects on stdout with no
+	// separator, rather than a single clean document. Naive first-brace-to-
+	// last-brace slicing would span all three and fail to parse.
+	noiseBefore := `{"type":"event","status":"init"}`
+	noiseAfter := `{"type":"event","status":"done"}`
+	stubScript := "#!/bin/sh\nprintf '%s' '" + noiseBefore + payload + noiseAfter + "'\nexit 0\n"
+	claudeStub := writeJudgeStub(t, "claude-stub.sh", stubScript)
+	opencodeStub := writeJudgeStub(t, "opencode-stub.sh", stubScript)
+
+	got, err := fixture.EvaluateRubric(ctx, fixture.RubricOptions{
+		Claude:       executor.Claude{Binary: claudeStub, WaitDelay: 50 * time.Millisecond},
+		Opencode:     executor.Opencode{Binary: opencodeStub, WaitDelay: 50 * time.Millisecond},
+		WorktreePath: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("EvaluateRubric: %v", err)
+	}
+	if !got.Passed {
+		t.Fatalf("Passed = false, want true when the real payload is concatenated with noise objects; reason=%q", got.Reason)
+	}
+}
+
+func TestRubric_ParsesPayloadNestedInResultEnvelope(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping subprocess stub test in -short mode")
+	}
+	ctx := context.Background()
+	payload := distinctPayloadJSON(t)
+
+	// Reproduces the real claude CLI (2.1.241, "--print --output-format
+	// json"): stdout is one top-level result envelope (is_error, usage,
+	// session_id, ...) whose "result" field is a *string* containing the
+	// model's reply -- a markdown-fenced ```json code block wrapping the
+	// real TriagePayload, followed by prose. The real answer is nested
+	// inside a string value, not present as a top-level field.
+	envelope := map[string]any{
+		"type":     "result",
+		"is_error": false,
+		"result":   "```json\n" + payload + "\n```\n\nThree hunks, three distinct kinds, three distinct resolutions.",
+	}
+	raw, err := json.Marshal(envelope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stubScript := "#!/bin/sh\nprintf '%s' " + shellQuote(string(raw)) + "\nexit 0\n"
+	claudeStub := writeJudgeStub(t, "claude-stub.sh", stubScript)
+	opencodeStub := writeJudgeStub(t, "opencode-stub.sh", stubScript)
+
+	got, err := fixture.EvaluateRubric(ctx, fixture.RubricOptions{
+		Claude:       executor.Claude{Binary: claudeStub, WaitDelay: 50 * time.Millisecond},
+		Opencode:     executor.Opencode{Binary: opencodeStub, WaitDelay: 50 * time.Millisecond},
+		WorktreePath: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("EvaluateRubric: %v", err)
+	}
+	if !got.Passed {
+		t.Fatalf("Passed = false, want true when the real payload is nested in a result envelope's string field; reason=%q", got.Reason)
+	}
+}
+
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
 func TestRubric_RejectsUniformHunkScoring(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping subprocess stub test in -short mode")
