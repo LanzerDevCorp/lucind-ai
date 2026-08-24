@@ -1199,3 +1199,87 @@ func TestGetRequestAndCandidateNotFound(t *testing.T) {
 		t.Errorf("Cancel(nonexistent) error = %v, want ErrRequestNotFound", err)
 	}
 }
+
+// TestUpdateCandidateOutputOnly proves triage JSON lands in Candidate.Output
+// without changing status or CandidateSHA. UpdateCandidateStatus SQL does not
+// touch output, so this path must go through a dedicated output-only update.
+func TestUpdateCandidateOutputOnly(t *testing.T) {
+	ctx := context.Background()
+	l := openTestLedger(t)
+
+	now := time.Date(2026, 8, 23, 18, 0, 0, 0, time.UTC)
+	svc := NewService(l, WithClock(func() time.Time { return now }))
+
+	ev := sampleRequiredEvidence()
+	req, err := svc.CreateRequest(ctx, CreateRequestParams{
+		ID:            "req-output-only",
+		FeatureID:     "feature-target",
+		SourceFeature: "feature-source",
+		SourceParent:  "refs/heads/feature-source",
+		TargetFeature: "feature-target",
+		TargetParent:  "refs/heads/feature-target",
+		SourceSHA:     ev.FeatureASHA,
+		TargetSHA:     ev.FeatureBSHA,
+		Evidence:      ev,
+	})
+	if err != nil {
+		t.Fatalf("CreateRequest: %v", err)
+	}
+
+	_, cand, err := svc.Approve(ctx, ApproveParams{
+		RequestID:     req.ID,
+		SourceFeature: "feature-source",
+		TargetFeature: "feature-target",
+		Actor:         "local:testuser",
+		CandidateID:   "cand-output-only",
+	})
+	if err != nil {
+		t.Fatalf("Approve: %v", err)
+	}
+	if cand.Status != CandidateStatusRunning {
+		t.Fatalf("cand.Status = %v, want %v", cand.Status, CandidateStatusRunning)
+	}
+	if cand.CandidateSHA != "" {
+		t.Fatalf("cand.CandidateSHA = %q, want empty before output persist", cand.CandidateSHA)
+	}
+	if cand.Output != "" {
+		t.Fatalf("cand.Output = %q, want empty before output persist", cand.Output)
+	}
+
+	payload := `{"cause_summary":"business hunk","risk_band":"high","proposed_sha":"abc123","verify_budget":"~4 min: ./lucind-checks.sh"}`
+	updTime := now.Add(2 * time.Minute)
+	svcUpd := NewService(l, WithClock(func() time.Time { return updTime }))
+
+	got, err := svcUpd.UpdateCandidateOutput(ctx, cand.ID, payload)
+	if err != nil {
+		t.Fatalf("UpdateCandidateOutput: %v", err)
+	}
+	if got.Output != payload {
+		t.Errorf("got.Output = %q, want %q", got.Output, payload)
+	}
+	if got.Status != CandidateStatusRunning {
+		t.Errorf("got.Status = %v, want still %v", got.Status, CandidateStatusRunning)
+	}
+	if got.CandidateSHA != "" {
+		t.Errorf("got.CandidateSHA = %q, want empty (output-only must not write CandidateSHA)", got.CandidateSHA)
+	}
+
+	fromDB, err := svcUpd.GetCandidate(ctx, cand.ID)
+	if err != nil {
+		t.Fatalf("GetCandidate after output persist: %v", err)
+	}
+	if fromDB.Output != payload {
+		t.Errorf("fromDB.Output = %q, want persisted payload", fromDB.Output)
+	}
+	if fromDB.Status != CandidateStatusRunning {
+		t.Errorf("fromDB.Status = %v, want still %v", fromDB.Status, CandidateStatusRunning)
+	}
+	if fromDB.CandidateSHA != "" {
+		t.Errorf("fromDB.CandidateSHA = %q, want empty", fromDB.CandidateSHA)
+	}
+
+	_, err = svcUpd.UpdateCandidateOutput(ctx, "does-not-exist", payload)
+	if !errors.Is(err, ErrCandidateNotFound) {
+		t.Errorf("UpdateCandidateOutput(missing) error = %v, want ErrCandidateNotFound", err)
+	}
+}
