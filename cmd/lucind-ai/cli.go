@@ -53,7 +53,7 @@ const attemptOwner = "lucind-ai run"
 // error, so a person driving the binary from a terminal always sees the one
 // invocation that works rather than a stack trace. --packet is repeatable:
 // each occurrence adds one more lane to the batch.
-const usage = "usage: lucind-ai run --packet <path> [--packet <path> ...] [--timeout <duration>] [--approval-timeout <duration>] [--legacy-main] [--expected-parent-sha <sha>]\n       lucind-ai split --dag <path> --out <dir>\n       lucind-ai check [--out <path>]\n       lucind-ai serve [--addr <addr>] [--approver <name>] [--approval-timeout <duration>] [--enable-dispatch] [--dispatch-token <token>]\n       lucind-ai feature create --id <id> --parent <ref> --base-sha <sha> [--expected-parent-sha <sha>]\n       lucind-ai feature status [--id <id>]\n       lucind-ai feature recover --attempt <id>\n       lucind-ai feature renew --id <id> --owner <owner> --fence <fence> [--ttl <duration>]\n       lucind-ai reconcile approve --request <id> --source <feature> --target <feature> [--actor <name>]\n       lucind-ai reconcile decline --request <id> [--actor <name>] [--reason <reason>]\n       lucind-ai reconcile cancel --request <id> [--actor <name>] [--reason <reason>]\n       lucind-ai reconcile renew --request <id> [--base-sha <sha>] [--source-sha <sha>] [--target-sha <sha>]\n       lucind-ai reconcile resolve --candidate <id> --sha <sha> [--actor <name>]\n       lucind-ai worktree cleanup --lane <id>\n       lucind-ai --version"
+const usage = "usage: lucind-ai run --packet <path> [--packet <path> ...] [--timeout <duration>] [--approval-timeout <duration>] [--legacy-main] [--expected-parent-sha <sha>]\n       lucind-ai split --dag <path> --out <dir>\n       lucind-ai check [--out <path>]\n       lucind-ai serve [--addr <addr>] [--approver <name>] [--approval-timeout <duration>] [--enable-dispatch] [--dispatch-token <token>]\n       lucind-ai feature create --id <id> --parent <ref> --base-sha <sha> [--expected-parent-sha <sha>]\n       lucind-ai feature status [--id <id>]\n       lucind-ai feature recover --attempt <id>\n       lucind-ai feature renew --id <id> --owner <owner> --fence <fence> [--ttl <duration>]\n       lucind-ai feature disable --id <id>\n       lucind-ai reconcile approve --request <id> --source <feature> --target <feature> [--actor <name>]\n       lucind-ai reconcile decline --request <id> [--actor <name>] [--reason <reason>]\n       lucind-ai reconcile cancel --request <id> [--actor <name>] [--reason <reason>]\n       lucind-ai reconcile renew --request <id> [--base-sha <sha>] [--source-sha <sha>] [--target-sha <sha>]\n       lucind-ai reconcile resolve --candidate <id> --sha <sha> [--actor <name>]\n       lucind-ai worktree cleanup --lane <id>\n       lucind-ai --version"
 
 // depsFactory constructs run.Deps for runDispatch. In production it is
 // productionDeps; tests may override it to inject test doubles or observe dependency calls.
@@ -810,11 +810,11 @@ func serveDispatch(ctx context.Context, args []string, stdout, stderr io.Writer)
 	return 0
 }
 
-// featureDispatch dispatches feature subcommands (create, status, recover, renew).
+// featureDispatch dispatches feature subcommands (create, status, recover, renew, disable).
 func featureDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	_ = reconcile.ErrInvalidDirection
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "lucind-ai: feature subcommand requires an action (create, status, recover, renew)")
+		fmt.Fprintln(stderr, "lucind-ai: feature subcommand requires an action (create, status, recover, renew, disable)")
 		fmt.Fprintln(stderr, usage)
 		return 1
 	}
@@ -828,6 +828,8 @@ func featureDispatch(ctx context.Context, args []string, stdout, stderr io.Write
 		return runFeatureRecover(ctx, args[1:], stdout, stderr)
 	case "renew":
 		return runFeatureRenew(ctx, args[1:], stdout, stderr)
+	case "disable":
+		return runFeatureDisable(ctx, args[1:], stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "lucind-ai: unknown feature subcommand %q\n%s\n", args[0], usage)
 		return 1
@@ -1123,6 +1125,62 @@ func runFeatureRenew(ctx context.Context, args []string, stdout, stderr io.Write
 	}
 
 	fmt.Fprintf(stdout, "feature:    %s\nowner:      %s\nfence:      %d\nexpires_at: %s\n", lease.FeatureID, lease.Owner, lease.Fence, lease.ExpiresAt.Format(time.RFC3339))
+	return 0
+}
+
+// runFeatureDisable implements "lucind-ai feature disable": retires a feature
+// (feature.Service.Disable). A disabled feature stops appearing in the active-feature
+// set that the overlap gate consults (internal/ledger.Ledger.ActiveFeatures filters on
+// status = 'active'), and its ID becomes eligible for reuse: a later "lucind-ai feature
+// create" against the same --id re-anchors and reactivates it, even with a different
+// --parent/--base-sha than its original registration. This is the supported path to
+// retire a feature registered against a base that turned out to be unusable, without
+// permanently losing the ID to ErrFeatureImmutable.
+func runFeatureDisable(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("feature disable", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	fs.Usage = func() {
+		fmt.Fprintln(stderr, "usage: lucind-ai feature disable --id <id>")
+		fs.PrintDefaults()
+	}
+
+	id := fs.String("id", "", "feature identifier to disable")
+
+	if err := fs.Parse(args); err != nil {
+		return 1
+	}
+
+	if strings.TrimSpace(*id) == "" {
+		fmt.Fprintln(stderr, "lucind-ai: --id is required")
+		fs.Usage()
+		return 1
+	}
+
+	primaryRoot, err := resolvePrimaryRoot(ctx)
+	if err != nil {
+		fmt.Fprintf(stderr, "lucind-ai: resolve primary repository root: %v\n", err)
+		return 1
+	}
+
+	if worktree.IsLinkedWorktree(primaryRoot) {
+		fmt.Fprintf(stderr, "lucind-ai: refusing to run from inside a linked worktree (%s); run from the primary repository instead\n", primaryRoot)
+		return 1
+	}
+
+	ledg, err := ledger.Open(ctx, primaryRoot)
+	if err != nil {
+		fmt.Fprintf(stderr, "lucind-ai: open ledger: %v\n", err)
+		return 1
+	}
+	defer ledg.Close()
+
+	featSvc := feature.NewService(ledg)
+	if err := featSvc.Disable(ctx, *id); err != nil {
+		fmt.Fprintf(stderr, "lucind-ai: %v\n", err)
+		return 1
+	}
+
+	fmt.Fprintf(stdout, "feature:  %s\nstatus:   %s\n", *id, feature.StatusDisabled)
 	return 0
 }
 

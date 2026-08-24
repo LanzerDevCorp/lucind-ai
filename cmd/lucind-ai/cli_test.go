@@ -2941,6 +2941,119 @@ func TestFeatureRenewCLI(t *testing.T) {
 	})
 }
 
+// TestFeatureDisableCLI covers "lucind-ai feature disable": the supported way
+// to retire a feature registered against a base that turned out to be
+// unusable, so it stops counting as active and its ID can be reused with a
+// corrected anchor -- see internal/feature.Service.reactivateDisabled.
+func TestFeatureDisableCLI(t *testing.T) {
+	primaryRoot := initRepo(t)
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(primaryRoot); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(cwd)
+
+	redBaseSHA := "1111111111111111111111111111111111111111"
+	greenBaseSHA := "4444444444444444444444444444444444444444"
+
+	ledg, err := ledger.Open(context.Background(), primaryRoot)
+	if err != nil {
+		t.Fatalf("ledger.Open error = %v", err)
+	}
+	featSvc := feature.NewService(ledg)
+	if _, err := featSvc.Create(context.Background(), "feat-stale", "refs/heads/feature-stale", redBaseSHA); err != nil {
+		t.Fatalf("featSvc.Create error = %v", err)
+	}
+	ledg.Close()
+
+	t.Run("disables an active feature", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		code := run(context.Background(), []string{"feature", "disable", "--id", "feat-stale"}, &stdout, &stderr)
+		if code != 0 {
+			t.Fatalf("feature disable exit code = %d, want 0; stderr = %q", code, stderr.String())
+		}
+		if !strings.Contains(stdout.String(), "feat-stale") || !strings.Contains(stdout.String(), "disabled") {
+			t.Errorf("stdout = %q, want it to report feat-stale disabled", stdout.String())
+		}
+
+		ledg2, err := ledger.Open(context.Background(), primaryRoot)
+		if err != nil {
+			t.Fatalf("ledger.Open error = %v", err)
+		}
+		defer ledg2.Close()
+
+		f, err := feature.NewService(ledg2).Get(context.Background(), "feat-stale")
+		if err != nil {
+			t.Fatalf("Get after disable error = %v", err)
+		}
+		if f.Status != feature.StatusDisabled {
+			t.Errorf("f.Status = %v, want disabled", f.Status)
+		}
+
+		active, err := ledg2.ActiveFeatures(context.Background())
+		if err != nil {
+			t.Fatalf("ActiveFeatures error = %v", err)
+		}
+		for _, af := range active {
+			if af.ID == "feat-stale" {
+				t.Errorf("ActiveFeatures still lists disabled feature %q", af.ID)
+			}
+		}
+	})
+
+	t.Run("feature create re-anchors and reactivates the disabled id with a new base", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		code := run(context.Background(), []string{
+			"feature", "create",
+			"--id", "feat-stale",
+			"--parent", "refs/heads/feature-stale-corrected",
+			"--base-sha", greenBaseSHA,
+		}, &stdout, &stderr)
+		if code != 0 {
+			t.Fatalf("feature create (re-anchor) exit code = %d, want 0; stderr = %q", code, stderr.String())
+		}
+
+		ledg2, err := ledger.Open(context.Background(), primaryRoot)
+		if err != nil {
+			t.Fatalf("ledger.Open error = %v", err)
+		}
+		defer ledg2.Close()
+
+		f, err := feature.NewService(ledg2).Get(context.Background(), "feat-stale")
+		if err != nil {
+			t.Fatalf("Get after re-anchor error = %v", err)
+		}
+		if f.Status != feature.StatusActive || f.BaseSHA != greenBaseSHA || f.ParentRef != "refs/heads/feature-stale-corrected" {
+			t.Errorf("reanchored feature = %+v, want active with base_sha %s", f, greenBaseSHA)
+		}
+	})
+
+	t.Run("disabling an unknown id fails with non-zero exit", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		code := run(context.Background(), []string{"feature", "disable", "--id", "feat-does-not-exist"}, &stdout, &stderr)
+		if code == 0 {
+			t.Fatalf("feature disable on unknown id exit code = 0, want non-zero")
+		}
+		if stderr.String() == "" {
+			t.Errorf("stderr is empty, want an error surfaced")
+		}
+	})
+
+	t.Run("missing --id fails with usage/error", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		code := run(context.Background(), []string{"feature", "disable"}, &stdout, &stderr)
+		if code == 0 {
+			t.Fatalf("feature disable without --id exit code = 0, want non-zero")
+		}
+		if !strings.Contains(stderr.String(), "--id") {
+			t.Errorf("stderr = %q, want it to contain %q", stderr.String(), "--id")
+		}
+	})
+}
+
 func TestWorktreeCleanupCLI(t *testing.T) {
 	if testing.Short() {
 		t.Skip("shells out to real git")
