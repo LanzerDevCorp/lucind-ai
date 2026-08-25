@@ -19,7 +19,13 @@ phases:
       the sub-agent's stale "schema v4" claim to the actual current v7 — folded into explore.md
       item 5/9 and the Hard Blockers section (any new Defect Record migration must be v8).
   proposal:
-    status: pending
+    status: done
+    note: |
+      Authored SDD proposal formalizing ultrafixer capability: ephemeral agy-lane dispatch,
+      base_sha origin classification, independent two-axis critical and per-branch blocking
+      evaluation across active features, signal-reproduced cross-branch impact detection,
+      isolated worktree repair with blocked result envelope delivery, ledger schema v8 Defect
+      Records, and human-gated CAS integration.
   spec:
     status: pending
   design:
