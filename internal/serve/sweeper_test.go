@@ -56,6 +56,21 @@ func laneStatus(t *testing.T, l *ledger.Ledger, runID, laneID string) lane.Statu
 	return ""
 }
 
+func laneWorktreePreserved(t *testing.T, l *ledger.Ledger, runID, laneID string) bool {
+	t.Helper()
+	lanes, err := l.Lanes(context.Background(), runID)
+	if err != nil {
+		t.Fatalf("Lanes: %v", err)
+	}
+	for _, ln := range lanes {
+		if ln.LaneID == laneID {
+			return ln.WorktreePreserved
+		}
+	}
+	t.Fatalf("lane %s not found", laneID)
+	return false
+}
+
 func hasOrphanNote(t *testing.T, l *ledger.Ledger, runID, laneID string) bool {
 	t.Helper()
 	events, err := l.Events(context.Background(), runID)
@@ -106,6 +121,33 @@ func TestSweeper_DeadPIDReconciled(t *testing.T) {
 	}
 	if !hasOrphanNote(t, l, runID, laneID) {
 		t.Fatal("missing orphan EventLaneNote")
+	}
+}
+
+// TestSweeper_DeadPIDPreservesWorktree reproduces the orphan-sweep recovery
+// gap: a lane that was registered and marked running (i.e. it dispatched and
+// may have already finished its own work and committed a "done" envelope to
+// its worktree) is orphan-swept because its driving process died before ever
+// reaching a graceful revert. The sweep never deletes the lane's worktree, so
+// worktree_preserved must end up true -- otherwise `integrate retry`
+// (internal/run/integrate_retry.go), which gates purely on that ledger flag,
+// can never recover genuinely-done work stranded by this exact sequence.
+func TestSweeper_DeadPIDPreservesWorktree(t *testing.T) {
+	cmd := exec.Command("true")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	pid := cmd.Process.Pid
+	if err := cmd.Wait(); err != nil {
+		t.Fatalf("Wait: %v", err)
+	}
+	l, runID, laneID := setupRunningLane(t, pid)
+	runOneSweep(t, l)
+	if got := laneStatus(t, l, runID, laneID); got != lane.Failed {
+		t.Fatalf("status = %s, want failed", got)
+	}
+	if !laneWorktreePreserved(t, l, runID, laneID) {
+		t.Fatal("worktree_preserved = false after orphan sweep, want true (sweep never deletes the worktree)")
 	}
 }
 

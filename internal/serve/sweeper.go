@@ -101,6 +101,16 @@ func (s *Sweeper) sweep(ctx context.Context) error {
 			if err := s.ledger.SetStatus(ctx, run.RunID, ln.LaneID, lane.Failed, now); err != nil {
 				return err
 			}
+			// The sweep never removes the lane's worktree -- only the graceful
+			// revert path (completeIntegration/revertLanes) does that, and only
+			// after explicitly deciding to. Marking the lane failed here without
+			// also marking its worktree preserved would strand a genuinely
+			// completed lane: `integrate retry` gates purely on this flag
+			// (see internal/run/integrate_retry.go), so a false value here makes
+			// intact, done work permanently unrecoverable through that path.
+			if err := s.ledger.SetWorktreePreserved(ctx, run.RunID, ln.LaneID, true); err != nil {
+				return err
+			}
 			if err := s.ledger.AppendEvent(ctx, ledger.Event{
 				RunID: run.RunID, LaneID: ln.LaneID, Type: ledger.EventLaneNote,
 				Detail: orphanNote, At: now,
