@@ -22,6 +22,7 @@ import (
 	"github.com/LanzerDevCorp/lucind-ai/internal/stability"
 	"github.com/LanzerDevCorp/lucind-ai/internal/stability/evidence"
 	"github.com/LanzerDevCorp/lucind-ai/internal/stability/fixture"
+	"github.com/LanzerDevCorp/lucind-ai/internal/stability/reconcile"
 	"github.com/LanzerDevCorp/lucind-ai/internal/stability/store"
 	"github.com/LanzerDevCorp/lucind-ai/internal/worktree"
 )
@@ -734,7 +735,7 @@ func newSimulatedTestDeps(t *testing.T, primaryRoot string, execEnv executor.Exe
 			return execEnv, nil
 		},
 		CreateWorktree: func(_ context.Context, _, laneID, _, baseSHA string) (worktree.Worktree, error) {
-			wtPath := filepath.Join(primaryRoot, "wt-"+laneID)
+			wtPath := reconcile.WorktreePathFor(primaryRoot, laneID)
 			lucindPath := filepath.Join(wtPath, ".lucind")
 			if err := os.MkdirAll(lucindPath, 0o755); err != nil {
 				return worktree.Worktree{}, err
@@ -942,7 +943,7 @@ func TestStabilityRunPreflightAndSimulatedThreeTrialRun(t *testing.T) {
 		_ = ledg
 
 		// Pre-populate Change B result envelope in target dir
-		wtPathB := filepath.Join(dir, "wt-stability-change-b")
+		wtPathB := reconcile.WorktreePathFor(dir, "stability-change-b")
 		_ = os.MkdirAll(filepath.Join(wtPathB, ".lucind"), 0o755)
 		_ = os.WriteFile(filepath.Join(wtPathB, ".lucind", "result.json"), []byte(laneEnvelopeJSON("stability-change-b", "done")), 0o644)
 

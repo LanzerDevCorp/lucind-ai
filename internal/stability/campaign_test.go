@@ -23,6 +23,7 @@ import (
 	"github.com/LanzerDevCorp/lucind-ai/internal/stability"
 	"github.com/LanzerDevCorp/lucind-ai/internal/stability/fixture"
 	"github.com/LanzerDevCorp/lucind-ai/internal/stability/process"
+	"github.com/LanzerDevCorp/lucind-ai/internal/stability/reconcile"
 	"github.com/LanzerDevCorp/lucind-ai/internal/stability/store"
 	"github.com/LanzerDevCorp/lucind-ai/internal/worktree"
 )
@@ -903,7 +904,7 @@ func newJourneyTestDeps(t *testing.T, execEnv executor.Executor) (run.Deps, *led
 			return execEnv, nil
 		},
 		CreateWorktree: func(_ context.Context, _, laneID, _, baseSHA string) (worktree.Worktree, error) {
-			wtPath := filepath.Join(root, "wt-"+laneID)
+			wtPath := reconcile.WorktreePathFor(root, laneID)
 			lucindPath := filepath.Join(wtPath, ".lucind")
 			if err := os.MkdirAll(lucindPath, 0o755); err != nil {
 				return worktree.Worktree{}, err
@@ -1068,8 +1069,8 @@ func TestTrialJourneyConcurrentLeaseHoldingBeforePromotion(t *testing.T) {
 	inFlightB := make(chan struct{})
 	verifiedConcurrent := make(chan struct{})
 
-	wtPathA := filepath.Join(deps.PrimaryRoot, "wt-stability-change-a")
-	wtPathB := filepath.Join(deps.PrimaryRoot, "wt-stability-change-b")
+	wtPathA := reconcile.WorktreePathFor(deps.PrimaryRoot, "stability-change-a")
+	wtPathB := reconcile.WorktreePathFor(deps.PrimaryRoot, "stability-change-b")
 
 	fakeExec.runFuncFor[wtPathA] = func(ctx context.Context, req executor.Request) (executor.Outcome, error) {
 		close(inFlightA)
@@ -1170,7 +1171,7 @@ func TestTrialJourneyAbruptKillAfterResultPersistenceBeforeAcceptance(t *testing
 	cfg := stability.DefaultJourneyConfig(1, "b000000000000000000000000000000000000000")
 	cfg.LeaseTTL = 5 * time.Second
 
-	wtPathB := filepath.Join(deps.PrimaryRoot, "wt-stability-change-b")
+	wtPathB := reconcile.WorktreePathFor(deps.PrimaryRoot, "stability-change-b")
 	lucindB := filepath.Join(wtPathB, ".lucind")
 	_ = os.MkdirAll(lucindB, 0o755)
 	persistedMarker := filepath.Join(wtPathB, "persisted.done")
@@ -1309,7 +1310,7 @@ func TestTrialJourneyPostExpiryReclaimMonotonicFenceEnvelopeAdoptionNoRedispatch
 		t.Errorf("initialLease.Fence = %d, want 1", initialLease.Fence)
 	}
 
-	wtPathB := filepath.Join(root, "wt-stability-change-b")
+	wtPathB := reconcile.WorktreePathFor(root, "stability-change-b")
 	lucindB := filepath.Join(wtPathB, ".lucind")
 	_ = os.MkdirAll(lucindB, 0o755)
 	envJSON := laneEnvelopeJSON("stability-change-b", "done")
@@ -1370,7 +1371,7 @@ func TestTrialJourneyZeroSurvivorVerificationGatesRecovery(t *testing.T) {
 	cfg := stability.DefaultJourneyConfig(1, "b000000000000000000000000000000000000000")
 	cfg.LeaseTTL = 100 * time.Millisecond
 
-	wtPathB := filepath.Join(root, "wt-stability-change-b")
+	wtPathB := reconcile.WorktreePathFor(root, "stability-change-b")
 	lucindB := filepath.Join(wtPathB, ".lucind")
 	_ = os.MkdirAll(lucindB, 0o755)
 	envJSON := laneEnvelopeJSON("stability-change-b", "done")
@@ -1460,7 +1461,7 @@ func TestTrialJourneyStateMachineWiringNoBypass(t *testing.T) {
 	cfg := stability.DefaultJourneyConfig(1, "b000000000000000000000000000000000000000")
 	cfg.LeaseTTL = 100 * time.Millisecond
 
-	wtPathB := filepath.Join(root, "wt-stability-change-b")
+	wtPathB := reconcile.WorktreePathFor(root, "stability-change-b")
 	lucindB := filepath.Join(wtPathB, ".lucind")
 	_ = os.MkdirAll(lucindB, 0o755)
 	envJSON := laneEnvelopeJSON("stability-change-b", "done")
@@ -1527,8 +1528,8 @@ func TestRemediationDefectRecordCreatedOnFixtureFailure(t *testing.T) {
 	cfg := stability.DefaultJourneyConfig(1, "b000000000000000000000000000000000000000")
 	pA, pB := stability.BuildJourneyPackets(cfg)
 
-	wtPathA := filepath.Join(root, "wt-stability-change-a")
-	wtPathB := filepath.Join(root, "wt-stability-change-b")
+	wtPathA := reconcile.WorktreePathFor(root, "stability-change-a")
+	wtPathB := reconcile.WorktreePathFor(root, "stability-change-b")
 
 	// Change A executor runs fixture check which fails on seeded defect
 	fakeExec.runFuncFor[wtPathA] = func(ctx context.Context, req executor.Request) (executor.Outcome, error) {
@@ -1610,7 +1611,7 @@ func TestRemediationTestActorApprovalExercisesGate(t *testing.T) {
 	fakeExec := newFakeJourneyExecutor()
 	deps, ledgerHandle, root := newJourneyTestDeps(t, fakeExec)
 
-	wtPathA := filepath.Join(root, "wt-stability-change-a")
+	wtPathA := reconcile.WorktreePathFor(root, "stability-change-a")
 	lucindPath := filepath.Join(wtPathA, ".lucind")
 	_ = os.MkdirAll(lucindPath, 0o755)
 
@@ -1710,7 +1711,7 @@ func TestRemediationFixChangeDispatchedOnlyAfterApproval(t *testing.T) {
 	}
 
 	// 2. Setup Fix executor to remediate the defect in worktree
-	wtPathFix := filepath.Join(root, "wt-stability-fix-a")
+	wtPathFix := reconcile.WorktreePathFor(root, "stability-fix-a")
 	fakeExec.runFuncFor[wtPathFix] = func(ctx context.Context, req executor.Request) (executor.Outcome, error) {
 		// Fix writes STATUS=FIXED to fixture/defect.txt
 		defectPath := filepath.Join(req.WorktreePath, "fixture", "defect.txt")
@@ -1761,7 +1762,7 @@ func TestRemediationFixChangeDispatchedOnlyAfterApproval(t *testing.T) {
 	depsParallel := deps
 	depsParallel.RunID = "run-journey-parallel"
 
-	wtPathFixParallel := filepath.Join(root, "wt-stability-fix-a-parallel")
+	wtPathFixParallel := reconcile.WorktreePathFor(root, "stability-fix-a-parallel")
 
 	fakeExec.runFuncFor[wtPathFixParallel] = func(ctx context.Context, req executor.Request) (executor.Outcome, error) {
 		close(inFlightFix)
@@ -2106,9 +2107,9 @@ func TestRemediationStateMachineProgressionNoBypass(t *testing.T) {
 	runGit("update-ref", cfg.ParentRefA, baseSHA)
 	runGit("update-ref", cfg.ParentRefB, baseSHA)
 
-	wtPathA := filepath.Join(root, "wt-stability-change-a")
-	wtPathB := filepath.Join(root, "wt-stability-change-b")
-	wtPathFix := filepath.Join(root, "wt-stability-fix-a")
+	wtPathA := reconcile.WorktreePathFor(root, "stability-change-a")
+	wtPathB := reconcile.WorktreePathFor(root, "stability-change-b")
+	wtPathFix := reconcile.WorktreePathFor(root, "stability-fix-a")
 
 	// Change A encounters seeded defect
 	fakeExec.runFuncFor[wtPathA] = func(ctx context.Context, req executor.Request) (executor.Outcome, error) {
@@ -2199,7 +2200,7 @@ func TestTrialJourneyLiveAbruptKillWatchAndRecover(t *testing.T) {
 	cfg := stability.DefaultJourneyConfig(1, "b000000000000000000000000000000000000000")
 	cfg.LeaseTTL = 200 * time.Millisecond
 
-	wtPathB := filepath.Join(deps.PrimaryRoot, "wt-stability-change-b")
+	wtPathB := reconcile.WorktreePathFor(deps.PrimaryRoot, "stability-change-b")
 	lucindB := filepath.Join(wtPathB, ".lucind")
 	_ = os.MkdirAll(lucindB, 0o755)
 
@@ -2299,7 +2300,7 @@ func TestTrialJourneyLiveNoKillWindowGracefulDegradation(t *testing.T) {
 	cfg := stability.DefaultJourneyConfig(1, "b000000000000000000000000000000000000000")
 	cfg.LeaseTTL = 50 * time.Millisecond
 
-	wtPathB := filepath.Join(root, "wt-stability-change-b")
+	wtPathB := reconcile.WorktreePathFor(root, "stability-change-b")
 	lucindB := filepath.Join(wtPathB, ".lucind")
 	_ = os.MkdirAll(lucindB, 0o755)
 	envJSON := laneEnvelopeJSON("stability-change-b", "done")
