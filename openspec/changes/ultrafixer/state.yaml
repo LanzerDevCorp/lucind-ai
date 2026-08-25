@@ -41,7 +41,13 @@ phases:
       zero-new-Go dispatch plumbing via packet template asset, two-axis triage, CodeGraph + signal
       reproduction, and human-gated CAS promotion.
   tasks:
-    status: pending
+    status: done
+    note: |
+      Authored Strict TDD implementation breakdown (tasks.md) across 3 phases / 3 work units:
+      Phase 1 (Schema v8 & Ledger API), Phase 2 (CLI defect subcommands), and Phase 3 (packet
+      template asset & coordination doc). Review workload forecast: 900–1150 changed lines (impl
+      ~350–430, tests ~480–600, asset/doc ~90–120), High 400-line budget risk, Medium 800-line risk,
+      Low 1200-line risk, delivery_strategy single-pr (size:exception).
   apply:
     status: pending
   verify:
