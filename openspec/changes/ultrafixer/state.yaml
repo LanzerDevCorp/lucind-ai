@@ -1,0 +1,51 @@
+change: ultrafixer
+created: 2026-08-25
+artifact_store: hybrid
+execution_mode: auto
+delivery_strategy: single-pr
+review_budget_lines: 1200
+phases:
+  explore:
+    status: done
+    note: |
+      Dispatched via a Claude Code sdd-explore sub-agent (SendMessage/Task route) rather than
+      through lucind-ai run/agy dispatch, before the user corrected the route for the rest of the
+      change to go through lucind-ai+agy exclusively. Kept as-is (not re-dispatched) since the
+      content is grounded, current, and complete. The orchestrator closed two gaps the sub-agent's
+      toolset could not reach: (a) persisted this content to explore.md/state.yaml (the sub-agent
+      had no Write/Edit/Bash), and (b) ran the missing mem_search pass for prior Engram context
+      (sdd-init/lucind-ai #1707, integrate-retry CAS baseline fix #2490, lane-status-observability
+      archive) plus a direct schema-version check (internal/ledger/schema.go:10) that corrected
+      the sub-agent's stale "schema v4" claim to the actual current v7 — folded into explore.md
+      item 5/9 and the Hard Blockers section (any new Defect Record migration must be v8).
+  proposal:
+    status: pending
+  spec:
+    status: pending
+  design:
+    status: pending
+  tasks:
+    status: pending
+  apply:
+    status: pending
+  verify:
+    status: pending
+  archive:
+    status: pending
+notes: |
+  Feature registered in lucind-ai's ledger: id=ultrafixer, parent=refs/heads/feature/ultrafixer,
+  base_sha=35de9910f743d18236bd250b14ec01887cd1f378, status=active. Worktree:
+  /home/lanzerdev/git_root/lucind-ai-worktrees/ultrafixer. CodeGraph indexed for the worktree.
+
+  From proposal onward, every phase (propose, spec, design, tasks, apply, verify, archive) is
+  dispatched as a real lucind-ai Lane (executor agy, one bounded packet per phase — this Change
+  uses SDD simple/no-fan-out, so no lens/synthesis packets) targeting this feature, per the
+  user's explicit instruction and per plugin/claude-code/skills/lucind-ai/references/strategies/
+  sdd.md's own documented phase routes. Each packet's base_sha/expected_parent_sha is refreshed to
+  the feature branch's actual current tip before dispatch (per recovery-reconciliation.md's
+  multi-wave sequencing rule) rather than reusing the immutable feature-create base_sha.
+
+  Design for ultrafixer itself was fully grilled and confirmed with the human before this
+  scaffolding began (see the conversation's grilling transcript / the confirmed design summary
+  carried into the propose packet's Context section) — sdd-propose's job is to formalize and
+  ground that already-agreed design, not to re-derive or re-litigate it.
