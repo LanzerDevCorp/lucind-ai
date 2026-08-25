@@ -1,6 +1,9 @@
 package packet_test
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"os"
 	"os/exec"
@@ -681,6 +684,169 @@ func TestSkillAssetContract(t *testing.T) {
 	}
 	if !strings.Contains(string(domainData), strings.TrimSpace(parts[1])) {
 		t.Errorf("references/core/domain.md canonical projection drifted from CONTEXT.md")
+	}
+}
+
+// pluginContentHashPath is where the last-recorded content hash of the
+// shipped plugin skill tree (plugin/claude-code/skills/lucind-ai/**) is
+// committed, alongside the plugin version it was recorded for. It must be
+// regenerated in the same commit as any change under that tree, together
+// with a matching version bump in both plugin.json and marketplace.json --
+// see TestPluginVersionGuardsSkillContent.
+const pluginContentHashPath = "testdata/skill_content_hash.txt"
+
+// pluginManifest mirrors the fields this test reads from
+// plugin/claude-code/.claude-plugin/plugin.json.
+type pluginManifest struct {
+	Version string `json:"version"`
+}
+
+// marketplaceManifest mirrors the fields this test reads from
+// .claude-plugin/marketplace.json.
+type marketplaceManifest struct {
+	Plugins []struct {
+		Name    string `json:"name"`
+		Version string `json:"version"`
+	} `json:"plugins"`
+}
+
+// hashSkillContent computes a deterministic SHA-256 over every regular file
+// under dir, folding in each file's repo-relative, forward-slash path so a
+// rename or an added/removed file changes the hash exactly as much as an
+// edited one. Directory traversal order is the lexical order
+// filepath.WalkDir already guarantees, so two runs over identical content
+// always produce the identical hash.
+func hashSkillContent(t *testing.T, dir string) string {
+	t.Helper()
+	h := sha256.New()
+	err := filepath.WalkDir(dir, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		rel, err := filepath.Rel(dir, path)
+		if err != nil {
+			return err
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		h.Write([]byte(filepath.ToSlash(rel)))
+		h.Write([]byte{0})
+		h.Write(data)
+		h.Write([]byte{0})
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("hash skill content under %s: %v", dir, err)
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// parseRecordedSkillContentHash reads pluginContentHashPath's "version: X"
+// / "sha256: Y" lines.
+func parseRecordedSkillContentHash(t *testing.T, path string) (version, sum string) {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(%s) error = %v -- this file records the plugin version and skill-content hash TestPluginVersionGuardsSkillContent checks against; it must exist and be committed", path, err)
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		switch {
+		case strings.HasPrefix(line, "version:"):
+			version = strings.TrimSpace(strings.TrimPrefix(line, "version:"))
+		case strings.HasPrefix(line, "sha256:"):
+			sum = strings.TrimSpace(strings.TrimPrefix(line, "sha256:"))
+		}
+	}
+	if version == "" || sum == "" {
+		t.Fatalf("%s missing a \"version: X\" or \"sha256: Y\" line", path)
+	}
+	return version, sum
+}
+
+// TestPluginVersionGuardsSkillContent is the guard the recovery-reconciliation.md
+// staleness incident was missing: nothing previously connected a change under
+// plugin/claude-code/skills/lucind-ai/** to the plugin version the two
+// manifests (plugin.json, marketplace.json) declare. That let every skill
+// fix in this session merge to dev with the version still at 2.0.1 -- the
+// same version already cached under a user's installed plugin -- so
+// reinstalling was a silent no-op and none of the corrected content ever
+// reached a real session.
+//
+// This test recomputes a content hash of the shipped skill tree and
+// compares it against a hash recorded in pluginContentHashPath alongside
+// the version it was recorded for, and separately requires plugin.json,
+// marketplace.json, and that recorded version to all agree. Either check
+// failing means: skill content changed (or the manifests drifted) without
+// the version bump and recorded-hash update that must travel with it.
+//
+// A weaker version of this guard would assert only that plugin.json and
+// marketplace.json agree with each other -- that catches the two manifests
+// going out of sync, but not the actual defect, which is both manifests
+// staying self-consistent while quietly falling behind the content they are
+// supposed to describe. The content-hash comparison is what makes a content
+// change without a version bump fail loudly instead of shipping silently.
+func TestPluginVersionGuardsSkillContent(t *testing.T) {
+	repoRoot := filepath.Join("..", "..")
+
+	pluginPath := filepath.Join(repoRoot, "plugin", "claude-code", ".claude-plugin", "plugin.json")
+	pluginData, err := os.ReadFile(pluginPath)
+	if err != nil {
+		t.Fatalf("ReadFile(%s) error = %v", pluginPath, err)
+	}
+	var pm pluginManifest
+	if err := json.Unmarshal(pluginData, &pm); err != nil {
+		t.Fatalf("parse %s: %v", pluginPath, err)
+	}
+	if pm.Version == "" {
+		t.Fatalf("%s: version is empty", pluginPath)
+	}
+
+	marketplacePath := filepath.Join(repoRoot, ".claude-plugin", "marketplace.json")
+	marketplaceData, err := os.ReadFile(marketplacePath)
+	if err != nil {
+		t.Fatalf("ReadFile(%s) error = %v", marketplacePath, err)
+	}
+	var mm marketplaceManifest
+	if err := json.Unmarshal(marketplaceData, &mm); err != nil {
+		t.Fatalf("parse %s: %v", marketplacePath, err)
+	}
+	var marketplaceVersion string
+	found := false
+	for _, p := range mm.Plugins {
+		if p.Name == "lucind-ai" {
+			marketplaceVersion = p.Version
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("%s: no plugin named \"lucind-ai\" in the plugins array", marketplacePath)
+	}
+
+	if pm.Version != marketplaceVersion {
+		t.Fatalf("plugin.json version %q does not match marketplace.json version %q for plugin \"lucind-ai\" -- they must stay in lockstep", pm.Version, marketplaceVersion)
+	}
+
+	// pluginContentHashPath is relative to this package's own directory,
+	// which is exactly go test's working directory for this package -- no
+	// repoRoot join needed here, unlike the repo-root-relative paths above.
+	hashRecordPath := pluginContentHashPath
+	recordedVersion, recordedSum := parseRecordedSkillContentHash(t, hashRecordPath)
+
+	if recordedVersion != pm.Version {
+		t.Fatalf("%s records version %q but plugin.json/marketplace.json now declare %q -- bump the recorded version (and, if skill content changed, its hash) in %s", hashRecordPath, recordedVersion, pm.Version, hashRecordPath)
+	}
+
+	skillDir := filepath.Join(repoRoot, "plugin", "claude-code", "skills", "lucind-ai")
+	actualSum := hashSkillContent(t, skillDir)
+	if actualSum != recordedSum {
+		t.Fatalf("skill content changed; bump plugin.json + marketplace.json version and update the recorded hash in %s (want a new version and sha256: %s for the current plugin/claude-code/skills/lucind-ai tree, found sha256: %s recorded for version %q)", hashRecordPath, actualSum, recordedSum, recordedVersion)
 	}
 }
 
