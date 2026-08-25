@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -1279,6 +1280,208 @@ func TestRunDispatchRegistersRunRowInLedger(t *testing.T) {
 	}
 	if got.PID != os.Getpid() {
 		t.Errorf("run.PID = %d, want os.Getpid() %d", got.PID, os.Getpid())
+	}
+}
+
+// writeAgyPacket writes a minimal legacy-mode packet naming the given
+// executor, for tests exercising runDispatch's agy quota gate.
+func writeAgyPacket(t *testing.T, dir, laneID, executorName string) string {
+	t.Helper()
+	path := filepath.Join(dir, laneID+".md")
+	content := "---\n" +
+		"id: " + laneID + "\n" +
+		"executor: " + executorName + "\n" +
+		"routed_by: test\n" +
+		"legacy_main: true\n" +
+		"expected_parent_sha: 1111111111111111111111111111111111111111\n" +
+		"---\n" +
+		"Task\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write packet: %v", err)
+	}
+	return path
+}
+
+// TestRunDispatchGatesOnAgyQuotaForAgyExecutorBatch proves runDispatch calls
+// the agy quota gate (ensureAgyQuota), with the --min-quota flag's value,
+// before dispatching a batch that includes an agy-executed packet. This is
+// the wave-level gate: --packet is repeated once per lane in the same
+// invocation, so this hook fires once per wave, never once per lane.
+func TestRunDispatchGatesOnAgyQuotaForAgyExecutorBatch(t *testing.T) {
+	primaryRoot := initRepo(t)
+	p1 := writeAgyPacket(t, primaryRoot, "lane-1", "agy")
+	overrideDispatchDeps(t, testDoneExecutor{})
+
+	var gateCalled bool
+	var gateMinFraction float64
+	origGate := ensureAgyQuota
+	ensureAgyQuota = func(ctx context.Context, minFraction float64) error {
+		gateCalled = true
+		gateMinFraction = minFraction
+		return nil
+	}
+	t.Cleanup(func() { ensureAgyQuota = origGate })
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(primaryRoot); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(cwd)
+
+	var stdout, stderr bytes.Buffer
+	code := run(context.Background(), []string{"run", "--packet", p1}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run exit code = %d, want 0; stderr = %q", code, stderr.String())
+	}
+	if !gateCalled {
+		t.Fatal("ensureAgyQuota was not called for a batch containing an agy-executed packet")
+	}
+	if gateMinFraction != defaultMinQuota {
+		t.Errorf("ensureAgyQuota minFraction = %v, want default %v", gateMinFraction, defaultMinQuota)
+	}
+}
+
+// TestRunDispatchSkipsAgyQuotaGateForNonAgyBatch proves the gate is skipped
+// entirely when no packet in the batch names the agy executor, since the
+// pooled-account quota it checks is meaningless for other executors' billing.
+func TestRunDispatchSkipsAgyQuotaGateForNonAgyBatch(t *testing.T) {
+	primaryRoot := initRepo(t)
+	p1 := writeAgyPacket(t, primaryRoot, "lane-1", "cursor-agent")
+	overrideDispatchDeps(t, testDoneExecutor{})
+
+	var gateCalled bool
+	origGate := ensureAgyQuota
+	ensureAgyQuota = func(ctx context.Context, minFraction float64) error {
+		gateCalled = true
+		return nil
+	}
+	t.Cleanup(func() { ensureAgyQuota = origGate })
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(primaryRoot); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(cwd)
+
+	var stdout, stderr bytes.Buffer
+	code := run(context.Background(), []string{"run", "--packet", p1}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run exit code = %d, want 0; stderr = %q", code, stderr.String())
+	}
+	if gateCalled {
+		t.Error("ensureAgyQuota was called for a batch with no agy-executed packet, want skipped")
+	}
+}
+
+// TestRunDispatchBlocksWaveWhenAgyQuotaGateFails proves a failing quota gate
+// blocks the whole wave before any ledger or worktree side effect -- no lane
+// dispatches, and no run row is registered, matching the same "fail before
+// ExecuteBatch" contract as the batch-disjointness check above it.
+func TestRunDispatchBlocksWaveWhenAgyQuotaGateFails(t *testing.T) {
+	primaryRoot := initRepo(t)
+	p1 := writeAgyPacket(t, primaryRoot, "lane-1", "agy")
+	overrideDispatchDeps(t, testDoneExecutor{})
+
+	const gateErr = "all pooled accounts below the quota minimum"
+	origGate := ensureAgyQuota
+	ensureAgyQuota = func(ctx context.Context, minFraction float64) error {
+		return errors.New(gateErr)
+	}
+	t.Cleanup(func() { ensureAgyQuota = origGate })
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(primaryRoot); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(cwd)
+
+	var stdout, stderr bytes.Buffer
+	code := run(context.Background(), []string{"run", "--packet", p1}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("run exit code = %d, want 1 when the quota gate fails", code)
+	}
+	if !strings.Contains(stderr.String(), gateErr) {
+		t.Errorf("stderr = %q, want it to contain %q", stderr.String(), gateErr)
+	}
+	if extractRunID(stdout.String()) != "" {
+		t.Errorf("stdout = %q, want no run id line: the gate must block before RegisterRun", stdout.String())
+	}
+}
+
+// TestRunDispatchMinQuotaFlagOverridesDefault proves --min-quota reaches the
+// gate as-given.
+func TestRunDispatchMinQuotaFlagOverridesDefault(t *testing.T) {
+	primaryRoot := initRepo(t)
+	p1 := writeAgyPacket(t, primaryRoot, "lane-1", "agy")
+	overrideDispatchDeps(t, testDoneExecutor{})
+
+	var gateMinFraction float64
+	origGate := ensureAgyQuota
+	ensureAgyQuota = func(ctx context.Context, minFraction float64) error {
+		gateMinFraction = minFraction
+		return nil
+	}
+	t.Cleanup(func() { ensureAgyQuota = origGate })
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(primaryRoot); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(cwd)
+
+	var stdout, stderr bytes.Buffer
+	code := run(context.Background(), []string{"run", "--packet", p1, "--min-quota", "0.25"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run exit code = %d, want 0; stderr = %q", code, stderr.String())
+	}
+	if gateMinFraction != 0.25 {
+		t.Errorf("ensureAgyQuota minFraction = %v, want 0.25", gateMinFraction)
+	}
+}
+
+// TestRunDispatchMinQuotaZeroDisablesGate proves --min-quota 0 is an
+// explicit escape hatch: the gate is skipped even for an agy-executor batch.
+func TestRunDispatchMinQuotaZeroDisablesGate(t *testing.T) {
+	primaryRoot := initRepo(t)
+	p1 := writeAgyPacket(t, primaryRoot, "lane-1", "agy")
+	overrideDispatchDeps(t, testDoneExecutor{})
+
+	var gateCalled bool
+	origGate := ensureAgyQuota
+	ensureAgyQuota = func(ctx context.Context, minFraction float64) error {
+		gateCalled = true
+		return nil
+	}
+	t.Cleanup(func() { ensureAgyQuota = origGate })
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(primaryRoot); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(cwd)
+
+	var stdout, stderr bytes.Buffer
+	code := run(context.Background(), []string{"run", "--packet", p1, "--min-quota", "0"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run exit code = %d, want 0; stderr = %q", code, stderr.String())
+	}
+	if gateCalled {
+		t.Error("ensureAgyQuota was called with --min-quota 0, want the gate disabled")
 	}
 }
 
