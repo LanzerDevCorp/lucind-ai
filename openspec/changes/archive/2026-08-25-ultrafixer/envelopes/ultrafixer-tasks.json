@@ -1,0 +1,81 @@
+{
+  "packet_id": "ultrafixer-tasks",
+  "status": "done",
+  "summary": "Authored Strict TDD implementation breakdown in openspec/changes/ultrafixer/tasks.md across 3 phases / 3 work units with exact line-level seam citations and review workload forecast. Updated openspec/changes/ultrafixer/state.yaml tasks phase status to done.",
+  "hard_stops": [
+    {
+      "hard_stop": "Any credential value would need to be chosen, generated, or written.",
+      "fired": false
+    },
+    {
+      "hard_stop": "A done-criterion turns out to be impossible, or already true for a reason the packet did not anticipate.",
+      "fired": false
+    },
+    {
+      "hard_stop": "The change would break something outside allowed_paths.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Two reasonable implementations exist and the packet does not say which.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    },
+    {
+      "hard_stop": "design.md's File Changes table turns out to be incomplete or internally inconsistent in a way that blocks writing a coherent task breakdown — name the exact gap, do not silently patch over a design decision yourself.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/ultrafixer/tasks.md",
+      "change": "created",
+      "why": "implementation task breakdown with Strict TDD pairs, review workload forecast, dependency order, threat-matrix tests, and traceability"
+    },
+    {
+      "path": "openspec/changes/ultrafixer/state.yaml",
+      "change": "modified",
+      "why": "update tasks phase status to done with phase summary and workload forecast note"
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every indirection introduced is demonstrably consumed by a terminal consumer. Every task that adds a type, field, table, or CLI verb must cite the exact caller/consumer from design.md's File Changes table.",
+      "met": true,
+      "evidence": "openspec/changes/ultrafixer/tasks.md lines 41, 43, 45, 50, 52, 54, 56 cite terminal consumers: ledger.Open (internal/ledger/ledger.go:146), runDefectRecord/runDefectList (cmd/lucind-ai/cli.go), CLI driver run() (cmd/lucind-ai/cli.go:134), Operator CLI invocations, and Feature Orchestrator lucind-ai run --packet (cmd/lucind-ai/cli.go:169-174)"
+    },
+    {
+      "criterion": "The work is committed. Evidence: git status --porcelain empty and git log --oneline -1. Conventional commit, no AI attribution.",
+      "met": true,
+      "evidence": "commit 333857a 'docs(ultrafixer): add implementation tasks and update state'; git status --porcelain is empty"
+    },
+    {
+      "criterion": "openspec/changes/ultrafixer/tasks.md exists, follows the local convention cited above.",
+      "met": true,
+      "evidence": "openspec/changes/ultrafixer/tasks.md exists and contains rationale, review workload forecast table, suggested work units, apply order, numbered RED/GREEN phase pairs with Prove commands, dependency order, threat-matrix RED tests, requirement traceability, and verbatim v8 DDL"
+    },
+    {
+      "criterion": "Every task is a genuine RED/GREEN pair (Strict TDD) — no task skips a failing test.",
+      "met": true,
+      "evidence": "openspec/changes/ultrafixer/tasks.md contains tasks 1.1-1.6, 2.1-2.6, 3.1-3.4 organized strictly as RED (failing test) followed by GREEN (minimal passing implementation)"
+    },
+    {
+      "criterion": "The ## Review Workload Forecast table gives an honest estimated changed-line range against the 1200-line budget, states 400/800/1200-line risk explicitly, and states whether a decision is needed before apply given delivery_strategy: single-pr (per this repo's Review Workload Guard: if risk is High or a decision is needed, single-pr means the orchestrator must record size:exception before apply — say so plainly in the forecast if that condition is met).",
+      "met": true,
+      "evidence": "openspec/changes/ultrafixer/tasks.md lines 7-23 specifies 900-1150 line range against 1200 budget, High 400-line risk, Medium 800-line risk, Low 1200-line risk, single-pr (size:exception), and confirms no decision needed before apply"
+    },
+    {
+      "criterion": "openspec/changes/ultrafixer/state.yaml's phases.tasks is updated to status: done with a short note: summarizing the phase/unit count and the forecast headline (updated lines estimate, risk level).",
+      "met": true,
+      "evidence": "openspec/changes/ultrafixer/state.yaml lines 43-50 set status: done with note detailing 3 phases / 3 work units and 900-1150 changed line forecast with size:exception"
+    },
+    {
+      "criterion": "Every file:line citation used in a task is verified against the actual current worktree.",
+      "met": true,
+      "evidence": "All seams verified against current worktree: internal/ledger/schema.go:10,359,458-472, schema_test.go:384,386-410, ledger.go:1436, ledger_test.go:1923, cmd/lucind-ai/cli.go:56,150-164,1838, cli_test.go:4234, packet_test.go:2041, and dependencies-defects.md:7-23"
+    }
+  ],
+  "commit": "333857a2f2269f6f0774fc80d157d670bcbe4b9e"
+}
