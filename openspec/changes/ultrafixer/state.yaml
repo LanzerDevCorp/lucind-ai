@@ -49,7 +49,14 @@ phases:
       ~350–430, tests ~480–600, asset/doc ~90–120), High 400-line budget risk, Medium 800-line risk,
       Low 1200-line risk, delivery_strategy single-pr (size:exception).
   apply:
-    status: pending
+    status: done
+    note: |
+      Completed all three work units from tasks.md across 3 conventional commits:
+      - Unit 1: Schema v8 defect_records table + Go Ledger API (RecordDefect, GetDefect, ListDefects) (commit dcd6ac4)
+      - Unit 2: CLI defect inspection commands (lucind-ai defect record, lucind-ai defect list) (commit 2053e59)
+      - Unit 3: Ultrafixer packet template asset, contract test, and coordination doc update (commit 26cd3ed)
+      Verified complete test suite passes via `go test ./... -race -count=1`.
+      Explicit confirmation: recorded `size:exception` per Review Workload Guard (delivery_strategy: single-pr, estimated 900–1150 lines, 1200-line budget).
   verify:
     status: pending
   archive:
