@@ -541,7 +541,7 @@ func RunCampaign(ctx context.Context, cfg CampaignConfig) (int, error) {
 		deps := cfg.DepsFactory(runID, cfg.PrimaryRoot, ledg, stability.DispatchTimeout, 0)
 
 		_, pB := stability.BuildJourneyPackets(journeyCfg)
-		wtPathB := filepath.Join(cfg.PrimaryRoot, "wt-"+pB.ID)
+		wtPathB := reconcile.WorktreePathFor(cfg.PrimaryRoot, pB.ID)
 
 		res, err := cfg.ExecuteJourney(ctx, sm, deps, featSvc, journeyCfg, cfg.PGIDB, wtPathB)
 		if err != nil {

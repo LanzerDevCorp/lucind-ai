@@ -25,6 +25,7 @@ import (
 	"github.com/LanzerDevCorp/lucind-ai/internal/run"
 	"github.com/LanzerDevCorp/lucind-ai/internal/stability/fixture"
 	"github.com/LanzerDevCorp/lucind-ai/internal/stability/process"
+	"github.com/LanzerDevCorp/lucind-ai/internal/stability/reconcile"
 	"github.com/LanzerDevCorp/lucind-ai/internal/stability/store"
 )
 
@@ -641,7 +642,7 @@ func ExecuteTrialJourneyLive(
 	}
 
 	pA, pB := BuildJourneyPackets(cfg)
-	worktreeBPath := filepath.Join(deps.PrimaryRoot, "wt-"+pB.ID)
+	worktreeBPath := reconcile.WorktreePathFor(deps.PrimaryRoot, pB.ID)
 
 	pidBChan := make(chan int, 1)
 	liveDeps := deps
@@ -787,7 +788,7 @@ func continueTrialAfterDispatch(
 		return nil, err
 	}
 
-	wtPathA := filepath.Join(deps.PrimaryRoot, "wt-"+pA.ID)
+	wtPathA := reconcile.WorktreePathFor(deps.PrimaryRoot, pA.ID)
 	defectRec, _ := ReadDefectRecord(deps.WorktreeFS(wtPathA), wtPathA)
 	var defectPtr *DefectRecord
 	if defectRec.ChangeID != "" {
