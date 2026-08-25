@@ -4,6 +4,6 @@
 # Regenerate BOTH lines below in the same commit as any change under that
 # tree, together with a matching version bump in
 # plugin/claude-code/.claude-plugin/plugin.json and .claude-plugin/marketplace.json.
-version: 2.0.6
-sha256: 31d09ab03f8976fbe0ebf502e7304c86042e68c9298b4056086f8bfdc14a64e9
+version: 2.0.7
+sha256: 90ebd1be3a172e54a5e119ec474cbb8f90c33592e822c6ec24a160f586aea143
 

@@ -27,6 +27,7 @@ The ultrafixer lifecycle follows a structured protocol:
    - Repairs are committed using conventional commit formatting with zero AI attribution or `Co-Authored-By` trailers.
    - Ultrafixer emits a `blocked` result envelope containing the repair commit, affected files, and distinct `Question` and `Finding` entries encoding per-branch recommendations and evidence.
    - Ultrafixer MUST NOT auto-integrate or push fixes. The Orchestrator presents the `blocked` result envelope to the human operator for decision and CAS promotion via `lucind-ai integrate retry`.
+   - If the operator accepts the fix, the Orchestrator runs `lucind-ai integrate retry` to promote it. If the operator declines, the Orchestrator records the decision with `lucind-ai defect decline --id <id>`, which transitions the Defect Record's disposition to `declined` in the ledger.
    - Repair branches and worktrees remain preserved on disk upon `blocked` emission or operator decline.
 
 ## Evidence boundary
