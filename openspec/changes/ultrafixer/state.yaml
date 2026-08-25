@@ -27,7 +27,12 @@ phases:
       isolated worktree repair with blocked result envelope delivery, ledger schema v8 Defect
       Records, and human-gated CAS integration.
   spec:
-    status: pending
+    status: done
+    note: |
+      Authored delta specs for ultrafixer-dispatch, defect-records, and dependencies-defects.
+      Evaluated lane-execution and dropped it from the delta spec list as confirmed by design.md's
+      zero-new-Go dispatch decision (internal/run, internal/executor, and internal/packet are reused
+      verbatim with no behavioral or code modifications).
   design:
     status: done
     note: |
