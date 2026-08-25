@@ -44,7 +44,7 @@ The SDD cycle for `ultrafixer` executed across the following phases:
 | Remediation | 1 remediation lane (`ultrafixer-remediate.md`, commit `3441c81`) | `agy` (`gemini-3.7-flash-high`) | Both violations fixed, 4 non-blocking findings addressed |
 | Verify R2 (Mechanical) | 1 check run at `f5e3a7f` | `lucind-checks.sh` | Passed (exit 0, all 21 packages green) |
 | Verify R2 (Qualitative) | 2 judgment lanes (`verify-ultrafixer-r2-agy.md`, `verify-ultrafixer-r2-cursor-agent.md`) | `agy` + `cursor-agent` | Both judges confirmed fixes, verdict PASSED |
-| Archive | 1 mechanical archival lane (`archive-ultrafixer.md`) | `agy` (`gemini-3.7-flash-high`) | In progress |
+| Archive | 1 mechanical archival lane (`archive-ultrafixer.md`, commit `2d4c9df`) | `agy` (`gemini-3.7-flash-high`) | Lane itself `done`; manually fast-forward-merged after a third reconciliation infra bug (see below) |
 
 Preserved dispatch artifacts under `openspec/changes/ultrafixer/`:
 - `packets/ultrafixer-propose.md`
@@ -84,3 +84,21 @@ Preserved dispatch artifacts under `openspec/changes/ultrafixer/`:
   1. *Reconcile `Renew` stale-approved supersession bug*: The overlap gate blocked promotion on a `cmd/lucind-ai/cli.go` usage const conflict, and `Renew` failed to clear the block because it only superseded requests with status `'awaiting'`, never `'approved'`. Reported to `lucind-ai-fixer`, fixed at commit `77fca29` in `internal/reconcile/reconcile.go`, merged to `dev`, and installed.
   2. *Reconcile stale-candidate-reuse-without-ancestry-check bug*: Remediation dispatch promoted stale candidate SHA `22e13710` instead of the Lane's real commit `3441c815`, temporarily regressing `feature/ultrafixer`. Recovered via `git merge-base --is-ancestor` verification and `git reset --hard 3441c815`. Reported to `lucind-ai-fixer`, fixed at commit `c0827fc` in `internal/reconcile/reconcile.go`, merged to `dev`, and installed.
   Both infrastructure fixes landed in `lucind-ai` itself, ensuring clean reconciliation for all future changes.
+  3. *Reconcile candidate non-determinism (unresolved, reported not fixed)*: the archive Lane
+     itself (`archive-ultrafixer`, commit `2d4c9df`, which never touches `cli.go` — only
+     `openspec/` paths) hit the exact same `reconciliation-required overlap with feature
+     native-stability-campaign` classification on its own promotion, purely from the *historical*
+     cli.go overlap in `feature/ultrafixer`'s cumulative diff (the overlap gate compares full
+     accumulated diffs from each feature's own `base_sha`, not the current packet's own changes —
+     so this recurs on every dispatch against the feature until it's actually merged to `dev`).
+     Attempting the standard reconcile renew/approve/resolve/`integrate retry` recovery twice in a
+     row surfaced a further issue: each `integrate retry` regenerated a **different** candidate
+     SHA for logically identical content (`ef3e3e2` then `d59247594...` then a third, unregistered,
+     SHA on a subsequent retry) — the exact-SHA matching the reconciliation-candidate mechanism
+     depends on cannot converge against a moving target. Recovered by manually fast-forwarding
+     `feature/ultrafixer` directly to the archive Lane's own preserved branch tip (`2d4c9df`,
+     confirmed via `git merge-base --is-ancestor` to be a genuine descendant of the pre-archive
+     tip — a safe advance, not a rewrite), independently verified with `go build ./...` and a clean
+     `git status --porcelain`. Reported to `lucind-ai-fixer` as a third, follow-on defect
+     (candidate-construction determinism); not yet fixed as of this change's close — tracked
+     separately, does not block this archive.
