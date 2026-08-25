@@ -53,7 +53,7 @@ const attemptOwner = "lucind-ai run"
 // error, so a person driving the binary from a terminal always sees the one
 // invocation that works rather than a stack trace. --packet is repeatable:
 // each occurrence adds one more lane to the batch.
-const usage = "usage: lucind-ai run --packet <path> [--packet <path> ...] [--timeout <duration>] [--approval-timeout <duration>] [--legacy-main] [--expected-parent-sha <sha>] [--min-quota <fraction>]\n       lucind-ai split --dag <path> --out <dir>\n       lucind-ai check [--out <path>]\n       lucind-ai serve [--addr <addr>] [--approver <name>] [--approval-timeout <duration>] [--enable-dispatch] [--dispatch-token <token>]\n       lucind-ai feature create --id <id> --parent <ref> --base-sha <sha> [--expected-parent-sha <sha>]\n       lucind-ai feature status [--id <id>]\n       lucind-ai feature recover --attempt <id>\n       lucind-ai feature renew --id <id> --owner <owner> --fence <fence> [--ttl <duration>]\n       lucind-ai feature disable --id <id>\n       lucind-ai reconcile approve --request <id> --source <feature> --target <feature> [--actor <name>]\n       lucind-ai reconcile decline --request <id> [--actor <name>] [--reason <reason>]\n       lucind-ai reconcile cancel --request <id> [--actor <name>] [--reason <reason>]\n       lucind-ai reconcile renew --request <id> [--base-sha <sha>] [--source-sha <sha>] [--target-sha <sha>]\n       lucind-ai reconcile resolve --candidate <id> --sha <sha> [--actor <name>]\n       lucind-ai defect record --id <id> --feature <id> --signature <sig> [--evidence <ev>] [--disposition <disp>] [--run <run-id>] [--lane <lane-id>]\n       lucind-ai defect list --feature <id>\n       lucind-ai worktree cleanup --lane <id>\n       lucind-ai integrate retry --run <run-id> [--lane <id> ...] [--timeout <duration>] [--approval-timeout <duration>]\n       lucind-ai --version"
+const usage = "usage: lucind-ai run --packet <path> [--packet <path> ...] [--timeout <duration>] [--approval-timeout <duration>] [--legacy-main] [--expected-parent-sha <sha>] [--min-quota <fraction>]\n       lucind-ai split --dag <path> --out <dir>\n       lucind-ai check [--out <path>]\n       lucind-ai serve [--addr <addr>] [--approver <name>] [--approval-timeout <duration>] [--enable-dispatch] [--dispatch-token <token>]\n       lucind-ai feature create --id <id> --parent <ref> --base-sha <sha> [--expected-parent-sha <sha>]\n       lucind-ai feature status [--id <id>]\n       lucind-ai feature recover --attempt <id>\n       lucind-ai feature renew --id <id> --owner <owner> --fence <fence> [--ttl <duration>]\n       lucind-ai feature disable --id <id>\n       lucind-ai reconcile approve --request <id> --source <feature> --target <feature> [--actor <name>]\n       lucind-ai reconcile decline --request <id> [--actor <name>] [--reason <reason>]\n       lucind-ai reconcile cancel --request <id> [--actor <name>] [--reason <reason>]\n       lucind-ai reconcile renew --request <id> [--base-sha <sha>] [--source-sha <sha>] [--target-sha <sha>]\n       lucind-ai reconcile resolve --candidate <id> --sha <sha> [--actor <name>]\n       lucind-ai defect record --id <id> --feature <id> --signature <sig> [--evidence <ev>] [--disposition <disp>] [--run <run-id>] [--lane <lane-id>]\n       lucind-ai defect list --feature <id>\n       lucind-ai defect decline --id <id>\n       lucind-ai worktree cleanup --lane <id>\n       lucind-ai integrate retry --run <run-id> [--lane <id> ...] [--timeout <duration>] [--approval-timeout <duration>]\n       lucind-ai --version"
 
 // depsFactory constructs run.Deps for runDispatch. In production it is
 // productionDeps; tests may override it to inject test doubles or observe dependency calls.
@@ -333,8 +333,9 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 	// nest a second worktree tree inside a linked worktree and put the
 	// ledger somewhere other than the primary repository's .lucind/,
 	// which internal/ledger.Open assumes is always the case.
-	if worktree.IsLinkedWorktree(primaryRoot) {
-		fmt.Fprintf(stderr, "lucind-ai: refusing to run from inside a linked worktree (%s); run from the primary repository instead\n", primaryRoot)
+	toplevel, err := gitShowToplevel(ctx)
+	if err == nil && worktree.IsLinkedWorktree(toplevel) {
+		fmt.Fprintf(stderr, "lucind-ai: refusing to run from inside a linked worktree (%s); run from the primary repository instead\n", toplevel)
 		return 1
 	}
 
@@ -671,12 +672,9 @@ func printIDList(w io.Writer, label string, ids []string) {
 	fmt.Fprintf(w, "%s: %s\n", label, strings.Join(ids, " "))
 }
 
-// resolvePrimaryRoot runs "git rev-parse --show-toplevel" in the process's
+// gitShowToplevel runs "git rev-parse --show-toplevel" in the process's
 // working directory and returns its trimmed, absolute output.
-// worktree.Create derives every lane's worktree location from this value
-// and worktree.Worktree.Path documents itself as absolute, so a relative
-// result here is treated as a failure rather than passed downstream.
-func resolvePrimaryRoot(ctx context.Context) (string, error) {
+func gitShowToplevel(ctx context.Context) (string, error) {
 	cmd := exec.CommandContext(ctx, "git", "rev-parse", "--show-toplevel")
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -685,11 +683,38 @@ func resolvePrimaryRoot(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("git rev-parse --show-toplevel: %w: %s", err, strings.TrimSpace(stderr.String()))
 	}
 
-	root := strings.TrimRight(stdout.String(), "\n")
+	root := strings.TrimRight(stdout.String(), "\r\n")
 	if !filepath.IsAbs(root) {
 		return "", fmt.Errorf("git rev-parse --show-toplevel returned a non-absolute path: %q", root)
 	}
 	return root, nil
+}
+
+// resolvePrimaryRoot resolves the primary repository root directory, even when
+// invoked from within a linked worktree or subdirectory.
+func resolvePrimaryRoot(ctx context.Context) (string, error) {
+	cmd := exec.CommandContext(ctx, "git", "rev-parse", "--git-common-dir")
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("git rev-parse --git-common-dir: %w: %s", err, strings.TrimSpace(stderr.String()))
+	}
+
+	commonDir := strings.TrimRight(stdout.String(), "\r\n")
+	if !filepath.IsAbs(commonDir) {
+		abs, err := filepath.Abs(commonDir)
+		if err != nil {
+			return "", fmt.Errorf("resolve git common dir %q: %w", commonDir, err)
+		}
+		commonDir = abs
+	}
+	commonDir = filepath.Clean(commonDir)
+	primaryRoot := filepath.Dir(commonDir)
+	if !filepath.IsAbs(primaryRoot) {
+		return "", fmt.Errorf("git rev-parse --git-common-dir returned a non-absolute path: %q", primaryRoot)
+	}
+	return primaryRoot, nil
 }
 
 // productionDeps constructs the production run.Deps wiring real-world
@@ -809,8 +834,9 @@ func serveDispatch(ctx context.Context, args []string, stdout, stderr io.Writer)
 		return 1
 	}
 
-	if worktree.IsLinkedWorktree(primaryRoot) {
-		fmt.Fprintf(stderr, "lucind-ai: refusing to run from inside a linked worktree (%s); run from the primary repository instead\n", primaryRoot)
+	toplevel, err := gitShowToplevel(ctx)
+	if err == nil && worktree.IsLinkedWorktree(toplevel) {
+		fmt.Fprintf(stderr, "lucind-ai: refusing to run from inside a linked worktree (%s); run from the primary repository instead\n", toplevel)
 		return 1
 	}
 
@@ -929,8 +955,9 @@ func runFeatureCreate(ctx context.Context, args []string, stdout, stderr io.Writ
 		return 1
 	}
 
-	if worktree.IsLinkedWorktree(primaryRoot) {
-		fmt.Fprintf(stderr, "lucind-ai: refusing to run from inside a linked worktree (%s); run from the primary repository instead\n", primaryRoot)
+	toplevel, err := gitShowToplevel(ctx)
+	if err == nil && worktree.IsLinkedWorktree(toplevel) {
+		fmt.Fprintf(stderr, "lucind-ai: refusing to run from inside a linked worktree (%s); run from the primary repository instead\n", toplevel)
 		return 1
 	}
 
@@ -969,11 +996,6 @@ func runFeatureStatus(ctx context.Context, args []string, stdout, stderr io.Writ
 	primaryRoot, err := resolvePrimaryRoot(ctx)
 	if err != nil {
 		fmt.Fprintf(stderr, "lucind-ai: resolve primary repository root: %v\n", err)
-		return 1
-	}
-
-	if worktree.IsLinkedWorktree(primaryRoot) {
-		fmt.Fprintf(stderr, "lucind-ai: refusing to run from inside a linked worktree (%s); run from the primary repository instead\n", primaryRoot)
 		return 1
 	}
 
@@ -1075,8 +1097,9 @@ func runFeatureRecover(ctx context.Context, args []string, stdout, stderr io.Wri
 		return 1
 	}
 
-	if worktree.IsLinkedWorktree(primaryRoot) {
-		fmt.Fprintf(stderr, "lucind-ai: refusing to run from inside a linked worktree (%s); run from the primary repository instead\n", primaryRoot)
+	toplevel, err := gitShowToplevel(ctx)
+	if err == nil && worktree.IsLinkedWorktree(toplevel) {
+		fmt.Fprintf(stderr, "lucind-ai: refusing to run from inside a linked worktree (%s); run from the primary repository instead\n", toplevel)
 		return 1
 	}
 
@@ -1152,8 +1175,9 @@ func runFeatureRenew(ctx context.Context, args []string, stdout, stderr io.Write
 		return 1
 	}
 
-	if worktree.IsLinkedWorktree(primaryRoot) {
-		fmt.Fprintf(stderr, "lucind-ai: refusing to run from inside a linked worktree (%s); run from the primary repository instead\n", primaryRoot)
+	toplevel, err := gitShowToplevel(ctx)
+	if err == nil && worktree.IsLinkedWorktree(toplevel) {
+		fmt.Fprintf(stderr, "lucind-ai: refusing to run from inside a linked worktree (%s); run from the primary repository instead\n", toplevel)
 		return 1
 	}
 
@@ -1209,8 +1233,9 @@ func runFeatureDisable(ctx context.Context, args []string, stdout, stderr io.Wri
 		return 1
 	}
 
-	if worktree.IsLinkedWorktree(primaryRoot) {
-		fmt.Fprintf(stderr, "lucind-ai: refusing to run from inside a linked worktree (%s); run from the primary repository instead\n", primaryRoot)
+	toplevel, err := gitShowToplevel(ctx)
+	if err == nil && worktree.IsLinkedWorktree(toplevel) {
+		fmt.Fprintf(stderr, "lucind-ai: refusing to run from inside a linked worktree (%s); run from the primary repository instead\n", toplevel)
 		return 1
 	}
 
@@ -1297,8 +1322,9 @@ func runReconcileApprove(ctx context.Context, args []string, stdout, stderr io.W
 		return 1
 	}
 
-	if worktree.IsLinkedWorktree(primaryRoot) {
-		fmt.Fprintf(stderr, "lucind-ai: refusing to run from inside a linked worktree (%s); run from the primary repository instead\n", primaryRoot)
+	toplevel, err := gitShowToplevel(ctx)
+	if err == nil && worktree.IsLinkedWorktree(toplevel) {
+		fmt.Fprintf(stderr, "lucind-ai: refusing to run from inside a linked worktree (%s); run from the primary repository instead\n", toplevel)
 		return 1
 	}
 
@@ -1399,8 +1425,9 @@ func runReconcileDecline(ctx context.Context, args []string, stdout, stderr io.W
 		return 1
 	}
 
-	if worktree.IsLinkedWorktree(primaryRoot) {
-		fmt.Fprintf(stderr, "lucind-ai: refusing to run from inside a linked worktree (%s); run from the primary repository instead\n", primaryRoot)
+	toplevel, err := gitShowToplevel(ctx)
+	if err == nil && worktree.IsLinkedWorktree(toplevel) {
+		fmt.Fprintf(stderr, "lucind-ai: refusing to run from inside a linked worktree (%s); run from the primary repository instead\n", toplevel)
 		return 1
 	}
 
@@ -1456,8 +1483,9 @@ func runReconcileCancel(ctx context.Context, args []string, stdout, stderr io.Wr
 		return 1
 	}
 
-	if worktree.IsLinkedWorktree(primaryRoot) {
-		fmt.Fprintf(stderr, "lucind-ai: refusing to run from inside a linked worktree (%s); run from the primary repository instead\n", primaryRoot)
+	toplevel, err := gitShowToplevel(ctx)
+	if err == nil && worktree.IsLinkedWorktree(toplevel) {
+		fmt.Fprintf(stderr, "lucind-ai: refusing to run from inside a linked worktree (%s); run from the primary repository instead\n", toplevel)
 		return 1
 	}
 
@@ -1515,8 +1543,9 @@ func runReconcileRenew(ctx context.Context, args []string, stdout, stderr io.Wri
 		return 1
 	}
 
-	if worktree.IsLinkedWorktree(primaryRoot) {
-		fmt.Fprintf(stderr, "lucind-ai: refusing to run from inside a linked worktree (%s); run from the primary repository instead\n", primaryRoot)
+	toplevel, err := gitShowToplevel(ctx)
+	if err == nil && worktree.IsLinkedWorktree(toplevel) {
+		fmt.Fprintf(stderr, "lucind-ai: refusing to run from inside a linked worktree (%s); run from the primary repository instead\n", toplevel)
 		return 1
 	}
 
@@ -1596,8 +1625,9 @@ func runReconcileResolve(ctx context.Context, args []string, stdout, stderr io.W
 		return 1
 	}
 
-	if worktree.IsLinkedWorktree(primaryRoot) {
-		fmt.Fprintf(stderr, "lucind-ai: refusing to run from inside a linked worktree (%s); run from the primary repository instead\n", primaryRoot)
+	toplevel, err := gitShowToplevel(ctx)
+	if err == nil && worktree.IsLinkedWorktree(toplevel) {
+		fmt.Fprintf(stderr, "lucind-ai: refusing to run from inside a linked worktree (%s); run from the primary repository instead\n", toplevel)
 		return 1
 	}
 
@@ -1679,8 +1709,9 @@ func runWorktreeCleanup(ctx context.Context, args []string, stdout, stderr io.Wr
 		return 1
 	}
 
-	if worktree.IsLinkedWorktree(primaryRoot) {
-		fmt.Fprintf(stderr, "lucind-ai: refusing to run from inside a linked worktree (%s); run from the primary repository instead\n", primaryRoot)
+	toplevel, err := gitShowToplevel(ctx)
+	if err == nil && worktree.IsLinkedWorktree(toplevel) {
+		fmt.Fprintf(stderr, "lucind-ai: refusing to run from inside a linked worktree (%s); run from the primary repository instead\n", toplevel)
 		return 1
 	}
 
@@ -1761,8 +1792,9 @@ func runIntegrateRetry(ctx context.Context, args []string, stdout, stderr io.Wri
 		return 1
 	}
 
-	if worktree.IsLinkedWorktree(primaryRoot) {
-		fmt.Fprintf(stderr, "lucind-ai: refusing to run from inside a linked worktree (%s); run from the primary repository instead\n", primaryRoot)
+	toplevel, err := gitShowToplevel(ctx)
+	if err == nil && worktree.IsLinkedWorktree(toplevel) {
+		fmt.Fprintf(stderr, "lucind-ai: refusing to run from inside a linked worktree (%s); run from the primary repository instead\n", toplevel)
 		return 1
 	}
 
@@ -1838,10 +1870,10 @@ func runIntegrateRetry(ctx context.Context, args []string, stdout, stderr io.Wri
 	return 0
 }
 
-// defectDispatch dispatches defect subcommands (record, list).
+// defectDispatch dispatches defect subcommands (record, list, decline).
 func defectDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "lucind-ai: defect subcommand requires an action (record, list)")
+		fmt.Fprintln(stderr, "lucind-ai: defect subcommand requires an action (record, list, decline)")
 		fmt.Fprintln(stderr, usage)
 		return 1
 	}
@@ -1851,6 +1883,8 @@ func defectDispatch(ctx context.Context, args []string, stdout, stderr io.Writer
 		return runDefectRecord(ctx, args[1:], stdout, stderr)
 	case "list":
 		return runDefectList(ctx, args[1:], stdout, stderr)
+	case "decline":
+		return runDefectDecline(ctx, args[1:], stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "lucind-ai: unknown defect subcommand %q\n%s\n", args[0], usage)
 		return 1
@@ -1898,15 +1932,15 @@ func runDefectRecord(ctx context.Context, args []string, stdout, stderr io.Write
 	if disp == "" {
 		disp = string(ledger.DefectDispositionRecorded)
 	}
+	if !ledger.DefectDisposition(disp).Valid() {
+		fmt.Fprintf(stderr, "lucind-ai: invalid disposition %q (valid: recorded, repaired, declined, deferred)\n", disp)
+		fs.Usage()
+		return 1
+	}
 
 	primaryRoot, err := resolvePrimaryRoot(ctx)
 	if err != nil {
 		fmt.Fprintf(stderr, "lucind-ai: resolve primary repository root: %v\n", err)
-		return 1
-	}
-
-	if worktree.IsLinkedWorktree(primaryRoot) {
-		fmt.Fprintf(stderr, "lucind-ai: refusing to run from inside a linked worktree (%s); run from the primary repository instead\n", primaryRoot)
 		return 1
 	}
 
@@ -1964,11 +1998,6 @@ func runDefectList(ctx context.Context, args []string, stdout, stderr io.Writer)
 		return 1
 	}
 
-	if worktree.IsLinkedWorktree(primaryRoot) {
-		fmt.Fprintf(stderr, "lucind-ai: refusing to run from inside a linked worktree (%s); run from the primary repository instead\n", primaryRoot)
-		return 1
-	}
-
 	ledg, err := ledger.Open(ctx, primaryRoot)
 	if err != nil {
 		fmt.Fprintf(stderr, "lucind-ai: open ledger: %v\n", err)
@@ -1991,5 +2020,47 @@ func runDefectList(ctx context.Context, args []string, stdout, stderr io.Writer)
 		fmt.Fprintf(stdout, "defect: %s  disposition: %s  signature: %s  created_at: %s\n",
 			d.ID, d.Disposition, d.ErrorSignature, d.CreatedAt.Format(time.RFC3339))
 	}
+	return 0
+}
+
+// runDefectDecline implements "lucind-ai defect decline": transitions an existing defect record to declined.
+func runDefectDecline(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("defect decline", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	fs.Usage = func() {
+		fmt.Fprintln(stderr, "usage: lucind-ai defect decline --id <id>")
+		fs.PrintDefaults()
+	}
+
+	id := fs.String("id", "", "defect record identifier")
+	if err := fs.Parse(args); err != nil {
+		return 1
+	}
+
+	if strings.TrimSpace(*id) == "" {
+		fmt.Fprintln(stderr, "lucind-ai: --id is required")
+		fs.Usage()
+		return 1
+	}
+
+	primaryRoot, err := resolvePrimaryRoot(ctx)
+	if err != nil {
+		fmt.Fprintf(stderr, "lucind-ai: resolve primary repository root: %v\n", err)
+		return 1
+	}
+
+	ledg, err := ledger.Open(ctx, primaryRoot)
+	if err != nil {
+		fmt.Fprintf(stderr, "lucind-ai: open ledger: %v\n", err)
+		return 1
+	}
+	defer ledg.Close()
+
+	if err := ledg.UpdateDefectDisposition(ctx, *id, ledger.DefectDispositionDeclined); err != nil {
+		fmt.Fprintf(stderr, "lucind-ai: %v\n", err)
+		return 1
+	}
+
+	fmt.Fprintf(stdout, "declined defect %s\n", *id)
 	return 0
 }

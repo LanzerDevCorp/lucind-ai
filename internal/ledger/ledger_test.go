@@ -2043,3 +2043,84 @@ func TestLedgerListDefects(t *testing.T) {
 		t.Errorf("ListDefects(feat-none) length = %d, want 0", len(listEmpty))
 	}
 }
+
+func TestLedgerUpdateDefectDisposition(t *testing.T) {
+	ctx := context.Background()
+	l := openTestLedger(t)
+
+	now := time.Date(2026, 8, 25, 12, 0, 0, 0, time.UTC)
+	rec := DefectRecord{
+		ID:             "defect-update-1",
+		FeatureID:      "feat-update",
+		ErrorSignature: "sig",
+		Disposition:    DefectDispositionRecorded,
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	}
+	if err := l.RecordDefect(ctx, rec); err != nil {
+		t.Fatalf("RecordDefect: %v", err)
+	}
+
+	// Update to declined
+	if err := l.UpdateDefectDisposition(ctx, "defect-update-1", DefectDispositionDeclined); err != nil {
+		t.Fatalf("UpdateDefectDisposition(declined): %v", err)
+	}
+
+	got, err := l.GetDefect(ctx, "defect-update-1")
+	if err != nil {
+		t.Fatalf("GetDefect: %v", err)
+	}
+	if got.Disposition != DefectDispositionDeclined {
+		t.Errorf("Disposition = %q, want %q", got.Disposition, DefectDispositionDeclined)
+	}
+	if !got.UpdatedAt.After(rec.UpdatedAt) && !got.UpdatedAt.Equal(rec.UpdatedAt) {
+		t.Errorf("UpdatedAt = %v, expected at or after initial %v", got.UpdatedAt, rec.UpdatedAt)
+	}
+
+	// Update to repaired
+	if err := l.UpdateDefectDisposition(ctx, "defect-update-1", DefectDispositionRepaired); err != nil {
+		t.Fatalf("UpdateDefectDisposition(repaired): %v", err)
+	}
+	got2, err := l.GetDefect(ctx, "defect-update-1")
+	if err != nil {
+		t.Fatalf("GetDefect: %v", err)
+	}
+	if got2.Disposition != DefectDispositionRepaired {
+		t.Errorf("Disposition = %q, want %q", got2.Disposition, DefectDispositionRepaired)
+	}
+}
+
+func TestLedgerUpdateDefectDispositionNotFound(t *testing.T) {
+	ctx := context.Background()
+	l := openTestLedger(t)
+
+	err := l.UpdateDefectDisposition(ctx, "nonexistent-defect", DefectDispositionDeclined)
+	if err == nil {
+		t.Fatal("UpdateDefectDisposition on nonexistent ID succeeded, want error")
+	}
+	if !errors.Is(err, ErrDefectNotFound) {
+		t.Errorf("err = %v, want ErrDefectNotFound", err)
+	}
+}
+
+func TestLedgerUpdateDefectDispositionRejectsInvalidDisposition(t *testing.T) {
+	ctx := context.Background()
+	l := openTestLedger(t)
+
+	rec := DefectRecord{
+		ID:             "defect-bad-update",
+		FeatureID:      "feat-update",
+		ErrorSignature: "sig",
+		Disposition:    DefectDispositionRecorded,
+		CreatedAt:      time.Now().UTC(),
+		UpdatedAt:      time.Now().UTC(),
+	}
+	if err := l.RecordDefect(ctx, rec); err != nil {
+		t.Fatalf("RecordDefect: %v", err)
+	}
+
+	err := l.UpdateDefectDisposition(ctx, "defect-bad-update", DefectDisposition("invalid-disp"))
+	if err == nil {
+		t.Fatal("UpdateDefectDisposition with invalid disposition succeeded, want error")
+	}
+}

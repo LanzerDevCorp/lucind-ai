@@ -10,7 +10,7 @@ allowed_paths: ["<path1>", "<path2>"]
 
 # Packet <id>
 
-**Tier:** B (auto-merge after audit)
+**Tier:** B (human-gated CAS integration after audit)
 **Worktree:** ../<repo>-worktrees/<id>  ·  **Branch:** lucind/<id>
 
 ## Goal
@@ -26,6 +26,7 @@ Triage pre-existing defect `<error-signature>`, assess critical and blocking imp
 
 - [ ] **Every indirection introduced is demonstrably consumed by a terminal consumer.**
 - [ ] **The work is committed (if critical/blocking) OR recorded in the ledger (if non-critical/non-blocking).**
+- [ ] **All repair commits MUST use conventional commit formatting with zero AI attribution or Co-Authored-By trailers.**
 - [ ] Origin classification executed against `base_sha`. If feature-introduced, exit `done` with explanatory summary.
 - [ ] Two-axis evaluation completed across active features discovered via `lucind-ai feature status`.
 - [ ] Cross-branch impact verified via failure signal reproduction in candidate worktrees.
@@ -59,3 +60,6 @@ Triage pre-existing defect `<error-signature>`, assess critical and blocking imp
 ## Return
 
 Write the result envelope to `.lucind/result.json` in this worktree.
+- For critical or blocking repairs, emit a schema-valid `blocked` result envelope and recommend CAS promotion via `lucind-ai integrate retry`. If the human operator declines the fix, record `disposition=declined` via `lucind-ai defect decline --id <id>`.
+- For non-critical/non-blocking defects, record the defect in the ledger via `lucind-ai defect record` with disposition `recorded` and emit a `done` envelope touching no files.
+

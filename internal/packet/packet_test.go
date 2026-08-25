@@ -2091,4 +2091,21 @@ func TestUltrafixerPacketTemplateContract(t *testing.T) {
 			t.Errorf("template missing expected section %q", sec)
 		}
 	}
+
+	// Protocol assertions from ultrafixer-dispatch and defect-records specs
+	if strings.Contains(content, "auto-merge") {
+		t.Errorf("template contains contradictory 'auto-merge' label")
+	}
+	if !strings.Contains(content, "conventional commit") {
+		t.Errorf("template missing conventional commit instruction")
+	}
+	if !strings.Contains(content, "Co-Authored-By") {
+		t.Errorf("template missing Co-Authored-By prohibition")
+	}
+	if !strings.Contains(content, "Auto-integrating or merging the repair commit directly into any branch") {
+		t.Errorf("template missing hard stop forbidding auto-integration")
+	}
+	if !strings.Contains(content, "lucind-ai defect decline") && !strings.Contains(content, "disposition=declined") {
+		t.Errorf("template missing declined disposition instruction")
+	}
 }

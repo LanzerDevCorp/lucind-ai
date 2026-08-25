@@ -102,6 +102,12 @@ phases:
       UpdateDefect/disposition-transition method exists anywhere, so the spec's "human declines
       fix... MUST be recorded" scenario has no implementation. Full detail, evidence, and four
       additional non-blocking findings: openspec/changes/ultrafixer/verify.md. Verdict: BLOCKED.
+
+      Remediation completed under lane ultrafixer-remediate (Strict TDD):
+      - Resolved linked-worktree refusal by routing resolvePrimaryRoot through git-common-dir and relaxing guards on feature status, defect record, defect list, defect decline; verified end-to-end in real linked worktree.
+      - Added Ledger.UpdateDefectDisposition and CLI subcommand lucind-ai defect decline --id <id>.
+      - Addressed all 4 non-blocking findings (fixed Tier label contradiction, added conventional commit and zero AI attribution requirement, expanded contract test assertions, added CLI-level --disposition validation, bumped plugin version to 2.0.6).
+      Ready for follow-up dual-judge verify re-dispatch.
   archive:
     status: pending
 notes: |

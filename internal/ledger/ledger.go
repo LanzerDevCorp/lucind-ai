@@ -1447,6 +1447,16 @@ const (
 	DefectDispositionDeferred DefectDisposition = "deferred"
 )
 
+// Valid reports whether the defect disposition is one of the supported values.
+func (d DefectDisposition) Valid() bool {
+	switch d {
+	case DefectDispositionRecorded, DefectDispositionRepaired, DefectDispositionDeclined, DefectDispositionDeferred:
+		return true
+	default:
+		return false
+	}
+}
+
 // DefectRecord represents a persisted defect record row in the defect_records table.
 type DefectRecord struct {
 	ID             string
@@ -1569,4 +1579,29 @@ func (l *Ledger) ListDefects(ctx context.Context, featureID string) ([]DefectRec
 		out = []DefectRecord{}
 	}
 	return out, nil
+}
+
+// UpdateDefectDisposition transitions an existing defect record's disposition.
+func (l *Ledger) UpdateDefectDisposition(ctx context.Context, id string, disposition DefectDisposition) error {
+	if !disposition.Valid() {
+		return fmt.Errorf("ledger: invalid defect disposition %q", disposition)
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	res, err := l.db.ExecContext(ctx, `
+		UPDATE defect_records
+		SET disposition = ?, updated_at = ?
+		WHERE id = ?`,
+		string(disposition), now, id,
+	)
+	if err != nil {
+		return fmt.Errorf("ledger: update defect %q disposition: %w", id, err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("ledger: read rows affected: %w", err)
+	}
+	if affected == 0 {
+		return ErrDefectNotFound
+	}
+	return nil
 }

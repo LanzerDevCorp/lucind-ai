@@ -95,8 +95,12 @@ its own worktree.
    `ultrafixer-packet-template.md` instruct passing the primary root path. Whichever direction is
    taken must be verified with a **real** linked-worktree invocation (not just an in-process
    Go test), since that's exactly the gap that let this ship undetected.
+   - **Remediated:** Updated `resolvePrimaryRoot` in `cmd/lucind-ai/cli.go` to resolve the primary repository root via `git rev-parse --git-common-dir`, relaxed `IsLinkedWorktree` checks on `runFeatureStatus`, `runDefectRecord`, `runDefectList`, `runDefectDecline`, added in-process test `TestLinkedWorktreeCommands` (`cmd/lucind-ai/cli_test.go`), and verified end-to-end via execution from within a real linked worktree.
 2. Add `Ledger.UpdateDefectDisposition` (or equivalent) and wire the "human declines fix" path to
    call it with `disposition=declined`, per the spec's scenario.
+   - **Remediated:** Added `Valid()` and `UpdateDefectDisposition(ctx, id, disposition)` to `internal/ledger/ledger.go`, added CLI subcommand `lucind-ai defect decline --id <id>` in `cmd/lucind-ai/cli.go`, covered by unit tests in `internal/ledger/ledger_test.go` and `cmd/lucind-ai/cli_test.go`, and updated `plugin/claude-code/skills/lucind-ai/assets/ultrafixer-packet-template.md` to instruct `defect decline` / `disposition=declined`.
 3. Fix the four non-blocking findings above in the same pass.
+   - **Remediated:** Fixed Tier label contradiction in `ultrafixer-packet-template.md` (updated to human-gated CAS integration), added conventional-commit and zero AI attribution / `Co-Authored-By` instruction to `ultrafixer-packet-template.md`, expanded `TestUltrafixerPacketTemplateContract` in `internal/packet/packet_test.go` to assert all protocol MUSTs, added CLI-level `--disposition` validation in `cmd/lucind-ai/cli.go` with coverage in `cmd/lucind-ai/cli_test.go`, and bumped plugin manifest versions to 2.0.6 in `.claude-plugin/marketplace.json`, `plugin/claude-code/.claude-plugin/plugin.json`, and `internal/packet/testdata/skill_content_hash.txt`.
 
-Remediation tasks to be dispatched as a follow-up `agy` packet against `feature/ultrafixer`.
+Remediation completed via packet `ultrafixer-remediate`. A fresh dual-judge verify dispatch will follow against `feature/ultrafixer`.
+
