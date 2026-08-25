@@ -755,6 +755,106 @@ func TestRenewRecomputesFreshEvidenceViaOverlap(t *testing.T) {
 	}
 }
 
+// TestRenewSupersedesAlreadyApprovedOldRequest proves Renew also expires the old
+// request when it is already "approved" (not just "awaiting"). Without this, an
+// approved request whose SHAs later go stale (e.g. the other feature promoted
+// again after approval but before a candidate was resolved) is left dangling in
+// "approved" status forever, alongside the freshly renewed request for the same
+// direction. evaluateOverlapGate's overlap-request lookup (internal/run/attempt.go)
+// takes the first created_at match for a direction, so that stale-SHA approved
+// request would permanently shadow the new request's resolved candidate, causing
+// promotion to keep blocking with the exact same reconciliation-required reason
+// even after the human-in-the-loop resolution was correctly approved and resolved.
+func TestRenewSupersedesAlreadyApprovedOldRequest(t *testing.T) {
+	ctx := context.Background()
+	l := openTestLedger(t)
+
+	now := time.Date(2026, 8, 25, 21, 0, 0, 0, time.UTC)
+
+	ev1 := sampleRequiredEvidence()
+	ev1.FeatureASHA = "sha_old_source_11111111111111111111111"
+	ev1.FeatureBSHA = "sha_old_target_22222222222222222222222"
+	ev1.Hash, _ = ev1.ComputeHash()
+
+	ev2 := sampleRequiredEvidence()
+	ev2.FeatureASHA = "sha_fresh_source_3333333333333333333333"
+	ev2.FeatureBSHA = "sha_fresh_target_4444444444444444444444"
+	ev2.Hash, _ = ev2.ComputeHash()
+
+	fakeEvaluator := func(ctx context.Context, repoDir, baseSHA, shaA, shaB string, opts ...overlap.EvaluateOption) (*overlap.Evidence, error) {
+		if shaA == ev2.FeatureASHA && shaB == ev2.FeatureBSHA {
+			return ev2, nil
+		}
+		return ev1, nil
+	}
+
+	svc := NewService(l, WithClock(func() time.Time { return now }), WithOverlapEvaluator(fakeEvaluator))
+
+	req1, err := svc.CreateRequest(ctx, CreateRequestParams{
+		ID:            "req-stale-approved-1",
+		FeatureID:     "feature-target",
+		SourceFeature: "feature-source",
+		SourceParent:  "refs/heads/feature-source",
+		TargetFeature: "feature-target",
+		TargetParent:  "refs/heads/feature-target",
+		SourceSHA:     ev1.FeatureASHA,
+		TargetSHA:     ev1.FeatureBSHA,
+		Evidence:      ev1,
+		TTL:           5 * time.Minute,
+	})
+	if err != nil {
+		t.Fatalf("CreateRequest: %v", err)
+	}
+
+	// Approve the request -- moves it from "awaiting" to "approved" and
+	// creates a candidate, exactly like a human running `reconcile approve`.
+	approvedReq, _, err := svc.Approve(ctx, ApproveParams{
+		RequestID:     req1.ID,
+		SourceFeature: "feature-source",
+		TargetFeature: "feature-target",
+		Actor:         "human-actor",
+	})
+	if err != nil {
+		t.Fatalf("Approve: %v", err)
+	}
+	if approvedReq.Status != RequestStatusApproved {
+		t.Fatalf("approvedReq.Status = %v, want %v", approvedReq.Status, RequestStatusApproved)
+	}
+
+	// Time passes; the other feature promotes again, so the approved
+	// request's recorded SHAs go stale before any candidate got resolved.
+	// The operator renews it with fresh SHAs, exactly per
+	// recovery-reconciliation.md's documented sequence.
+	renewTime := now.Add(20 * time.Minute)
+	svcRenew := NewService(l, WithClock(func() time.Time { return renewTime }), WithOverlapEvaluator(fakeEvaluator))
+
+	renewedReq, err := svcRenew.Renew(ctx, RenewParams{
+		OldRequestID:     req1.ID,
+		RepoDir:          t.TempDir(),
+		BaseSHA:          ev1.BaseSHA,
+		CurrentSourceSHA: ev2.FeatureASHA,
+		CurrentTargetSHA: ev2.FeatureBSHA,
+		TTL:              15 * time.Minute,
+		NewRequestID:     "req-renewed-2",
+	})
+	if err != nil {
+		t.Fatalf("Renew failed: %v", err)
+	}
+	if renewedReq.Status != RequestStatusAwaiting {
+		t.Errorf("renewedReq.Status = %v, want %v", renewedReq.Status, RequestStatusAwaiting)
+	}
+
+	// The regression: the old, already-approved request must also be
+	// superseded (expired) by Renew, not left dangling in "approved".
+	oldRow, err := l.ReconciliationRequest(ctx, req1.ID)
+	if err != nil {
+		t.Fatalf("ReconciliationRequest(oldReq): %v", err)
+	}
+	if oldRow.Status != string(RequestStatusExpired) {
+		t.Errorf("oldRow.Status in DB = %q, want %q (an approved-but-stale request must be superseded on renew, or it permanently shadows the renewed request in evaluateOverlapGate's first-match lookup)", oldRow.Status, RequestStatusExpired)
+	}
+}
+
 // TestCandidateLifecycleTransitionsAndQueries proves candidate state transitions:
 // candidate_running -> integrated | failed | stale with atomic audit logging.
 func TestCandidateLifecycleTransitionsAndQueries(t *testing.T) {
