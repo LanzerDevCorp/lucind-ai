@@ -35,7 +35,8 @@ type gateSpies struct {
 		CandidateSHA string
 		ExpectedSHA  string
 	}
-	refSHAFunc func(ctx context.Context, primaryRoot, ref string) (string, error)
+	refSHAFunc     func(ctx context.Context, primaryRoot, ref string) (string, error)
+	isAncestorFunc func(ctx context.Context, primaryRoot, ancestorSHA, descendantSHA string) (bool, error)
 }
 
 func newGateTestDeps(t *testing.T, spies *gateSpies) (run.Deps, *ledger.Ledger, *feature.Service) {
@@ -85,6 +86,19 @@ func newGateTestDeps(t *testing.T, spies *gateSpies) (run.Deps, *ledger.Ledger, 
 		},
 		ResolveCandidateSHA: func(ctx context.Context, primaryRoot, worktreePath, branch string) (string, error) {
 			return "candidate-sha-" + branch, nil
+		},
+		// Default true: every existing gate test predates this guard and
+		// implicitly assumes a matched resolution is always still valid to
+		// reuse. Only a test that specifically exercises the guard overrides
+		// isAncestorFunc to return false for its own scenario.
+		IsAncestorSHA: func(ctx context.Context, primaryRoot, ancestorSHA, descendantSHA string) (bool, error) {
+			spies.mu.Lock()
+			fn := spies.isAncestorFunc
+			spies.mu.Unlock()
+			if fn != nil {
+				return fn(ctx, primaryRoot, ancestorSHA, descendantSHA)
+			}
+			return true, nil
 		},
 		DiscardCombined: func(ctx context.Context, primaryRoot, worktreePath, branchName string) error {
 			return nil
@@ -624,6 +638,153 @@ func TestApprovedIntegratedCandidateUnblocksPromotion(t *testing.T) {
 	}
 	if count != 1 {
 		t.Errorf("reconciliation_requests count = %d, want still exactly 1", count)
+	}
+}
+
+// TestStaleResolvedCandidateBehindOwnCurrentTipIsRejected proves the data-loss
+// regression this guard exists to close: a reconciliation candidate approved
+// and resolved for an EARLIER round of feat-stale-a's own work (e.g. already
+// consumed by an earlier promotion, with real new commits landed on the
+// branch since) must NOT be silently reused for a LATER attempt just because
+// the OTHER feature's tip still matches. matchedOtherSHA==otherSHA alone only
+// proves the other side hasn't moved; it says nothing about whether THIS
+// attempt's own content is still what the resolution was registered against.
+// Reusing a stale resolution here would CAS the branch backward, discarding
+// every real commit since -- exactly the reported bug (a "promoted" attempt
+// that silently landed the wrong, older content).
+func TestStaleResolvedCandidateBehindOwnCurrentTipIsRejected(t *testing.T) {
+	spies := &gateSpies{
+		evaluateOverlapFunc: func(ctx context.Context, repoDir, baseSHA, shaA, shaB string, opts ...overlap.EvaluateOption) (*overlap.Evidence, error) {
+			ev := &overlap.Evidence{
+				Version:     "v1",
+				BaseSHA:     baseSHA,
+				FeatureASHA: shaA,
+				FeatureBSHA: shaB,
+				Class:       overlap.ClassRequired,
+				Rationale:   []string{"predicted Git merge conflict detected in shared.go"},
+				Signals: overlap.Signals{
+					PredictedConflict: true,
+					ConflictPaths:     []string{"shared.go"},
+				},
+				CreatedAt: time.Date(2026, 8, 20, 12, 0, 0, 0, time.UTC),
+			}
+			h, _ := ev.ComputeHash()
+			ev.Hash = h
+			return ev, nil
+		},
+	}
+	deps, l, featSvc := newGateTestDeps(t, spies)
+
+	featA, err := featSvc.Create(context.Background(), "feat-stale-a", "refs/heads/feature-stale-a", "base-sha-common", "expected-sha-refs/heads/feature-stale-a")
+	if err != nil {
+		t.Fatalf("featSvc.Create(feat-stale-a) error = %v", err)
+	}
+	featB, err := featSvc.Create(context.Background(), "feat-stale-b", "refs/heads/feature-stale-b", "base-sha-common", "expected-sha-refs/heads/feature-stale-b")
+	if err != nil {
+		t.Fatalf("featSvc.Create(feat-stale-b) error = %v", err)
+	}
+
+	// Round 1: feat-stale-a is blocked against feat-stale-b, approved, and
+	// resolved to a candidate -- exactly TestApprovedIntegratedCandidateUnblocksPromotion's setup.
+	reqA1 := run.AttemptRequest{
+		ID:                "att-stale-a-1",
+		FeatureID:         featA.ID,
+		ParentRef:         featA.ParentRef,
+		BaseSHA:           featA.BaseSHA,
+		ExpectedParentSHA: featA.ExpectedParentSHA,
+		IdempotencyKey:    "idem-stale-a-1",
+		Owner:             "owner-stale-a",
+		Branches:          []string{"lucind/lane-stale-a-1"},
+	}
+	resA1, err := run.ExecuteAttempt(context.Background(), deps, reqA1)
+	if err != nil {
+		t.Fatalf("ExecuteAttempt(A1) error = %v", err)
+	}
+	if resA1.Status != run.AttemptStatusBlocked {
+		t.Fatalf("resA1.Status = %v, want %v", resA1.Status, run.AttemptStatusBlocked)
+	}
+
+	var reqID string
+	if err := l.DB().QueryRowContext(context.Background(), `SELECT id FROM reconciliation_requests LIMIT 1`).Scan(&reqID); err != nil {
+		t.Fatalf("query reconciliation_request id: %v", err)
+	}
+
+	reconcileSvc := reconcile.NewService(l, reconcile.WithClock(deps.Now))
+	_, _, err = reconcileSvc.Approve(context.Background(), reconcile.ApproveParams{
+		RequestID:     reqID,
+		SourceFeature: featA.ID,
+		TargetFeature: featB.ID,
+		Actor:         "test-actor",
+	})
+	if err != nil {
+		t.Fatalf("reconcileSvc.Approve() error = %v", err)
+	}
+	cand, err := l.ReconciliationCandidateByRequest(context.Background(), reqID)
+	if err != nil {
+		t.Fatalf("ReconciliationCandidateByRequest() error = %v", err)
+	}
+	const round1ResolvedSHA = "resolved-sha-round1"
+	if _, err := reconcileSvc.UpdateCandidateStatus(context.Background(), cand.ID, reconcile.CandidateStatusIntegrated, round1ResolvedSHA, ""); err != nil {
+		t.Fatalf("reconcileSvc.UpdateCandidateStatus() error = %v", err)
+	}
+
+	// The request stays "approved" (this is exactly the real bug: nothing
+	// ever transitions it away). feat-stale-a's own branch has since moved
+	// PAST round1ResolvedSHA -- e.g. an earlier promotion already consumed
+	// it, and further real commits landed on top. Simulate that by making
+	// ResolveRefSHA report a newer current tip for feat-stale-a's own parent
+	// ref from now on, and wiring IsAncestorSHA to reflect the real git
+	// relationship: round1ResolvedSHA is NOT an ancestor of the new tip (the
+	// new tip descends from it, not the other way around).
+	const newerOwnTip = "own-tip-after-round1-promotion-plus-more-commits"
+	spies.refSHAFunc = func(ctx context.Context, primaryRoot, ref string) (string, error) {
+		if ref == featA.ParentRef {
+			return newerOwnTip, nil
+		}
+		return "expected-sha-" + ref, nil
+	}
+	spies.isAncestorFunc = func(ctx context.Context, primaryRoot, ancestorSHA, descendantSHA string) (bool, error) {
+		if ancestorSHA == newerOwnTip && descendantSHA == round1ResolvedSHA {
+			return false, nil
+		}
+		return true, nil
+	}
+
+	// Round 2: a genuinely new dispatch for feat-stale-a (a distinct Lane
+	// branch, not a mere retry of round 1's own lane) hits the SAME required
+	// overlap against feat-stale-b, whose tip has not moved.
+	reqA2 := run.AttemptRequest{
+		ID:        "att-stale-a-2",
+		FeatureID: featA.ID,
+		ParentRef: featA.ParentRef,
+		BaseSHA:   featA.BaseSHA,
+		// Matches newerOwnTip, exactly like a real feature-targeted retry
+		// that re-reads the feature's current parent_ref/base_sha from the
+		// ledger at retry time (recovery-reconciliation.md): the ref really
+		// is where the attempt expects it. The pre-existing CAS staleness
+		// check (currentSHA != expectedParentSHA) must not be what blocks
+		// this attempt -- only ownResolutionStillValid's content guard
+		// should.
+		ExpectedParentSHA: newerOwnTip,
+		IdempotencyKey:    "idem-stale-a-2",
+		Owner:             "owner-stale-a-2",
+		Branches:          []string{"lucind/lane-stale-a-2"},
+	}
+	resA2, err := run.ExecuteAttempt(context.Background(), deps, reqA2)
+	if err != nil {
+		t.Fatalf("ExecuteAttempt(A2) error = %v", err)
+	}
+
+	if resA2.Status == run.AttemptStatusPromoted && resA2.CandidateSHA == round1ResolvedSHA {
+		t.Fatalf("resA2 silently promoted the stale round-1 resolved candidate %q (status=%v) -- this is the reported data-loss regression: the branch would CAS backward, discarding every real commit since", round1ResolvedSHA, resA2.Status)
+	}
+	for _, c := range spies.promoteCASCalls {
+		if c.CandidateSHA == round1ResolvedSHA {
+			t.Fatalf("PromoteCAS called with stale round-1 resolved candidate_sha %q", round1ResolvedSHA)
+		}
+	}
+	if resA2.Status != run.AttemptStatusBlocked {
+		t.Errorf("resA2.Status = %v, want %v (own tip has moved past the resolved candidate; the stale resolution must not silently unblock promotion)", resA2.Status, run.AttemptStatusBlocked)
 	}
 }
 

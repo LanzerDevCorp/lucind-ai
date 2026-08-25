@@ -2039,3 +2039,73 @@ func TestArchivePacketTemplateContract(t *testing.T) {
 		t.Errorf("template declares feature-target fields; a reusable template must declare no dispatch target")
 	}
 }
+
+// TestUltrafixerPacketTemplateContract asserts that ultrafixer-packet-template.md
+// conforms to the packet parser contract and contains the required frontmatter and sections.
+func TestUltrafixerPacketTemplateContract(t *testing.T) {
+	path := filepath.Join("..", "..", "plugin", "claude-code", "skills", "lucind-ai", "assets", "ultrafixer-packet-template.md")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(%s) error = %v", path, err)
+	}
+	content := string(data)
+
+	p, err := packet.Parse(strings.NewReader(content))
+	if err != nil {
+		t.Fatalf("packet.Parse() error = %v", err)
+	}
+
+	if p.ID != "<id>" {
+		t.Errorf("ID = %q, want %q", p.ID, "<id>")
+	}
+	if p.Executor != "agy" {
+		t.Errorf("Executor = %q, want %q", p.Executor, "agy")
+	}
+	if p.RoutedBy != "pre-existing defect triage and repair" {
+		t.Errorf("RoutedBy = %q, want %q", p.RoutedBy, "pre-existing defect triage and repair")
+	}
+	if p.Model != "gemini-3.7-flash-high" {
+		t.Errorf("Model = %q, want %q", p.Model, "gemini-3.7-flash-high")
+	}
+	if p.BaseSHA != "<base_sha>" {
+		t.Errorf("BaseSHA = %q, want %q", p.BaseSHA, "<base_sha>")
+	}
+	if p.ParentRef != "<parent_ref>" {
+		t.Errorf("ParentRef = %q, want %q", p.ParentRef, "<parent_ref>")
+	}
+
+	wantSections := []string{
+		"## Goal",
+		"## Preconditions",
+		"## Done criteria",
+		"## Allowed paths",
+		"## Hard stops",
+		"## Context",
+		"### Failing check command",
+		"### Error transcript and signature",
+		"### Feature metadata",
+		"## Return",
+	}
+	for _, sec := range wantSections {
+		if !strings.Contains(content, sec) {
+			t.Errorf("template missing expected section %q", sec)
+		}
+	}
+
+	// Protocol assertions from ultrafixer-dispatch and defect-records specs
+	if strings.Contains(content, "auto-merge") {
+		t.Errorf("template contains contradictory 'auto-merge' label")
+	}
+	if !strings.Contains(content, "conventional commit") {
+		t.Errorf("template missing conventional commit instruction")
+	}
+	if !strings.Contains(content, "Co-Authored-By") {
+		t.Errorf("template missing Co-Authored-By prohibition")
+	}
+	if !strings.Contains(content, "Auto-integrating or merging the repair commit directly into any branch") {
+		t.Errorf("template missing hard stop forbidding auto-integration")
+	}
+	if !strings.Contains(content, "lucind-ai defect decline") && !strings.Contains(content, "disposition=declined") {
+		t.Errorf("template missing declined disposition instruction")
+	}
+}

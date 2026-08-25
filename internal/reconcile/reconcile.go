@@ -750,11 +750,22 @@ func (s *Service) Renew(ctx context.Context, params RenewParams) (Request, error
 	}
 
 	err = s.ledger.WriteWithAudit(ctx, func(tx *sql.Tx) error {
-		// Mark old request expired if it was awaiting
+		// Mark old request expired if it was awaiting OR already approved. A
+		// renewed request supersedes the old one either way: an awaiting
+		// request that never got a decision, or an approved request whose
+		// underlying SHAs have since gone stale (e.g. the other feature
+		// promoted again after approval, before a candidate was resolved).
+		// Leaving a stale *approved* request active would let it stay
+		// simultaneously "approved" alongside the freshly renewed request
+		// for the same direction; evaluateOverlapGate's overlap-request
+		// lookup takes the first created_at match for a direction, so the
+		// older, stale-SHA request would keep shadowing the new one's
+		// resolved candidate forever, permanently reproducing the same
+		// reconciliation-required block after every retry.
 		_, err := tx.ExecContext(ctx, `
 			UPDATE reconciliation_requests
 			SET status = ?, updated_at = ?
-			WHERE id = ? AND status = 'awaiting'`,
+			WHERE id = ? AND status IN ('awaiting', 'approved')`,
 			string(RequestStatusExpired), now.UTC().Format(time.RFC3339), oldReq.ID,
 		)
 		if err != nil {

@@ -701,6 +701,54 @@ func recoverAttemptInternal(ctx context.Context, deps Deps, att Attempt) (Attemp
 	return att, nil
 }
 
+// resolveOwnCurrentSHA resolves parentRef's current tip using the same
+// multi-tier fallback evaluateOverlapGate already uses for otherFeat's tip.
+func resolveOwnCurrentSHA(ctx context.Context, deps Deps, parentRef string) string {
+	if deps.ResolveRefSHA != nil {
+		sha, _ := deps.ResolveRefSHA(ctx, deps.PrimaryRoot, parentRef)
+		return sha
+	}
+	if deps.GitRunner != nil {
+		canonicalRef := worktree.CanonicalizeRef(parentRef)
+		out, err := deps.GitRunner.Run(ctx, deps.PrimaryRoot, "rev-parse", "--verify", canonicalRef+"^{commit}")
+		if err != nil {
+			return ""
+		}
+		return strings.TrimSpace(string(out))
+	}
+	sha, _ := worktree.ResolveCommitSHA(ctx, worktree.DefaultGitRunner, deps.PrimaryRoot, parentRef)
+	return sha
+}
+
+// ownResolutionStillValid guards reuse of a previously approved+integrated
+// reconciliation candidateSHA: this attempt's own feature (at parentRef) must
+// still have candidateSHA as an ancestor -- i.e. candidateSHA must already
+// contain, not predate, this attempt's own current state. Without this, a
+// candidate resolved for an EARLIER round (already consumed by an earlier
+// promotion, or simply stale relative to real new work landed on the branch
+// since) could be reused for a LATER attempt with genuinely different
+// content, CAS'ing the branch backward and silently discarding everything
+// landed since -- see evaluateOverlapGate's reuse check below.
+//
+// deps.IsAncestorSHA is nil in every test double that does not opt in, which
+// deliberately preserves prior behavior (reuse allowed) unchanged for them;
+// only cmd/lucind-ai/cli.go's productionDeps and a test that specifically
+// exercises this guard need to wire it.
+func ownResolutionStillValid(ctx context.Context, deps Deps, parentRef, candidateSHA string) bool {
+	if deps.IsAncestorSHA == nil {
+		return true
+	}
+	ownCurrentSHA := resolveOwnCurrentSHA(ctx, deps, parentRef)
+	if strings.TrimSpace(ownCurrentSHA) == "" {
+		return false
+	}
+	ok, err := deps.IsAncestorSHA(ctx, deps.PrimaryRoot, ownCurrentSHA, candidateSHA)
+	if err != nil {
+		return false
+	}
+	return ok
+}
+
 // evaluateOverlapGate evaluates deterministic overlap signals between the current feature attempt
 // and all other active features. Required overlap creates an awaiting reconciliation request (if none exists)
 // and blocks promotion; warning overlap records evidence without blocking; informational overlap is a no-op.
@@ -838,9 +886,18 @@ func evaluateOverlapGate(ctx context.Context, deps Deps, att Attempt, featSvc *f
 			// otherFeat comparison in this same pass, and would silently discard every
 			// resolution but the last if two or more conflicts resolve simultaneously -- see
 			// the post-loop accumulation below.
+			//
+			// ownResolutionStillValid guards against reusing a candidate resolved for an
+			// EARLIER round of this same feature's own work: matchedOtherSHA==otherSHA alone
+			// only proves the OTHER side hasn't moved, never that THIS attempt's own content
+			// is still what the resolution was registered against. A later attempt with
+			// genuinely new content (a fresh dispatch, not a mere retry) must not silently
+			// adopt a stale resolved SHA that predates it -- doing so would CAS the branch
+			// backward, discarding real work landed since.
 			if matched != nil && matched.Status == string(reconcile.RequestStatusApproved) && matchedOtherSHA == otherSHA {
 				cand, cErr := deps.Ledger.ReconciliationCandidateByRequest(ctx, matched.ID)
-				if cErr == nil && cand.Status == string(reconcile.CandidateStatusIntegrated) && cand.CandidateSHA != "" {
+				if cErr == nil && cand.Status == string(reconcile.CandidateStatusIntegrated) && cand.CandidateSHA != "" &&
+					ownResolutionStillValid(ctx, deps, parentRef, cand.CandidateSHA) {
 					resolvedOverrideSHA = cand.CandidateSHA
 					resolvedAgainst = append(resolvedAgainst, otherFeat.ID)
 					continue
