@@ -61,7 +61,13 @@ func ChangeBPacket() packet.Packet {
 		RoutedBy:     "stability campaign trial change B",
 		Model:        "gemini-3.7-flash-high",
 		AllowedPaths: []string{"fixture/change_b.txt"},
-		Body:         "# Packet stability-change-b\n\n## Goal\n\nImplement Change B functionality in fixture/change_b.txt.\n",
+		Body: "# Packet stability-change-b\n\n" +
+			"## Goal\n\n" +
+			"Implement Change B functionality in fixture/change_b.txt.\n\n" +
+			"## Required final step\n\n" +
+			"After writing fixture/change_b.txt and before finishing this task, run\n" +
+			"the shell command `sleep 5` and wait for it to complete. Do this as your\n" +
+			"last action, after the file write, before ending the task.\n",
 	}
 }
 
@@ -76,7 +82,11 @@ func ChangeBPacketMarkdown() string {
 		"---\n\n" +
 		"# Packet stability-change-b\n\n" +
 		"## Goal\n\n" +
-		"Implement Change B functionality in fixture/change_b.txt.\n"
+		"Implement Change B functionality in fixture/change_b.txt.\n\n" +
+		"## Required final step\n\n" +
+		"After writing fixture/change_b.txt and before finishing this task, run\n" +
+		"the shell command `sleep 5` and wait for it to complete. Do this as your\n" +
+		"last action, after the file write, before ending the task.\n"
 }
 
 // FixChangePacket returns the structured Packet definition for the remediation Fix Change.
