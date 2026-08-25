@@ -53,11 +53,28 @@ const attemptOwner = "lucind-ai run"
 // error, so a person driving the binary from a terminal always sees the one
 // invocation that works rather than a stack trace. --packet is repeatable:
 // each occurrence adds one more lane to the batch.
-const usage = "usage: lucind-ai run --packet <path> [--packet <path> ...] [--timeout <duration>] [--approval-timeout <duration>] [--legacy-main] [--expected-parent-sha <sha>]\n       lucind-ai split --dag <path> --out <dir>\n       lucind-ai check [--out <path>]\n       lucind-ai serve [--addr <addr>] [--approver <name>] [--approval-timeout <duration>] [--enable-dispatch] [--dispatch-token <token>]\n       lucind-ai feature create --id <id> --parent <ref> --base-sha <sha> [--expected-parent-sha <sha>]\n       lucind-ai feature status [--id <id>]\n       lucind-ai feature recover --attempt <id>\n       lucind-ai feature renew --id <id> --owner <owner> --fence <fence> [--ttl <duration>]\n       lucind-ai feature disable --id <id>\n       lucind-ai reconcile approve --request <id> --source <feature> --target <feature> [--actor <name>]\n       lucind-ai reconcile decline --request <id> [--actor <name>] [--reason <reason>]\n       lucind-ai reconcile cancel --request <id> [--actor <name>] [--reason <reason>]\n       lucind-ai reconcile renew --request <id> [--base-sha <sha>] [--source-sha <sha>] [--target-sha <sha>]\n       lucind-ai reconcile resolve --candidate <id> --sha <sha> [--actor <name>]\n       lucind-ai worktree cleanup --lane <id>\n       lucind-ai integrate retry --run <run-id> [--lane <id> ...] [--timeout <duration>] [--approval-timeout <duration>]\n       lucind-ai stability run\n       lucind-ai stability status [--json]\n       lucind-ai stability resume\n       lucind-ai stability abort\n       lucind-ai --version"
+const usage = "usage: lucind-ai run --packet <path> [--packet <path> ...] [--timeout <duration>] [--approval-timeout <duration>] [--legacy-main] [--expected-parent-sha <sha>] [--min-quota <fraction>]\n       lucind-ai split --dag <path> --out <dir>\n       lucind-ai check [--out <path>]\n       lucind-ai serve [--addr <addr>] [--approver <name>] [--approval-timeout <duration>] [--enable-dispatch] [--dispatch-token <token>]\n       lucind-ai feature create --id <id> --parent <ref> --base-sha <sha> [--expected-parent-sha <sha>]\n       lucind-ai feature status [--id <id>]\n       lucind-ai feature recover --attempt <id>\n       lucind-ai feature renew --id <id> --owner <owner> --fence <fence> [--ttl <duration>]\n       lucind-ai feature disable --id <id>\n       lucind-ai reconcile approve --request <id> --source <feature> --target <feature> [--actor <name>]\n       lucind-ai reconcile decline --request <id> [--actor <name>] [--reason <reason>]\n       lucind-ai reconcile cancel --request <id> [--actor <name>] [--reason <reason>]\n       lucind-ai reconcile renew --request <id> [--base-sha <sha>] [--source-sha <sha>] [--target-sha <sha>]\n       lucind-ai reconcile resolve --candidate <id> --sha <sha> [--actor <name>]\n       lucind-ai worktree cleanup --lane <id>\n       lucind-ai integrate retry --run <run-id> [--lane <id> ...] [--timeout <duration>] [--approval-timeout <duration>]\n       lucind-ai stability run\n       lucind-ai stability status [--json]\n       lucind-ai stability resume\n       lucind-ai stability abort\n       lucind-ai --version"
 
 // depsFactory constructs run.Deps for runDispatch. In production it is
 // productionDeps; tests may override it to inject test doubles or observe dependency calls.
 var depsFactory = productionDeps
+
+// defaultMinQuota is --min-quota's default: the minimum fraction of the
+// active agy-pool account's remaining 5-hour Gemini quota required before a
+// wave (one runDispatch invocation) is allowed to dispatch an agy-executed
+// batch. Below it, ensureAgyQuota rotates to the pooled account with the
+// most quota left; see internal/executor.AgyQuota.Ensure's doc comment for
+// why the 5-hour window specifically, and why the check runs once per wave
+// rather than once per lane.
+const defaultMinQuota = 0.10
+
+// ensureAgyQuota gates a batch dispatch on the active Antigravity account's
+// remaining 5-hour Gemini quota, rotating to a higher-quota pooled account
+// via agy-pool when needed. Only called when the batch includes an
+// agy-executed packet (see runDispatch) and --min-quota is non-zero. Tests
+// override this to avoid shelling out to the real agy/agy-pool binaries --
+// see this package's hard constraint against that in cli_test.go.
+var ensureAgyQuota = executor.AgyQuota{}.Ensure
 
 // supportedExecutors names every packet.Executor value this binary knows
 // how to dispatch. Unlisted values are a routing error, never a silent
@@ -165,6 +182,7 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 	approvalTimeout := fs.Duration("approval-timeout", 0, "approval timeout budget granted to lane gates (0 = no wait / bypass)")
 	legacyMain := fs.Bool("legacy-main", false, "declare legacy mode (dispatches against main)")
 	expectedParentSHA := fs.String("expected-parent-sha", "", "expected parent commit SHA for legacy mode")
+	minQuota := fs.Float64("min-quota", defaultMinQuota, "minimum fraction of the active agy-pool account's 5h gemini quota required before dispatching an agy-executed batch; below it, auto-rotates to the pooled account with the most quota (0 disables the check)")
 
 	if err := fs.Parse(args); err != nil {
 		// flag.ContinueOnError already invoked fs.Usage() on a parse
@@ -267,6 +285,31 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 	if err := packet.DisjointAllowedPaths(ps); err != nil {
 		fmt.Fprintf(stderr, "lucind-ai: %v\n", err)
 		return 1
+	}
+
+	// Wave-level agy quota gate: one runDispatch invocation is one wave (the
+	// orchestrator invokes "run" once per wave, with one --packet per lane in
+	// it), and this fires exactly once per invocation -- never once per lane
+	// -- so it can never rotate the shared active credential out from under a
+	// lane that is already dispatching. Must stay before ExecuteBatch and
+	// worktree.Create, same as the disjointness check above, so a blocked
+	// wave leaves zero side effects. Skipped for a batch with no
+	// agy-executed packet: the pooled account's quota has nothing to do with
+	// another executor's billing.
+	if *minQuota > 0 {
+		usesAgy := false
+		for _, p := range ps {
+			if p.Executor == "agy" {
+				usesAgy = true
+				break
+			}
+		}
+		if usesAgy {
+			if err := ensureAgyQuota(ctx, *minQuota); err != nil {
+				fmt.Fprintf(stderr, "lucind-ai: %v\n", err)
+				return 1
+			}
+		}
 	}
 
 	// One batch produces one combined tree and promotes it once, so the
@@ -1758,16 +1801,24 @@ func runIntegrateRetry(ctx context.Context, args []string, stdout, stderr io.Wri
 			return 1
 		}
 
+		// The feature row's own ParentRef/BaseSHA/ExpectedParentSHA are set
+		// once at feature.Service.Create and never updated again, so they
+		// are only correct for a feature's first wave. RetryFeatureTarget
+		// prefers the original packet's own dispatch-time target, recovered
+		// from each included lane's LaneMetadata, which is what a later
+		// wave's CAS promotion actually used -- see RetryFeatureTarget's doc
+		// comment.
+		target, terr := lucindrun.RetryFeatureTarget(ctx, deps, feat, batch.Outcome.Integrate)
+		if terr != nil {
+			fmt.Fprintf(stderr, "lucind-ai: %v\n", terr)
+			return 1
+		}
+
 		attemptID := uuid.NewString()
-		integrateReport, attempt, err = lucindrun.IntegrateFeature(ctx, deps, batch, lucindrun.AttemptRequest{
-			ID:                attemptID,
-			FeatureID:         feat.ID,
-			ParentRef:         feat.ParentRef,
-			BaseSHA:           feat.BaseSHA,
-			ExpectedParentSHA: feat.ExpectedParentSHA,
-			IdempotencyKey:    attemptID,
-			Owner:             attemptOwner,
-		})
+		target.ID = attemptID
+		target.IdempotencyKey = attemptID
+		target.Owner = attemptOwner
+		integrateReport, attempt, err = lucindrun.IntegrateFeature(ctx, deps, batch, target)
 	} else {
 		integrateReport, err = lucindrun.Integrate(ctx, deps, batch)
 	}

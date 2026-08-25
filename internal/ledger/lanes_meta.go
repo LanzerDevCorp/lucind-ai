@@ -31,6 +31,19 @@ type LaneMetadata struct {
 	AllowedPaths []string `json:"allowed_paths"`
 	Dependencies []string `json:"dependencies"`
 	BodyDigest   string   `json:"body_digest"`
+	// ParentRef, BaseSHA, and ExpectedParentSHA are the feature-target fields
+	// this lane's own packet declared at dispatch time (see
+	// packet.Packet.ParentRef/BaseSHA/ExpectedParentSHA). A later wave's
+	// packet legitimately declares a base_sha/expected_parent_sha that has
+	// already advanced past the feature row's own immutable anchor
+	// (features.base_sha / features.expected_parent_sha, set once at feature
+	// creation and never updated afterward). Capturing the packet's own
+	// values here lets "lucind-ai integrate retry" recover the correct CAS
+	// baseline for that lane instead of falling back to the feature row's
+	// stale, wave-1-only anchor -- see run.RetryFeatureTarget.
+	ParentRef         string `json:"parent_ref"`
+	BaseSHA           string `json:"base_sha"`
+	ExpectedParentSHA string `json:"expected_parent_sha"`
 }
 
 // UpdateLaneMetadata updates schema-v6's lane metadata columns and appends a
