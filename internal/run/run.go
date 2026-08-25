@@ -270,6 +270,10 @@ type Report struct {
 	// reporting its own failures as structured JSON on stdout rather than
 	// stderr (see diagnosisDetail).
 	Diagnosis string
+	// PGID is the OS process-group id of the dispatched child process when
+	// Setpgid was true; zero otherwise (not applicable, either because
+	// Setpgid was false or because the lane never dispatched a process).
+	PGID int
 }
 
 // Execute runs one packet end to end: create its worktree, register it in
@@ -557,6 +561,7 @@ func Execute(ctx context.Context, deps Deps, p packet.Packet) (Report, error) {
 		Envelope:                envelope,
 		OutputCaptureIncomplete: outcome.OutputTruncated,
 		Diagnosis:               diagnosis,
+		PGID:                    outcome.PGID,
 	}, nil
 }
 
