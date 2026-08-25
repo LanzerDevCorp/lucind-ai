@@ -108,6 +108,33 @@ phases:
       - Added Ledger.UpdateDefectDisposition and CLI subcommand lucind-ai defect decline --id <id>.
       - Addressed all 4 non-blocking findings (fixed Tier label contradiction, added conventional commit and zero AI attribution requirement, expanded contract test assertions, added CLI-level --disposition validation, bumped plugin version to 2.0.6).
       Ready for follow-up dual-judge verify re-dispatch.
+
+      Orchestrator recovery note: the remediation dispatch reported success
+      (status: done, integrated=1) but promoted the WRONG content — a second,
+      more severe lucind-ai reconciliation bug. attempt 9adb8ef5's recorded
+      candidate_sha was 22e13710357111b8ef44e2dc2f324984701ac989 (a stale
+      candidate from the earlier cli.go reconciliation round), not the Lane's
+      own real commit 3441c815fc76c93e2d09fa39a12e1161307a8e34 (confirmed via
+      the Lane's own .lucind/result.json "commit" field). This silently
+      regressed feature/ultrafixer's ref by 3 commits, discarding this
+      verify.md BLOCKED-verdict commit and the entire remediation Lane's work
+      from the branch. Nothing was actually lost — 3441c815 remained a valid,
+      recoverable git object (git cat-file -t confirmed) built correctly on
+      top of fc57d35. Recovered by confirming git merge-base --is-ancestor
+      HEAD 3441c815 (safe fast-forward, not a history rewrite) and running
+      git reset --hard 3441c815 in the primary-checkout-tracking worktree.
+      Verified go build ./... clean and git status --porcelain empty
+      post-recovery. Reported to lucind-ai-fixer as a second, data-loss-risk
+      defect (suspected cause: 3 lingering reconciliation_requests for the
+      same feature-pair direction from the earlier manual-workaround round;
+      an unexplained automated worktree reconcile-r1-ultrafixer3 also
+      appeared, unused) — left the ledger reconciliation rows and that
+      worktree untouched for the fixer to inspect. Fix pending; this
+      orchestrator-level recovery procedure (extract the Lane's own reported
+      commit SHA from its result.json, verify it's a safe fast-forward
+      ancestor of the current ref, reset --hard to it) should be repeated if
+      the same symptom recurs on a future dispatch before the root cause is
+      fixed.
   archive:
     status: pending
 notes: |
