@@ -2,10 +2,13 @@ package executor_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -497,3 +500,67 @@ func TestRunCapturesStdout(t *testing.T) {
 		t.Errorf("Stdout = %q, want %q", outcome.Stdout, want)
 	}
 }
+
+// TestAgyLinuxSetpgidSysProcAttr asserts that when Setpgid is true, Agy.Run
+// configures the child in its own process group and context cancellation signals
+// the entire process group, ensuring no grandchild or descendant processes survive.
+func TestAgyLinuxSetpgidSysProcAttr(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping subprocess test in -short mode")
+	}
+
+	pidFile := filepath.Join(t.TempDir(), "grandchild.pid")
+	// The stub backgrounds a grandchild that sleeps 10s and writes its PID to pidFile,
+	// then the parent stub sleeps 10s.
+	script := fmt.Sprintf("#!/bin/sh\n( sleep 10 ) &\necho $! > \"%s\"\nsleep 10\n", pidFile)
+	stub := writeStub(t, script)
+	worktree := t.TempDir()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+
+	a := executor.Agy{Binary: stub, WaitDelay: 100 * time.Millisecond}
+	outcome, err := a.Run(ctx, executor.Request{
+		Prompt:       "do the thing",
+		WorktreePath: worktree,
+		Setpgid:      true,
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v, want nil", err)
+	}
+	if !outcome.TimedOut {
+		t.Errorf("TimedOut = false, want true")
+	}
+
+	raw, err := os.ReadFile(pidFile)
+	if err != nil {
+		t.Fatalf("ReadFile(grandchild.pid) error = %v", err)
+	}
+	pidStr := strings.TrimSpace(string(raw))
+	pid, err := strconv.Atoi(pidStr)
+	if err != nil {
+		t.Fatalf("invalid grandchild pid %q: %v", pidStr, err)
+	}
+
+	// Ensure cleanup in case grandchild survived (e.g. before the fix).
+	t.Cleanup(func() {
+		_ = syscall.Kill(pid, syscall.SIGKILL)
+	})
+
+	// Probe liveness of the grandchild PID. It must be dead (syscall.ESRCH).
+	dead := false
+	probeDeadline := time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(probeDeadline) {
+		err := syscall.Kill(pid, 0)
+		if errors.Is(err, syscall.ESRCH) {
+			dead = true
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	if !dead {
+		t.Fatalf("grandchild process %d is still alive after context cancellation with Setpgid: true", pid)
+	}
+}
+
