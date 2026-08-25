@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"os/exec"
+	"syscall"
 	"time"
 )
 
@@ -193,6 +194,15 @@ func (a Agy) runFormat(ctx context.Context, req Request, format string, stdoutTa
 	cmd := exec.CommandContext(ctx, binary, args...)
 	cmd.Dir = req.WorktreePath
 	cmd.WaitDelay = waitDelay
+	if req.Setpgid {
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+		cmd.Cancel = func() error {
+			if cmd.Process == nil {
+				return nil
+			}
+			return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		}
+	}
 
 	var stderr, stdout bytes.Buffer
 	cmd.Stderr = &stderr

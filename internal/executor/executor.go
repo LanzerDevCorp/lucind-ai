@@ -49,6 +49,15 @@ type Request struct {
 	// Progress optionally receives incremental dispatch progress. Executors
 	// that do not emit progress leave it unused; nil preserves existing behavior.
 	Progress chan<- ProgressEvent
+	// Setpgid places the dispatched child in its own Linux process group and
+	// makes cancellation kill that whole group, not just the direct child.
+	// Opt-in and false by default: unconditionally changing process-group
+	// behavior for every ordinary lane dispatch (internal/run/batch.go:66-78)
+	// was rejected in favor of a caller-scoped field (design.md Decision 2).
+	// Only Agy.Run honors it; other executors ignore it. Linux-only: on other
+	// platforms this is a silent no-op, since Stability Campaigns are already
+	// gated Linux-only upstream.
+	Setpgid bool
 }
 
 // Outcome is what actually happened when the child process ran, nothing
