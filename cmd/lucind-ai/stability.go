@@ -476,7 +476,12 @@ func RunCampaign(ctx context.Context, cfg CampaignConfig) (int, error) {
 		cfg.FeatureSvcMaker = feature.NewService
 	}
 	if cfg.ExecuteJourney == nil {
-		cfg.ExecuteJourney = stability.ExecuteTrialJourney
+		cfg.ExecuteJourney = func(
+			ctx context.Context, sm *stability.StateMachine, deps lucindrun.Deps,
+			featSvc *feature.Service, journeyCfg stability.JourneyConfig, _ int, _ string,
+		) (*stability.TrialJourneyResult, error) {
+			return stability.ExecuteTrialJourneyLive(ctx, sm, deps, featSvc, journeyCfg)
+		}
 	}
 	if cfg.ReceiptWriter == nil {
 		cfg.ReceiptWriter = evidence.WriteReceipt

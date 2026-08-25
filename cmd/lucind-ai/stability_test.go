@@ -1305,3 +1305,93 @@ func TestStabilityRunPreflightAndSimulatedThreeTrialRun(t *testing.T) {
 		}
 	})
 }
+
+type customInstrumentedExecutor struct {
+	inner executor.Executor
+	onRun func(req executor.Request)
+}
+
+func (c *customInstrumentedExecutor) Run(ctx context.Context, req executor.Request) (executor.Outcome, error) {
+	if c.onRun != nil {
+		c.onRun(req)
+	}
+	return c.inner.Run(ctx, req)
+}
+
+func (c *customInstrumentedExecutor) DefaultModel() string {
+	return c.inner.DefaultModel()
+}
+
+func (c *customInstrumentedExecutor) KnownModels() []string {
+	return c.inner.KnownModels()
+}
+
+func TestStabilityRunProductionDefaultWiresLiveJourney(t *testing.T) {
+	ctx := context.Background()
+	dir, headSHA := setupCleanTestRepoForStability(t)
+
+	var (
+		mu              sync.Mutex
+		receivedSetpgid []bool
+		receivedOnStart []bool
+	)
+
+	fakeExec := newFakeJourneyExecutor()
+	customExec := &customInstrumentedExecutor{
+		inner: fakeExec,
+		onRun: func(req executor.Request) {
+			mu.Lock()
+			defer mu.Unlock()
+			receivedSetpgid = append(receivedSetpgid, req.Setpgid)
+			receivedOnStart = append(receivedOnStart, req.OnStart != nil)
+			if req.OnStart != nil {
+				req.OnStart(99999)
+			}
+		},
+	}
+
+	var stdout, stderr bytes.Buffer
+	campCfg := CampaignConfig{
+		PrimaryRoot:  dir,
+		CandidateSHA: headSHA,
+		BuildVersion: headSHA,
+		CampaignID:   "camp-prod-default-live",
+		ReceiptID:    "rcpt-prod-default-live",
+		LedgerOpener: func(ctx context.Context, primaryRoot string) (*ledger.Ledger, error) {
+			return ledger.Open(ctx, primaryRoot)
+		},
+		DepsFactory: func(runID, primaryRoot string, l *ledger.Ledger, timeout, approvalTimeout time.Duration) lucindrun.Deps {
+			d, _ := newSimulatedTestDeps(t, primaryRoot, customExec)
+			d.RunID = runID
+			d.Ledger = l
+			return d
+		},
+		CheckRunner: func(ctx context.Context, dir string) (bool, string, error) {
+			return true, "PASS: baseline check passed", nil
+		},
+		Stdout: &stdout,
+		Stderr: &stderr,
+		// ExecuteJourney is intentionally omitted (nil) to test production default wiring
+	}
+
+	code, err := RunCampaign(ctx, campCfg)
+	if err != nil || code != 0 {
+		t.Fatalf("RunCampaign failed: code = %d, err = %v, stderr = %s", code, err, stderr.String())
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(receivedSetpgid) == 0 {
+		t.Fatalf("no executor dispatches were observed")
+	}
+	for i, spgid := range receivedSetpgid {
+		if !spgid {
+			t.Errorf("dispatch[%d] req.Setpgid = false, want true (proving ExecuteTrialJourneyLive was reached via production default wiring)", i)
+		}
+	}
+	for i, onStart := range receivedOnStart {
+		if !onStart {
+			t.Errorf("dispatch[%d] req.OnStart is nil, want non-nil (proving ExecuteTrialJourneyLive was reached via production default wiring)", i)
+		}
+	}
+}
