@@ -22,10 +22,10 @@ import (
 
 // Sentinel errors returned by reconcile methods.
 var (
-	ErrCannotResume                 = errors.New("stability/reconcile: campaign cannot be resumed")
-	ErrCleanupBlocked               = errors.New("stability/reconcile: cleanup blocked by unremovable residue")
-	ErrEvidencePreservationFailed   = errors.New("stability/reconcile: evidence preservation failed before cleanup")
-	ErrCampaignNotFound             = errors.New("stability/reconcile: campaign not found")
+	ErrCannotResume               = errors.New("stability/reconcile: campaign cannot be resumed")
+	ErrCleanupBlocked             = errors.New("stability/reconcile: cleanup blocked by unremovable residue")
+	ErrEvidencePreservationFailed = errors.New("stability/reconcile: evidence preservation failed before cleanup")
+	ErrCampaignNotFound           = errors.New("stability/reconcile: campaign not found")
 )
 
 // Decision represents the fail-closed resume evaluation outcome.
@@ -286,18 +286,18 @@ type AbortParams struct {
 
 // AbortResult summarizes the actions taken during abort cleanup.
 type AbortResult struct {
-	CampaignID       string              `json:"campaign_id"`
-	InitialStatus    store.Status        `json:"initial_status"`
-	FinalStatus      store.Status        `json:"final_status"`
-	CleanedWorktrees []string            `json:"cleaned_worktrees,omitempty"`
-	SkippedWorktrees []string            `json:"skipped_worktrees,omitempty"`
-	FailedWorktrees  map[string]error    `json:"failed_worktrees,omitempty"`
-	CleanedBranches  []string            `json:"cleaned_branches,omitempty"`
-	SkippedBranches  []string            `json:"skipped_branches,omitempty"`
-	FailedBranches   map[string]error    `json:"failed_branches,omitempty"`
-	KilledProcesses  []int               `json:"killed_processes,omitempty"`
-	FailedProcesses  map[int]error       `json:"failed_processes,omitempty"`
-	NoOp             bool                `json:"no_op"`
+	CampaignID       string           `json:"campaign_id"`
+	InitialStatus    store.Status     `json:"initial_status"`
+	FinalStatus      store.Status     `json:"final_status"`
+	CleanedWorktrees []string         `json:"cleaned_worktrees,omitempty"`
+	SkippedWorktrees []string         `json:"skipped_worktrees,omitempty"`
+	FailedWorktrees  map[string]error `json:"failed_worktrees,omitempty"`
+	CleanedBranches  []string         `json:"cleaned_branches,omitempty"`
+	SkippedBranches  []string         `json:"skipped_branches,omitempty"`
+	FailedBranches   map[string]error `json:"failed_branches,omitempty"`
+	KilledProcesses  []int            `json:"killed_processes,omitempty"`
+	FailedProcesses  map[int]error    `json:"failed_processes,omitempty"`
+	NoOp             bool             `json:"no_op"`
 }
 
 // Abort idempotently cleans up all processes, worktrees, and branches belonging to a Campaign.

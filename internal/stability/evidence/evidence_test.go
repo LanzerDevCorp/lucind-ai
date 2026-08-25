@@ -102,7 +102,6 @@ func TestStripPathsAndFormatStreamDirect(t *testing.T) {
 	}
 }
 
-
 func TestEvidenceSanitizationAndCanonicalReceiptRFC8785(t *testing.T) {
 	// 1. Prove 4096-byte cap, path stripping, raw payload hashing
 	raw := "/home/lanzer/secret/path/run.log: " + strings.Repeat("X", 5000) + "DONE"
@@ -251,4 +250,3 @@ func TestWriteReceiptRoundTrip(t *testing.T) {
 		t.Errorf("Disk receipt does not match canonical bytes: %s != %s", string(diskBytes), string(b))
 	}
 }
-

@@ -245,11 +245,11 @@ func IsAncestor(ctx context.Context, repoDir, ancestorSHA, descendantSHA string)
 }
 
 // VerifyAncestryIsolation verifies Git commit ancestry isolation between target A and target B:
-// 1. baseSHA must be an ancestor of targetASHA and targetBSHA.
-// 2. If fixSHA is provided, baseSHA must be an ancestor of fixSHA, fixSHA must be an ancestor
-//    of targetASHA, and fixSHA must NOT be an ancestor of targetBSHA (unless fixSHA == baseSHA).
-// 3. targetASHA and targetBSHA must not be ancestors of each other.
-// 4. The common merge base between targetASHA and targetBSHA must equal baseSHA.
+//  1. baseSHA must be an ancestor of targetASHA and targetBSHA.
+//  2. If fixSHA is provided, baseSHA must be an ancestor of fixSHA, fixSHA must be an ancestor
+//     of targetASHA, and fixSHA must NOT be an ancestor of targetBSHA (unless fixSHA == baseSHA).
+//  3. targetASHA and targetBSHA must not be ancestors of each other.
+//  4. The common merge base between targetASHA and targetBSHA must equal baseSHA.
 func VerifyAncestryIsolation(ctx context.Context, repoDir, baseSHA, targetASHA, targetBSHA, fixSHA string) error {
 	// 1. Base is ancestor of target A
 	isBaseInA, err := IsAncestor(ctx, repoDir, baseSHA, targetASHA)

@@ -262,6 +262,3 @@ func TestStoreOpenWithGitRunner(t *testing.T) {
 		t.Errorf("fetched mismatch: %+v", fetched)
 	}
 }
-
-
-

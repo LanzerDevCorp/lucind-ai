@@ -131,7 +131,7 @@ func TestCampaignTrialStatesClosedSet(t *testing.T) {
 
 	// Verify kebab-case alias parsing
 	kebabCases := map[string]stability.TrialState{
-		"awaiting-defect-assessment":     stability.TrialAwaitingDefectAssessment,
+		"awaiting-defect-assessment":    stability.TrialAwaitingDefectAssessment,
 		"awaiting-remediation-approval": stability.TrialAwaitingRemediationApproval,
 		"fix-dispatched":                stability.TrialFixDispatched,
 		"crash-injected":                stability.TrialCrashInjected,

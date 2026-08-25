@@ -74,7 +74,7 @@ var (
 	ErrInvalidCampaignTransition = errors.New("stability: illegal campaign state transition")
 	ErrPreflightNotPersisted     = errors.New("stability: preflight state cannot be persisted to store")
 	ErrInvalidTrialState         = errors.New("stability: invalid trial state")
-	ErrInvalidTrialTransition   = errors.New("stability: illegal trial state transition")
+	ErrInvalidTrialTransition    = errors.New("stability: illegal trial state transition")
 	ErrCampaignNotRunning        = errors.New("stability: campaign is not running")
 	ErrTrialAlreadyActive        = errors.New("stability: active trial is still running")
 	ErrCampaignCompleted         = errors.New("stability: campaign has reached terminal state")
@@ -284,11 +284,11 @@ func CheckCampaignBudget(elapsed, budget time.Duration) bool {
 // StateMachine coordinates the pure in-memory state of a Campaign and its Trials.
 // It has no clock, timer, or I/O.
 type StateMachine struct {
-	state                CampaignState
-	consecutivePasses    int
-	currentTrial         int
-	activeTrialState     TrialState
-	hasActiveTrial       bool
+	state             CampaignState
+	consecutivePasses int
+	currentTrial      int
+	activeTrialState  TrialState
+	hasActiveTrial    bool
 }
 
 // NewStateMachine constructs a StateMachine initialized in CampaignPreflight.
