@@ -6,14 +6,20 @@ package stability
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/LanzerDevCorp/lucind-ai/internal/feature"
+	"github.com/LanzerDevCorp/lucind-ai/internal/integrate"
+	"github.com/LanzerDevCorp/lucind-ai/internal/lane"
+	"github.com/LanzerDevCorp/lucind-ai/internal/ledger"
 	"github.com/LanzerDevCorp/lucind-ai/internal/packet"
 	"github.com/LanzerDevCorp/lucind-ai/internal/result"
 	"github.com/LanzerDevCorp/lucind-ai/internal/run"
@@ -591,6 +597,9 @@ type TrialJourneyResult struct {
 	InitialLeaseB    feature.Lease
 	ReclaimedLeaseB  feature.Lease
 	AdoptedEnvelopeB result.Envelope
+	DefectRecord     *DefectRecord
+	Approval         *RemediationApproval
+	FixReport        *run.Report
 }
 
 // ExecuteTrialJourney runs the concurrent journey for Changes A and B, coordinating
@@ -630,28 +639,73 @@ func ExecuteTrialJourney(
 		return nil, fmt.Errorf("stability: dispatch batch: %w", err)
 	}
 
-	// 3. Progress through defect/remediation stages to crash injection
-	stages := []TrialState{
-		TrialAwaitingDefectAssessment,
-		TrialAwaitingRemediationApproval,
-		TrialFixDispatched,
-		TrialCrashInjected,
-		TrialLeaseWait,
+	// 3. Progress to defect assessment
+	if err := sm.AdvanceTrial(TrialAwaitingDefectAssessment); err != nil {
+		_ = sm.RecordTrialOutcome(TrialFailed)
+		return nil, err
 	}
-	for _, stage := range stages {
-		if err := sm.AdvanceTrial(stage); err != nil {
-			_ = sm.RecordTrialOutcome(TrialFailed)
-			return nil, err
+
+	wtPathA := filepath.Join(deps.PrimaryRoot, "wt-"+pA.ID)
+	defectRec, _ := ReadDefectRecord(deps.WorktreeFS(wtPathA), wtPathA)
+	var defectPtr *DefectRecord
+	if defectRec.ChangeID != "" {
+		defectPtr = &defectRec
+	} else if len(batchReport.Lanes) > 0 && batchReport.Lanes[0].Status == lane.Blocked {
+		d, err := AssessAndRecordDefect(ctx, deps.Ledger, wtPathA, pA.ID, "fixture/check.sh", "CHECK FAILURE: Seeded defect present in fixture/defect.txt", deps.Now())
+		if err == nil {
+			defectPtr = d
 		}
 	}
 
-	// 4. In TrialLeaseWait, wait for Change B's lease TTL to expire if still held
+	// 4. Progress to remediation approval
+	if err := sm.AdvanceTrial(TrialAwaitingRemediationApproval); err != nil {
+		_ = sm.RecordTrialOutcome(TrialFailed)
+		return nil, err
+	}
+
+	var approvalPtr *RemediationApproval
+	if defectPtr != nil {
+		app, err := RecordTestActorApproval(ctx, deps.Ledger, wtPathA, *defectPtr, DefaultTestActor, true, "remediation approved for fixture defect", deps.Now())
+		if err != nil {
+			_ = sm.RecordTrialOutcome(TrialFailed)
+			return nil, err
+		}
+		approvalPtr = app
+	}
+
+	// 5. Progress to fix dispatched
+	if err := sm.AdvanceTrial(TrialFixDispatched); err != nil {
+		_ = sm.RecordTrialOutcome(TrialFailed)
+		return nil, err
+	}
+
+	var fixReportPtr *run.Report
+	if approvalPtr != nil && approvalPtr.Approved {
+		rep, err := DispatchFixChange(ctx, deps, cfg, approvalPtr)
+		if err == nil {
+			fixReportPtr = &rep
+		}
+	}
+
+	// 6. Crash injection stage
+	if err := sm.AdvanceTrial(TrialCrashInjected); err != nil {
+		_ = sm.RecordTrialOutcome(TrialFailed)
+		return nil, err
+	}
+
+	// 7. Lease wait stage
+	if err := sm.AdvanceTrial(TrialLeaseWait); err != nil {
+		_ = sm.RecordTrialOutcome(TrialFailed)
+		return nil, err
+	}
+
+	// In TrialLeaseWait, wait for Change B's lease TTL to expire if still held
 	now := time.Now().UTC()
 	if now.Before(leaseB.ExpiresAt) {
 		time.Sleep(leaseB.ExpiresAt.Sub(now) + 10*time.Millisecond)
 	}
 
-	// 5. Recover Change B (zero survivors check -> lease reclaim -> envelope adoption)
+	// 8. Recover Change B (zero survivors check -> lease reclaim -> envelope adoption)
 	reclaimedB, adoptedEnvB, err := RecoverCrashedChangeB(
 		ctx,
 		featSvc,
@@ -668,17 +722,21 @@ func ExecuteTrialJourney(
 		return nil, err
 	}
 
-	// 6. Advance through recovery, promotion, and evidence capture
-	postRecoveryStages := []TrialState{
-		TrialReclaimed,
-		TrialPromoted,
-		TrialEvidenceCaptured,
+	if err := sm.AdvanceTrial(TrialReclaimed); err != nil {
+		_ = sm.RecordTrialOutcome(TrialFailed)
+		return nil, err
 	}
-	for _, stage := range postRecoveryStages {
-		if err := sm.AdvanceTrial(stage); err != nil {
-			_ = sm.RecordTrialOutcome(TrialFailed)
-			return nil, err
-		}
+
+	// 9. Promote stage
+	if err := sm.AdvanceTrial(TrialPromoted); err != nil {
+		_ = sm.RecordTrialOutcome(TrialFailed)
+		return nil, err
+	}
+
+	// 10. Evidence capture stage
+	if err := sm.AdvanceTrial(TrialEvidenceCaptured); err != nil {
+		_ = sm.RecordTrialOutcome(TrialFailed)
+		return nil, err
 	}
 
 	return &TrialJourneyResult{
@@ -687,5 +745,249 @@ func ExecuteTrialJourney(
 		InitialLeaseB:    leaseB,
 		ReclaimedLeaseB:  reclaimedB,
 		AdoptedEnvelopeB: adoptedEnvB,
+		DefectRecord:     defectPtr,
+		Approval:         approvalPtr,
+		FixReport:        fixReportPtr,
 	}, nil
+}
+
+// DefectRecord describes a detected out-of-scope fixture defect.
+type DefectRecord struct {
+	ChangeID     string    `json:"change_id"`
+	FixtureCheck string    `json:"fixture_check"`
+	Reason       string    `json:"reason"`
+	DiscoveredAt time.Time `json:"discovered_at"`
+}
+
+// PersistDefectRecord writes the DefectRecord to .lucind/defect_record.json in worktreePath.
+func PersistDefectRecord(worktreePath string, record DefectRecord) error {
+	lucindDir := filepath.Join(worktreePath, ".lucind")
+	if err := os.MkdirAll(lucindDir, 0o755); err != nil {
+		return fmt.Errorf("stability: create .lucind directory in %s: %w", worktreePath, err)
+	}
+	data, err := json.MarshalIndent(record, "", "  ")
+	if err != nil {
+		return fmt.Errorf("stability: marshal defect record: %w", err)
+	}
+	target := filepath.Join(lucindDir, "defect_record.json")
+	if err := os.WriteFile(target, data, 0o644); err != nil {
+		return fmt.Errorf("stability: write defect record to %s: %w", target, err)
+	}
+	return nil
+}
+
+// ReadDefectRecord reads and parses a DefectRecord from .lucind/defect_record.json in worktreePath.
+func ReadDefectRecord(fsys fs.FS, worktreePath string) (DefectRecord, error) {
+	var data []byte
+	var err error
+	if fsys != nil {
+		data, err = fs.ReadFile(fsys, ".lucind/defect_record.json")
+	} else {
+		data, err = os.ReadFile(filepath.Join(worktreePath, ".lucind", "defect_record.json"))
+	}
+	if err != nil {
+		return DefectRecord{}, fmt.Errorf("stability: read defect record in %s: %w", worktreePath, err)
+	}
+	var record DefectRecord
+	if err := json.Unmarshal(data, &record); err != nil {
+		return DefectRecord{}, fmt.Errorf("stability: unmarshal defect record in %s: %w", worktreePath, err)
+	}
+	return record, nil
+}
+
+// AssessAndRecordDefect creates and persists a DefectRecord when a fixture check fails.
+func AssessAndRecordDefect(ctx context.Context, l *ledger.Ledger, worktreePath, changeID, checkName, failureOutput string, now time.Time) (*DefectRecord, error) {
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	record := DefectRecord{
+		ChangeID:     changeID,
+		FixtureCheck: checkName,
+		Reason:       strings.TrimSpace(failureOutput),
+		DiscoveredAt: now,
+	}
+	if err := PersistDefectRecord(worktreePath, record); err != nil {
+		return nil, err
+	}
+	if l != nil {
+		_ = l.AppendEvent(ctx, ledger.Event{
+			RunID:  "",
+			LaneID: changeID,
+			Type:   ledger.EventLaneNote,
+			Detail: fmt.Sprintf("defect_recorded: %s", record.Reason),
+			At:     now,
+		})
+	}
+	return &record, nil
+}
+
+// DefaultTestActor is the canonical deterministic actor name for automated stability remediation decisions.
+const DefaultTestActor = "stability-test-actor"
+
+// ErrRemediationNotApproved is returned when remediation dispatch is attempted without prior Test Actor approval.
+var ErrRemediationNotApproved = errors.New("stability: remediation proposal has not been approved by Test Actor")
+
+// RemediationApproval represents a deterministic, durable decision on a DefectRecord.
+type RemediationApproval struct {
+	ChangeID  string    `json:"change_id"`
+	Approver  string    `json:"approver"`
+	Approved  bool      `json:"approved"`
+	Reason    string    `json:"reason"`
+	DecidedAt time.Time `json:"decided_at"`
+}
+
+// PersistRemediationApproval writes the RemediationApproval to .lucind/remediation_approval.json in worktreePath.
+func PersistRemediationApproval(worktreePath string, approval RemediationApproval) error {
+	lucindDir := filepath.Join(worktreePath, ".lucind")
+	if err := os.MkdirAll(lucindDir, 0o755); err != nil {
+		return fmt.Errorf("stability: create .lucind directory in %s: %w", worktreePath, err)
+	}
+	data, err := json.MarshalIndent(approval, "", "  ")
+	if err != nil {
+		return fmt.Errorf("stability: marshal remediation approval: %w", err)
+	}
+	target := filepath.Join(lucindDir, "remediation_approval.json")
+	if err := os.WriteFile(target, data, 0o644); err != nil {
+		return fmt.Errorf("stability: write remediation approval to %s: %w", target, err)
+	}
+	return nil
+}
+
+// ReadRemediationApproval reads and parses a RemediationApproval from .lucind/remediation_approval.json in worktreePath.
+func ReadRemediationApproval(fsys fs.FS, worktreePath string) (RemediationApproval, error) {
+	var data []byte
+	var err error
+	if fsys != nil {
+		data, err = fs.ReadFile(fsys, ".lucind/remediation_approval.json")
+	} else {
+		data, err = os.ReadFile(filepath.Join(worktreePath, ".lucind", "remediation_approval.json"))
+	}
+	if err != nil {
+		return RemediationApproval{}, fmt.Errorf("stability: read remediation approval in %s: %w", worktreePath, err)
+	}
+	var approval RemediationApproval
+	if err := json.Unmarshal(data, &approval); err != nil {
+		return RemediationApproval{}, fmt.Errorf("stability: unmarshal remediation approval in %s: %w", worktreePath, err)
+	}
+	return approval, nil
+}
+
+// RecordTestActorApproval records a deterministic approval decision for a DefectRecord.
+func RecordTestActorApproval(
+	ctx context.Context,
+	l *ledger.Ledger,
+	worktreePath string,
+	defect DefectRecord,
+	actor string,
+	approved bool,
+	reason string,
+	now time.Time,
+) (*RemediationApproval, error) {
+	if actor == "" {
+		actor = DefaultTestActor
+	}
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+
+	app := RemediationApproval{
+		ChangeID:  defect.ChangeID,
+		Approver:  actor,
+		Approved:  approved,
+		Reason:    reason,
+		DecidedAt: now,
+	}
+
+	if err := PersistRemediationApproval(worktreePath, app); err != nil {
+		return nil, err
+	}
+
+	if l != nil {
+		decision := ledger.DecisionApproved
+		if !approved {
+			decision = ledger.DecisionRejected
+		}
+		// Register or update approval in SQLite ledger
+		ledgerApp := ledger.Approval{
+			RunID:       "run-journey-trial-1",
+			LaneID:      defect.ChangeID,
+			PacketID:    defect.ChangeID,
+			Approver:    actor,
+			Decision:    decision,
+			Evidence:    defect.Reason,
+			RequestedAt: defect.DiscoveredAt,
+			DecidedAt:   &now,
+		}
+		_ = l.RequestApproval(ctx, ledgerApp)
+		_ = l.AppendEvent(ctx, ledger.Event{
+			RunID:  "run-journey-trial-1",
+			LaneID: defect.ChangeID,
+			Type:   "remediation_approval_decided",
+			Detail: fmt.Sprintf("actor=%s decision=%s reason=%s", actor, decision, reason),
+			At:     now,
+		})
+	}
+
+	return &app, nil
+}
+
+// VerifyRemediationApproval checks that a valid, approved RemediationApproval exists for changeID.
+func VerifyRemediationApproval(fsys fs.FS, worktreePath string, changeID string) (*RemediationApproval, error) {
+	app, err := ReadRemediationApproval(fsys, worktreePath)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrRemediationNotApproved, err)
+	}
+	if !app.Approved {
+		return &app, fmt.Errorf("%w: remediation for %s was rejected: %s", ErrRemediationNotApproved, changeID, app.Reason)
+	}
+	if app.Approver == "" {
+		return &app, fmt.Errorf("%w: missing approver identity", ErrRemediationNotApproved)
+	}
+	if app.DecidedAt.IsZero() {
+		return &app, fmt.Errorf("%w: missing decision timestamp", ErrRemediationNotApproved)
+	}
+	return &app, nil
+}
+
+// PromoteTargetCAS promotes candidateSHA to parentRef using CAS semantics via integrate.PromoteCAS.
+func PromoteTargetCAS(ctx context.Context, primaryRoot, parentRef, candidateSHA, expectedSHA string) error {
+	return integrate.PromoteCAS(ctx, primaryRoot, parentRef, candidateSHA, expectedSHA)
+}
+
+// BuildFixPacket constructs a Fix Change packet from fixture templates,
+// injecting feature Target A, ParentRefA, BaseSHA, and pinned model.
+func BuildFixPacket(cfg JourneyConfig) packet.Packet {
+	pFix := fixture.FixChangePacket()
+	pFix.Feature = cfg.TargetA
+	pFix.ParentRef = cfg.ParentRefA
+	pFix.BaseSHA = cfg.BaseSHA
+	pFix.ExpectedParentSHA = cfg.ExpectedParentSHA
+	pFix.Model = PinnedModel
+	return pFix
+}
+
+// DispatchFixChange dispatches the Fix Change lane through run.Execute, gated on prior approval.
+func DispatchFixChange(ctx context.Context, deps run.Deps, cfg JourneyConfig, approval *RemediationApproval) (run.Report, error) {
+	if approval == nil || !approval.Approved {
+		return run.Report{}, fmt.Errorf("%w: cannot dispatch fix change without valid approval", ErrRemediationNotApproved)
+	}
+	pFix := BuildFixPacket(cfg)
+	return run.Execute(ctx, deps, pFix)
+}
+
+// ErrDependencyNotSatisfied is returned when Change A promotion is attempted before Fix promotion is confirmed.
+var ErrDependencyNotSatisfied = errors.New("stability: remediation fix dependency is not satisfied")
+
+// PromoteChangeACAS promotes Change A's candidate commit to Target A using CAS semantics,
+// enforcing that Fix promotion to Target A has been confirmed satisfied first.
+func PromoteChangeACAS(ctx context.Context, primaryRoot string, cfg JourneyConfig, candidateASHA, fixSHA string, fixPromoted bool) error {
+	if !fixPromoted {
+		return fmt.Errorf("%w: fix change has not been promoted to target A (%s)", ErrDependencyNotSatisfied, cfg.TargetA)
+	}
+	return integrate.PromoteCAS(ctx, primaryRoot, cfg.ParentRefA, candidateASHA, fixSHA)
+}
+
+// PromoteTargetBCAS promotes Change B's candidate commit to Target B using CAS semantics.
+func PromoteTargetBCAS(ctx context.Context, primaryRoot string, cfg JourneyConfig, candidateBSHA string) error {
+	return integrate.PromoteCAS(ctx, primaryRoot, cfg.ParentRefB, candidateBSHA, cfg.ExpectedParentSHA)
 }

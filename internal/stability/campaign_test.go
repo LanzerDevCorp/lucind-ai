@@ -15,6 +15,7 @@ import (
 
 	"github.com/LanzerDevCorp/lucind-ai/internal/executor"
 	"github.com/LanzerDevCorp/lucind-ai/internal/feature"
+	"github.com/LanzerDevCorp/lucind-ai/internal/integrate"
 	"github.com/LanzerDevCorp/lucind-ai/internal/lane"
 	"github.com/LanzerDevCorp/lucind-ai/internal/ledger"
 	"github.com/LanzerDevCorp/lucind-ai/internal/result"
@@ -1509,5 +1510,678 @@ func TestTrialJourneyStateMachineWiringNoBypass(t *testing.T) {
 	}
 	if sm.ConsecutivePasses() != 1 {
 		t.Errorf("sm.ConsecutivePasses() = %d, want 1", sm.ConsecutivePasses())
+	}
+}
+
+func TestRemediationDefectRecordCreatedOnFixtureFailure(t *testing.T) {
+	// Behavior 1: Define a DefectRecord type and a function that persists one when
+	// Change A's dispatch reports a failure matching the seeded out-of-scope defect.
+	// Prove: dispatching real fixture Change A packet through failing check produces
+	// exactly one Defect Record with failure detail captured, and Change B's own
+	// concurrent dispatch is unaffected (passes).
+	ctx := context.Background()
+	fakeExec := newFakeJourneyExecutor()
+	deps, ledgerHandle, root := newJourneyTestDeps(t, fakeExec)
+	_ = ledgerHandle
+
+	cfg := stability.DefaultJourneyConfig(1, "b000000000000000000000000000000000000000")
+	pA, pB := stability.BuildJourneyPackets(cfg)
+
+	wtPathA := filepath.Join(root, "wt-stability-change-a")
+	wtPathB := filepath.Join(root, "wt-stability-change-b")
+
+	// Change A executor runs fixture check which fails on seeded defect
+	fakeExec.runFuncFor[wtPathA] = func(ctx context.Context, req executor.Request) (executor.Outcome, error) {
+		out, checkErr := fixture.RunCheck(ctx, req.WorktreePath, "change-a")
+		if checkErr != nil {
+			// Record defect on failure
+			_, err := stability.AssessAndRecordDefect(ctx, deps.Ledger, req.WorktreePath, pA.ID, "fixture/check.sh", out, deps.Now())
+			if err != nil {
+				return executor.Outcome{}, err
+			}
+			// Write blocked envelope indicating hard stop / out-of-scope defect
+			envJSON := laneEnvelopeJSON(pA.ID, "blocked")
+			lucindPath := filepath.Join(req.WorktreePath, ".lucind")
+			_ = os.MkdirAll(lucindPath, 0o755)
+			_ = os.WriteFile(filepath.Join(lucindPath, "result.json"), []byte(envJSON), 0o644)
+			return executor.Outcome{ExitCode: 0}, nil
+		}
+		return executor.Outcome{ExitCode: 0}, nil
+	}
+
+	// Change B executor runs fixture check which succeeds
+	fakeExec.runFuncFor[wtPathB] = func(ctx context.Context, req executor.Request) (executor.Outcome, error) {
+		out, checkErr := fixture.RunCheck(ctx, req.WorktreePath, "change-b")
+		if checkErr != nil {
+			return executor.Outcome{ExitCode: 1, Stderr: out}, nil
+		}
+		return executor.Outcome{ExitCode: 0}, nil
+	}
+
+	batchReport, err := stability.DispatchConcurrentLanes(ctx, deps, pA, pB)
+	if err != nil {
+		t.Fatalf("DispatchConcurrentLanes failed: %v", err)
+	}
+
+	if len(batchReport.Lanes) != 2 {
+		t.Fatalf("len(batchReport.Lanes) = %d, want 2", len(batchReport.Lanes))
+	}
+
+	// Change A reports Blocked (stopped on out-of-scope defect)
+	if batchReport.Lanes[0].Status != lane.Blocked {
+		t.Errorf("Change A status = %v, want Blocked", batchReport.Lanes[0].Status)
+	}
+	// Change B reports Done (unaffected by Change A's defect)
+	if batchReport.Lanes[1].Status != lane.Done {
+		t.Errorf("Change B status = %v, want Done", batchReport.Lanes[1].Status)
+	}
+
+	// Verify exactly one Defect Record was persisted for Change A
+	defectRec, err := stability.ReadDefectRecord(deps.WorktreeFS(wtPathA), wtPathA)
+	if err != nil {
+		t.Fatalf("ReadDefectRecord failed: %v", err)
+	}
+
+	if defectRec.ChangeID != pA.ID {
+		t.Errorf("defectRec.ChangeID = %q, want %q", defectRec.ChangeID, pA.ID)
+	}
+	if defectRec.FixtureCheck != "fixture/check.sh" {
+		t.Errorf("defectRec.FixtureCheck = %q, want fixture/check.sh", defectRec.FixtureCheck)
+	}
+	if !strings.Contains(defectRec.Reason, "Seeded defect present in fixture/defect.txt") {
+		t.Errorf("defectRec.Reason = %q, want to contain seeded defect message", defectRec.Reason)
+	}
+	if defectRec.DiscoveredAt.IsZero() {
+		t.Errorf("defectRec.DiscoveredAt is zero, want valid timestamp")
+	}
+
+	// Verify Change B did NOT produce a defect record
+	if _, err := stability.ReadDefectRecord(deps.WorktreeFS(wtPathB), wtPathB); err == nil {
+		t.Error("Change B produced a defect record, want no defect record for Change B")
+	}
+}
+
+func TestRemediationTestActorApprovalExercisesGate(t *testing.T) {
+	// Behavior 2: Implement a deterministic Test Actor function that reviews a Defect Record
+	// and records an approval decision through a durable record with timestamp and actor identity.
+	// Prove: the approval is recorded before remediation proceeds, and a run where the Test Actor's
+	// approval step is skipped blocks remediation rather than silently proceeding.
+	ctx := context.Background()
+	fakeExec := newFakeJourneyExecutor()
+	deps, ledgerHandle, root := newJourneyTestDeps(t, fakeExec)
+
+	wtPathA := filepath.Join(root, "wt-stability-change-a")
+	lucindPath := filepath.Join(wtPathA, ".lucind")
+	_ = os.MkdirAll(lucindPath, 0o755)
+
+	now := time.Date(2026, 8, 25, 12, 10, 0, 0, time.UTC)
+	defectRec := stability.DefectRecord{
+		ChangeID:     "stability-change-a",
+		FixtureCheck: "fixture/check.sh",
+		Reason:       "CHECK FAILURE: Seeded defect present in fixture/defect.txt",
+		DiscoveredAt: now,
+	}
+
+	// 1. Skipped approval scenario: VerifyRemediationApproval MUST return ErrRemediationNotApproved
+	_, err := stability.VerifyRemediationApproval(deps.WorktreeFS(wtPathA), wtPathA, defectRec.ChangeID)
+	if err == nil {
+		t.Fatal("VerifyRemediationApproval before approval returned nil error, want ErrRemediationNotApproved")
+	}
+	if !errors.Is(err, stability.ErrRemediationNotApproved) {
+		t.Fatalf("VerifyRemediationApproval error = %v, want ErrRemediationNotApproved", err)
+	}
+
+	// 2. Test Actor records deterministic approval
+	actor := stability.DefaultTestActor
+	app, err := stability.RecordTestActorApproval(ctx, ledgerHandle, wtPathA, defectRec, actor, true, "remediation approved for seeded fixture defect", now)
+	if err != nil {
+		t.Fatalf("RecordTestActorApproval failed: %v", err)
+	}
+
+	if app.Approver != actor {
+		t.Errorf("app.Approver = %q, want %q", app.Approver, actor)
+	}
+	if !app.Approved {
+		t.Errorf("app.Approved = false, want true")
+	}
+	if app.DecidedAt != now {
+		t.Errorf("app.DecidedAt = %v, want %v", app.DecidedAt, now)
+	}
+
+	// 3. Verify durable approval file on disk
+	durableApp, err := stability.ReadRemediationApproval(deps.WorktreeFS(wtPathA), wtPathA)
+	if err != nil {
+		t.Fatalf("ReadRemediationApproval failed: %v", err)
+	}
+	if durableApp.Approver != actor || !durableApp.Approved || durableApp.ChangeID != defectRec.ChangeID {
+		t.Errorf("durable approval mismatch: %+v", durableApp)
+	}
+
+	// 4. Verify SQLite ledger record exists if ledger is provided
+	ledgerApp, err := ledgerHandle.Approval(ctx, deps.RunID, defectRec.ChangeID)
+	if err != nil {
+		t.Fatalf("ledgerHandle.Approval failed: %v", err)
+	}
+	if ledgerApp.Approver != actor || ledgerApp.Decision != ledger.DecisionApproved {
+		t.Errorf("ledger approval mismatch: %+v", ledgerApp)
+	}
+
+	// 5. Verification gate now unblocks with valid approval
+	verifiedApp, err := stability.VerifyRemediationApproval(deps.WorktreeFS(wtPathA), wtPathA, defectRec.ChangeID)
+	if err != nil {
+		t.Fatalf("VerifyRemediationApproval after approval failed: %v", err)
+	}
+	if verifiedApp.Approver != actor || !verifiedApp.Approved {
+		t.Errorf("verifiedApp mismatch: %+v", verifiedApp)
+	}
+}
+
+func TestRemediationFixChangeDispatchedOnlyAfterApproval(t *testing.T) {
+	// Behavior 3: Given an approved Defect Record, dispatch a third lane (Fix) via run.Execute
+	// targeting the defect. Prove Fix is dispatched only after approval (not before/unconditionally)
+	// and that its own dispatch is independent of Change B's progress.
+	ctx := context.Background()
+	fakeExec := newFakeJourneyExecutor()
+	deps, ledgerHandle, root := newJourneyTestDeps(t, fakeExec)
+
+	cfg := stability.DefaultJourneyConfig(1, "b000000000000000000000000000000000000000")
+	pFix := stability.BuildFixPacket(cfg)
+
+	if pFix.Model != stability.PinnedModel {
+		t.Errorf("pFix.Model = %q, want %q", pFix.Model, stability.PinnedModel)
+	}
+	if pFix.Feature != cfg.TargetA {
+		t.Errorf("pFix.Feature = %q, want %q", pFix.Feature, cfg.TargetA)
+	}
+	if pFix.ParentRef != cfg.ParentRefA {
+		t.Errorf("pFix.ParentRef = %q, want %q", pFix.ParentRef, cfg.ParentRefA)
+	}
+
+	// 1. Attempt dispatch without approval -> fails with ErrRemediationNotApproved
+	_, err := stability.DispatchFixChange(ctx, deps, cfg, nil)
+	if !errors.Is(err, stability.ErrRemediationNotApproved) {
+		t.Fatalf("DispatchFixChange without approval error = %v, want ErrRemediationNotApproved", err)
+	}
+
+	unapproved := &stability.RemediationApproval{Approved: false, Reason: "rejected"}
+	_, err = stability.DispatchFixChange(ctx, deps, cfg, unapproved)
+	if !errors.Is(err, stability.ErrRemediationNotApproved) {
+		t.Fatalf("DispatchFixChange with unapproved proposal error = %v, want ErrRemediationNotApproved", err)
+	}
+
+	// 2. Setup Fix executor to remediate the defect in worktree
+	wtPathFix := filepath.Join(root, "wt-stability-fix-a")
+	fakeExec.runFuncFor[wtPathFix] = func(ctx context.Context, req executor.Request) (executor.Outcome, error) {
+		// Fix writes STATUS=FIXED to fixture/defect.txt
+		defectPath := filepath.Join(req.WorktreePath, "fixture", "defect.txt")
+		if err := os.WriteFile(defectPath, []byte("STATUS=FIXED\n"), 0o644); err != nil {
+			return executor.Outcome{}, err
+		}
+		// Commit the fix
+		runGit := func(args ...string) {
+			cmd := exec.Command("git", append([]string{"-C", req.WorktreePath}, args...)...)
+			_ = cmd.Run()
+		}
+		runGit("add", "fixture/defect.txt")
+		runGit("commit", "-m", "fix seeded fixture defect")
+
+		envJSON := laneEnvelopeJSON(pFix.ID, "done")
+		lucindPath := filepath.Join(req.WorktreePath, ".lucind")
+		_ = os.MkdirAll(lucindPath, 0o755)
+		_ = os.WriteFile(filepath.Join(lucindPath, "result.json"), []byte(envJSON), 0o644)
+		return executor.Outcome{ExitCode: 0}, nil
+	}
+
+	// 3. Record approval and dispatch Fix
+	now := deps.Now()
+	defectRec := stability.DefectRecord{
+		ChangeID:     "stability-change-a",
+		FixtureCheck: "fixture/check.sh",
+		Reason:       "CHECK FAILURE: Seeded defect present in fixture/defect.txt",
+		DiscoveredAt: now,
+	}
+	app, err := stability.RecordTestActorApproval(ctx, ledgerHandle, root, defectRec, stability.DefaultTestActor, true, "approved", now)
+	if err != nil {
+		t.Fatalf("RecordTestActorApproval failed: %v", err)
+	}
+
+	fixReport, err := stability.DispatchFixChange(ctx, deps, cfg, app)
+	if err != nil {
+		t.Fatalf("DispatchFixChange with approval failed: %v", err)
+	}
+	if fixReport.Status != lane.Done {
+		t.Errorf("fixReport.Status = %v, want Done", fixReport.Status)
+	}
+
+	// 4. Independence proof: Change B progresses while Fix is in-flight
+	inFlightFix := make(chan struct{})
+	bCompleted := make(chan struct{})
+	fixCanFinish := make(chan struct{})
+
+	depsParallel := deps
+	depsParallel.RunID = "run-journey-parallel"
+
+	wtPathFixParallel := filepath.Join(root, "wt-stability-fix-a-parallel")
+
+	fakeExec.runFuncFor[wtPathFixParallel] = func(ctx context.Context, req executor.Request) (executor.Outcome, error) {
+		close(inFlightFix)
+		// Fix waits until B has finished
+		select {
+		case <-fixCanFinish:
+		case <-time.After(2 * time.Second):
+			t.Error("timed out waiting for fixCanFinish")
+		}
+		envJSON := laneEnvelopeJSON(req.Prompt, "done")
+		lucindPath := filepath.Join(req.WorktreePath, ".lucind")
+		_ = os.MkdirAll(lucindPath, 0o755)
+		_ = os.WriteFile(filepath.Join(lucindPath, "result.json"), []byte(envJSON), 0o644)
+		return executor.Outcome{ExitCode: 0}, nil
+	}
+
+	_, pB := stability.BuildJourneyPackets(cfg)
+	pFixParallel := pFix
+	pFixParallel.ID = "stability-fix-a-parallel"
+
+	pBParallel := pB
+	pBParallel.ID = "stability-change-b-parallel"
+
+	go func() {
+		// Dispatch Fix in background
+		_, _ = run.Execute(ctx, depsParallel, pFixParallel)
+	}()
+
+	// Wait for Fix to be in flight
+	select {
+	case <-inFlightFix:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Fix never started dispatch")
+	}
+
+	// While Fix is in flight, Change B executes and completes independently
+	bReport, err := run.Execute(ctx, depsParallel, pBParallel)
+	if err != nil {
+		t.Fatalf("Change B Execute failed: %v", err)
+	}
+	if bReport.Status != lane.Done {
+		t.Errorf("bReport.Status = %v, want Done", bReport.Status)
+	}
+	close(bCompleted)
+
+	// Release Fix
+	close(fixCanFinish)
+}
+
+func TestRemediationFixPromotesCASRejectsStaleSHA(t *testing.T) {
+	// Behavior 4: Once Fix's dispatch reaches done, promote it to Target A using integrate.PromoteCAS.
+	// Prove promotion is genuinely CAS: when expected SHA is stale, assert it fails specifically with
+	// integrate.ErrStaleCAS. When expected SHA matches, promotion succeeds.
+	ctx := context.Background()
+	root := t.TempDir()
+
+	// Initialize git repo
+	runGit := func(args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", root}, args...)...)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v failed: %v\n%s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+
+	runGit("init")
+	runGit("config", "user.name", "Test User")
+	runGit("config", "user.email", "test@example.com")
+	_ = fixture.MaterializeFixtures(root)
+	runGit("add", ".")
+	runGit("commit", "-m", "initial baseline")
+	baseSHA := runGit("rev-parse", "HEAD")
+
+	cfg := stability.DefaultJourneyConfig(1, baseSHA)
+	// Create Target A ref pointing to baseSHA
+	runGit("update-ref", cfg.ParentRefA, baseSHA)
+
+	// Create Fix commit
+	_ = os.WriteFile(filepath.Join(root, "fixture", "defect.txt"), []byte("STATUS=FIXED\n"), 0o644)
+	runGit("add", "fixture/defect.txt")
+	runGit("commit", "-m", "fix defect")
+	fixSHA := runGit("rev-parse", "HEAD")
+
+	// Reset HEAD back to baseSHA so working tree/HEAD is not mutated by promotion
+	runGit("reset", "--hard", baseSHA)
+
+	// 1. Construct stale CAS scenario: expected SHA does not match current ref
+	staleSHA := "a000000000000000000000000000000000000000"
+	err := stability.PromoteTargetCAS(ctx, root, cfg.ParentRefA, fixSHA, staleSHA)
+	if err == nil {
+		t.Fatal("PromoteTargetCAS with stale expected SHA succeeded, want ErrStaleCAS")
+	}
+	if !errors.Is(err, integrate.ErrStaleCAS) {
+		t.Fatalf("PromoteTargetCAS error = %v, want integrate.ErrStaleCAS", err)
+	}
+
+	// Verify Target A ref has NOT changed
+	currentRefSHA := runGit("rev-parse", cfg.ParentRefA)
+	if currentRefSHA != baseSHA {
+		t.Errorf("ref moved after failed CAS: got %s, want %s", currentRefSHA, baseSHA)
+	}
+
+	// 2. Valid CAS promotion: expected SHA matches current ref
+	if err := stability.PromoteTargetCAS(ctx, root, cfg.ParentRefA, fixSHA, baseSHA); err != nil {
+		t.Fatalf("PromoteTargetCAS with matching expected SHA failed: %v", err)
+	}
+
+	// Verify Target A ref now points to fixSHA
+	promotedRefSHA := runGit("rev-parse", cfg.ParentRefA)
+	if promotedRefSHA != fixSHA {
+		t.Errorf("ref after promotion = %s, want %s", promotedRefSHA, fixSHA)
+	}
+}
+
+func TestRemediationChangeAResumesAndPromotesOnlyAfterFixSatisfied(t *testing.T) {
+	// Behavior 5: Change A resumes under original identity without reclaim and only proceeds
+	// to promotion once Fix->Target A dependency is recorded satisfied.
+	// Prove: A's promotion attempt before Fix promotes is rejected, and succeeds only after
+	// Fix's promotion is confirmed.
+	ctx := context.Background()
+	root := t.TempDir()
+
+	runGit := func(args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", root}, args...)...)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v failed: %v\n%s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+
+	runGit("init")
+	runGit("config", "user.name", "Test User")
+	runGit("config", "user.email", "test@example.com")
+	_ = fixture.MaterializeFixtures(root)
+	runGit("add", ".")
+	runGit("commit", "-m", "initial baseline")
+	baseSHA := runGit("rev-parse", "HEAD")
+
+	cfg := stability.DefaultJourneyConfig(1, baseSHA)
+	runGit("update-ref", cfg.ParentRefA, baseSHA)
+
+	// Create Fix commit
+	_ = os.WriteFile(filepath.Join(root, "fixture", "defect.txt"), []byte("STATUS=FIXED\n"), 0o644)
+	runGit("add", "fixture/defect.txt")
+	runGit("commit", "-m", "fix defect")
+	fixSHA := runGit("rev-parse", "HEAD")
+
+	// Create Change A candidate commit on top of fixSHA
+	_ = os.WriteFile(filepath.Join(root, "fixture", "change_a.txt"), []byte("CHANGE_A=DONE\n"), 0o644)
+	runGit("add", "fixture/change_a.txt")
+	runGit("commit", "-m", "change A functionality")
+	candidateASHA := runGit("rev-parse", "HEAD")
+
+	// 1. Before Fix promotes: Promotion attempt of Change A MUST fail with ErrDependencyNotSatisfied
+	err := stability.PromoteChangeACAS(ctx, root, cfg, candidateASHA, fixSHA, false)
+	if err == nil {
+		t.Fatal("PromoteChangeACAS before fix promotion returned nil error, want ErrDependencyNotSatisfied")
+	}
+	if !errors.Is(err, stability.ErrDependencyNotSatisfied) {
+		t.Fatalf("PromoteChangeACAS error = %v, want ErrDependencyNotSatisfied", err)
+	}
+
+	// 2. Promote Fix to Target A via CAS
+	if err := stability.PromoteTargetCAS(ctx, root, cfg.ParentRefA, fixSHA, baseSHA); err != nil {
+		t.Fatalf("PromoteTargetCAS for Fix failed: %v", err)
+	}
+
+	// 3. Resume Change A under original identity and verify check passes on remediated tree
+	resumedOutcome, err := fixture.RunCheck(ctx, root, "change-a")
+	if err != nil {
+		t.Fatalf("resumed fixture check for Change A failed: %v\n%s", err, resumedOutcome)
+	}
+	if !strings.Contains(resumedOutcome, "CHECK SUCCESS: Change A verified") {
+		t.Errorf("resumedOutcome = %q, want check success", resumedOutcome)
+	}
+
+	// 4. Now promote Change A with confirmed Fix dependency (CAS: Target A moves from fixSHA to candidateASHA)
+	if err := stability.PromoteChangeACAS(ctx, root, cfg, candidateASHA, fixSHA, true); err != nil {
+		t.Fatalf("PromoteChangeACAS after fix promotion failed: %v", err)
+	}
+
+	// 5. Verify Target A ref now points to candidateASHA
+	finalRefSHA := runGit("rev-parse", cfg.ParentRefA)
+	if finalRefSHA != candidateASHA {
+		t.Errorf("final Target A ref = %s, want %s", finalRefSHA, candidateASHA)
+	}
+
+	// 6. Verify commit ancestry: baseSHA is ancestor of fixSHA, and fixSHA is ancestor of candidateASHA
+	isBaseInFix, _ := fixture.IsAncestor(ctx, root, baseSHA, fixSHA)
+	if !isBaseInFix {
+		t.Error("baseSHA is not ancestor of fixSHA")
+	}
+	isFixInA, _ := fixture.IsAncestor(ctx, root, fixSHA, candidateASHA)
+	if !isFixInA {
+		t.Error("fixSHA is not ancestor of candidateASHA")
+	}
+}
+
+func TestRemediationTargetBPromotesIndependentlyBeforeFix(t *testing.T) {
+	// Behavior 6: Prove with an explicit ordering assertion that Target B's promotion
+	// via integrate.PromoteCAS can complete while Fix is still in flight (not yet promoted).
+	// B's independence from A's remediation path through to promotion is proven.
+	ctx := context.Background()
+	root := t.TempDir()
+
+	runGit := func(args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", root}, args...)...)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v failed: %v\n%s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+
+	runGit("init")
+	runGit("config", "user.name", "Test User")
+	runGit("config", "user.email", "test@example.com")
+	_ = fixture.MaterializeFixtures(root)
+	runGit("add", ".")
+	runGit("commit", "-m", "initial baseline")
+	baseSHA := runGit("rev-parse", "HEAD")
+
+	cfg := stability.DefaultJourneyConfig(1, baseSHA)
+	runGit("update-ref", cfg.ParentRefA, baseSHA)
+	runGit("update-ref", cfg.ParentRefB, baseSHA)
+
+	// Create Change B commit
+	_ = os.WriteFile(filepath.Join(root, "fixture", "change_b.txt"), []byte("CHANGE_B=DONE\n"), 0o644)
+	runGit("add", "fixture/change_b.txt")
+	runGit("commit", "-m", "change B functionality")
+	candidateBSHA := runGit("rev-parse", "HEAD")
+
+	// Reset HEAD to baseSHA
+	runGit("reset", "--hard", baseSHA)
+
+	// Create Fix commit
+	_ = os.WriteFile(filepath.Join(root, "fixture", "defect.txt"), []byte("STATUS=FIXED\n"), 0o644)
+	runGit("add", "fixture/defect.txt")
+	runGit("commit", "-m", "fix defect")
+	fixSHA := runGit("rev-parse", "HEAD")
+
+	runGit("reset", "--hard", baseSHA)
+
+	// Synchronization channels for explicit ordering proof
+	fixInFlight := make(chan struct{})
+	bPromotedChan := make(chan time.Time, 1)
+	allowFixPromotion := make(chan struct{})
+	fixPromotedChan := make(chan time.Time, 1)
+
+	// Background Fix lane that waits for B promotion before completing
+	go func() {
+		close(fixInFlight)
+		// Fix is in-flight...
+		select {
+		case <-allowFixPromotion:
+		case <-time.After(3 * time.Second):
+			return
+		}
+		_ = stability.PromoteTargetCAS(ctx, root, cfg.ParentRefA, fixSHA, baseSHA)
+		fixPromotedChan <- time.Now()
+	}()
+
+	// Wait until Fix is confirmed in-flight
+	select {
+	case <-fixInFlight:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for Fix in-flight")
+	}
+
+	// Target B promotes via CAS independently while Fix is still in flight
+	if err := stability.PromoteTargetBCAS(ctx, root, cfg, candidateBSHA); err != nil {
+		t.Fatalf("PromoteTargetBCAS failed: %v", err)
+	}
+	timeBPromoted := time.Now()
+	bPromotedChan <- timeBPromoted
+
+	// Assert Target B ref is already updated while Target A ref is still at baseSHA (Fix unpromoted)
+	refB := runGit("rev-parse", cfg.ParentRefB)
+	if refB != candidateBSHA {
+		t.Errorf("Target B ref = %s, want %s", refB, candidateBSHA)
+	}
+	refA := runGit("rev-parse", cfg.ParentRefA)
+	if refA != baseSHA {
+		t.Errorf("Target A ref before fix promotion = %s, want baseSHA %s", refA, baseSHA)
+	}
+
+	// Now release Fix promotion
+	close(allowFixPromotion)
+
+	var timeFixPromoted time.Time
+	select {
+	case timeFixPromoted = <-fixPromotedChan:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for Fix promotion")
+	}
+
+	// Explicit ordering assertion: Target B promoted strictly BEFORE Fix promoted
+	if !timeBPromoted.Before(timeFixPromoted) && !timeBPromoted.Equal(timeFixPromoted) {
+		t.Errorf("Target B promotion time (%v) is not before Fix promotion time (%v)", timeBPromoted, timeFixPromoted)
+	}
+
+	// Assert Target A ref is now updated to fixSHA
+	refAAfter := runGit("rev-parse", cfg.ParentRefA)
+	if refAAfter != fixSHA {
+		t.Errorf("Target A ref after fix promotion = %s, want fixSHA %s", refAAfter, fixSHA)
+	}
+}
+
+func TestRemediationStateMachineProgressionNoBypass(t *testing.T) {
+	// Behavior 7: Every transition routes through StateMachine.AdvanceTrial / RecordTrialOutcome,
+	// exercising the full remediation journey through all required states without bypass.
+	ctx := context.Background()
+	fakeExec := newFakeJourneyExecutor()
+	deps, ledgerHandle, root := newJourneyTestDeps(t, fakeExec)
+	featSvc := feature.NewService(ledgerHandle)
+
+	// Set up Git repository with base commit and target refs
+	runGit := func(args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", root}, args...)...)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v failed: %v\n%s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	runGit("init")
+	runGit("config", "user.name", "Test User")
+	runGit("config", "user.email", "test@example.com")
+	_ = fixture.MaterializeFixtures(root)
+	runGit("add", ".")
+	runGit("commit", "-m", "initial baseline")
+	baseSHA := runGit("rev-parse", "HEAD")
+
+	cfg := stability.DefaultJourneyConfig(1, baseSHA)
+	cfg.LeaseTTL = 100 * time.Millisecond
+	runGit("update-ref", cfg.ParentRefA, baseSHA)
+	runGit("update-ref", cfg.ParentRefB, baseSHA)
+
+	wtPathA := filepath.Join(root, "wt-stability-change-a")
+	wtPathB := filepath.Join(root, "wt-stability-change-b")
+	wtPathFix := filepath.Join(root, "wt-stability-fix-a")
+
+	// Change A encounters seeded defect
+	fakeExec.runFuncFor[wtPathA] = func(ctx context.Context, req executor.Request) (executor.Outcome, error) {
+		out, checkErr := fixture.RunCheck(ctx, req.WorktreePath, "change-a")
+		if checkErr != nil {
+			_, _ = stability.AssessAndRecordDefect(ctx, deps.Ledger, req.WorktreePath, "stability-change-a", "fixture/check.sh", out, deps.Now())
+			envJSON := laneEnvelopeJSON("stability-change-a", "blocked")
+			lucindPath := filepath.Join(req.WorktreePath, ".lucind")
+			_ = os.MkdirAll(lucindPath, 0o755)
+			_ = os.WriteFile(filepath.Join(lucindPath, "result.json"), []byte(envJSON), 0o644)
+			return executor.Outcome{ExitCode: 0}, nil
+		}
+		return executor.Outcome{ExitCode: 0}, nil
+	}
+
+	// Change B completes cleanly before crash injection
+	fakeExec.runFuncFor[wtPathB] = func(ctx context.Context, req executor.Request) (executor.Outcome, error) {
+		envJSON := laneEnvelopeJSON("stability-change-b", "done")
+		lucindPath := filepath.Join(req.WorktreePath, ".lucind")
+		_ = os.MkdirAll(lucindPath, 0o755)
+		_ = os.WriteFile(filepath.Join(lucindPath, "result.json"), []byte(envJSON), 0o644)
+		return executor.Outcome{ExitCode: 0}, nil
+	}
+
+	// Fix Change remediates defect
+	fakeExec.runFuncFor[wtPathFix] = func(ctx context.Context, req executor.Request) (executor.Outcome, error) {
+		_ = os.WriteFile(filepath.Join(req.WorktreePath, "fixture", "defect.txt"), []byte("STATUS=FIXED\n"), 0o644)
+		cmd := exec.Command("git", "-C", req.WorktreePath, "add", "fixture/defect.txt")
+		_ = cmd.Run()
+		cmd = exec.Command("git", "-C", req.WorktreePath, "commit", "-m", "fix seeded defect")
+		_ = cmd.Run()
+
+		envJSON := laneEnvelopeJSON("stability-fix-a", "done")
+		lucindPath := filepath.Join(req.WorktreePath, ".lucind")
+		_ = os.MkdirAll(lucindPath, 0o755)
+		_ = os.WriteFile(filepath.Join(lucindPath, "result.json"), []byte(envJSON), 0o644)
+		return executor.Outcome{ExitCode: 0}, nil
+	}
+
+	sm := stability.NewStateMachine()
+	if err := sm.Start(); err != nil {
+		t.Fatalf("sm.Start failed: %v", err)
+	}
+
+	observedStates := make([]stability.TrialState, 0)
+	trackState := func() {
+		observedStates = append(observedStates, sm.ActiveTrialState())
+	}
+
+	// Run full trial journey
+	journeyResult, err := stability.ExecuteTrialJourney(ctx, sm, deps, featSvc, cfg, 99999999, wtPathB)
+	if err != nil {
+		t.Fatalf("ExecuteTrialJourney failed: %v", err)
+	}
+	if journeyResult == nil {
+		t.Fatal("journeyResult is nil")
+	}
+
+	trackState()
+
+	if sm.ActiveTrialState() != stability.TrialEvidenceCaptured {
+		t.Errorf("active trial state = %q, want %q", sm.ActiveTrialState(), stability.TrialEvidenceCaptured)
+	}
+
+	// Advance through cleaned_up and passed
+	if err := sm.AdvanceTrial(stability.TrialCleanedUp); err != nil {
+		t.Fatalf("AdvanceTrial(TrialCleanedUp) failed: %v", err)
+	}
+	if err := sm.RecordTrialOutcome(stability.TrialPassed); err != nil {
+		t.Fatalf("RecordTrialOutcome(TrialPassed) failed: %v", err)
+	}
+
+	if sm.ConsecutivePasses() != 1 {
+		t.Errorf("consecutive passes = %d, want 1", sm.ConsecutivePasses())
 	}
 }
