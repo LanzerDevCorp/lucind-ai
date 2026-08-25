@@ -493,6 +493,23 @@ func TestExecuteHappyPathEnvelopeDoneReachesLaneDone(t *testing.T) {
 	}
 }
 
+func TestExecuteOutcomePGIDPopulatesReportPGID(t *testing.T) {
+	wtPath := t.TempDir()
+	fe := &fakeExecutor{outcome: executor.Outcome{ExitCode: 0, PGID: 12345}}
+	deps := newTestDeps(t, wtPath, func(string) fs.FS {
+		return fstest.MapFS{".lucind/result.json": {Data: []byte(doneEnvelopeJSON)}}
+	}, fe)
+
+	p := testPacket()
+	report, err := run.Execute(context.Background(), deps, p)
+	if err != nil {
+		t.Fatalf("Execute() error = %v, want nil", err)
+	}
+	if report.PGID != 12345 {
+		t.Errorf("report.PGID = %d, want 12345", report.PGID)
+	}
+}
+
 // blockedEnvelopeJSON is a minimal envelope satisfying result.schema.json
 // with status "blocked": a fired hard stop, and the required note on it.
 const blockedEnvelopeJSON = `{

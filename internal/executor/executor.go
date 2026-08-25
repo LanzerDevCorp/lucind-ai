@@ -84,6 +84,10 @@ type Outcome struct {
 	// exit status, and a truncated capture must never be treated as a
 	// failed or discarded run.
 	OutputTruncated bool
+	// PGID is the OS process-group id of the dispatched child when
+	// Request.Setpgid was true. Zero otherwise (not applicable --
+	// either Setpgid was false, or the executor does not support it).
+	PGID int
 }
 
 // Executor runs one Request, bounded by ctx.

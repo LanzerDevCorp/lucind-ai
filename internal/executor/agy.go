@@ -215,6 +215,9 @@ func (a Agy) runFormat(ctx context.Context, req Request, format string, stdoutTa
 	err := cmd.Run()
 
 	outcome := Outcome{Stderr: stderr.String(), Stdout: stdout.String()}
+	if req.Setpgid && cmd.Process != nil {
+		outcome.PGID = cmd.Process.Pid
+	}
 
 	if ctx.Err() == context.DeadlineExceeded {
 		outcome.TimedOut = true

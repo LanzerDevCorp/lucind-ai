@@ -564,3 +564,68 @@ func TestAgyLinuxSetpgidSysProcAttr(t *testing.T) {
 	}
 }
 
+// TestAgyLinuxSetpgidPGIDCaptured asserts that when Setpgid is true,
+// Outcome.PGID is populated with the real PID of the child process (which is
+// the process group leader), and is 0 when Setpgid is false.
+func TestAgyLinuxSetpgidPGIDCaptured(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping subprocess test in -short mode")
+	}
+
+	t.Run("SetpgidTruePopulatesPGID", func(t *testing.T) {
+		pidFile := filepath.Join(t.TempDir(), "child.pid")
+		script := fmt.Sprintf("#!/bin/sh\necho $$ > \"%s\"\nexit 0\n", pidFile)
+		stub := writeStub(t, script)
+		worktree := t.TempDir()
+
+		a := executor.Agy{Binary: stub}
+		outcome, err := a.Run(context.Background(), executor.Request{
+			Prompt:       "do the thing",
+			WorktreePath: worktree,
+			Setpgid:      true,
+		})
+		if err != nil {
+			t.Fatalf("Run() error = %v, want nil", err)
+		}
+		if outcome.ExitCode != 0 {
+			t.Fatalf("ExitCode = %d, want 0", outcome.ExitCode)
+		}
+
+		raw, err := os.ReadFile(pidFile)
+		if err != nil {
+			t.Fatalf("ReadFile(child.pid) error = %v", err)
+		}
+		expectedPID, err := strconv.Atoi(strings.TrimSpace(string(raw)))
+		if err != nil {
+			t.Fatalf("invalid child pid %q: %v", string(raw), err)
+		}
+		if expectedPID <= 0 {
+			t.Fatalf("expectedPID = %d, want > 0", expectedPID)
+		}
+
+		if outcome.PGID != expectedPID {
+			t.Errorf("outcome.PGID = %d, want %d", outcome.PGID, expectedPID)
+		}
+	})
+
+	t.Run("SetpgidFalseLeavesPGIDZero", func(t *testing.T) {
+		stub := writeStub(t, "#!/bin/sh\nexit 0\n")
+		worktree := t.TempDir()
+
+		a := executor.Agy{Binary: stub}
+		outcome, err := a.Run(context.Background(), executor.Request{
+			Prompt:       "do the thing",
+			WorktreePath: worktree,
+			Setpgid:      false,
+		})
+		if err != nil {
+			t.Fatalf("Run() error = %v, want nil", err)
+		}
+		if outcome.ExitCode != 0 {
+			t.Fatalf("ExitCode = %d, want 0", outcome.ExitCode)
+		}
+		if outcome.PGID != 0 {
+			t.Errorf("outcome.PGID = %d, want 0 when Setpgid is false", outcome.PGID)
+		}
+	})
+}
