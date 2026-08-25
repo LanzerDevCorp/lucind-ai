@@ -4647,3 +4647,96 @@ func TestLinkedWorktreeCommands(t *testing.T) {
 		t.Errorf("def-wt-2 = %+v, want signature 'sig-from-wt' and disposition 'recorded'", d2)
 	}
 }
+
+// TestRunCheckFromLinkedWorktreeTestsWorktreeOwnCode proves the runCheck
+// regression fix: "check" run from inside a linked worktree must test and
+// report the WORKTREE's own commit and lucind-checks.sh -- never silently
+// redirect to the primary checkout's. resolvePrimaryRoot's
+// git-common-dir-based semantics are correct for the 18 ledger-touching call
+// sites, but "check" never touches the ledger; it tests wherever the caller
+// is actually standing, worktree or not. The two lucind-checks.sh scripts
+// and commits below are deliberately never merged/visible to each other --
+// a real, local, uncommitted-relative-to-primary divergence -- so a run
+// against the wrong root is unambiguously detectable by its output.
+func TestRunCheckFromLinkedWorktreeTestsWorktreeOwnCode(t *testing.T) {
+	if testing.Short() {
+		t.Skip("shells out to real git")
+	}
+	primaryRoot := initRepo(t)
+
+	primaryScript := "#!/bin/sh\necho \"PASS: primary\"\nexit 0\n"
+	if err := os.WriteFile(filepath.Join(primaryRoot, "lucind-checks.sh"), []byte(primaryScript), 0o755); err != nil {
+		t.Fatalf("WriteFile(primary lucind-checks.sh) error = %v", err)
+	}
+	runGit(t, primaryRoot, "add", "lucind-checks.sh")
+	runGit(t, primaryRoot, "commit", "-m", "add primary lucind-checks.sh")
+
+	ctx := context.Background()
+	wt, err := worktree.Create(ctx, primaryRoot, "lane-check-wt")
+	if err != nil {
+		t.Fatalf("worktree.Create: %v", err)
+	}
+	defer worktree.Remove(ctx, primaryRoot, wt.Path)
+
+	if !worktree.IsLinkedWorktree(wt.Path) {
+		t.Fatalf("IsLinkedWorktree(%q) = false, want true", wt.Path)
+	}
+
+	// A commit that exists ONLY in the worktree's own branch -- never merged
+	// or visible from the primary checkout.
+	worktreeScript := "#!/bin/sh\necho \"PASS: worktree own code\"\nexit 0\n"
+	if err := os.WriteFile(filepath.Join(wt.Path, "lucind-checks.sh"), []byte(worktreeScript), 0o755); err != nil {
+		t.Fatalf("WriteFile(worktree lucind-checks.sh) error = %v", err)
+	}
+	runGit(t, wt.Path, "add", "lucind-checks.sh")
+	runGit(t, wt.Path, "commit", "-m", "worktree-only change")
+
+	cmd := exec.Command("git", "rev-parse", "HEAD")
+	cmd.Dir = wt.Path
+	worktreeHeadBytes, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git rev-parse HEAD (worktree): %v", err)
+	}
+	worktreeHead := strings.TrimSpace(string(worktreeHeadBytes))
+
+	cmd = exec.Command("git", "rev-parse", "HEAD")
+	cmd.Dir = primaryRoot
+	primaryHeadBytes, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git rev-parse HEAD (primary): %v", err)
+	}
+	primaryHead := strings.TrimSpace(string(primaryHeadBytes))
+
+	if worktreeHead == primaryHead {
+		t.Fatalf("worktree and primary HEAD unexpectedly identical (%s); test setup did not diverge them", worktreeHead)
+	}
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(wt.Path); err != nil {
+		t.Fatalf("os.Chdir to worktree: %v", err)
+	}
+	defer os.Chdir(cwd)
+
+	var stdout, stderr bytes.Buffer
+	code := run(ctx, []string{"check"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("check in linked worktree exit code = %d, want 0; stderr = %q, stdout = %q", code, stderr.String(), stdout.String())
+	}
+
+	outStr := stdout.String()
+	if !strings.Contains(outStr, "PASS: worktree own code") {
+		t.Errorf("stdout = %q, want it to contain the WORKTREE's own script output %q -- got the primary checkout's script instead, meaning check tested the wrong code", outStr, "PASS: worktree own code")
+	}
+	if strings.Contains(outStr, "PASS: primary") {
+		t.Errorf("stdout = %q, unexpectedly contains the PRIMARY checkout's script output -- check ran against primary instead of the worktree", outStr)
+	}
+	if !strings.Contains(outStr, worktreeHead) {
+		t.Errorf("stdout = %q, want it to report the worktree's own commit %q", outStr, worktreeHead)
+	}
+	if strings.Contains(outStr, primaryHead) {
+		t.Errorf("stdout = %q, unexpectedly reports the PRIMARY checkout's commit %q instead of the worktree's own %q", outStr, primaryHead, worktreeHead)
+	}
+}

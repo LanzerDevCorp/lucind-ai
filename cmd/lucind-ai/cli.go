@@ -517,6 +517,18 @@ func runSplit(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 
 // runCheck implements the "check" subcommand: executes lucind-checks.sh
 // via internal/integrate.Check deterministically and reports results.
+//
+// Deliberately does NOT use resolvePrimaryRoot: "check" tests the code at
+// wherever the caller is actually standing -- worktree or not -- never the
+// ledger's primary root. It never touches the ledger, only calls
+// integrate.Check(ctx, root) against root's own working tree. Using
+// resolvePrimaryRoot here would silently redirect a linked-worktree
+// invocation to test the PRIMARY checkout's code while still reporting it
+// under the worktree's own identity: a false pass/fail with no error, no
+// warning (see the regression this fixes -- resolvePrimaryRoot's
+// git-common-dir-based rewrite was correct for the 18 ledger-touching call
+// sites, but "check" was never one of them). gitShowToplevel preserves the
+// original, correct "wherever you're standing" contract.
 func runCheck(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("check", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -536,7 +548,7 @@ func runCheck(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 		return 1
 	}
 
-	root, err := resolvePrimaryRoot(ctx)
+	root, err := gitShowToplevel(ctx)
 	if err != nil {
 		if wd, wdErr := os.Getwd(); wdErr == nil {
 			root = wd
