@@ -361,6 +361,12 @@ func Execute(ctx context.Context, deps Deps, p packet.Packet) (Report, error) {
 		Skill:        p.Skill,
 		PacketPath:   p.Path,
 		AllowedPaths: p.AllowedPaths,
+		// Captured verbatim from this packet's own dispatch-time target
+		// fields (empty for a legacy dispatch), not the feature row -- see
+		// ledger.LaneMetadata's doc comment and RetryFeatureTarget.
+		ParentRef:         p.ParentRef,
+		BaseSHA:           p.BaseSHA,
+		ExpectedParentSHA: p.ExpectedParentSHA,
 	}, now); err != nil {
 		cause := fmt.Errorf("run: update lane metadata for %q: %w", p.ID, err)
 		return report, recordLaneFailure(ctx, deps, p.ID, now, cause)

@@ -7,6 +7,7 @@ import (
 	"sort"
 
 	"github.com/LanzerDevCorp/lucind-ai/internal/barrier"
+	"github.com/LanzerDevCorp/lucind-ai/internal/feature"
 	"github.com/LanzerDevCorp/lucind-ai/internal/lane"
 	"github.com/LanzerDevCorp/lucind-ai/internal/ledger"
 	"github.com/LanzerDevCorp/lucind-ai/internal/result"
@@ -128,4 +129,72 @@ func RebuildBatchForRetry(ctx context.Context, deps Deps, runID string, laneIDs 
 		Released: true,
 		Outcome:  barrier.Outcome{Released: true, Integrate: include},
 	}, nil
+}
+
+// RetryFeatureTarget derives the AttemptRequest target fields to use when
+// retrying a feature-targeted batch's integration, preferring each included
+// lane's own dispatch-time target -- captured in that lane's LaneMetadata by
+// Execute -- over the feature row's immutable ledger anchor (feat.BaseSHA /
+// feat.ExpectedParentSHA).
+//
+// This matters for any feature past its first wave: the documented
+// multi-wave-chaining pattern lets each dispatch declare the feature's
+// actual current tip as its own base_sha/expected_parent_sha (see
+// FeatureTarget), which the durable attempt machine uses directly for CAS
+// promotion (see driveAttemptFromLeased/performCASPromotion) without ever
+// requiring the feature row's own base_sha/expected_parent_sha columns to
+// change -- those columns are set once at feature.Service.Create and never
+// updated again. Reusing feat.ExpectedParentSHA at retry time therefore
+// compares the current ref against wave 1's anchor forever, which is stale
+// (and fails CAS) for every wave after the first.
+//
+// laneIDs is the batch's own included lane set (BatchReport.Outcome.Integrate
+// from RebuildBatchForRetry). Every lane that recorded a target in its
+// LaneMetadata must agree, or RetryFeatureTarget fails closed with
+// ErrMixedFeatureTargets -- the same rule FeatureTarget enforces at original
+// dispatch time, since one batch promotes onto exactly one parent. A lane
+// that predates this capture (no recorded target fields) is skipped rather
+// than treated as a real disagreement, so retrying a batch dispatched before
+// this fix still falls back to feat's own anchor, unchanged from before.
+func RetryFeatureTarget(ctx context.Context, deps Deps, feat feature.Feature, laneIDs []string) (AttemptRequest, error) {
+	target := AttemptRequest{
+		FeatureID:         feat.ID,
+		ParentRef:         feat.ParentRef,
+		BaseSHA:           feat.BaseSHA,
+		ExpectedParentSHA: feat.ExpectedParentSHA,
+	}
+
+	var recovered bool
+	for _, id := range laneIDs {
+		meta, err := deps.Ledger.GetLaneMetadata(ctx, deps.RunID, id)
+		if err != nil {
+			if errors.Is(err, ledger.ErrLaneUnknown) {
+				continue
+			}
+			return AttemptRequest{}, fmt.Errorf("run: get lane metadata for %q: %w", id, err)
+		}
+		if meta.ParentRef == "" && meta.BaseSHA == "" && meta.ExpectedParentSHA == "" {
+			// Predates per-lane target capture: no recorded target to prefer.
+			continue
+		}
+
+		laneTarget := AttemptRequest{
+			FeatureID:         feat.ID,
+			ParentRef:         meta.ParentRef,
+			BaseSHA:           meta.BaseSHA,
+			ExpectedParentSHA: meta.ExpectedParentSHA,
+		}
+		if !recovered {
+			target = laneTarget
+			recovered = true
+			continue
+		}
+		if laneTarget.ParentRef != target.ParentRef ||
+			laneTarget.BaseSHA != target.BaseSHA ||
+			laneTarget.ExpectedParentSHA != target.ExpectedParentSHA {
+			return AttemptRequest{}, ErrMixedFeatureTargets
+		}
+	}
+
+	return target, nil
 }
