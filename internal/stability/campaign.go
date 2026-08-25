@@ -5,11 +5,20 @@
 package stability
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/LanzerDevCorp/lucind-ai/internal/feature"
+	"github.com/LanzerDevCorp/lucind-ai/internal/packet"
+	"github.com/LanzerDevCorp/lucind-ai/internal/result"
+	"github.com/LanzerDevCorp/lucind-ai/internal/run"
+	"github.com/LanzerDevCorp/lucind-ai/internal/stability/fixture"
+	"github.com/LanzerDevCorp/lucind-ai/internal/stability/process"
 	"github.com/LanzerDevCorp/lucind-ai/internal/stability/store"
 )
 
@@ -415,4 +424,268 @@ func (sm *StateMachine) RecordTrialOutcome(outcome TrialState) error {
 	}
 
 	return nil
+}
+
+// DefaultLeaseTTL is the standard 10-second lease TTL for accelerated crash recovery.
+const DefaultLeaseTTL = 10 * time.Second
+
+// PinnedModel is the strict model required for stability dispatches.
+const PinnedModel = "gemini-3.7-flash-high"
+
+// JourneyConfig defines the execution parameters for a concurrent Trial journey.
+type JourneyConfig struct {
+	TargetA           string
+	TargetB           string
+	ParentRefA        string
+	ParentRefB        string
+	BaseSHA           string
+	ExpectedParentSHA string
+	OwnerA            string
+	OwnerB            string
+	ReplacementOwnerB string
+	LeaseTTL          time.Duration
+}
+
+// DefaultJourneyConfig creates a default JourneyConfig for a given trial number and base SHA.
+func DefaultJourneyConfig(trialNum int, baseSHA string) JourneyConfig {
+	return JourneyConfig{
+		TargetA:           fmt.Sprintf("stability-trial-%d-target-a", trialNum),
+		TargetB:           fmt.Sprintf("stability-trial-%d-target-b", trialNum),
+		ParentRefA:        fmt.Sprintf("refs/heads/stability-trial-%d-a", trialNum),
+		ParentRefB:        fmt.Sprintf("refs/heads/stability-trial-%d-b", trialNum),
+		BaseSHA:           baseSHA,
+		ExpectedParentSHA: baseSHA,
+		OwnerA:            fmt.Sprintf("orchestrator-trial-%d-a", trialNum),
+		OwnerB:            fmt.Sprintf("orchestrator-trial-%d-b", trialNum),
+		ReplacementOwnerB: fmt.Sprintf("orchestrator-trial-%d-b-reclaim", trialNum),
+		LeaseTTL:          DefaultLeaseTTL,
+	}
+}
+
+// BuildJourneyPackets constructs Change A and Change B packets from fixture templates,
+// injecting feature targets, parent refs, base SHAs, and pinned model.
+func BuildJourneyPackets(cfg JourneyConfig) (packet.Packet, packet.Packet) {
+	pA := fixture.ChangeAPacket()
+	pA.Feature = cfg.TargetA
+	pA.ParentRef = cfg.ParentRefA
+	pA.BaseSHA = cfg.BaseSHA
+	pA.ExpectedParentSHA = cfg.ExpectedParentSHA
+	pA.Model = PinnedModel
+
+	pB := fixture.ChangeBPacket()
+	pB.Feature = cfg.TargetB
+	pB.ParentRef = cfg.ParentRefB
+	pB.BaseSHA = cfg.BaseSHA
+	pB.ExpectedParentSHA = cfg.ExpectedParentSHA
+	pB.Model = PinnedModel
+
+	return pA, pB
+}
+
+// DispatchConcurrentLanes dispatches Change A and Change B concurrently through the existing
+// internal/run.ExecuteBatch primitive.
+func DispatchConcurrentLanes(ctx context.Context, deps run.Deps, pA, pB packet.Packet) (run.BatchReport, error) {
+	return run.ExecuteBatch(ctx, deps, []packet.Packet{pA, pB})
+}
+
+// AcquireTargetLeasesConcurrently acquires Ownership Leases for both Target A and Target B
+// concurrently using feature.Service, ensuring both orchestrators hold active leases.
+func AcquireTargetLeasesConcurrently(ctx context.Context, featSvc *feature.Service, cfg JourneyConfig) (feature.Lease, feature.Lease, error) {
+	ttl := cfg.LeaseTTL
+	if ttl <= 0 {
+		ttl = DefaultLeaseTTL
+	}
+
+	var (
+		leaseA, leaseB feature.Lease
+		errA, errB     error
+		wg             sync.WaitGroup
+	)
+
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		leaseA, errA = featSvc.AcquireLease(ctx, cfg.TargetA, cfg.OwnerA, ttl)
+	}()
+	go func() {
+		defer wg.Done()
+		leaseB, errB = featSvc.AcquireLease(ctx, cfg.TargetB, cfg.OwnerB, ttl)
+	}()
+	wg.Wait()
+
+	if errA != nil {
+		return leaseA, leaseB, fmt.Errorf("stability: acquire lease for target A (%s): %w", cfg.TargetA, errA)
+	}
+	if errB != nil {
+		return leaseA, leaseB, fmt.Errorf("stability: acquire lease for target B (%s): %w", cfg.TargetB, errB)
+	}
+
+	return leaseA, leaseB, nil
+}
+
+// AdoptResultEnvelope reads and returns the already-persisted result envelope from the worktree.
+func AdoptResultEnvelope(fsys fs.FS, worktreePath string) (result.Envelope, error) {
+	envelope, err := result.Read(fsys, ".lucind/result.json")
+	if err != nil {
+		return result.Envelope{}, fmt.Errorf("stability: read persisted result envelope in %s: %w", worktreePath, err)
+	}
+	return envelope, nil
+}
+
+// VerifyZeroSurvivors checks that no surviving descendant processes remain in pgid.
+func VerifyZeroSurvivors(pgid int) error {
+	return process.VerifyZeroSurvivors(pgid)
+}
+
+// ReclaimTargetLease re-acquires the lease for a target after expiry, verifying monotonic fence increment.
+func ReclaimTargetLease(ctx context.Context, featSvc *feature.Service, target, newOwner string, initialFence int64, ttl time.Duration) (feature.Lease, error) {
+	if ttl <= 0 {
+		ttl = DefaultLeaseTTL
+	}
+	reclaimed, err := featSvc.AcquireLease(ctx, target, newOwner, ttl)
+	if err != nil {
+		return feature.Lease{}, fmt.Errorf("stability: reclaim lease for target %s: %w", target, err)
+	}
+	if reclaimed.Fence <= initialFence {
+		return reclaimed, fmt.Errorf("stability: reclaimed lease fence %d is not strictly greater than initial fence %d", reclaimed.Fence, initialFence)
+	}
+	return reclaimed, nil
+}
+
+// RecoverCrashedChangeB orchestrates the full recovery of crashed Change B:
+// 1. Verifies zero surviving processes in Change B's process group.
+// 2. Reclaims Change B's feature lease with incremented fence.
+// 3. Adopts Change B's already-persisted result envelope without redispatch.
+func RecoverCrashedChangeB(
+	ctx context.Context,
+	featSvc *feature.Service,
+	fsys fs.FS,
+	worktreePath string,
+	target string,
+	newOwner string,
+	initialFence int64,
+	pgid int,
+	ttl time.Duration,
+) (feature.Lease, result.Envelope, error) {
+	if err := VerifyZeroSurvivors(pgid); err != nil {
+		return feature.Lease{}, result.Envelope{}, fmt.Errorf("stability: zero-survivor audit failed: %w", err)
+	}
+
+	reclaimed, err := ReclaimTargetLease(ctx, featSvc, target, newOwner, initialFence, ttl)
+	if err != nil {
+		return feature.Lease{}, result.Envelope{}, err
+	}
+
+	env, err := AdoptResultEnvelope(fsys, worktreePath)
+	if err != nil {
+		return reclaimed, result.Envelope{}, err
+	}
+
+	return reclaimed, env, nil
+}
+
+// TrialJourneyResult holds the outcome and artifacts of a Trial concurrent journey.
+type TrialJourneyResult struct {
+	BatchReport      run.BatchReport
+	LeaseA           feature.Lease
+	InitialLeaseB    feature.Lease
+	ReclaimedLeaseB  feature.Lease
+	AdoptedEnvelopeB result.Envelope
+}
+
+// ExecuteTrialJourney runs the concurrent journey for Changes A and B, coordinating
+// with the StateMachine through all required stage transitions.
+func ExecuteTrialJourney(
+	ctx context.Context,
+	sm *StateMachine,
+	deps run.Deps,
+	featSvc *feature.Service,
+	cfg JourneyConfig,
+	pgidB int,
+	worktreeBPath string,
+) (*TrialJourneyResult, error) {
+	if !sm.HasActiveTrial() {
+		if _, err := sm.StartNextTrial(); err != nil {
+			return nil, fmt.Errorf("stability: start next trial: %w", err)
+		}
+	}
+
+	// 1. Acquire preflight ownership leases concurrently
+	leaseA, leaseB, err := AcquireTargetLeasesConcurrently(ctx, featSvc, cfg)
+	if err != nil {
+		_ = sm.RecordTrialOutcome(TrialFailed)
+		return nil, err
+	}
+
+	// 2. Advance to dispatching and run ExecuteBatch
+	if err := sm.AdvanceTrial(TrialDispatching); err != nil {
+		_ = sm.RecordTrialOutcome(TrialFailed)
+		return nil, err
+	}
+
+	pA, pB := BuildJourneyPackets(cfg)
+	batchReport, err := DispatchConcurrentLanes(ctx, deps, pA, pB)
+	if err != nil {
+		_ = sm.RecordTrialOutcome(TrialFailed)
+		return nil, fmt.Errorf("stability: dispatch batch: %w", err)
+	}
+
+	// 3. Progress through defect/remediation stages to crash injection
+	stages := []TrialState{
+		TrialAwaitingDefectAssessment,
+		TrialAwaitingRemediationApproval,
+		TrialFixDispatched,
+		TrialCrashInjected,
+		TrialLeaseWait,
+	}
+	for _, stage := range stages {
+		if err := sm.AdvanceTrial(stage); err != nil {
+			_ = sm.RecordTrialOutcome(TrialFailed)
+			return nil, err
+		}
+	}
+
+	// 4. In TrialLeaseWait, wait for Change B's lease TTL to expire if still held
+	now := time.Now().UTC()
+	if now.Before(leaseB.ExpiresAt) {
+		time.Sleep(leaseB.ExpiresAt.Sub(now) + 10*time.Millisecond)
+	}
+
+	// 5. Recover Change B (zero survivors check -> lease reclaim -> envelope adoption)
+	reclaimedB, adoptedEnvB, err := RecoverCrashedChangeB(
+		ctx,
+		featSvc,
+		deps.WorktreeFS(worktreeBPath),
+		worktreeBPath,
+		cfg.TargetB,
+		cfg.ReplacementOwnerB,
+		leaseB.Fence,
+		pgidB,
+		cfg.LeaseTTL,
+	)
+	if err != nil {
+		_ = sm.RecordTrialOutcome(TrialFailed)
+		return nil, err
+	}
+
+	// 6. Advance through recovery, promotion, and evidence capture
+	postRecoveryStages := []TrialState{
+		TrialReclaimed,
+		TrialPromoted,
+		TrialEvidenceCaptured,
+	}
+	for _, stage := range postRecoveryStages {
+		if err := sm.AdvanceTrial(stage); err != nil {
+			_ = sm.RecordTrialOutcome(TrialFailed)
+			return nil, err
+		}
+	}
+
+	return &TrialJourneyResult{
+		BatchReport:      batchReport,
+		LeaseA:           leaseA,
+		InitialLeaseB:    leaseB,
+		ReclaimedLeaseB:  reclaimedB,
+		AdoptedEnvelopeB: adoptedEnvB,
+	}, nil
 }
