@@ -732,6 +732,18 @@ func productionDeps(runID, primaryRoot string, ledg *ledger.Ledger, timeout, app
 		ResolveCandidateSHA: func(ctx context.Context, primaryRoot, worktreePath, branch string) (string, error) {
 			return worktree.ResolveCommitSHA(ctx, worktree.DefaultGitRunner, worktreePath, "HEAD")
 		},
+		// Guards reuse of a previously approved+integrated reconciliation
+		// candidate against reapplying a resolution that predates this
+		// attempt's own real content -- see run.Deps.IsAncestorSHA's doc
+		// comment. "git merge-base --is-ancestor" exits non-zero both for a
+		// genuine "false" and for a real resolution error; either way, not
+		// provably an ancestor means reuse is not safe, so both map to false.
+		IsAncestorSHA: func(ctx context.Context, primaryRoot, ancestorSHA, descendantSHA string) (bool, error) {
+			if _, err := worktree.DefaultGitRunner.Run(ctx, primaryRoot, "merge-base", "--is-ancestor", ancestorSHA, descendantSHA); err != nil {
+				return false, nil
+			}
+			return true, nil
+		},
 		// The lease is held across combine and the full check run, and nothing
 		// renews it mid-attempt. The 30s package default would expire during
 		// lucind-checks.sh on any real repository and land the attempt in

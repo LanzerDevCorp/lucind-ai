@@ -217,7 +217,20 @@ type Deps struct {
 	ResolveRefSHA       func(ctx context.Context, primaryRoot, ref string) (string, error)
 	ResolveCandidateSHA func(ctx context.Context, primaryRoot, worktreePath, branch string) (string, error)
 	EvaluateOverlap     func(ctx context.Context, repoDir, baseSHA, shaA, shaB string, opts ...overlap.EvaluateOption) (*overlap.Evidence, error)
-	FeatureLeaseTTL     time.Duration
+	// IsAncestorSHA reports whether ancestorSHA is an ancestor of (already
+	// contained within) descendantSHA. evaluateOverlapGate uses it to guard
+	// reuse of a previously approved+integrated reconciliation candidate: the
+	// candidate is only safe to promote when this attempt's own feature tip is
+	// still an ancestor of it. Without this guard, a candidate resolved for an
+	// EARLIER round -- already consumed by an earlier promotion, or simply
+	// stale relative to real new work landed since -- could be reused for a
+	// LATER attempt with genuinely different content, CAS'ing the branch
+	// backward and silently discarding everything since. nil means "not
+	// wired to verify," which preserves prior behavior (reuse allowed)
+	// unchanged; production always wires a real implementation (see
+	// cmd/lucind-ai/cli.go's productionDeps).
+	IsAncestorSHA   func(ctx context.Context, primaryRoot, ancestorSHA, descendantSHA string) (bool, error)
+	FeatureLeaseTTL time.Duration
 	// RenewInterval controls how often driveAttemptFromLeased renews the
 	// feature lease while checkFunc (integrate.Check) runs during the
 	// CHECKING phase -- see the lease-renewal loop there. Zero means the
