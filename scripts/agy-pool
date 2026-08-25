@@ -5,9 +5,13 @@ GEMINI_DIR="$HOME/.gemini"
 POOL_DIR="$GEMINI_DIR/profiles"
 POOL_CONF="$POOL_DIR/pool.conf"
 STATE_FILE="$POOL_DIR/.state"
+ACTIVE_FILE="$POOL_DIR/.active"
 LOG_FILE="$POOL_DIR/rotate.log"
-CREDS_FILE="$GEMINI_DIR/oauth_creds.json"
-ACCOUNTS_FILE="$GEMINI_DIR/google_accounts.json"
+# Antigravity CLI (the current "agy" binary) keeps a single OAuth token file
+# with no embedded email — unlike the classic Gemini CLI's oauth_creds.json +
+# google_accounts.json pair. Identity is tracked by the pool itself (ACTIVE_FILE),
+# not read back from the credential.
+CREDS_FILE="$GEMINI_DIR/antigravity-cli/antigravity-oauth-token"
 
 DEFAULT_ACCOUNTS=(
   "lanzerdev20@gmail.com"
@@ -34,15 +38,11 @@ require_conf() {
 }
 
 active_email() {
-  if [[ ! -f "$ACCOUNTS_FILE" ]]; then
+  if [[ ! -f "$ACTIVE_FILE" ]]; then
     echo ""
     return 0
   fi
-  if command -v python3 >/dev/null 2>&1; then
-    python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("active",""))' "$ACCOUNTS_FILE" 2>/dev/null || echo ""
-  else
-    grep -o '"active"[[:space:]]*:[[:space:]]*"[^"]*"' "$ACCOUNTS_FILE" | head -1 | sed -E 's/.*"active"[[:space:]]*:[[:space:]]*"([^"]*)".*/\1/'
-  fi
+  cat "$ACTIVE_FILE" 2>/dev/null || echo ""
 }
 
 log() {
@@ -81,21 +81,21 @@ swap_in() {
   slug=$(slug_of "$email")
   profile_dir="$POOL_DIR/$slug"
 
-  if [[ ! -f "$profile_dir/oauth_creds.json" || ! -f "$profile_dir/google_accounts.json" ]]; then
+  if [[ ! -f "$profile_dir/antigravity-oauth-token" ]]; then
     echo "agy-pool: no hay perfil guardado para $email — corré 'agy-pool save $email' primero (logueado como esa cuenta)" >&2
     exit 1
   fi
 
   ensure_pool_dir
+  mkdir -p "$(dirname "$CREDS_FILE")"
   exec 9>"$STATE_FILE.lock"
   flock 9
 
-  cp "$profile_dir/oauth_creds.json" "$CREDS_FILE.tmp"
+  cp "$profile_dir/antigravity-oauth-token" "$CREDS_FILE.tmp"
   mv -f "$CREDS_FILE.tmp" "$CREDS_FILE"
   chmod 600 "$CREDS_FILE"
 
-  cp "$profile_dir/google_accounts.json" "$ACCOUNTS_FILE.tmp"
-  mv -f "$ACCOUNTS_FILE.tmp" "$ACCOUNTS_FILE"
+  echo "$email" > "$ACTIVE_FILE"
 
   local idx
   idx=$(pool_index_of "$email")
@@ -141,7 +141,7 @@ cmd_list() {
   while IFS= read -r email; do
     local slug saved marker
     slug=$(slug_of "$email")
-    if [[ -f "$POOL_DIR/$slug/oauth_creds.json" ]]; then
+    if [[ -f "$POOL_DIR/$slug/antigravity-oauth-token" ]]; then
       saved="guardado: sí"
     else
       saved="guardado: no"
@@ -167,10 +167,13 @@ cmd_save() {
     echo "agy-pool: $email no está en el pool — corré 'agy-pool add $email' primero" >&2
     exit 1
   fi
+  # Antigravity's token carries no email, so this only checks the pool's own
+  # bookkeeping (ACTIVE_FILE), not who is really logged into agy. Confirm you
+  # ran `agy` and logged in as $email before saving, or pass --force.
   local cur
   cur=$(active_email)
   if [[ "$cur" != "$email" && "$force" != "--force" ]]; then
-    echo "agy-pool: la cuenta activa actual es '$cur', no '$email' — logueate como $email primero, o pasá --force" >&2
+    echo "agy-pool: la cuenta activa registrada por el pool es '$cur', no '$email' — si ya te logueaste como $email en agy, pasá --force" >&2
     exit 1
   fi
   if [[ ! -f "$CREDS_FILE" ]]; then
@@ -181,8 +184,8 @@ cmd_save() {
   slug=$(slug_of "$email")
   profile_dir="$POOL_DIR/$slug"
   mkdir -p "$profile_dir"
-  install -m 600 "$CREDS_FILE" "$profile_dir/oauth_creds.json"
-  cp "$ACCOUNTS_FILE" "$profile_dir/google_accounts.json"
+  install -m 600 "$CREDS_FILE" "$profile_dir/antigravity-oauth-token"
+  echo "$email" > "$ACTIVE_FILE"
   log "save $email"
   echo "Guardado perfil de $email en $profile_dir"
 }
