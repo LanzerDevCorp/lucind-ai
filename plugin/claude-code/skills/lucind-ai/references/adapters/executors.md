@@ -25,6 +25,16 @@ Use installed CLI help and model-list commands for invocation details. Re-check 
 
 Opencode route failures preserve captured stdout and stderr for diagnosis. Quota failure does not authorize a silent route change; obtain Orchestrator approval for a different Execution Route.
 
+### `agy` account pool and the wave-level quota gate
+
+`agy` is Antigravity CLI, not the classic Gemini CLI: it keeps a single OAuth token with no embedded email at `~/.gemini/antigravity-cli/antigravity-oauth-token`, and its own free local slash command `agy --print "/usage" --output-format json` is the only place remaining quota is exposed (per model-family group, `weekly` and `5h` buckets; `num_turns` is always `0` for it, so checking costs no model quota).
+
+`scripts/agy-pool` manages a pool of saved Google account credentials for this one token file: `init`/`add`/`list`/`save <email> [--force]`/`use <email>`/`current`/`next`/`count`/`usage [--refresh]`/`best <min-fraction>`. Since the token carries no email, `save`'s identity check compares against the pool's own bookkeeping (`.active`), not who is really logged into `agy` — pass `--force` when you know better. `usage` always checks the active account live and reads every other saved account from its own cache (refreshing one means temporarily swapping its credential in, which this pool never does casually — see the next paragraph); `save` also opportunistically caches a fresh reading since the credential is already active at that point.
+
+`lucind-ai run`'s `--min-quota <fraction>` flag (default `0.10`) gates a **whole wave**, never a single lane: the check runs once per `runDispatch` invocation, before any lane starts (`ExecuteBatch`), and only when the batch includes an `agy`-executed packet. Below the threshold it asks `agy-pool best` for whichever pooled account has the most `gemini-5h` quota left and switches to it (`agy-pool use`) before dispatching; if no pooled account clears the minimum, the wave is blocked with an error and nothing dispatches — no lane, no ledger row. `--min-quota 0` disables the check. This is why the gate is wave-scoped and not per-lane: rotating the shared credential file mid-flight would pull it out from under every other lane already dispatching concurrently within the same wave.
+
+`scripts/agyr` is a separate, simpler wrapper (detects `429`/quota-exhausted output from a single `agy` invocation and retries against `agy-pool next`) kept in the repo but not the recommended path for lucind-ai dispatches — the wave-level `--min-quota` gate above supersedes it for that use case. It remains available for manual, sequential `agy` use outside lucind-ai.
+
 A blind in-process Claude panel is an audit fallback outside `lucind-ai`, not an executor route or stable orchestration dependency. If a separate review protocol authorizes it after opencode quota failure, freeze the same diff and packet for context-isolated judges and record the degraded same-family audit. Never route that fallback to the context-carrying Orchestrator.
 
 ## Worktree environment
