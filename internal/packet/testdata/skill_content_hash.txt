@@ -1,0 +1,8 @@
+# Recorded content hash for plugin/claude-code/skills/lucind-ai/**, checked
+# by internal/packet/packet_test.go's TestPluginVersionGuardsSkillContent.
+#
+# Regenerate BOTH lines below in the same commit as any change under that
+# tree, together with a matching version bump in
+# plugin/claude-code/.claude-plugin/plugin.json and .claude-plugin/marketplace.json.
+version: 2.0.2
+sha256: a3cf7096dfd9706b16c4ce72465a260d1f40edba5f133b0f8cb62f356ff9caae
