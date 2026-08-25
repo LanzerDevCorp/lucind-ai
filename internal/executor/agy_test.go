@@ -629,3 +629,87 @@ func TestAgyLinuxSetpgidPGIDCaptured(t *testing.T) {
 		}
 	})
 }
+
+// TestAgyLinuxSetpgidOnStartFiresMidFlight asserts that when Setpgid is true and
+// OnStart is provided, Agy.Run invokes OnStart synchronously with the real OS PID
+// while the child process is actively running (mid-flight), before waiting for exit.
+func TestAgyLinuxSetpgidOnStartFiresMidFlight(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping subprocess test in -short mode")
+	}
+
+	t.Run("SetpgidTrueCallsOnStartMidFlight", func(t *testing.T) {
+		pidFile := filepath.Join(t.TempDir(), "child.pid")
+		script := fmt.Sprintf("#!/bin/sh\necho $$ > \"%s\"\nsleep 3\nexit 0\n", pidFile)
+		stub := writeStub(t, script)
+		worktree := t.TempDir()
+
+		a := executor.Agy{Binary: stub}
+		pidChan := make(chan int, 1)
+		runDone := make(chan struct{})
+
+		go func() {
+			defer close(runDone)
+			outcome, err := a.Run(context.Background(), executor.Request{
+				Prompt:       "do the thing",
+				WorktreePath: worktree,
+				Setpgid:      true,
+				OnStart: func(pid int) {
+					pidChan <- pid
+				},
+			})
+			if err != nil {
+				t.Errorf("Run() error = %v, want nil", err)
+			}
+			if outcome.ExitCode != 0 {
+				t.Errorf("ExitCode = %d, want 0", outcome.ExitCode)
+			}
+		}()
+
+		select {
+		case pid := <-pidChan:
+			if pid <= 0 {
+				t.Fatalf("OnStart pid = %d, want > 0", pid)
+			}
+			// Confirm the process is alive right now while the 3-second sleep stub is running.
+			if err := syscall.Kill(pid, 0); err != nil {
+				t.Errorf("syscall.Kill(%d, 0) = %v, want nil (process alive mid-flight)", pid, err)
+			}
+			// Verify runDone has not closed yet (confirms callback fired before Run completed).
+			select {
+			case <-runDone:
+				t.Fatal("runDone closed prematurely: OnStart did not fire before process exit")
+			default:
+			}
+		case <-time.After(1500 * time.Millisecond):
+			t.Fatal("timed out waiting for OnStart to fire mid-flight")
+		}
+
+		<-runDone
+	})
+
+	t.Run("SetpgidFalseDoesNotCallOnStart", func(t *testing.T) {
+		stub := writeStub(t, "#!/bin/sh\nexit 0\n")
+		worktree := t.TempDir()
+
+		called := false
+		a := executor.Agy{Binary: stub}
+		outcome, err := a.Run(context.Background(), executor.Request{
+			Prompt:       "do the thing",
+			WorktreePath: worktree,
+			Setpgid:      false,
+			OnStart: func(pid int) {
+				called = true
+			},
+		})
+		if err != nil {
+			t.Fatalf("Run() error = %v, want nil", err)
+		}
+		if outcome.ExitCode != 0 {
+			t.Fatalf("ExitCode = %d, want 0", outcome.ExitCode)
+		}
+		if called {
+			t.Errorf("OnStart was called when Setpgid is false, want not called")
+		}
+	})
+}

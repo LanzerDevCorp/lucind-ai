@@ -226,6 +226,20 @@ type Deps struct {
 	// set it to a couple of milliseconds to observe renewal deterministically
 	// without waiting out a real multi-second lease TTL.
 	RenewInterval time.Duration
+
+	// Setpgid, when true, dispatches every lane in this Deps with
+	// executor.Request.Setpgid: true. Zero value (false) preserves
+	// existing behavior for every current caller -- Execute currently
+	// never sets Setpgid on the Request it builds (confirmed: grep
+	// "executor.Request{" in this file finds exactly one construction
+	// site, and it does not set Setpgid), so ordinary lucind-ai run
+	// dispatches are completely unaffected by this field's existence.
+	Setpgid bool
+	// OnProcessStart, if non-nil, is called with (laneID, pid) as soon as
+	// that lane's dispatched child process has started -- see
+	// executor.Request.OnStart. Only meaningful when Setpgid is also
+	// true. Nil means no notification.
+	OnProcessStart func(laneID string, pid int)
 }
 
 // Report is the outcome of running exactly one lane through Execute.
@@ -422,6 +436,12 @@ func Execute(ctx context.Context, deps Deps, p packet.Packet) (Report, error) {
 		Agent:        p.Agent,
 		SchemaPath:   schemaPath,
 		Progress:     progress,
+		Setpgid:      deps.Setpgid,
+		OnStart: func(pid int) {
+			if deps.OnProcessStart != nil {
+				deps.OnProcessStart(p.ID, pid)
+			}
+		},
 	})
 	close(progress)
 	progressErrors := <-progressDone
