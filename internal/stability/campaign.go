@@ -559,7 +559,7 @@ func ReclaimTargetLease(ctx context.Context, featSvc *feature.Service, target, n
 }
 
 // RecoverCrashedChangeB orchestrates the full recovery of crashed Change B:
-// 1. Verifies zero surviving processes in Change B's process group.
+// 1. Verifies zero surviving processes in Change B's process group (if pgid > 1).
 // 2. Reclaims Change B's feature lease with incremented fence.
 // 3. Adopts Change B's already-persisted result envelope without redispatch.
 func RecoverCrashedChangeB(
@@ -573,8 +573,10 @@ func RecoverCrashedChangeB(
 	pgid int,
 	ttl time.Duration,
 ) (feature.Lease, result.Envelope, error) {
-	if err := VerifyZeroSurvivors(pgid); err != nil {
-		return feature.Lease{}, result.Envelope{}, fmt.Errorf("stability: zero-survivor audit failed: %w", err)
+	if pgid > 1 {
+		if err := VerifyZeroSurvivors(pgid); err != nil {
+			return feature.Lease{}, result.Envelope{}, fmt.Errorf("stability: zero-survivor audit failed: %w", err)
+		}
 	}
 
 	reclaimed, err := ReclaimTargetLease(ctx, featSvc, target, newOwner, initialFence, ttl)
@@ -600,6 +602,128 @@ type TrialJourneyResult struct {
 	DefectRecord     *DefectRecord
 	Approval         *RemediationApproval
 	FixReport        *run.Report
+}
+
+// ChangeBEnvelopeWatchTimeout bounds how long ExecuteTrialJourneyLive waits for
+// Change B's real dispatch to persist its result envelope before giving up on
+// injecting a live kill (falling back to letting the dispatch finish naturally).
+// Comfortably larger than the fixture's own sleep-5-after-write window
+// (internal/stability/fixture/fixture.go's ChangeBPacket) so a real dispatch has
+// margin to actually reach that point.
+const ChangeBEnvelopeWatchTimeout = 15 * time.Second
+
+// ExecuteTrialJourneyLive runs the concurrent trial journey with live process
+// group tracking and abrupt termination upon envelope persistence.
+func ExecuteTrialJourneyLive(
+	ctx context.Context,
+	sm *StateMachine,
+	deps run.Deps,
+	featSvc *feature.Service,
+	cfg JourneyConfig,
+) (*TrialJourneyResult, error) {
+	if !sm.HasActiveTrial() {
+		if _, err := sm.StartNextTrial(); err != nil {
+			return nil, fmt.Errorf("stability: start next trial: %w", err)
+		}
+	}
+
+	// 1. Acquire preflight ownership leases concurrently
+	leaseA, leaseB, err := AcquireTargetLeasesConcurrently(ctx, featSvc, cfg)
+	if err != nil {
+		_ = sm.RecordTrialOutcome(TrialFailed)
+		return nil, err
+	}
+
+	// 2. Advance to dispatching and run ExecuteBatch
+	if err := sm.AdvanceTrial(TrialDispatching); err != nil {
+		_ = sm.RecordTrialOutcome(TrialFailed)
+		return nil, err
+	}
+
+	pA, pB := BuildJourneyPackets(cfg)
+	worktreeBPath := filepath.Join(deps.PrimaryRoot, "wt-"+pB.ID)
+
+	pidBChan := make(chan int, 1)
+	liveDeps := deps
+	liveDeps.Setpgid = true
+	liveDeps.OnProcessStart = func(laneID string, pid int) {
+		if laneID == pB.ID {
+			select {
+			case pidBChan <- pid:
+			default:
+			}
+		}
+	}
+
+	type dispatchResult struct {
+		report run.BatchReport
+		err    error
+	}
+	dispatchDone := make(chan dispatchResult, 1)
+	go func() {
+		rep, dErr := DispatchConcurrentLanes(ctx, liveDeps, pA, pB)
+		dispatchDone <- dispatchResult{report: rep, err: dErr}
+	}()
+
+	var (
+		capturedPGID     int
+		dispatchRes      dispatchResult
+		dispatchFinished bool
+	)
+
+	watchTimer := time.NewTimer(ChangeBEnvelopeWatchTimeout)
+	defer watchTimer.Stop()
+
+	select {
+	case <-ctx.Done():
+	case <-watchTimer.C:
+	case res := <-dispatchDone:
+		dispatchRes = res
+		dispatchFinished = true
+	case pid := <-pidBChan:
+		ticker := time.NewTicker(25 * time.Millisecond)
+		defer ticker.Stop()
+
+	pollLoop:
+		for {
+			select {
+			case <-ctx.Done():
+				break pollLoop
+			case <-watchTimer.C:
+				break pollLoop
+			case res := <-dispatchDone:
+				dispatchRes = res
+				dispatchFinished = true
+				break pollLoop
+			case <-ticker.C:
+				env, readErr := result.Read(deps.WorktreeFS(worktreeBPath), ".lucind/result.json")
+				if readErr == nil && env.PacketID == pB.ID {
+					_ = process.KillGroup(pid)
+					capturedPGID = pid
+					break pollLoop
+				}
+			}
+		}
+	}
+
+	if !dispatchFinished {
+		select {
+		case <-ctx.Done():
+			dispatchRes = <-dispatchDone
+		case res := <-dispatchDone:
+			dispatchRes = res
+		}
+	}
+
+	if dispatchRes.err != nil {
+		_ = sm.RecordTrialOutcome(TrialFailed)
+		return nil, fmt.Errorf("stability: dispatch batch: %w", dispatchRes.err)
+	}
+
+	return continueTrialAfterDispatch(
+		ctx, sm, deps, featSvc, cfg, dispatchRes.report, pA, pB,
+		leaseA, leaseB, capturedPGID, worktreeBPath,
+	)
 }
 
 // ExecuteTrialJourney runs the concurrent journey for Changes A and B, coordinating
@@ -639,6 +763,24 @@ func ExecuteTrialJourney(
 		return nil, fmt.Errorf("stability: dispatch batch: %w", err)
 	}
 
+	return continueTrialAfterDispatch(
+		ctx, sm, deps, featSvc, cfg, batchReport, pA, pB,
+		leaseA, leaseB, pgidB, worktreeBPath,
+	)
+}
+
+func continueTrialAfterDispatch(
+	ctx context.Context,
+	sm *StateMachine,
+	deps run.Deps,
+	featSvc *feature.Service,
+	cfg JourneyConfig,
+	batchReport run.BatchReport,
+	pA, pB packet.Packet,
+	leaseA, leaseB feature.Lease,
+	pgidB int,
+	worktreeBPath string,
+) (*TrialJourneyResult, error) {
 	// 3. Progress to defect assessment
 	if err := sm.AdvanceTrial(TrialAwaitingDefectAssessment); err != nil {
 		_ = sm.RecordTrialOutcome(TrialFailed)

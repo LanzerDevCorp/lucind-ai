@@ -2185,3 +2185,143 @@ func TestRemediationStateMachineProgressionNoBypass(t *testing.T) {
 		t.Errorf("consecutive passes = %d, want 1", sm.ConsecutivePasses())
 	}
 }
+
+func TestTrialJourneyLiveAbruptKillWatchAndRecover(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping subprocess test in -short mode")
+	}
+
+	ctx := context.Background()
+	fakeExec := newFakeJourneyExecutor()
+	deps, ledgerHandle, _ := newJourneyTestDeps(t, fakeExec)
+	featSvc := feature.NewService(ledgerHandle)
+
+	cfg := stability.DefaultJourneyConfig(1, "b000000000000000000000000000000000000000")
+	cfg.LeaseTTL = 200 * time.Millisecond
+
+	wtPathB := filepath.Join(deps.PrimaryRoot, "wt-stability-change-b")
+	lucindB := filepath.Join(wtPathB, ".lucind")
+	_ = os.MkdirAll(lucindB, 0o755)
+
+	// Stub writes .lucind/result.json then sleeps for 10 seconds awaiting live kill
+	stubScript := fmt.Sprintf(`#!/bin/sh
+mkdir -p %q
+cat << 'EOF' > %q
+{
+  "packet_id": "stability-change-b",
+  "status": "done",
+  "summary": "change B work completed before live crash",
+  "hard_stops": [{"hard_stop": "do not touch internal/barrier", "fired": false}]
+}
+EOF
+sleep 10
+`, lucindB, filepath.Join(lucindB, "result.json"))
+	stubPath := writeStubScript(t, stubScript)
+
+	var (
+		capturedStubPID int
+		pidMu           sync.Mutex
+	)
+
+	supervisor := process.NewSupervisor()
+	fakeExec.runFuncFor[wtPathB] = func(ctx context.Context, req executor.Request) (executor.Outcome, error) {
+		cmd := exec.Command(stubPath)
+		cmd.Dir = wtPathB
+		pgid, err := supervisor.Start(cmd)
+		if err != nil {
+			return executor.Outcome{}, err
+		}
+		pidMu.Lock()
+		capturedStubPID = pgid
+		pidMu.Unlock()
+		if req.Setpgid && req.OnStart != nil {
+			req.OnStart(pgid)
+		}
+		// Wait for command to exit or be killed
+		_ = cmd.Wait()
+		return executor.Outcome{ExitCode: 0, PGID: pgid}, nil
+	}
+
+	sm := stability.NewStateMachine()
+	if err := sm.Start(); err != nil {
+		t.Fatalf("sm.Start failed: %v", err)
+	}
+
+	start := time.Now()
+	res, err := stability.ExecuteTrialJourneyLive(ctx, sm, deps, featSvc, cfg)
+	elapsed := time.Since(start)
+
+	if err != nil {
+		t.Fatalf("ExecuteTrialJourneyLive failed: %v", err)
+	}
+	if res == nil {
+		t.Fatal("ExecuteTrialJourneyLive returned nil result")
+	}
+
+	// (a) Stub process is confirmed dead after call returns
+	pidMu.Lock()
+	pid := capturedStubPID
+	pidMu.Unlock()
+	if pid <= 1 {
+		t.Fatalf("capturedStubPID = %d, want > 1", pid)
+	}
+	if err := supervisor.VerifyZero(pid); err != nil {
+		t.Errorf("stub process %d still alive after ExecuteTrialJourneyLive: %v", pid, err)
+	}
+
+	// (b) Returned *TrialJourneyResult is populated with AdoptedEnvelopeB
+	if res.AdoptedEnvelopeB.PacketID != "stability-change-b" {
+		t.Errorf("AdoptedEnvelopeB.PacketID = %q, want stability-change-b", res.AdoptedEnvelopeB.PacketID)
+	}
+	if res.AdoptedEnvelopeB.LaneStatus() != lane.Done {
+		t.Errorf("AdoptedEnvelopeB.LaneStatus() = %v, want Done", res.AdoptedEnvelopeB.LaneStatus())
+	}
+	if res.ReclaimedLeaseB.Fence <= res.InitialLeaseB.Fence {
+		t.Errorf("ReclaimedLeaseB.Fence = %d, want > %d", res.ReclaimedLeaseB.Fence, res.InitialLeaseB.Fence)
+	}
+
+	// (c) Whole call completes well before stub's 10s natural sleep duration
+	if elapsed >= 5*time.Second {
+		t.Errorf("ExecuteTrialJourneyLive took %v, want < 5s (proving abrupt kill occurred before 10s sleep)", elapsed)
+	}
+
+	if sm.ActiveTrialState() != stability.TrialEvidenceCaptured {
+		t.Errorf("sm.ActiveTrialState() = %q, want %q", sm.ActiveTrialState(), stability.TrialEvidenceCaptured)
+	}
+}
+
+func TestTrialJourneyLiveNoKillWindowGracefulDegradation(t *testing.T) {
+	ctx := context.Background()
+	fakeExec := newFakeJourneyExecutor()
+	deps, ledgerHandle, root := newJourneyTestDeps(t, fakeExec)
+	featSvc := feature.NewService(ledgerHandle)
+
+	cfg := stability.DefaultJourneyConfig(1, "b000000000000000000000000000000000000000")
+	cfg.LeaseTTL = 50 * time.Millisecond
+
+	wtPathB := filepath.Join(root, "wt-stability-change-b")
+	lucindB := filepath.Join(wtPathB, ".lucind")
+	_ = os.MkdirAll(lucindB, 0o755)
+	envJSON := laneEnvelopeJSON("stability-change-b", "done")
+	_ = os.WriteFile(filepath.Join(lucindB, "result.json"), []byte(envJSON), 0o644)
+
+	// Change B completes naturally without triggering OnStart or live kill
+	sm := stability.NewStateMachine()
+	if err := sm.Start(); err != nil {
+		t.Fatalf("sm.Start failed: %v", err)
+	}
+
+	res, err := stability.ExecuteTrialJourneyLive(ctx, sm, deps, featSvc, cfg)
+	if err != nil {
+		t.Fatalf("ExecuteTrialJourneyLive degraded path failed: %v", err)
+	}
+	if res == nil {
+		t.Fatal("ExecuteTrialJourneyLive returned nil result")
+	}
+	if res.AdoptedEnvelopeB.PacketID != "stability-change-b" {
+		t.Errorf("res.AdoptedEnvelopeB.PacketID = %q, want stability-change-b", res.AdoptedEnvelopeB.PacketID)
+	}
+	if sm.ActiveTrialState() != stability.TrialEvidenceCaptured {
+		t.Errorf("sm.ActiveTrialState() = %q, want %q", sm.ActiveTrialState(), stability.TrialEvidenceCaptured)
+	}
+}
