@@ -1,8 +1,46 @@
 # Verify: Ultrafixer
 
+**Round 1 verdict: BLOCKED** (see below). **Round 2 (re-verify) verdict: PASSED.**
+
+## Round 2 — Re-verify after remediation
+
+Mechanical check re-run clean at `f5e3a7f` (21/21 packages, no flake). Dual qualitative
+re-verification dispatched (`verify-ultrafixer-r2-agy`, `verify-ultrafixer-r2-cursor-agent`)
+against candidate `95c426e`, both independently instructed to *confirm or refute* — not
+trust — the remediation Lane's own claims.
+
+Both judges now agree: **both round-1 confirmed violations are genuinely fixed**, independently
+traced to terminal consumers:
+
+- Violation 1 (linked-worktree refusal): `resolvePrimaryRoot` now resolves via `git rev-parse
+  --git-common-dir` + `filepath.Dir` instead of `--show-toplevel`, so it correctly lands on the
+  primary repository's ledger even when invoked from inside a linked worktree.
+  `runFeatureStatus`/`runDefectRecord`/`runDefectList`/`runDefectDecline` no longer call
+  `IsLinkedWorktree`; git-mutating verbs (`feature create`, `worktree cleanup`, `reconcile *`,
+  `integrate retry`) still do, via the separate `gitShowToplevel` check — cursor-agent verified
+  this distinction is deliberate and correct, not an accidental blanket relaxation.
+  `TestLinkedWorktreeCommands` (`cmd/lucind-ai/cli_test.go:4532-4649`) proves it with a **real**
+  `git worktree`, not just an in-process stub — closing the exact gap that let the original defect
+  ship undetected.
+- Violation 2 (no declined-disposition path): `Ledger.UpdateDefectDisposition` exists, validates
+  via `DefectDisposition.Valid`, is wired to `lucind-ai defect decline --id <id>`, and the packet
+  template instructs it. `TestDefectDeclineCLI` proves a decline actually flips the ledger row.
+
+All four non-blocking findings confirmed addressed. One small residual, non-blocking gap
+(`dependencies-defects.md` named the accept path but not `defect decline`) was fixed directly by
+the orchestrator after the re-verify (commit `0bb86af`, plugin version bumped to 2.0.7) — trivial
+doc-only addition, not worth a third dispatch round.
+
+No regressions found in the original apply-phase work (schema v8, `RecordDefect`/`GetDefect`/
+`ListDefects`, `defect record`/`defect list` CLI).
+
+**Verdict: PASSED.** Ready for archive.
+
+## Round 1
+
 **Verdict: BLOCKED**
 
-## Stage 1 — Mechanical Check
+### Stage 1 — Mechanical Check
 
 `lucind-ai check` at commit `13b6295` (log frozen and committed at `6ca101b`):
 `status: passed`, all 21 packages green. One transient failure on an earlier run

@@ -77,8 +77,20 @@ phases:
       (merge commit `d5feeb4`). Re-ran the full `go test ./... -race -count=1` post-merge: all
       packages green. Worktree and branch left in place per the "cheap to keep" convention.
   verify:
-    status: blocked
+    status: done
     note: |
+      FINAL: round 2 re-verify PASSED at candidate 95c426e (mechanical clean, both judges
+      independently confirmed both round-1 violations genuinely fixed with real terminal-consumer
+      evidence, including a real linked-worktree test — TestLinkedWorktreeCommands). One tiny
+      residual doc gap (dependencies-defects.md missing `defect decline` mention) fixed directly
+      by the orchestrator (commit 0bb86af, plugin version 2.0.7). Full detail:
+      openspec/changes/ultrafixer/verify.md.
+
+      Also during this phase: two real lucind-ai infrastructure bugs were found in the
+      reconcile/overlap-gate machinery (see below), both reported to and fixed by
+      lucind-ai-fixer, merged to dev (commits 77fca29, then c0827fc), and installed. Neither
+      required any change to ultrafixer's own design/spec/tasks/code.
+    _round1_note: |
       Stage 1 (mechanical check) passed clean at commit 13b6295 (log committed at 6ca101b), after
       confirming one earlier failure (TestConcurrentLeaseAcquisition) was a known, documented,
       isolation-verified pre-existing flake unrelated to this change.
