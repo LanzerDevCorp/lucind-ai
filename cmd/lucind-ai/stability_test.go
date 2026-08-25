@@ -4,13 +4,24 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
+	"github.com/LanzerDevCorp/lucind-ai/internal/executor"
+	"github.com/LanzerDevCorp/lucind-ai/internal/feature"
+	"github.com/LanzerDevCorp/lucind-ai/internal/ledger"
+	lucindrun "github.com/LanzerDevCorp/lucind-ai/internal/run"
+	"github.com/LanzerDevCorp/lucind-ai/internal/stability"
+	"github.com/LanzerDevCorp/lucind-ai/internal/stability/evidence"
+	"github.com/LanzerDevCorp/lucind-ai/internal/stability/fixture"
 	"github.com/LanzerDevCorp/lucind-ai/internal/stability/store"
 	"github.com/LanzerDevCorp/lucind-ai/internal/worktree"
 )
@@ -628,37 +639,669 @@ func TestRunStabilityRouting(t *testing.T) {
 	}
 }
 
-// stability run stub / placeholder
-func TestStabilityRunPreflightStub(t *testing.T) {
-	ctx := context.Background()
-	dir := initTestGitRepo(t)
+// fakeJourneyExecutor is a test double for running trial journey packets.
+type fakeJourneyExecutor struct {
+	mu         sync.Mutex
+	calls      map[string]int
+	outcomes   map[string]executor.Outcome
+	runFuncFor map[string]func(ctx context.Context, req executor.Request) (executor.Outcome, error)
+}
 
-	// Write passing lucind-checks.sh and commit it so working tree is clean
+func newFakeJourneyExecutor() *fakeJourneyExecutor {
+	return &fakeJourneyExecutor{
+		calls:      make(map[string]int),
+		outcomes:   make(map[string]executor.Outcome),
+		runFuncFor: make(map[string]func(ctx context.Context, req executor.Request) (executor.Outcome, error)),
+	}
+}
+
+func (f *fakeJourneyExecutor) Run(ctx context.Context, req executor.Request) (executor.Outcome, error) {
+	f.mu.Lock()
+	f.calls[req.WorktreePath]++
+	customFn := f.runFuncFor[req.WorktreePath]
+	outcome, ok := f.outcomes[req.WorktreePath]
+	f.mu.Unlock()
+
+	if customFn != nil {
+		return customFn(ctx, req)
+	}
+	if ok {
+		return outcome, nil
+	}
+	return executor.Outcome{ExitCode: 0}, nil
+}
+
+func (f *fakeJourneyExecutor) DefaultModel() string {
+	return stability.PinnedModel
+}
+
+func (f *fakeJourneyExecutor) KnownModels() []string {
+	return []string{stability.PinnedModel}
+}
+
+func (f *fakeJourneyExecutor) CallCount(worktreePath string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.calls[worktreePath]
+}
+
+// laneEnvelopeJSON returns a minimal envelope satisfying result.schema.json.
+func laneEnvelopeJSON(id, status string) string {
+	if status == "blocked" {
+		return fmt.Sprintf(`{
+			"packet_id": %q,
+			"status": "blocked",
+			"summary": "hit a hard stop",
+			"hard_stops": [{"hard_stop": "do not touch internal/barrier", "fired": true, "note": "would have had to edit it"}]
+		}`, id)
+	}
+	return fmt.Sprintf(`{
+		"packet_id": %q,
+		"status": "done",
+		"summary": "completed work cleanly",
+		"hard_stops": [{"hard_stop": "do not touch internal/barrier", "fired": false}]
+	}`, id)
+}
+
+func setupCleanTestRepoForStability(t *testing.T) (string, string) {
+	t.Helper()
+	dir := initTestGitRepo(t)
 	checksScript := filepath.Join(dir, "lucind-checks.sh")
 	if err := os.WriteFile(checksScript, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
 		t.Fatalf("write checks script: %v", err)
 	}
 	runGitCmd(t, dir, "add", "lucind-checks.sh")
 	runGitCmd(t, dir, "commit", "-m", "add checks script")
-
 	headSHA := runGitCmd(t, dir, "rev-parse", "HEAD")
+	return dir, headSHA
+}
 
-	// Inject matching version
-	oldVersion := version
-	version = headSHA
-	defer func() { version = oldVersion }()
+func newSimulatedTestDeps(t *testing.T, primaryRoot string, execEnv executor.Executor) (lucindrun.Deps, *ledger.Ledger) {
+	t.Helper()
+	l, err := ledger.Open(context.Background(), primaryRoot)
+	if err != nil {
+		t.Fatalf("ledger.Open error = %v", err)
+	}
+	t.Cleanup(func() { l.Close() })
 
+	now := time.Date(2026, 8, 25, 12, 0, 0, 0, time.UTC)
+
+	deps := lucindrun.Deps{
+		RunID:       "run-stability-simulated",
+		PrimaryRoot: primaryRoot,
+		Ledger:      l,
+		LookupExecutor: func(name string) (executor.Executor, error) {
+			return execEnv, nil
+		},
+		CreateWorktree: func(_ context.Context, _, laneID, _, baseSHA string) (worktree.Worktree, error) {
+			wtPath := filepath.Join(primaryRoot, "wt-"+laneID)
+			lucindPath := filepath.Join(wtPath, ".lucind")
+			if err := os.MkdirAll(lucindPath, 0o755); err != nil {
+				return worktree.Worktree{}, err
+			}
+
+			runGit := func(args ...string) {
+				cmd := exec.Command("git", append([]string{"-C", wtPath}, args...)...)
+				_ = cmd.Run()
+			}
+			runGit("init")
+			runGit("config", "user.name", "Test User")
+			runGit("config", "user.email", "test@example.com")
+			_ = fixture.MaterializeFixtures(wtPath)
+			runGit("add", ".")
+			runGit("commit", "-m", "initial baseline")
+
+			cmd := exec.Command("git", "-C", wtPath, "rev-parse", "HEAD")
+			out, _ := cmd.Output()
+			actualBase := strings.TrimSpace(string(out))
+			if baseSHA == "" {
+				baseSHA = actualBase
+			}
+
+			if laneID == "stability-change-a" {
+				_ = os.WriteFile(filepath.Join(wtPath, "fixture", "change_a.txt"), []byte("CHANGE_A=DONE\n"), 0o644)
+			} else if laneID == "stability-change-b" {
+				_ = os.WriteFile(filepath.Join(wtPath, "fixture", "change_b.txt"), []byte("CHANGE_B=DONE\n"), 0o644)
+			} else if laneID == "stability-fix-a" {
+				_ = os.WriteFile(filepath.Join(wtPath, "fixture", "defect.txt"), []byte("STATUS=FIXED\n"), 0o644)
+			}
+			runGit("add", ".")
+			runGit("commit", "-m", "lane change for "+laneID)
+
+			envJSON := laneEnvelopeJSON(laneID, "done")
+			if err := os.WriteFile(filepath.Join(lucindPath, "result.json"), []byte(envJSON), 0o644); err != nil {
+				return worktree.Worktree{}, err
+			}
+			return worktree.Worktree{
+				Path:    wtPath,
+				Branch:  "lucind/" + laneID,
+				BaseSHA: actualBase,
+			}, nil
+		},
+		WorktreeFS: func(path string) fs.FS {
+			return os.DirFS(path)
+		},
+		Now: func() time.Time {
+			return now
+		},
+		HasUniqueLaneCommits: func(ctx context.Context, worktreePath, baseSHA string) (bool, error) {
+			return true, nil
+		},
+		PorcelainEmpty: func(ctx context.Context, worktreePath string) (bool, error) {
+			return true, nil
+		},
+	}
+
+	return deps, l
+}
+
+// Part 1: Prohibited flag rejection tests
+func TestStabilityRunRejectsYesFlag(t *testing.T) {
+	ctx := context.Background()
 	var stdout, stderr bytes.Buffer
-	code := runStabilityRunWithDir(ctx, []string{}, &stdout, &stderr, dir, func(string) (string, error) {
-		return "/bin/agy", nil
+	code := runStabilityRunWithDir(ctx, []string{"--yes"}, strings.NewReader(""), &stdout, &stderr, "", nil)
+	if code != 1 {
+		t.Fatalf("runStabilityRunWithDir(--yes) code = %d, want 1; stderr = %s", code, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "flag provided but not defined") {
+		t.Errorf("stderr = %q, want unrecognized flag error for --yes", stderr.String())
+	}
+}
+
+func TestStabilityRunRejectsTagFlag(t *testing.T) {
+	ctx := context.Background()
+	var stdout, stderr bytes.Buffer
+	code := runStabilityRunWithDir(ctx, []string{"--tag"}, strings.NewReader(""), &stdout, &stderr, "", nil)
+	if code != 1 {
+		t.Fatalf("runStabilityRunWithDir(--tag) code = %d, want 1; stderr = %s", code, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "flag provided but not defined") {
+		t.Errorf("stderr = %q, want unrecognized flag error for --tag", stderr.String())
+	}
+}
+
+func TestStabilityRunRejectsPushFlag(t *testing.T) {
+	ctx := context.Background()
+	var stdout, stderr bytes.Buffer
+	code := runStabilityRunWithDir(ctx, []string{"--push"}, strings.NewReader(""), &stdout, &stderr, "", nil)
+	if code != 1 {
+		t.Fatalf("runStabilityRunWithDir(--push) code = %d, want 1; stderr = %s", code, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "flag provided but not defined") {
+		t.Errorf("stderr = %q, want unrecognized flag error for --push", stderr.String())
+	}
+}
+
+func TestStabilityRunRejectsReleaseFlag(t *testing.T) {
+	ctx := context.Background()
+	var stdout, stderr bytes.Buffer
+	code := runStabilityRunWithDir(ctx, []string{"--release"}, strings.NewReader(""), &stdout, &stderr, "", nil)
+	if code != 1 {
+		t.Fatalf("runStabilityRunWithDir(--release) code = %d, want 1; stderr = %s", code, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "flag provided but not defined") {
+		t.Errorf("stderr = %q, want unrecognized flag error for --release", stderr.String())
+	}
+}
+
+// Part 1: Interactive confirmation tests
+func TestStabilityRunConfirmation(t *testing.T) {
+	ctx := context.Background()
+
+	cases := []struct {
+		name         string
+		stdinInput   string
+		wantExitCode int
+		wantDeclined bool
+	}{
+		{
+			name:         "declines on empty stdin",
+			stdinInput:   "",
+			wantExitCode: 1,
+			wantDeclined: true,
+		},
+		{
+			name:         "declines on garbage input maybe",
+			stdinInput:   "maybe\n",
+			wantExitCode: 1,
+			wantDeclined: true,
+		},
+		{
+			name:         "declines on explicit no",
+			stdinInput:   "no\n",
+			wantExitCode: 1,
+			wantDeclined: true,
+		},
+		{
+			name:         "proceeds on lowercase y",
+			stdinInput:   "y\n",
+			wantExitCode: 0,
+			wantDeclined: false,
+		},
+		{
+			name:         "proceeds on uppercase YES",
+			stdinInput:   "YES\n",
+			wantExitCode: 0,
+			wantDeclined: false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir, headSHA := setupCleanTestRepoForStability(t)
+			oldVersion := version
+			version = headSHA
+			defer func() { version = oldVersion }()
+
+			var stdout, stderr bytes.Buffer
+			code := runStabilityRunWithConfig(ctx, []string{}, strings.NewReader(tc.stdinInput), &stdout, &stderr, PreflightConfig{
+				PrimaryRoot: dir,
+				LookPath: func(string) (string, error) {
+					return "/bin/agy", nil
+				},
+			}, CampaignConfig{
+				CheckRunner: func(ctx context.Context, dir string) (bool, string, error) {
+					return true, "PASS", nil
+				},
+				ExecuteJourney: func(ctx context.Context, sm *stability.StateMachine, deps lucindrun.Deps, featSvc *feature.Service, cfg stability.JourneyConfig, pgidB int, wtBPath string) (*stability.TrialJourneyResult, error) {
+					_ = os.MkdirAll(filepath.Join(wtBPath, ".lucind"), 0o755)
+					_ = os.WriteFile(filepath.Join(wtBPath, ".lucind", "result.json"), []byte(laneEnvelopeJSON("stability-change-b", "done")), 0o644)
+					cfg.LeaseTTL = 50 * time.Millisecond
+					return stability.ExecuteTrialJourney(ctx, sm, deps, featSvc, cfg, pgidB, wtBPath)
+				},
+				DepsFactory: func(runID, primaryRoot string, l *ledger.Ledger, timeout, approvalTimeout time.Duration) lucindrun.Deps {
+					d, _ := newSimulatedTestDeps(t, primaryRoot, newFakeJourneyExecutor())
+					d.RunID = runID
+					d.Ledger = l
+					return d
+				},
+			})
+			if code != tc.wantExitCode {
+				t.Fatalf("exit code = %d, want %d; stderr = %s", code, tc.wantExitCode, stderr.String())
+			}
+			if !strings.Contains(stdout.String(), "15 agy dispatches, three sequential Trials, up to 135 minutes, temporary refs/worktrees/processes, and final cleanup.") {
+				t.Errorf("stdout = %q, want verbatim forecast copy", stdout.String())
+			}
+			if tc.wantDeclined && !strings.Contains(stderr.String(), "declined") {
+				t.Errorf("stderr = %q, want 'declined' message", stderr.String())
+			}
+		})
+	}
+}
+
+// Part 3: Task 5.1 Simulated 3-Trial Campaign Verification
+func TestStabilityRunPreflightAndSimulatedThreeTrialRun(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("ThreePassingTrialsReceiptAndBaseline", func(t *testing.T) {
+		dir, headSHA := setupCleanTestRepoForStability(t)
+
+		fakeExec := newFakeJourneyExecutor()
+		deps, ledg := newSimulatedTestDeps(t, dir, fakeExec)
+		_ = deps
+		_ = ledg
+
+		// Pre-populate Change B result envelope in target dir
+		wtPathB := filepath.Join(dir, "wt-stability-change-b")
+		_ = os.MkdirAll(filepath.Join(wtPathB, ".lucind"), 0o755)
+		_ = os.WriteFile(filepath.Join(wtPathB, ".lucind", "result.json"), []byte(laneEnvelopeJSON("stability-change-b", "done")), 0o644)
+
+		baselineChecksCount := 0
+		var stdout, stderr bytes.Buffer
+
+		campCfg := CampaignConfig{
+			PrimaryRoot:  dir,
+			CandidateSHA: headSHA,
+			BuildVersion: headSHA,
+			CampaignID:   "camp-sim-3trial-pass",
+			ReceiptID:    "rcpt-sim-3trial-pass",
+			PGIDB:        99999999,
+			LedgerOpener: func(ctx context.Context, primaryRoot string) (*ledger.Ledger, error) {
+				return ledger.Open(ctx, primaryRoot)
+			},
+			ExecuteJourney: func(ctx context.Context, sm *stability.StateMachine, deps lucindrun.Deps, featSvc *feature.Service, cfg stability.JourneyConfig, pgidB int, wtBPath string) (*stability.TrialJourneyResult, error) {
+				_ = os.MkdirAll(filepath.Join(wtBPath, ".lucind"), 0o755)
+				_ = os.WriteFile(filepath.Join(wtBPath, ".lucind", "result.json"), []byte(laneEnvelopeJSON("stability-change-b", "done")), 0o644)
+				cfg.LeaseTTL = 50 * time.Millisecond
+				return stability.ExecuteTrialJourney(ctx, sm, deps, featSvc, cfg, pgidB, wtBPath)
+			},
+			DepsFactory: func(runID, primaryRoot string, l *ledger.Ledger, timeout, approvalTimeout time.Duration) lucindrun.Deps {
+				d, _ := newSimulatedTestDeps(t, primaryRoot, fakeExec)
+				d.RunID = runID
+				d.Ledger = l
+				return d
+			},
+			CheckRunner: func(ctx context.Context, dir string) (bool, string, error) {
+				baselineChecksCount++
+				return true, "PASS: all baseline checks passed", nil
+			},
+			Stdout: &stdout,
+			Stderr: &stderr,
+		}
+
+		code, err := RunCampaign(ctx, campCfg)
+		if err != nil || code != 0 {
+			t.Fatalf("RunCampaign failed: code = %d, err = %v, stderr = %s", code, err, stderr.String())
+		}
+
+		if baselineChecksCount != 1 {
+			t.Errorf("baselineChecksCount = %d, want 1 (final baseline check)", baselineChecksCount)
+		}
+
+		// Verify store row is store.StatusPassed
+		st, err := store.Open(ctx, worktree.DefaultGitRunner, dir)
+		if err != nil {
+			t.Fatalf("store.Open: %v", err)
+		}
+		defer st.Close()
+
+		camp, err := st.GetCampaign(ctx, "camp-sim-3trial-pass")
+		if err != nil {
+			t.Fatalf("GetCampaign: %v", err)
+		}
+		if camp.Status != store.StatusPassed {
+			t.Errorf("camp.Status = %q, want %q", camp.Status, store.StatusPassed)
+		}
+
+		// Verify receipt file exists and parses correctly
+		receiptPath, err := resolveReceiptPath(ctx, worktree.DefaultGitRunner, dir, "rcpt-sim-3trial-pass")
+		if err != nil {
+			t.Fatalf("resolveReceiptPath: %v", err)
+		}
+		receiptData, err := os.ReadFile(receiptPath)
+		if err != nil {
+			t.Fatalf("ReadFile(%s): %v", receiptPath, err)
+		}
+		var rcpt evidence.Receipt
+		if err := json.Unmarshal(receiptData, &rcpt); err != nil {
+			t.Fatalf("Unmarshal receipt: %v", err)
+		}
+		if rcpt.ReceiptID != "rcpt-sim-3trial-pass" {
+			t.Errorf("rcpt.ReceiptID = %q, want rcpt-sim-3trial-pass", rcpt.ReceiptID)
+		}
+		if rcpt.CandidateSHA != headSHA {
+			t.Errorf("rcpt.CandidateSHA = %q, want %q", rcpt.CandidateSHA, headSHA)
+		}
+		if rcpt.Verdict != "passed" {
+			t.Errorf("rcpt.Verdict = %q, want passed", rcpt.Verdict)
+		}
+		if len(rcpt.Trials) != 3 {
+			t.Errorf("len(rcpt.Trials) = %d, want 3", len(rcpt.Trials))
+		}
+		for i, tr := range rcpt.Trials {
+			if tr.TrialNumber != i+1 {
+				t.Errorf("Trials[%d].TrialNumber = %d, want %d", i, tr.TrialNumber, i+1)
+			}
+			if tr.Verdict != "passed" {
+				t.Errorf("Trials[%d].Verdict = %q, want passed", i, tr.Verdict)
+			}
+		}
 	})
-	if code != 0 {
-		t.Fatalf("runStabilityRunWithDir exit = %d, want 0; stderr = %s", code, stderr.String())
-	}
-	if !strings.Contains(stdout.String(), "preflight passed") {
-		t.Errorf("stdout = %q, want 'preflight passed'", stdout.String())
-	}
-	if !strings.Contains(stdout.String(), "Wave 4b") && !strings.Contains(stdout.String(), "not yet implemented") {
-		t.Errorf("stdout = %q, want stub notice for Wave 4b", stdout.String())
-	}
+
+	t.Run("TrialFailureStopsImmediatelyZeroRetry", func(t *testing.T) {
+		dir, headSHA := setupCleanTestRepoForStability(t)
+
+		fakeExec := newFakeJourneyExecutor()
+		trialsAttempted := 0
+
+		var stdout, stderr bytes.Buffer
+		campCfg := CampaignConfig{
+			PrimaryRoot:  dir,
+			CandidateSHA: headSHA,
+			BuildVersion: headSHA,
+			CampaignID:   "camp-sim-fail-stop",
+			ReceiptID:    "rcpt-sim-fail-stop",
+			PGIDB:        99999999,
+			LedgerOpener: func(ctx context.Context, primaryRoot string) (*ledger.Ledger, error) {
+				return ledger.Open(ctx, primaryRoot)
+			},
+			ExecuteJourney: func(ctx context.Context, sm *stability.StateMachine, deps lucindrun.Deps, featSvc *feature.Service, cfg stability.JourneyConfig, pgidB int, wtBPath string) (*stability.TrialJourneyResult, error) {
+				trialsAttempted++
+				if trialsAttempted == 1 {
+					// Trial 1 succeeds
+					_ = os.MkdirAll(filepath.Join(wtBPath, ".lucind"), 0o755)
+					_ = os.WriteFile(filepath.Join(wtBPath, ".lucind", "result.json"), []byte(laneEnvelopeJSON("stability-change-b", "done")), 0o644)
+					cfg.LeaseTTL = 50 * time.Millisecond
+					return stability.ExecuteTrialJourney(ctx, sm, deps, featSvc, cfg, pgidB, wtBPath)
+				}
+				// Trial 2 fails
+				return nil, fmt.Errorf("injected failure on trial 2")
+			},
+			DepsFactory: func(runID, primaryRoot string, l *ledger.Ledger, timeout, approvalTimeout time.Duration) lucindrun.Deps {
+				d, _ := newSimulatedTestDeps(t, primaryRoot, fakeExec)
+				d.RunID = runID
+				d.Ledger = l
+				return d
+			},
+			CheckRunner: func(ctx context.Context, dir string) (bool, string, error) {
+				return true, "PASS", nil
+			},
+			Stdout: &stdout,
+			Stderr: &stderr,
+		}
+
+		code, err := RunCampaign(ctx, campCfg)
+		if code == 0 || err == nil {
+			t.Fatalf("RunCampaign succeeded, want failure; code = %d, err = %v", code, err)
+		}
+
+		if trialsAttempted != 2 {
+			t.Errorf("trialsAttempted = %d, want exactly 2 (stopped immediately on failure)", trialsAttempted)
+		}
+
+		// Verify store status is store.StatusFailed
+		st, err := store.Open(ctx, worktree.DefaultGitRunner, dir)
+		if err != nil {
+			t.Fatalf("store.Open: %v", err)
+		}
+		defer st.Close()
+
+		camp, err := st.GetCampaign(ctx, "camp-sim-fail-stop")
+		if err != nil {
+			t.Fatalf("GetCampaign: %v", err)
+		}
+		if camp.Status != store.StatusFailed {
+			t.Errorf("camp.Status = %q, want %q", camp.Status, store.StatusFailed)
+		}
+
+		// Verify no receipt was written
+		receiptPath, err := resolveReceiptPath(ctx, worktree.DefaultGitRunner, dir, "rcpt-sim-fail-stop")
+		if err != nil {
+			t.Fatalf("resolveReceiptPath: %v", err)
+		}
+		if _, err := os.Stat(receiptPath); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("receipt file %s exists, want not exist on failed campaign", receiptPath)
+		}
+	})
+
+	t.Run("CrashAndReclaimMaintainsBookkeeping", func(t *testing.T) {
+		dir, headSHA := setupCleanTestRepoForStability(t)
+
+		fakeExec := newFakeJourneyExecutor()
+		trialsAttempted := 0
+
+		var stdout, stderr bytes.Buffer
+		campCfg := CampaignConfig{
+			PrimaryRoot:  dir,
+			CandidateSHA: headSHA,
+			BuildVersion: headSHA,
+			CampaignID:   "camp-sim-crash-reclaim",
+			ReceiptID:    "rcpt-sim-crash-reclaim",
+			PGIDB:        99999999,
+			LedgerOpener: func(ctx context.Context, primaryRoot string) (*ledger.Ledger, error) {
+				return ledger.Open(ctx, primaryRoot)
+			},
+			ExecuteJourney: func(ctx context.Context, sm *stability.StateMachine, deps lucindrun.Deps, featSvc *feature.Service, cfg stability.JourneyConfig, pgidB int, wtBPath string) (*stability.TrialJourneyResult, error) {
+				trialsAttempted++
+				// Simulate Change B write result envelope in target dir
+				_ = os.MkdirAll(filepath.Join(wtBPath, ".lucind"), 0o755)
+				_ = os.WriteFile(filepath.Join(wtBPath, ".lucind", "result.json"), []byte(laneEnvelopeJSON("stability-change-b", "done")), 0o644)
+				cfg.LeaseTTL = 50 * time.Millisecond
+				return stability.ExecuteTrialJourney(ctx, sm, deps, featSvc, cfg, pgidB, wtBPath)
+			},
+			DepsFactory: func(runID, primaryRoot string, l *ledger.Ledger, timeout, approvalTimeout time.Duration) lucindrun.Deps {
+				d, _ := newSimulatedTestDeps(t, primaryRoot, fakeExec)
+				d.RunID = runID
+				d.Ledger = l
+				return d
+			},
+			CheckRunner: func(ctx context.Context, dir string) (bool, string, error) {
+				return true, "PASS", nil
+			},
+			Stdout: &stdout,
+			Stderr: &stderr,
+		}
+
+		code, err := RunCampaign(ctx, campCfg)
+		if err != nil || code != 0 {
+			t.Fatalf("RunCampaign failed: code = %d, err = %v, stderr = %s", code, err, stderr.String())
+		}
+		if trialsAttempted != 3 {
+			t.Errorf("trialsAttempted = %d, want 3", trialsAttempted)
+		}
+	})
+
+	t.Run("RemediationBranchSurfacesDefect", func(t *testing.T) {
+		dir, headSHA := setupCleanTestRepoForStability(t)
+
+		fakeExec := newFakeJourneyExecutor()
+		trialsAttempted := 0
+
+		var stdout, stderr bytes.Buffer
+		campCfg := CampaignConfig{
+			PrimaryRoot:  dir,
+			CandidateSHA: headSHA,
+			BuildVersion: headSHA,
+			CampaignID:   "camp-sim-remediation",
+			ReceiptID:    "rcpt-sim-remediation",
+			PGIDB:        99999999,
+			LedgerOpener: func(ctx context.Context, primaryRoot string) (*ledger.Ledger, error) {
+				return ledger.Open(ctx, primaryRoot)
+			},
+			ExecuteJourney: func(ctx context.Context, sm *stability.StateMachine, deps lucindrun.Deps, featSvc *feature.Service, cfg stability.JourneyConfig, pgidB int, wtBPath string) (*stability.TrialJourneyResult, error) {
+				trialsAttempted++
+				_ = os.MkdirAll(filepath.Join(wtBPath, ".lucind"), 0o755)
+				_ = os.WriteFile(filepath.Join(wtBPath, ".lucind", "result.json"), []byte(laneEnvelopeJSON("stability-change-b", "done")), 0o644)
+				cfg.LeaseTTL = 50 * time.Millisecond
+				res, err := stability.ExecuteTrialJourney(ctx, sm, deps, featSvc, cfg, pgidB, wtBPath)
+				if err != nil {
+					return nil, err
+				}
+				if res.Approval == nil || !res.Approval.Approved {
+					t.Errorf("res.Approval = %+v, want Approved: true", res.Approval)
+				}
+				return res, nil
+			},
+			DepsFactory: func(runID, primaryRoot string, l *ledger.Ledger, timeout, approvalTimeout time.Duration) lucindrun.Deps {
+				d, _ := newSimulatedTestDeps(t, primaryRoot, fakeExec)
+				d.RunID = runID
+				d.Ledger = l
+				origCreate := d.CreateWorktree
+				d.CreateWorktree = func(ctx context.Context, root, laneID, parentRef, baseSHA string) (worktree.Worktree, error) {
+					wt, err := origCreate(ctx, root, laneID, parentRef, baseSHA)
+					if err != nil {
+						return wt, err
+					}
+					if laneID == "stability-change-a" {
+						envJSON := laneEnvelopeJSON(laneID, "blocked")
+						_ = os.WriteFile(filepath.Join(wt.Path, ".lucind", "result.json"), []byte(envJSON), 0o644)
+					}
+					return wt, nil
+				}
+				return d
+			},
+			CheckRunner: func(ctx context.Context, dir string) (bool, string, error) {
+				return true, "PASS", nil
+			},
+			Stdout: &stdout,
+			Stderr: &stderr,
+		}
+
+		code, err := RunCampaign(ctx, campCfg)
+		if err != nil || code != 0 {
+			t.Fatalf("RunCampaign failed: code = %d, err = %v, stderr = %s", code, err, stderr.String())
+		}
+		if trialsAttempted != 3 {
+			t.Errorf("trialsAttempted = %d, want 3", trialsAttempted)
+		}
+	})
+
+	t.Run("ReceiptContentVerification", func(t *testing.T) {
+		dir, headSHA := setupCleanTestRepoForStability(t)
+
+		fakeExec := newFakeJourneyExecutor()
+		var stdout, stderr bytes.Buffer
+		campCfg := CampaignConfig{
+			PrimaryRoot:  dir,
+			CandidateSHA: headSHA,
+			BuildVersion: headSHA,
+			CampaignID:   "camp-sim-receipt-verify",
+			ReceiptID:    "rcpt-sim-receipt-verify",
+			PGIDB:        99999999,
+			LedgerOpener: func(ctx context.Context, primaryRoot string) (*ledger.Ledger, error) {
+				return ledger.Open(ctx, primaryRoot)
+			},
+			DepsFactory: func(runID, primaryRoot string, l *ledger.Ledger, timeout, approvalTimeout time.Duration) lucindrun.Deps {
+				d, _ := newSimulatedTestDeps(t, primaryRoot, fakeExec)
+				d.RunID = runID
+				d.Ledger = l
+				return d
+			},
+			ExecuteJourney: func(ctx context.Context, sm *stability.StateMachine, deps lucindrun.Deps, featSvc *feature.Service, cfg stability.JourneyConfig, pgidB int, wtBPath string) (*stability.TrialJourneyResult, error) {
+				_ = os.MkdirAll(filepath.Join(wtBPath, ".lucind"), 0o755)
+				_ = os.WriteFile(filepath.Join(wtBPath, ".lucind", "result.json"), []byte(laneEnvelopeJSON("stability-change-b", "done")), 0o644)
+				cfg.LeaseTTL = 50 * time.Millisecond
+				return stability.ExecuteTrialJourney(ctx, sm, deps, featSvc, cfg, pgidB, wtBPath)
+			},
+			CheckRunner: func(ctx context.Context, dir string) (bool, string, error) {
+				return true, "PASS: all baseline checks passed", nil
+			},
+			Stdout: &stdout,
+			Stderr: &stderr,
+		}
+
+		code, err := RunCampaign(ctx, campCfg)
+		if err != nil || code != 0 {
+			t.Fatalf("RunCampaign failed: code = %d, err = %v, stderr = %s", code, err, stderr.String())
+		}
+
+		receiptPath, err := resolveReceiptPath(ctx, worktree.DefaultGitRunner, dir, "rcpt-sim-receipt-verify")
+		if err != nil {
+			t.Fatalf("resolveReceiptPath: %v", err)
+		}
+		receiptData, err := os.ReadFile(receiptPath)
+		if err != nil {
+			t.Fatalf("ReadFile(%s): %v", receiptPath, err)
+		}
+		var rcpt evidence.Receipt
+		if err := json.Unmarshal(receiptData, &rcpt); err != nil {
+			t.Fatalf("Unmarshal receipt: %v", err)
+		}
+		if rcpt.ReceiptID != "rcpt-sim-receipt-verify" {
+			t.Errorf("rcpt.ReceiptID = %q, want rcpt-sim-receipt-verify", rcpt.ReceiptID)
+		}
+		if rcpt.CandidateSHA != headSHA {
+			t.Errorf("rcpt.CandidateSHA = %q, want %q", rcpt.CandidateSHA, headSHA)
+		}
+		if rcpt.BuildVersion != headSHA {
+			t.Errorf("rcpt.BuildVersion = %q, want %q", rcpt.BuildVersion, headSHA)
+		}
+		if rcpt.Verdict != "passed" {
+			t.Errorf("rcpt.Verdict = %q, want passed", rcpt.Verdict)
+		}
+		if rcpt.BaselineCheck != "PASS: all baseline checks passed" {
+			t.Errorf("rcpt.BaselineCheck = %q, want 'PASS: all baseline checks passed'", rcpt.BaselineCheck)
+		}
+		if len(rcpt.Trials) != 3 {
+			t.Errorf("len(rcpt.Trials) = %d, want 3", len(rcpt.Trials))
+		}
+		for i, tr := range rcpt.Trials {
+			if tr.TrialNumber != i+1 {
+				t.Errorf("Trials[%d].TrialNumber = %d, want %d", i, tr.TrialNumber, i+1)
+			}
+			if tr.Verdict != "passed" {
+				t.Errorf("Trials[%d].Verdict = %q, want passed", i, tr.Verdict)
+			}
+		}
+	})
 }

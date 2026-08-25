@@ -1,19 +1,29 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/LanzerDevCorp/lucind-ai/internal/executor"
+	"github.com/LanzerDevCorp/lucind-ai/internal/feature"
 	"github.com/LanzerDevCorp/lucind-ai/internal/integrate"
+	"github.com/LanzerDevCorp/lucind-ai/internal/ledger"
+	lucindrun "github.com/LanzerDevCorp/lucind-ai/internal/run"
+	"github.com/LanzerDevCorp/lucind-ai/internal/stability"
+	"github.com/LanzerDevCorp/lucind-ai/internal/stability/evidence"
 	"github.com/LanzerDevCorp/lucind-ai/internal/stability/reconcile"
 	"github.com/LanzerDevCorp/lucind-ai/internal/stability/store"
 	"github.com/LanzerDevCorp/lucind-ai/internal/worktree"
@@ -300,11 +310,35 @@ func stabilityDispatch(ctx context.Context, args []string, stdout, stderr io.Wri
 // runStabilityRun implements "lucind-ai stability run": validates preflight admission
 // and stops short of starting Campaign orchestration (Wave 4b).
 func runStabilityRun(ctx context.Context, args []string, stdout, stderr io.Writer) int {
-	return runStabilityRunWithDir(ctx, args, stdout, stderr, "", nil)
+	return runStabilityRunWithDir(ctx, args, os.Stdin, stdout, stderr, "", nil)
 }
 
-// runStabilityRunWithDir allows injecting directory and lookPath for testing.
-func runStabilityRunWithDir(ctx context.Context, args []string, stdout, stderr io.Writer, dir string, lookPath func(string) (string, error)) int {
+// ForecastCopy is the verbatim master-plan-mandated long-work forecast.
+const ForecastCopy = "15 agy dispatches, three sequential Trials, up to 135 minutes, temporary refs/worktrees/processes, and final cleanup."
+
+// promptConfirmation displays the forecast and reads single-line interactive confirmation.
+// Only exact case-insensitive "y" or "yes" proceeds.
+func promptConfirmation(stdin io.Reader, stdout, stderr io.Writer) bool {
+	fmt.Fprintln(stdout, ForecastCopy)
+	fmt.Fprint(stdout, "proceed with stability campaign? [y/N]: ")
+	if stdin == nil {
+		return false
+	}
+	scanner := bufio.NewScanner(stdin)
+	if !scanner.Scan() {
+		return false
+	}
+	ans := strings.TrimSpace(scanner.Text())
+	return strings.EqualFold(ans, "y") || strings.EqualFold(ans, "yes")
+}
+
+// runStabilityRunWithDir allows injecting stdin, directory and lookPath for testing.
+func runStabilityRunWithDir(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer, dir string, lookPath func(string) (string, error)) int {
+	return runStabilityRunWithConfig(ctx, args, stdin, stdout, stderr, PreflightConfig{PrimaryRoot: dir, LookPath: lookPath}, CampaignConfig{})
+}
+
+// runStabilityRunWithConfig allows injecting preflight and campaign configs for testing.
+func runStabilityRunWithConfig(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer, preflightCfg PreflightConfig, campCfg CampaignConfig) int {
 	fs := flag.NewFlagSet("stability run", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
@@ -315,12 +349,7 @@ func runStabilityRunWithDir(ctx context.Context, args []string, stdout, stderr i
 		return 1
 	}
 
-	cfg := PreflightConfig{
-		PrimaryRoot: dir,
-		LookPath:    lookPath,
-	}
-
-	res, err := Preflight(ctx, cfg)
+	res, err := Preflight(ctx, preflightCfg)
 	if err != nil {
 		fmt.Fprintf(stderr, "lucind-ai: stability preflight error: %v\n", err)
 		return 1
@@ -331,8 +360,271 @@ func runStabilityRunWithDir(ctx context.Context, args []string, stdout, stderr i
 	}
 
 	fmt.Fprintf(stdout, "preflight passed: ready for stability campaign (candidate %s)\n", res.CandidateSHA)
-	fmt.Fprintln(stdout, "note: stability run dispatch orchestration is not yet implemented (Wave 4b stub)")
-	return 0
+
+	if !promptConfirmation(stdin, stdout, stderr) {
+		fmt.Fprintln(stderr, "stability run declined by operator")
+		return 1
+	}
+
+	if campCfg.PrimaryRoot == "" {
+		campCfg.PrimaryRoot = res.PrimaryRoot
+	}
+	if campCfg.CandidateSHA == "" {
+		campCfg.CandidateSHA = res.CandidateSHA
+	}
+	if campCfg.BuildVersion == "" {
+		campCfg.BuildVersion = version
+	}
+	if campCfg.Stdout == nil {
+		campCfg.Stdout = stdout
+	}
+	if campCfg.Stderr == nil {
+		campCfg.Stderr = stderr
+	}
+
+	code, err := RunCampaign(ctx, campCfg)
+	if err != nil {
+		return code
+	}
+	return code
+}
+
+// CampaignConfig holds dependencies and configuration for executing a 3-Trial Stability Campaign.
+type CampaignConfig struct {
+	PrimaryRoot     string
+	CandidateSHA    string
+	BuildVersion    string
+	CampaignID      string
+	ReceiptID       string
+	PGIDB           int
+	Now             func() time.Time
+	StoreOpener     func(context.Context, worktree.GitRunner, string) (*store.Store, error)
+	LedgerOpener    func(context.Context, string) (*ledger.Ledger, error)
+	CheckRunner     func(context.Context, string) (bool, string, error)
+	DepsFactory     func(runID, primaryRoot string, ledg *ledger.Ledger, timeout, approvalTimeout time.Duration) lucindrun.Deps
+	FeatureSvcMaker func(ledg *ledger.Ledger) *feature.Service
+	ExecuteJourney  func(context.Context, *stability.StateMachine, lucindrun.Deps, *feature.Service, stability.JourneyConfig, int, string) (*stability.TrialJourneyResult, error)
+	ReceiptWriter   func(string, evidence.Receipt) error
+	GitRunner       worktree.GitRunner
+	Stdin           io.Reader
+	Stdout          io.Writer
+	Stderr          io.Writer
+}
+
+func resolveGitCommonDir(ctx context.Context, runner worktree.GitRunner, repoDir string) (string, error) {
+	if runner == nil {
+		runner = worktree.DefaultGitRunner
+	}
+	out, err := runner.Run(ctx, repoDir, "rev-parse", "--git-common-dir")
+	if err != nil {
+		return "", fmt.Errorf("resolve git common dir: %w", err)
+	}
+	commonDir := strings.TrimSpace(string(out))
+	if commonDir == "" {
+		return "", errors.New("empty git common dir")
+	}
+	if !filepath.IsAbs(commonDir) {
+		commonDir = filepath.Join(repoDir, commonDir)
+	}
+	return filepath.Clean(commonDir), nil
+}
+
+func resolveReceiptPath(ctx context.Context, runner worktree.GitRunner, repoDir, receiptID string) (string, error) {
+	commonDir, err := resolveGitCommonDir(ctx, runner, repoDir)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(commonDir, "lucind-ai", "stability", "v1", "receipts", receiptID+".json"), nil
+}
+
+// RunCampaign coordinates the 3-Trial stability campaign loop and writes the canonical receipt upon 3 consecutive passes.
+func RunCampaign(ctx context.Context, cfg CampaignConfig) (int, error) {
+	if cfg.PrimaryRoot == "" {
+		return 1, errors.New("primary root is required")
+	}
+	if cfg.CandidateSHA == "" {
+		return 1, errors.New("candidate SHA is required")
+	}
+	if cfg.BuildVersion == "" {
+		cfg.BuildVersion = version
+	}
+	if cfg.CampaignID == "" {
+		cfg.CampaignID = fmt.Sprintf("camp-%s", uuid.NewString())
+	}
+	if cfg.ReceiptID == "" {
+		cfg.ReceiptID = fmt.Sprintf("rcpt-%s", uuid.NewString())
+	}
+	if cfg.PGIDB == 0 {
+		cfg.PGIDB = 99999999
+	}
+	if cfg.Now == nil {
+		cfg.Now = time.Now
+	}
+	if cfg.StoreOpener == nil {
+		cfg.StoreOpener = store.Open
+	}
+	if cfg.LedgerOpener == nil {
+		cfg.LedgerOpener = ledger.Open
+	}
+	if cfg.CheckRunner == nil {
+		cfg.CheckRunner = integrate.Check
+	}
+	if cfg.DepsFactory == nil {
+		cfg.DepsFactory = productionDeps
+	}
+	if cfg.FeatureSvcMaker == nil {
+		cfg.FeatureSvcMaker = feature.NewService
+	}
+	if cfg.ExecuteJourney == nil {
+		cfg.ExecuteJourney = stability.ExecuteTrialJourney
+	}
+	if cfg.ReceiptWriter == nil {
+		cfg.ReceiptWriter = evidence.WriteReceipt
+	}
+	if cfg.GitRunner == nil {
+		cfg.GitRunner = worktree.DefaultGitRunner
+	}
+	if cfg.Stdout == nil {
+		cfg.Stdout = io.Discard
+	}
+	if cfg.Stderr == nil {
+		cfg.Stderr = io.Discard
+	}
+
+	st, err := cfg.StoreOpener(ctx, cfg.GitRunner, cfg.PrimaryRoot)
+	if err != nil {
+		fmt.Fprintf(cfg.Stderr, "stability campaign error: open store: %v\n", err)
+		return 1, fmt.Errorf("open store: %w", err)
+	}
+	defer st.Close()
+
+	if _, err := st.CreateCampaign(ctx, cfg.CampaignID, cfg.CandidateSHA); err != nil {
+		fmt.Fprintf(cfg.Stderr, "stability campaign error: create campaign row: %v\n", err)
+		return 1, fmt.Errorf("create campaign row: %w", err)
+	}
+
+	sm := stability.NewStateMachine()
+	if err := sm.Start(); err != nil {
+		_ = st.UpdateCampaignStatus(ctx, cfg.CampaignID, store.StatusFailed)
+		fmt.Fprintf(cfg.Stderr, "stability campaign error: start state machine: %v\n", err)
+		return 1, fmt.Errorf("start state machine: %w", err)
+	}
+
+	ledg, err := cfg.LedgerOpener(ctx, cfg.PrimaryRoot)
+	if err != nil {
+		_ = sm.TransitionCampaign(stability.CampaignFailed)
+		_ = st.UpdateCampaignStatus(ctx, cfg.CampaignID, store.StatusFailed)
+		fmt.Fprintf(cfg.Stderr, "stability campaign error: open ledger: %v\n", err)
+		return 1, fmt.Errorf("open ledger: %w", err)
+	}
+	defer ledg.Close()
+
+	featSvc := cfg.FeatureSvcMaker(ledg)
+
+	var trialRecords []evidence.TrialRecord
+	for trialNum := 1; trialNum <= stability.TargetConsecutivePasses; trialNum++ {
+		tNum, err := sm.StartNextTrial()
+		if err != nil {
+			_ = sm.TransitionCampaign(stability.CampaignFailed)
+			_ = st.UpdateCampaignStatus(ctx, cfg.CampaignID, store.StatusFailed)
+			fmt.Fprintf(cfg.Stderr, "stability campaign error: start trial %d: %v\n", trialNum, err)
+			return 1, fmt.Errorf("start trial %d: %w", trialNum, err)
+		}
+
+		journeyCfg := stability.DefaultJourneyConfig(tNum, cfg.CandidateSHA)
+		runID := fmt.Sprintf("stability-%s-trial-%d", cfg.CampaignID, tNum)
+		deps := cfg.DepsFactory(runID, cfg.PrimaryRoot, ledg, stability.DispatchTimeout, 0)
+
+		_, pB := stability.BuildJourneyPackets(journeyCfg)
+		wtPathB := filepath.Join(cfg.PrimaryRoot, "wt-"+pB.ID)
+
+		res, err := cfg.ExecuteJourney(ctx, sm, deps, featSvc, journeyCfg, cfg.PGIDB, wtPathB)
+		if err != nil {
+			if sm.HasActiveTrial() {
+				_ = sm.RecordTrialOutcome(stability.TrialFailed)
+			}
+			_ = sm.TransitionCampaign(stability.CampaignFailed)
+			_ = st.UpdateCampaignStatus(ctx, cfg.CampaignID, store.StatusFailed)
+			fmt.Fprintf(cfg.Stderr, "stability trial %d failed: %v\n", tNum, err)
+			return 1, fmt.Errorf("trial %d failed: %w", tNum, err)
+		}
+		_ = res
+
+		if err := sm.AdvanceTrial(stability.TrialCleanedUp); err != nil {
+			_ = sm.RecordTrialOutcome(stability.TrialFailed)
+			_ = sm.TransitionCampaign(stability.CampaignFailed)
+			_ = st.UpdateCampaignStatus(ctx, cfg.CampaignID, store.StatusFailed)
+			fmt.Fprintf(cfg.Stderr, "stability trial %d advance cleanup error: %v\n", tNum, err)
+			return 1, fmt.Errorf("advance trial %d cleanup: %w", tNum, err)
+		}
+
+		if err := sm.RecordTrialOutcome(stability.TrialPassed); err != nil {
+			_ = sm.TransitionCampaign(stability.CampaignFailed)
+			_ = st.UpdateCampaignStatus(ctx, cfg.CampaignID, store.StatusFailed)
+			fmt.Fprintf(cfg.Stderr, "stability trial %d record outcome error: %v\n", tNum, err)
+			return 1, fmt.Errorf("record trial %d outcome: %w", tNum, err)
+		}
+
+		trialRecords = append(trialRecords, evidence.TrialRecord{
+			TrialNumber: tNum,
+			Verdict:     string(stability.TrialPassed),
+		})
+
+		// Zero-retry stop condition: halt immediately if not running
+		if sm.State() != stability.CampaignRunning && !sm.IsEligibleForTerminalVerification() {
+			break
+		}
+	}
+
+	if !sm.IsEligibleForTerminalVerification() {
+		finalStatus, _ := sm.State().StoreStatus()
+		_ = st.UpdateCampaignStatus(ctx, cfg.CampaignID, finalStatus)
+		fmt.Fprintf(cfg.Stderr, "stability campaign failed: eligible for verification = false (state %s)\n", sm.State())
+		return 1, fmt.Errorf("campaign not eligible for verification (state %s)", sm.State())
+	}
+
+	// Final post-cleanup baseline check
+	passed, output, err := cfg.CheckRunner(ctx, cfg.PrimaryRoot)
+	if err != nil || !passed {
+		_ = sm.TransitionCampaign(stability.CampaignFailed)
+		_ = st.UpdateCampaignStatus(ctx, cfg.CampaignID, store.StatusFailed)
+		fmt.Fprintf(cfg.Stderr, "stability campaign final baseline check failed: %s (%v)\n", strings.TrimSpace(output), err)
+		return 1, fmt.Errorf("final baseline check failed: %w", err)
+	}
+
+	receiptPath, err := resolveReceiptPath(ctx, cfg.GitRunner, cfg.PrimaryRoot, cfg.ReceiptID)
+	if err != nil {
+		_ = sm.TransitionCampaign(stability.CampaignFailed)
+		_ = st.UpdateCampaignStatus(ctx, cfg.CampaignID, store.StatusFailed)
+		fmt.Fprintf(cfg.Stderr, "stability campaign resolve receipt path error: %v\n", err)
+		return 1, fmt.Errorf("resolve receipt path: %w", err)
+	}
+
+	rcpt := evidence.Receipt{
+		ReceiptID:     cfg.ReceiptID,
+		CandidateSHA:  cfg.CandidateSHA,
+		BuildVersion:  cfg.BuildVersion,
+		Verdict:       string(store.StatusPassed),
+		CreatedAt:     cfg.Now().UTC().Format(time.RFC3339),
+		BaselineCheck: strings.TrimSpace(output),
+		Trials:        trialRecords,
+	}
+
+	if err := cfg.ReceiptWriter(receiptPath, rcpt); err != nil {
+		_ = sm.TransitionCampaign(stability.CampaignFailed)
+		_ = st.UpdateCampaignStatus(ctx, cfg.CampaignID, store.StatusFailed)
+		fmt.Fprintf(cfg.Stderr, "stability campaign write receipt error: %v\n", err)
+		return 1, fmt.Errorf("write stability receipt: %w", err)
+	}
+
+	if err := st.UpdateCampaignStatus(ctx, cfg.CampaignID, store.StatusPassed); err != nil {
+		fmt.Fprintf(cfg.Stderr, "stability campaign update status error: %v\n", err)
+		return 1, fmt.Errorf("update campaign status to passed: %w", err)
+	}
+
+	fmt.Fprintf(cfg.Stdout, "stability campaign %s passed (3/3 trials passed)\n", cfg.CampaignID)
+	fmt.Fprintf(cfg.Stdout, "receipt written: %s\n", receiptPath)
+	return 0, nil
 }
 
 // runStabilityStatus implements "lucind-ai stability status": queries active stability campaign state.
