@@ -1920,3 +1920,126 @@ func TestLedgerAllReconciliationRequests(t *testing.T) {
 		t.Errorf("AllReconciliationRequests = %+v, want [req-all-1, req-all-2]", all)
 	}
 }
+
+func TestLedgerRecordAndGetDefect(t *testing.T) {
+	ctx := context.Background()
+	l := openTestLedger(t)
+
+	now := time.Date(2026, 8, 25, 12, 0, 0, 0, time.UTC)
+	rec := DefectRecord{
+		ID:             "defect-123",
+		FeatureID:      "feature-abc",
+		RunID:          "run-456",
+		LaneID:         "lane-789",
+		ErrorSignature: "TestFoo failed on nil pointer dereference",
+		Evidence:       "panic: runtime error: invalid memory address or nil pointer dereference\n[stack trace]",
+		Disposition:    DefectDispositionRecorded,
+		CreatedAt:      now,
+		UpdatedAt:      now.Add(5 * time.Minute),
+	}
+
+	if err := l.RecordDefect(ctx, rec); err != nil {
+		t.Fatalf("RecordDefect: %v", err)
+	}
+
+	got, err := l.GetDefect(ctx, "defect-123")
+	if err != nil {
+		t.Fatalf("GetDefect: %v", err)
+	}
+
+	if got.ID != rec.ID || got.FeatureID != rec.FeatureID || got.RunID != rec.RunID ||
+		got.LaneID != rec.LaneID || got.ErrorSignature != rec.ErrorSignature ||
+		got.Evidence != rec.Evidence || got.Disposition != rec.Disposition ||
+		!got.CreatedAt.Equal(rec.CreatedAt) || !got.UpdatedAt.Equal(rec.UpdatedAt) {
+		t.Errorf("GetDefect = %+v, want %+v", got, rec)
+	}
+
+	// Unknown ID returns error
+	if _, err := l.GetDefect(ctx, "nonexistent"); err == nil {
+		t.Error("GetDefect with unknown ID succeeded, want error")
+	}
+}
+
+func TestLedgerRecordDefectRejectsInvalidDisposition(t *testing.T) {
+	ctx := context.Background()
+	l := openTestLedger(t)
+
+	rec := DefectRecord{
+		ID:             "defect-bad",
+		FeatureID:      "feature-abc",
+		ErrorSignature: "some error",
+		Disposition:    DefectDisposition("not-a-valid-disposition"),
+		CreatedAt:      time.Now().UTC(),
+		UpdatedAt:      time.Now().UTC(),
+	}
+
+	if err := l.RecordDefect(ctx, rec); err == nil {
+		t.Fatal("RecordDefect with invalid disposition succeeded, want error")
+	}
+}
+
+func TestLedgerListDefects(t *testing.T) {
+	ctx := context.Background()
+	l := openTestLedger(t)
+
+	now := time.Date(2026, 8, 25, 12, 0, 0, 0, time.UTC)
+	rec1 := DefectRecord{
+		ID:             "defect-list-1",
+		FeatureID:      "feat-a",
+		ErrorSignature: "error 1",
+		Disposition:    DefectDispositionRecorded,
+		CreatedAt:      now.Add(10 * time.Minute),
+		UpdatedAt:      now.Add(10 * time.Minute),
+	}
+	rec2 := DefectRecord{
+		ID:             "defect-list-2",
+		FeatureID:      "feat-b",
+		ErrorSignature: "error 2",
+		Disposition:    DefectDispositionRepaired,
+		CreatedAt:      now.Add(5 * time.Minute),
+		UpdatedAt:      now.Add(5 * time.Minute),
+	}
+	rec3 := DefectRecord{
+		ID:             "defect-list-3",
+		FeatureID:      "feat-a",
+		ErrorSignature: "error 3",
+		Disposition:    DefectDispositionDeferred,
+		CreatedAt:      now.Add(2 * time.Minute),
+		UpdatedAt:      now.Add(2 * time.Minute),
+	}
+
+	for _, rec := range []DefectRecord{rec1, rec2, rec3} {
+		if err := l.RecordDefect(ctx, rec); err != nil {
+			t.Fatalf("RecordDefect(%s): %v", rec.ID, err)
+		}
+	}
+
+	listA, err := l.ListDefects(ctx, "feat-a")
+	if err != nil {
+		t.Fatalf("ListDefects(feat-a): %v", err)
+	}
+	if len(listA) != 2 {
+		t.Fatalf("ListDefects(feat-a) length = %d, want 2", len(listA))
+	}
+	// Assert ordered chronologically by created_at ASC (rec3 at +2m, rec1 at +10m)
+	if listA[0].ID != "defect-list-3" || listA[1].ID != "defect-list-1" {
+		t.Errorf("ListDefects(feat-a) ordering = [%s, %s], want [defect-list-3, defect-list-1]", listA[0].ID, listA[1].ID)
+	}
+
+	listB, err := l.ListDefects(ctx, "feat-b")
+	if err != nil {
+		t.Fatalf("ListDefects(feat-b): %v", err)
+	}
+	if len(listB) != 1 || listB[0].ID != "defect-list-2" {
+		t.Errorf("ListDefects(feat-b) = %+v, want [defect-list-2]", listB)
+	}
+
+	// Empty list for unknown feature
+	listEmpty, err := l.ListDefects(ctx, "feat-none")
+	if err != nil {
+		t.Fatalf("ListDefects(feat-none): %v", err)
+	}
+	if len(listEmpty) != 0 {
+		t.Errorf("ListDefects(feat-none) length = %d, want 0", len(listEmpty))
+	}
+}

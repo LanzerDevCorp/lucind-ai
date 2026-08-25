@@ -383,6 +383,207 @@ func TestSchemaV7ReopenIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestMigrateV7ToV8PreservesRowsAndAddsSchema(t *testing.T) {
+	ctx := context.Background()
+	root := createV7SchemaFixture(t, ctx)
+
+	l, err := Open(ctx, root)
+	if err != nil {
+		t.Fatalf("Open v7 database: %v", err)
+	}
+	defer l.Close()
+
+	var versionCount int
+	if err := l.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM schema_migrations WHERE version = 8`).Scan(&versionCount); err != nil {
+		t.Fatalf("query v8 migration: %v", err)
+	}
+	if versionCount != 1 {
+		t.Fatalf("version 8 migration count = %d, want 1", versionCount)
+	}
+
+	assertTableColumns(t, l.db, "defect_records", []string{
+		"id", "feature_id", "run_id", "lane_id", "error_signature", "evidence", "disposition", "created_at", "updated_at",
+	})
+	assertIndexColumns(t, l.db, "idx_defect_records_feature", []string{"feature_id", "id"})
+
+	var strict int
+	if err := l.db.QueryRowContext(ctx, `SELECT strict FROM pragma_table_list WHERE name = 'defect_records'`).Scan(&strict); err != nil {
+		t.Fatalf("query defect_records strict flag: %v", err)
+	}
+	if strict != 1 {
+		t.Errorf("defect_records strict = %d, want 1", strict)
+	}
+
+	// Verify preserved runs from v7 fixture
+	var pid int
+	if err := l.db.QueryRowContext(ctx, `SELECT pid FROM runs WHERE run_id = 'run-v7'`).Scan(&pid); err != nil {
+		t.Fatalf("query preserved run: %v", err)
+	}
+	if pid != 1234 {
+		t.Errorf("preserved run pid = %d, want 1234", pid)
+	}
+
+	// Verify preserved lane_progress from v7 fixture
+	var totalTokens int
+	if err := l.db.QueryRowContext(ctx, `SELECT total_tokens FROM lane_progress WHERE run_id = 'run-v7' AND lane_id = 'lane-v7'`).Scan(&totalTokens); err != nil {
+		t.Fatalf("query preserved progress: %v", err)
+	}
+	if totalTokens != 100 {
+		t.Errorf("preserved progress total_tokens = %d, want 100", totalTokens)
+	}
+
+	// Verify preserved lanes, events, approvals from earlier fixtures
+	var laneCount, eventCount, approvalCount int
+	if err := l.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM lanes WHERE lane_id = 'lane-v5'`).Scan(&laneCount); err != nil {
+		t.Fatalf("query preserved lanes: %v", err)
+	}
+	if laneCount != 1 {
+		t.Errorf("preserved lanes count = %d, want 1", laneCount)
+	}
+	if err := l.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE id = 41`).Scan(&eventCount); err != nil {
+		t.Fatalf("query preserved events: %v", err)
+	}
+	if eventCount != 1 {
+		t.Errorf("preserved events count = %d, want 1", eventCount)
+	}
+	if err := l.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM approvals WHERE packet_id = 'packet-v5'`).Scan(&approvalCount); err != nil {
+		t.Fatalf("query preserved approvals: %v", err)
+	}
+	if approvalCount != 1 {
+		t.Errorf("preserved approvals count = %d, want 1", approvalCount)
+	}
+}
+
+func TestSchemaV8ConstraintsAndIndexes(t *testing.T) {
+	ctx := context.Background()
+	l := openTestLedger(t)
+
+	// Valid insert with full fields
+	if _, err := l.db.ExecContext(ctx, `
+		INSERT INTO defect_records (
+			id, feature_id, run_id, lane_id, error_signature, evidence, disposition, created_at, updated_at
+		) VALUES (
+			'defect-1', 'feat-1', 'run-1', 'lane-1', 'test failure', 'stack trace', 'recorded', '2026-08-25T10:00:00Z', '2026-08-25T10:00:00Z'
+		)
+	`); err != nil {
+		t.Fatalf("insert defect record: %v", err)
+	}
+
+	// Valid insert with defaults for run_id, lane_id, evidence
+	if _, err := l.db.ExecContext(ctx, `
+		INSERT INTO defect_records (
+			id, feature_id, error_signature, disposition, created_at, updated_at
+		) VALUES (
+			'defect-2', 'feat-1', 'build error', 'repaired', '2026-08-25T10:01:00Z', '2026-08-25T10:01:00Z'
+		)
+	`); err != nil {
+		t.Fatalf("insert defect record with defaults: %v", err)
+	}
+
+	// Test valid dispositions
+	for _, disp := range []string{"declined", "deferred"} {
+		if _, err := l.db.ExecContext(ctx, `
+			INSERT INTO defect_records (
+				id, feature_id, error_signature, disposition, created_at, updated_at
+			) VALUES (
+				?, 'feat-1', 'some error', ?, '2026-08-25T10:02:00Z', '2026-08-25T10:02:00Z'
+			)
+		`, "defect-"+disp, disp); err != nil {
+			t.Fatalf("insert defect record with disposition %q: %v", disp, err)
+		}
+	}
+
+	// Invalid disposition should fail CHECK constraint
+	if _, err := l.db.ExecContext(ctx, `
+		INSERT INTO defect_records (
+			id, feature_id, error_signature, disposition, created_at, updated_at
+		) VALUES (
+			'defect-invalid', 'feat-1', 'error', 'invalid_disp', '2026-08-25T10:03:00Z', '2026-08-25T10:03:00Z'
+		)
+	`); err == nil {
+		t.Fatal("invalid disposition insert succeeded, want CHECK constraint error")
+	}
+
+	assertIndexColumns(t, l.db, "idx_defect_records_feature", []string{"feature_id", "id"})
+}
+
+func TestSchemaV8ReopenIsIdempotent(t *testing.T) {
+	ctx := context.Background()
+	root := createV7SchemaFixture(t, ctx)
+
+	l1, err := Open(ctx, root)
+	if err != nil {
+		t.Fatalf("first Open: %v", err)
+	}
+	if _, err := l1.db.ExecContext(ctx, `
+		INSERT INTO defect_records (
+			id, feature_id, error_signature, disposition, created_at, updated_at
+		) VALUES (
+			'defect-reopen', 'feature-reopen', 'reopen error', 'recorded', '2026-08-25T11:00:00Z', '2026-08-25T11:00:00Z'
+		)
+	`); err != nil {
+		t.Fatalf("insert defect record before reopen: %v", err)
+	}
+	var firstAppliedAt string
+	if err := l1.db.QueryRowContext(ctx, `SELECT applied_at FROM schema_migrations WHERE version = 8`).Scan(&firstAppliedAt); err != nil {
+		t.Fatalf("query first v8 applied_at: %v", err)
+	}
+	if err := l1.Close(); err != nil {
+		t.Fatalf("first Close: %v", err)
+	}
+
+	l2, err := Open(ctx, root)
+	if err != nil {
+		t.Fatalf("second Open: %v", err)
+	}
+	defer l2.Close()
+
+	var migrationCount int
+	var secondAppliedAt string
+	if err := l2.db.QueryRowContext(ctx, `
+		SELECT COUNT(*), MIN(applied_at) FROM schema_migrations WHERE version = 8
+	`).Scan(&migrationCount, &secondAppliedAt); err != nil {
+		t.Fatalf("query v8 migration after reopen: %v", err)
+	}
+	if migrationCount != 1 || secondAppliedAt != firstAppliedAt {
+		t.Errorf("v8 migration after reopen = count %d applied_at %q, want count 1 applied_at %q", migrationCount, secondAppliedAt, firstAppliedAt)
+	}
+
+	var errorSig string
+	if err := l2.db.QueryRowContext(ctx, `SELECT error_signature FROM defect_records WHERE id = 'defect-reopen'`).Scan(&errorSig); err != nil {
+		t.Fatalf("query defect record after reopen: %v", err)
+	}
+	if errorSig != "reopen error" {
+		t.Errorf("preserved error_signature after reopen = %q, want %q", errorSig, "reopen error")
+	}
+}
+
+func createV7SchemaFixture(t *testing.T, ctx context.Context) string {
+	t.Helper()
+	root := createV6SchemaFixture(t, ctx)
+	dbPath := ledgerpath.Resolve(root)
+
+	db, err := sql.Open("sqlite", "file:"+dbPath+"?_pragma=foreign_keys(1)")
+	if err != nil {
+		t.Fatalf("open v7 fixture: %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.ExecContext(ctx, migrateV6ToV7DDL); err != nil {
+		t.Fatalf("apply v7 fixture schema: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO schema_migrations (version, applied_at) VALUES (7, '2026-08-25T00:00:00Z');
+		INSERT INTO runs (run_id, feature_id, status, target_ref, lane_count, started_at, pid)
+		VALUES ('run-v7', 'feature-v7', 'running', 'refs/heads/main', 2, '2026-08-25T04:00:00Z', 1234);
+		INSERT INTO lane_progress (run_id, lane_id, seq, message, at, total_tokens, cost_usd, tool_calls)
+		VALUES ('run-v7', 'lane-v7', 1, 'v7 progress', '2026-08-25T04:01:00Z', 100, 0.05, 3);
+	`); err != nil {
+		t.Fatalf("seed v7 fixture: %v", err)
+	}
+	return root
+}
+
 func createV6SchemaFixture(t *testing.T, ctx context.Context) string {
 	t.Helper()
 	root := createV5SchemaFixture(t, ctx)
