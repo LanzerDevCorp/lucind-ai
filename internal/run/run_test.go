@@ -510,6 +510,62 @@ func TestExecuteOutcomePGIDPopulatesReportPGID(t *testing.T) {
 	}
 }
 
+func TestExecuteSetpgidAndOnProcessStartPlumbing(t *testing.T) {
+	wtPath := t.TempDir()
+	fe := &fakeExecutor{outcome: executor.Outcome{ExitCode: 0}}
+	deps := newTestDeps(t, wtPath, func(string) fs.FS {
+		return fstest.MapFS{".lucind/result.json": {Data: []byte(doneEnvelopeJSON)}}
+	}, fe)
+
+	var recordedLaneID string
+	var recordedPID int
+	deps.Setpgid = true
+	deps.OnProcessStart = func(laneID string, pid int) {
+		recordedLaneID = laneID
+		recordedPID = pid
+	}
+
+	p := testPacket()
+	report, err := run.Execute(context.Background(), deps, p)
+	if err != nil {
+		t.Fatalf("Execute() error = %v, want nil", err)
+	}
+	if report.Status != lane.Done {
+		t.Fatalf("report.Status = %v, want %v", report.Status, lane.Done)
+	}
+
+	if !fe.gotReq.Setpgid {
+		t.Errorf("fe.gotReq.Setpgid = false, want true")
+	}
+	if fe.gotReq.OnStart == nil {
+		t.Fatalf("fe.gotReq.OnStart = nil, want non-nil func")
+	}
+
+	// Trigger the OnStart callback to verify it forwards to deps.OnProcessStart.
+	fe.gotReq.OnStart(999)
+
+	if recordedLaneID != p.ID {
+		t.Errorf("recordedLaneID = %q, want %q", recordedLaneID, p.ID)
+	}
+	if recordedPID != 999 {
+		t.Errorf("recordedPID = %d, want 999", recordedPID)
+	}
+
+	// Also verify that when deps.OnProcessStart is nil, invoking OnStart does not panic.
+	depsNil := newTestDeps(t, wtPath, func(string) fs.FS {
+		return fstest.MapFS{".lucind/result.json": {Data: []byte(doneEnvelopeJSON)}}
+	}, fe)
+	depsNil.Setpgid = true
+	depsNil.OnProcessStart = nil
+	_, err = run.Execute(context.Background(), depsNil, p)
+	if err != nil {
+		t.Fatalf("Execute() with nil OnProcessStart error = %v", err)
+	}
+	if fe.gotReq.OnStart != nil {
+		fe.gotReq.OnStart(888)
+	}
+}
+
 // blockedEnvelopeJSON is a minimal envelope satisfying result.schema.json
 // with status "blocked": a fired hard stop, and the required note on it.
 const blockedEnvelopeJSON = `{

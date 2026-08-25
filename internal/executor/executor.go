@@ -58,6 +58,18 @@ type Request struct {
 	// platforms this is a silent no-op, since Stability Campaigns are already
 	// gated Linux-only upstream.
 	Setpgid bool
+	// OnStart, if non-nil, is called synchronously with the dispatched
+	// child's real OS PID as soon as the process has started successfully
+	// -- before the executor waits for it to exit. This is the only way a
+	// caller can observe a dispatched process's identity while it is still
+	// running (Outcome.PGID, by contrast, is only populated after the
+	// process has already exited -- see its doc comment). Only honored
+	// by Agy.Run, and only when Setpgid is also true, since a PID is only
+	// safe to treat as a process-group id (for a later SIGKILL to
+	// -pgid) when the child is the leader of its own new process group.
+	// Nil means no notification; existing behavior for every caller that
+	// does not set this is completely unchanged.
+	OnStart func(pid int)
 }
 
 // Outcome is what actually happened when the child process ran, nothing

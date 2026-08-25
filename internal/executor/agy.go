@@ -212,7 +212,13 @@ func (a Agy) runFormat(ctx context.Context, req Request, format string, stdoutTa
 		cmd.Stdout = io.MultiWriter(&stdout, stdoutTap)
 	}
 
-	err := cmd.Run()
+	err := cmd.Start()
+	if err == nil {
+		if req.Setpgid && req.OnStart != nil && cmd.Process != nil {
+			req.OnStart(cmd.Process.Pid)
+		}
+		err = cmd.Wait()
+	}
 
 	outcome := Outcome{Stderr: stderr.String(), Stdout: stdout.String()}
 	if req.Setpgid && cmd.Process != nil {
