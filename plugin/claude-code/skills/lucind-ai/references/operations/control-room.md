@@ -6,7 +6,7 @@ Load this module for `serve`, approvals, ledger status, monitoring, or operator 
 
 Run `lucind-ai -v` before dispatch and compare the embedded build with the checkout. Use the binary's usage output for current command syntax; the CLI does not currently expose a successful conventional top-level `--help` path, but invalid or empty invocation prints usage.
 
-`lucind-ai serve` starts the approvals and status HTTP surface. Dispatch through the server is separately gated and must not be inferred from monitoring availability. The current Lane timeout defaults to 20 minutes and approval waits to 30 minutes; `--approval-timeout` bounds approval independently of Lane execution. Synthesis Lanes require an explicit larger timeout.
+`lucind-ai serve` starts the approvals and status HTTP surface. Dispatch through the server is separately gated and must not be inferred from monitoring availability. The current Lane timeout defaults to 20 minutes. `serve`'s own `--approval-timeout` defaults to 30 minutes but is informational only and does not gate Lanes (`cmd/lucind-ai/cli.go:748`); the flag that actually gates Lanes is `--approval-timeout` on `lucind-ai run`/`integrate retry`, which defaults to `0` (no wait / bypass, `cmd/lucind-ai/cli.go:163`). Passing a positive value there without a live `serve --approver ...` process recording decisions blocks every Lane until it times out into `Blocked` -- see `../core/safety.md`.
 
 ## Durable state
 
