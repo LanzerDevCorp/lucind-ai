@@ -1799,16 +1799,24 @@ func runIntegrateRetry(ctx context.Context, args []string, stdout, stderr io.Wri
 			return 1
 		}
 
+		// The feature row's own ParentRef/BaseSHA/ExpectedParentSHA are set
+		// once at feature.Service.Create and never updated again, so they
+		// are only correct for a feature's first wave. RetryFeatureTarget
+		// prefers the original packet's own dispatch-time target, recovered
+		// from each included lane's LaneMetadata, which is what a later
+		// wave's CAS promotion actually used -- see RetryFeatureTarget's doc
+		// comment.
+		target, terr := lucindrun.RetryFeatureTarget(ctx, deps, feat, batch.Outcome.Integrate)
+		if terr != nil {
+			fmt.Fprintf(stderr, "lucind-ai: %v\n", terr)
+			return 1
+		}
+
 		attemptID := uuid.NewString()
-		integrateReport, attempt, err = lucindrun.IntegrateFeature(ctx, deps, batch, lucindrun.AttemptRequest{
-			ID:                attemptID,
-			FeatureID:         feat.ID,
-			ParentRef:         feat.ParentRef,
-			BaseSHA:           feat.BaseSHA,
-			ExpectedParentSHA: feat.ExpectedParentSHA,
-			IdempotencyKey:    attemptID,
-			Owner:             attemptOwner,
-		})
+		target.ID = attemptID
+		target.IdempotencyKey = attemptID
+		target.Owner = attemptOwner
+		integrateReport, attempt, err = lucindrun.IntegrateFeature(ctx, deps, batch, target)
 	} else {
 		integrateReport, err = lucindrun.Integrate(ctx, deps, batch)
 	}
