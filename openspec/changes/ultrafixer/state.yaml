@@ -29,7 +29,12 @@ phases:
   spec:
     status: pending
   design:
-    status: pending
+    status: done
+    note: |
+      Authored technical design resolving proposal's three open questions (defect_records schema
+      v8 DDL, multi-branch question encoding in result.json, worktree cleanup reuse), specifying
+      zero-new-Go dispatch plumbing via packet template asset, two-axis triage, CodeGraph + signal
+      reproduction, and human-gated CAS promotion.
   tasks:
     status: pending
   apply:
