@@ -1,0 +1,103 @@
+{
+  "packet_id": "verify-ultrafixer-r2-cursor-agent",
+  "status": "done",
+  "summary": "Independent re-verify of feature/ultrafixer at 95c426e confirms both round-1 BLOCKED violations are genuinely fixed in code, with terminal consumers, and the four non-blocking findings are addressed. No apply-phase regression of schema v8 or defect record/list. Residual notes are documentation placement and contract-test completeness, not missing capabilities.",
+  "hard_stops": [
+    {
+      "hard_stop": "Executing mechanical test/build commands when mechanical results are already provided.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Any credential value would need to be chosen, generated, or written.",
+      "fired": false
+    },
+    {
+      "hard_stop": "A done-criterion turns out to be impossible, or already true for a reason the packet did not anticipate.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Two reasonable interpretations exist for a spec requirement and the specification does not say which.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": ".lucind/result.json",
+      "change": "created",
+      "why": "Read-only verify envelope for the dispatching binary."
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every indirection introduced is demonstrably consumed by a terminal consumer.",
+      "met": true,
+      "evidence": "resolvePrimaryRoot (cmd/lucind-ai/cli.go:695-717, git rev-parse --git-common-dir then filepath.Dir) is consumed by runFeatureStatus:996, runDefectRecord:1941, runDefectList:1995, runDefectDecline:2046, each of which pass the result to ledger.Open (internal/ledger/ledger.go:149 → ledgerpath.Resolve → \u003cprimary\u003e/.lucind/lucind.db). gitShowToplevel (cli.go:677) is consumed by IsLinkedWorktree guards on mutating verbs (e.g. runDispatch:336-339) so those still refuse a linked worktree after primaryRoot stopped being the cwd toplevel. DefectDisposition.Valid (internal/ledger/ledger.go:1451) is consumed by runDefectRecord CLI validation (cli.go:1935) and UpdateDefectDisposition (ledger.go:1586). UpdateDefectDisposition (ledger.go:1585) is consumed by runDefectDecline (cli.go:2059), which defectDispatch (cli.go:1886-1887) exposes as `lucind-ai defect decline`. Plugin 2.0.6 is consumed by TestPluginVersionGuardsSkillContent via internal/packet/testdata/skill_content_hash.txt."
+    },
+    {
+      "criterion": "The worktree carries no unique commits and no working-tree changes relative to the lane's birth point. Evidence: git status --porcelain empty and HEAD equals this packet's base_sha (95c426e).",
+      "met": true,
+      "evidence": "git rev-parse HEAD = 95c426e74a881f191eb494320211c30c170879f8; git status --porcelain empty; git log feature/ultrafixer..HEAD empty; branch lucind/verify-ultrafixer-r2-cursor-agent."
+    },
+    {
+      "criterion": "Qualitative evaluation completed (.lucind/result.json populated with status, summary, and structured findings).",
+      "met": true,
+      "evidence": "This envelope. Independent traces of cli.go, ledger.go, ledgerpath.go, packet template, coordination doc, remediation commit 3441c81, and TestLinkedWorktreeCommands; empirical git-common-dir from this linked worktree."
+    }
+  ],
+  "findings": [
+    {
+      "finding": "CONFIRMED FIXED: round-1 violation 1 (linked-worktree refusal). resolvePrimaryRoot no longer uses --show-toplevel; it runs git rev-parse --git-common-dir, absolutizes, then filepath.Dir to the directory that contains .git. runFeatureStatus, runDefectRecord, runDefectList, and runDefectDecline no longer call IsLinkedWorktree. Mutating verbs still refuse, but they now check gitShowToplevel (the current checkout) rather than the newly-resolved primary root — necessary, because IsLinkedWorktree(primaryRoot) would never fire once primaryRoot is the main working tree. Empirically, from this lane's own linked worktree, --git-common-dir returns /home/lanzerdev/git_root/lucind-ai/.git and Dir yields /home/lanzerdev/git_root/lucind-ai, so ledger.Open lands on the primary lucind.db, not a worktree-local copy. That is the intended single-ledger location, not a wrong-ledger write.",
+      "evidence": "cmd/lucind-ai/cli.go:695-717 (resolvePrimaryRoot); cli.go:996-1002 (runFeatureStatus, no IsLinkedWorktree); cli.go:1941-1951 (runDefectRecord); cli.go:1995-2005 (runDefectList); cli.go:2046-2056 (runDefectDecline); cli.go:336-339 (runDispatch still refuses via gitShowToplevel); internal/ledger/ledger.go:149-150; internal/ledgerpath/ledgerpath.go:36-37. Empirical: git rev-parse --git-common-dir from this worktree → /home/lanzerdev/git_root/lucind-ai/.git; derived ledger path /home/lanzerdev/git_root/lucind-ai/.lucind/lucind.db vs worktree .lucind which is this lane's envelope dir, not the DB.",
+      "affects": "ultrafixer-dispatch Requirement Independent two-axis evaluation (feature status from the lane worktree); defect-records persistence path"
+    },
+    {
+      "finding": "CONFIRMED FIXED: round-1 violation 2 (no declined-disposition path). Ledger.UpdateDefectDisposition exists, rejects invalid dispositions via Valid(), returns ErrDefectNotFound on zero rows, and is called by runDefectDecline. defectDispatch wires `lucind-ai defect decline --id`. The live packet template instructs that verb for a human-declined fix. This is not an orphaned method.",
+      "evidence": "internal/ledger/ledger.go:1584-1606 (UpdateDefectDisposition); cmd/lucind-ai/cli.go:1873-1887 (defectDispatch decline); cli.go:2026-2065 (runDefectDecline); plugin/claude-code/skills/lucind-ai/assets/ultrafixer-packet-template.md:63; internal/ledger/ledger_test.go:2047-2124; cmd/lucind-ai/cli_test.go:4434-4491 (TestDefectDeclineCLI asserts stdout and GetDefect row disposition=declined).",
+      "affects": "ultrafixer-dispatch Requirement Isolated repair delivery and human-gated CAS integration, Scenario Human declines fix and worktree is preserved"
+    },
+    {
+      "finding": "Non-blocking finding 1 (Tier auto-merge contradiction) addressed in the live template: **Tier:** B (human-gated CAS integration after audit), and the auto-integration hard stop remains. design.md still embeds the old 'Tier: B (auto-merge after audit)' excerpt — stale design snapshot, not the dispatched template.",
+      "evidence": "plugin/claude-code/skills/lucind-ai/assets/ultrafixer-packet-template.md:13 and :45; openspec/changes/ultrafixer/design.md:216",
+      "affects": "ultrafixer-packet-template.md vs design.md excerpt drift"
+    },
+    {
+      "finding": "Non-blocking finding 2 (missing conventional-commit / no-Co-Authored-By instruction) addressed as a done-criterion in the live template.",
+      "evidence": "plugin/claude-code/skills/lucind-ai/assets/ultrafixer-packet-template.md:29",
+      "affects": "ultrafixer-dispatch Requirement Isolated repair delivery (conventional commit MUST)"
+    },
+    {
+      "finding": "Non-blocking finding 3 (weak template contract test) partially strengthened: TestUltrafixerPacketTemplateContract now asserts no 'auto-merge', conventional commit, Co-Authored-By, the auto-integration hard-stop sentence, and defect-decline / disposition=declined. It still does not assert isolated-worktree path language as a dedicated string (the original finding also named that MUST). Remaining gap is test completeness, not missing template prose — Goal already says isolated repair commit and the Worktree line uses ../\u003crepo\u003e-worktrees/\u003cid\u003e.",
+      "evidence": "internal/packet/packet_test.go:2095-2110; ultrafixer-packet-template.md:13-14, :18",
+      "affects": "tasks.md threat-matrix claim that the contract test covers protocol MUSTs"
+    },
+    {
+      "finding": "Non-blocking finding 4 (--disposition CLI validation) addressed: invalid values are rejected in process before ledger.Open, with stderr 'invalid disposition' and non-zero exit. TestDefectRecordCLIRejectsInvalidDisposition asserts that.",
+      "evidence": "cmd/lucind-ai/cli.go:1931-1938; cmd/lucind-ai/cli_test.go:4398-4431",
+      "affects": "defect-records CLI validation"
+    },
+    {
+      "finding": "Plugin version bump to 2.0.6 is real across the three files the remediation note named.",
+      "evidence": ".claude-plugin/marketplace.json:12; plugin/claude-code/.claude-plugin/plugin.json:3; internal/packet/testdata/skill_content_hash.txt:7",
+      "affects": "plugin version-guard contract"
+    },
+    {
+      "finding": "No apply-phase regression on schema v8 or RecordDefect/GetDefect/ListDefects or defect record/list CLI. Remediation commit 3441c81 adds UPDATE + Valid + UpdateDefectDisposition to ledger.go and does not rewrite the INSERT/SELECT paths or schema.go. schemaVersion remains 8; defect_records DDL remains. Existing CLI tests TestDefectRecordCLI / TestDefectListCLI still present and mechanical check of cmd/lucind-ai was green at f5e3a7f.",
+      "evidence": "internal/ledger/schema.go:10, :361-372; internal/ledger/ledger.go:1473-1582; git diff 6ca101b 3441c81 -- internal/ledger/schema.go (empty) / ledger.go (Valid + UpdateDefectDisposition UPDATE only); cmd/lucind-ai/cli_test.go:4266-4396",
+      "affects": "original apply-phase defect_records API and CLI"
+    },
+    {
+      "finding": "Remediation tests assert real terminal behavior of the thing that broke last time, not a stub of it. TestLinkedWorktreeCommands calls worktree.Create (real linked worktree), os.Chdir into it, then the production in-process CLI dispatcher run() for feature status / defect list / defect record / defect decline, asserts exit codes and stdout, then ledger.Open(primaryRoot) + GetDefect for real primary DB rows (declined + recorded-from-worktree). It does not mock resolvePrimaryRoot or IsLinkedWorktree. Still in-process run() rather than spawning the lucind-ai binary — that is this package's documented testability seam (cli.go:130-133) and is how cwd-sensitive git exec is supposed to be tested here. Mechanical check ok github.com/LanzerDevCorp/lucind-ai/cmd/lucind-ai 61.233s at f5e3a7f covers this test.",
+      "evidence": "cmd/lucind-ai/cli_test.go:4532-4648; cmd/lucind-ai/cli.go:130-133; openspec/changes/ultrafixer/verify-mechanical.log (cmd/lucind-ai ok)",
+      "affects": "test quality of the linked-worktree reachability fix"
+    },
+    {
+      "finding": "Residual, non-blocking: the operator-facing coordination doc still does not tell the Orchestrator to run `lucind-ai defect decline` when the human declines. Section 4 covers worktree preservation and integrate retry for accept, but never the decline CLI. The instruction lives in the ultrafixer packet template Return section, which the repair lane reads before the human decides (the lane has already exited blocked). The CLI path exists; a later operator who only reads dependencies-defects.md could miss it.",
+      "evidence": "plugin/claude-code/skills/lucind-ai/references/coordination/dependencies-defects.md:25-36 (no 'defect decline'); ultrafixer-packet-template.md:63",
+      "affects": "operator-facing wiring of ultrafixer-dispatch Scenario Human declines fix"
+    }
+  ]
+}

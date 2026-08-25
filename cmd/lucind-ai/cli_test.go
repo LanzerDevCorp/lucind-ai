@@ -4231,3 +4231,419 @@ func TestIntegrateRetryCLIUnknownRun(t *testing.T) {
 		t.Errorf("stderr is empty, want an error surfaced")
 	}
 }
+
+func TestDefectSubcommandUnknownAction(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	codeNoAction := run(context.Background(), []string{"defect"}, &stdout, &stderr)
+	if codeNoAction == 0 {
+		t.Fatalf("lucind-ai defect without action exit code = 0, want non-zero")
+	}
+	if !strings.Contains(stderr.String(), "action") {
+		t.Errorf("stderr = %q, want it to mention action requirement", stderr.String())
+	}
+
+	stderr.Reset()
+	codeUnknown := run(context.Background(), []string{"defect", "bogus"}, &stdout, &stderr)
+	if codeUnknown == 0 {
+		t.Fatalf("lucind-ai defect bogus exit code = 0, want non-zero")
+	}
+	if !strings.Contains(stderr.String(), "unknown defect subcommand") {
+		t.Errorf("stderr = %q, want it to mention unknown defect subcommand", stderr.String())
+	}
+}
+
+func TestDefectListCLIRequiresFeature(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := run(context.Background(), []string{"defect", "list"}, &stdout, &stderr)
+	if code == 0 {
+		t.Fatalf("lucind-ai defect list without --feature exit code = 0, want non-zero")
+	}
+	if !strings.Contains(stderr.String(), "--feature") {
+		t.Errorf("stderr = %q, want it to contain --feature", stderr.String())
+	}
+}
+
+func TestDefectRecordCLI(t *testing.T) {
+	primaryRoot := initRepo(t)
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(primaryRoot); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(cwd)
+
+	baseSHA := strings.Repeat("1", 40)
+	ctx := context.Background()
+	var stdout, stderr bytes.Buffer
+	// Create feature first
+	createCode := run(ctx, []string{"feature", "create", "--id", "feat-defect-1", "--parent", "refs/heads/feature-defect-1", "--base-sha", baseSHA}, &stdout, &stderr)
+	if createCode != 0 {
+		t.Fatalf("feature create exit code = %d, want 0; stderr = %q", createCode, stderr.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	recordCode := run(ctx, []string{
+		"defect", "record",
+		"--id", "defect-rec-1",
+		"--feature", "feat-defect-1",
+		"--signature", "TestAuthFailed",
+		"--evidence", "stack trace: nil pointer",
+		"--disposition", "recorded",
+	}, &stdout, &stderr)
+	if recordCode != 0 {
+		t.Fatalf("defect record exit code = %d, want 0; stderr = %q", recordCode, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "recorded defect defect-rec-1 for feature feat-defect-1") {
+		t.Errorf("stdout = %q, want recorded defect confirmation", stdout.String())
+	}
+
+	// Verify defect is persisted in ledger
+	ledg, err := ledger.Open(ctx, primaryRoot)
+	if err != nil {
+		t.Fatalf("open ledger: %v", err)
+	}
+	defer ledg.Close()
+
+	rec, err := ledg.GetDefect(ctx, "defect-rec-1")
+	if err != nil {
+		t.Fatalf("GetDefect(defect-rec-1): %v", err)
+	}
+	if rec.ID != "defect-rec-1" || rec.FeatureID != "feat-defect-1" ||
+		rec.ErrorSignature != "TestAuthFailed" || rec.Evidence != "stack trace: nil pointer" ||
+		rec.Disposition != ledger.DefectDispositionRecorded {
+		t.Errorf("persisted DefectRecord = %+v", rec)
+	}
+}
+
+func TestDefectRecordCLIRequiresFlags(t *testing.T) {
+	primaryRoot := initRepo(t)
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(primaryRoot); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(cwd)
+
+	ctx := context.Background()
+
+	// Missing --id
+	var stdout, stderr bytes.Buffer
+	code := run(ctx, []string{"defect", "record", "--feature", "f1", "--signature", "sig1"}, &stdout, &stderr)
+	if code == 0 || !strings.Contains(stderr.String(), "--id") {
+		t.Fatalf("defect record without --id code = %d, want non-zero; stderr = %q", code, stderr.String())
+	}
+
+	// Missing --feature
+	stdout.Reset()
+	stderr.Reset()
+	code = run(ctx, []string{"defect", "record", "--id", "id1", "--signature", "sig1"}, &stdout, &stderr)
+	if code == 0 || !strings.Contains(stderr.String(), "--feature") {
+		t.Fatalf("defect record without --feature code = %d, want non-zero; stderr = %q", code, stderr.String())
+	}
+
+	// Missing --signature
+	stdout.Reset()
+	stderr.Reset()
+	code = run(ctx, []string{"defect", "record", "--id", "id1", "--feature", "f1"}, &stdout, &stderr)
+	if code == 0 || !strings.Contains(stderr.String(), "--signature") {
+		t.Fatalf("defect record without --signature code = %d, want non-zero; stderr = %q", code, stderr.String())
+	}
+}
+
+func TestDefectListCLI(t *testing.T) {
+	primaryRoot := initRepo(t)
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(primaryRoot); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(cwd)
+
+	baseSHA := strings.Repeat("2", 40)
+	ctx := context.Background()
+	var stdout, stderr bytes.Buffer
+	// Create feature first
+	createCode := run(ctx, []string{"feature", "create", "--id", "feat-list-1", "--parent", "refs/heads/feature-list-1", "--base-sha", baseSHA}, &stdout, &stderr)
+	if createCode != 0 {
+		t.Fatalf("feature create exit code = %d, want 0; stderr = %q", createCode, stderr.String())
+	}
+
+	// Record two defects
+	run(ctx, []string{"defect", "record", "--id", "def-l-1", "--feature", "feat-list-1", "--signature", "sig-1", "--disposition", "recorded"}, &stdout, &stderr)
+	run(ctx, []string{"defect", "record", "--id", "def-l-2", "--feature", "feat-list-1", "--signature", "sig-2", "--disposition", "repaired"}, &stdout, &stderr)
+
+	stdout.Reset()
+	stderr.Reset()
+	listCode := run(ctx, []string{"defect", "list", "--feature", "feat-list-1"}, &stdout, &stderr)
+	if listCode != 0 {
+		t.Fatalf("defect list exit code = %d, want 0; stderr = %q", listCode, stderr.String())
+	}
+
+	out := stdout.String()
+	if !strings.Contains(out, "def-l-1") || !strings.Contains(out, "sig-1") || !strings.Contains(out, "recorded") {
+		t.Errorf("defect list output missing def-l-1 details: %q", out)
+	}
+	if !strings.Contains(out, "def-l-2") || !strings.Contains(out, "sig-2") || !strings.Contains(out, "repaired") {
+		t.Errorf("defect list output missing def-l-2 details: %q", out)
+	}
+}
+
+func TestDefectRecordCLIRejectsInvalidDisposition(t *testing.T) {
+	primaryRoot := initRepo(t)
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(primaryRoot); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(cwd)
+
+	baseSHA := strings.Repeat("3", 40)
+	ctx := context.Background()
+	var stdout, stderr bytes.Buffer
+	createCode := run(ctx, []string{"feature", "create", "--id", "feat-disp-test", "--parent", "refs/heads/feature-disp-test", "--base-sha", baseSHA}, &stdout, &stderr)
+	if createCode != 0 {
+		t.Fatalf("feature create exit code = %d, want 0; stderr = %q", createCode, stderr.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code := run(ctx, []string{
+		"defect", "record",
+		"--id", "def-bad-disp",
+		"--feature", "feat-disp-test",
+		"--signature", "sig",
+		"--disposition", "not-a-valid-disposition",
+	}, &stdout, &stderr)
+	if code == 0 {
+		t.Fatalf("defect record with invalid disposition exit code = %d, want non-zero", code)
+	}
+	if !strings.Contains(stderr.String(), "invalid disposition") {
+		t.Errorf("stderr = %q, want it to mention 'invalid disposition'", stderr.String())
+	}
+}
+
+func TestDefectDeclineCLI(t *testing.T) {
+	primaryRoot := initRepo(t)
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(primaryRoot); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(cwd)
+
+	baseSHA := strings.Repeat("4", 40)
+	ctx := context.Background()
+	var stdout, stderr bytes.Buffer
+	// Create feature first
+	createCode := run(ctx, []string{"feature", "create", "--id", "feat-decline-1", "--parent", "refs/heads/feature-decline-1", "--base-sha", baseSHA}, &stdout, &stderr)
+	if createCode != 0 {
+		t.Fatalf("feature create exit code = %d, want 0; stderr = %q", createCode, stderr.String())
+	}
+
+	// Record a defect with disposition recorded
+	recordCode := run(ctx, []string{
+		"defect", "record",
+		"--id", "defect-to-decline",
+		"--feature", "feat-decline-1",
+		"--signature", "TestFixMe",
+		"--evidence", "broken test",
+		"--disposition", "recorded",
+	}, &stdout, &stderr)
+	if recordCode != 0 {
+		t.Fatalf("defect record exit code = %d; stderr = %q", recordCode, stderr.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	// Decline the defect
+	declineCode := run(ctx, []string{"defect", "decline", "--id", "defect-to-decline"}, &stdout, &stderr)
+	if declineCode != 0 {
+		t.Fatalf("defect decline exit code = %d, want 0; stderr = %q", declineCode, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "declined defect defect-to-decline") {
+		t.Errorf("stdout = %q, want confirmation 'declined defect defect-to-decline'", stdout.String())
+	}
+
+	// Verify in ledger that disposition is now declined
+	ledg, err := ledger.Open(ctx, primaryRoot)
+	if err != nil {
+		t.Fatalf("open ledger: %v", err)
+	}
+	defer ledg.Close()
+
+	rec, err := ledg.GetDefect(ctx, "defect-to-decline")
+	if err != nil {
+		t.Fatalf("GetDefect: %v", err)
+	}
+	if rec.Disposition != ledger.DefectDispositionDeclined {
+		t.Errorf("Disposition = %q, want %q", rec.Disposition, ledger.DefectDispositionDeclined)
+	}
+}
+
+func TestDefectDeclineCLIRequiresFlags(t *testing.T) {
+	primaryRoot := initRepo(t)
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(primaryRoot); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(cwd)
+
+	ctx := context.Background()
+	var stdout, stderr bytes.Buffer
+	code := run(ctx, []string{"defect", "decline"}, &stdout, &stderr)
+	if code == 0 || !strings.Contains(stderr.String(), "--id") {
+		t.Fatalf("defect decline without --id code = %d, want non-zero; stderr = %q", code, stderr.String())
+	}
+}
+
+func TestDefectDeclineCLINotFound(t *testing.T) {
+	primaryRoot := initRepo(t)
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(primaryRoot); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(cwd)
+
+	ctx := context.Background()
+	var stdout, stderr bytes.Buffer
+	code := run(ctx, []string{"defect", "decline", "--id", "nonexistent-id"}, &stdout, &stderr)
+	if code == 0 {
+		t.Fatalf("defect decline nonexistent ID code = %d, want non-zero", code)
+	}
+}
+
+func TestLinkedWorktreeCommands(t *testing.T) {
+	primaryRoot := initRepo(t)
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(primaryRoot); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(cwd)
+
+	baseSHA := strings.Repeat("5", 40)
+	ctx := context.Background()
+	var stdout, stderr bytes.Buffer
+
+	// 1. Create feature in primary repo
+	createCode := run(ctx, []string{"feature", "create", "--id", "feat-wt-1", "--parent", "refs/heads/feature-wt-1", "--base-sha", baseSHA}, &stdout, &stderr)
+	if createCode != 0 {
+		t.Fatalf("feature create exit code = %d, want 0; stderr = %q", createCode, stderr.String())
+	}
+
+	// 2. Record an initial defect in primary repo
+	recCode := run(ctx, []string{
+		"defect", "record",
+		"--id", "def-wt-1",
+		"--feature", "feat-wt-1",
+		"--signature", "sig-initial",
+		"--evidence", "stack-initial",
+		"--disposition", "recorded",
+	}, &stdout, &stderr)
+	if recCode != 0 {
+		t.Fatalf("defect record in primary root exit code = %d; stderr = %q", recCode, stderr.String())
+	}
+
+	// 3. Create a linked worktree
+	wt, err := worktree.Create(ctx, primaryRoot, "lane-wt-test")
+	if err != nil {
+		t.Fatalf("worktree.Create: %v", err)
+	}
+	defer worktree.Remove(ctx, primaryRoot, wt.Path)
+
+	if !worktree.IsLinkedWorktree(wt.Path) {
+		t.Fatalf("IsLinkedWorktree(%q) = false, want true", wt.Path)
+	}
+
+	// 4. Switch working directory into the linked worktree
+	if err := os.Chdir(wt.Path); err != nil {
+		t.Fatalf("os.Chdir to worktree: %v", err)
+	}
+
+	// 5. Test feature status from inside linked worktree
+	stdout.Reset()
+	stderr.Reset()
+	statusCode := run(ctx, []string{"feature", "status", "--id", "feat-wt-1"}, &stdout, &stderr)
+	if statusCode != 0 {
+		t.Errorf("feature status in linked worktree exit code = %d, want 0; stderr = %q", statusCode, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "feat-wt-1") {
+		t.Errorf("feature status stdout = %q, want it to contain 'feat-wt-1'", stdout.String())
+	}
+
+	// 6. Test defect list from inside linked worktree
+	stdout.Reset()
+	stderr.Reset()
+	listCode := run(ctx, []string{"defect", "list", "--feature", "feat-wt-1"}, &stdout, &stderr)
+	if listCode != 0 {
+		t.Errorf("defect list in linked worktree exit code = %d, want 0; stderr = %q", listCode, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "def-wt-1") {
+		t.Errorf("defect list stdout = %q, want it to contain 'def-wt-1'", stdout.String())
+	}
+
+	// 7. Test defect record from inside linked worktree
+	stdout.Reset()
+	stderr.Reset()
+	recordCode := run(ctx, []string{
+		"defect", "record",
+		"--id", "def-wt-2",
+		"--feature", "feat-wt-1",
+		"--signature", "sig-from-wt",
+		"--evidence", "stack-from-wt",
+		"--disposition", "recorded",
+	}, &stdout, &stderr)
+	if recordCode != 0 {
+		t.Errorf("defect record in linked worktree exit code = %d, want 0; stderr = %q", recordCode, stderr.String())
+	}
+
+	// 8. Test defect decline from inside linked worktree
+	stdout.Reset()
+	stderr.Reset()
+	declineCode := run(ctx, []string{"defect", "decline", "--id", "def-wt-1"}, &stdout, &stderr)
+	if declineCode != 0 {
+		t.Errorf("defect decline in linked worktree exit code = %d, want 0; stderr = %q", declineCode, stderr.String())
+	}
+
+	// 9. Verify in primary root's ledger that updates persisted
+	ledg, err := ledger.Open(ctx, primaryRoot)
+	if err != nil {
+		t.Fatalf("open ledger: %v", err)
+	}
+	defer ledg.Close()
+
+	d1, err := ledg.GetDefect(ctx, "def-wt-1")
+	if err != nil {
+		t.Fatalf("GetDefect(def-wt-1): %v", err)
+	}
+	if d1.Disposition != ledger.DefectDispositionDeclined {
+		t.Errorf("def-wt-1 disposition = %q, want %q", d1.Disposition, ledger.DefectDispositionDeclined)
+	}
+
+	d2, err := ledg.GetDefect(ctx, "def-wt-2")
+	if err != nil {
+		t.Fatalf("GetDefect(def-wt-2): %v", err)
+	}
+	if d2.ErrorSignature != "sig-from-wt" || d2.Disposition != ledger.DefectDispositionRecorded {
+		t.Errorf("def-wt-2 = %+v, want signature 'sig-from-wt' and disposition 'recorded'", d2)
+	}
+}

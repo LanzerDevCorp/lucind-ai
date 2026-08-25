@@ -1,0 +1,98 @@
+{
+  "packet_id": "verify-ultrafixer-cursor-agent",
+  "status": "done",
+  "summary": "Qualitative verification of ultrafixer at 6ca101b completed without re-running mechanical checks. Schema v8, ledger CRUD, defect CLI, packet template, and coordination doc satisfy the Go/SQL/CLI MUSTs and the zero-new-dispatch-plumbing decision; remaining gaps are agent-instruction completeness (worktree CLI refusal, missing declined-disposition path, thin packet protocol vs spec MUSTs) rather than missing persistence machinery.",
+  "hard_stops": [
+    {
+      "hard_stop": "Executing mechanical test/build commands when mechanical results are already provided.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Any credential value would need to be chosen, generated, or written.",
+      "fired": false
+    },
+    {
+      "hard_stop": "A done-criterion turns out to be impossible, or already true for a reason the packet did not anticipate.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Two reasonable interpretations exist for a spec requirement and the specification does not say which.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": ".lucind/result.json",
+      "change": "created",
+      "why": "Read-only verify lane envelope consumed by the dispatching binary."
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every indirection introduced is demonstrably consumed by a terminal consumer.",
+      "met": true,
+      "evidence": "migrateV7ToV8DDL (internal/ledger/schema.go:360-373) is executed by migrate() at schema.go:486-497, itself called from ledger.Open. RecordDefect/GetDefect/ListDefects (internal/ledger/ledger.go:1464-1572) are called by runDefectRecord/runDefectList (cmd/lucind-ai/cli.go:1932,1979), which are routed from run() case \"defect\" (cli.go:153-154). ultrafixer-packet-template.md is parsed by packet.Parse in TestUltrafixerPacketTemplateContract (internal/packet/packet_test.go:2045-2056) and named as the Orchestrator dispatch asset in dependencies-defects.md:7 via lucind-ai run --packet (cli.go:153-154 run switch plus existing run path). idx_defect_records_feature is asserted by TestSchemaV8ConstraintsAndIndexes (schema_test.go:507)."
+    },
+    {
+      "criterion": "The worktree carries no unique commits and no working-tree changes relative to the lane's birth point. Evidence: git status --porcelain empty and HEAD equals this packet's base_sha (6ca101b).",
+      "met": true,
+      "evidence": "git status --porcelain produced empty output; git rev-parse HEAD = 6ca101ba3cc45b3d43bf6561afcd1a5d6207189a; git log --oneline 6ca101b..HEAD empty; git diff --stat 6ca101b HEAD empty."
+    },
+    {
+      "criterion": "Qualitative evaluation completed (.lucind/result.json populated with status, summary, and structured findings).",
+      "met": true,
+      "evidence": ".lucind/result.json written with status, summary, hard_stops, done_criteria, and findings covering spec compliance, edge cases, test quality, and design fidelity."
+    }
+  ],
+  "findings": [
+    {
+      "finding": "Schema v8, CHECK constraint, and reopen idempotency match defect-records spec. schemaVersion=8; migrateV7ToV8DDL creates STRICT defect_records with the specified columns, disposition CHECK IN ('recorded','repaired','declined','deferred'), and idx_defect_records_feature(feature_id, id). migrate() applies the step only when currentVersion \u003c 8. Tests open a real v7 fixture, assert preserved runs/lanes/events/approvals/progress, reject invalid_disp via CHECK, and prove reopen does not duplicate version 8 or drop the inserted row.",
+      "evidence": "internal/ledger/schema.go:10,360-373,486-497; internal/ledger/schema_test.go:386-558",
+      "affects": "Requirement: Ledger schema v8 persistence for defect records"
+    },
+    {
+      "finding": "Ledger API matches the spec and design contract and is exercised on real rows. RecordDefect inserts (not upserts) a row; GetDefect returns ErrDefectNotFound on miss; ListDefects filters by feature_id and orders by created_at ASC, returning an empty slice rather than nil. Tests round-trip ID/feature/run/lane/signature/evidence/disposition/timestamps through SQLite, reject an invalid disposition string through RecordDefect, and assert chronological ordering plus cross-feature isolation.",
+      "evidence": "internal/ledger/ledger.go:1440-1572; internal/ledger/ledger_test.go:1924-2044",
+      "affects": "Requirement: Defect record query and retrieval API; Scenario: Defect record stores complete error signature and evidence"
+    },
+    {
+      "finding": "CLI defect record/list satisfy the CLI spec with real stdout and a real ledger read-back. Routing, required-flag rejection (--id/--feature/--signature; list --feature), unknown-action errors, confirmation line, and list output containing ID, signature, and disposition are all tested via in-process run() against a temp git repo. Missing: no CLI test for invalid --disposition (relies on SQLite CHECK), duplicate --id, or empty-list stdout.",
+      "evidence": "cmd/lucind-ai/cli.go:153-154,1841-1994; cmd/lucind-ai/cli_test.go:4235-4395",
+      "affects": "Requirement: CLI defect inspection commands; Evaluation area: CLI flag validation"
+    },
+    {
+      "finding": "Zero new production Go under internal/run/, internal/executor/, or internal/packet/ on the apply commits. git diff dcd6ac4^..6ca101b -- internal/run internal/executor internal/packet lists only internal/packet/packet_test.go and internal/packet/testdata/skill_content_hash.txt. That matches design.md's 'Zero new Go dispatch plumbing' decision. Plugin version-guard files (.claude-plugin/marketplace.json, plugin/claude-code/.claude-plugin/plugin.json) were also bumped because the skill asset/docs changed; those are outside the design File Changes table but are consumed by the plugin version/hash tests.",
+      "evidence": "git diff --name-only dcd6ac4^..6ca101b -- internal/run internal/executor internal/packet; openspec/changes/ultrafixer/design.md:18-23,267-276",
+      "affects": "Design fidelity: Zero new Go dispatch plumbing"
+    },
+    {
+      "finding": "Ultrafixer running in its isolated linked worktree cannot call the CLI verbs the protocol tells it to use. resolvePrimaryRoot is git rev-parse --show-toplevel (the linked worktree path). runDefectRecord, runDefectList, and runFeatureStatus all refuse when IsLinkedWorktree(primaryRoot) is true. The packet template requires lucind-ai feature status for two-axis evaluation, and dependencies-defects.md:19 tells ultrafixer to persist via lucind-ai defect record. An agy lane at ../\u003crepo\u003e-worktrees/\u003cid\u003e will get 'refusing to run from inside a linked worktree'. Non-critical persistence via Ledger.RecordDefect is therefore unreachable from the dispatched agent unless it cds to the primary repo — which the packet does not instruct.",
+      "evidence": "cmd/lucind-ai/cli.go:679-693,975-977,1908-1910,1967-1969; plugin/claude-code/skills/lucind-ai/assets/ultrafixer-packet-template.md:30; plugin/claude-code/skills/lucind-ai/references/coordination/dependencies-defects.md:19; internal/worktree/worktree.go:278-292",
+      "affects": "Requirement: Non-critical non-blocking defect persistence; Requirement: Independent two-axis evaluation and multi-branch triage"
+    },
+    {
+      "finding": "No disposition state machine exists beyond insert-time CHECK. RecordDefect's comment says 'inserts or replaces' but the SQL is a plain INSERT (duplicate id hits PRIMARY KEY). There is no UpdateDefect, no transition recorded→repaired/declined/deferred, and no wiring from operator decline of a blocked ultrafixer envelope to disposition=declined. Spec scenario 'Human declines fix' MUST record declined in the ledger; neither the CLI, serve handlers, nor dependencies-defects.md implement or instruct that write. serve.Model is named as a terminal consumer in design.md:44 and tasks.md 1.4/1.6 but internal/serve has no RecordDefect/ListDefects/GetDefect calls (existing 'defect' routes mark approvals.defect_surfaced_later only).",
+      "evidence": "internal/ledger/ledger.go:1463-1483; openspec/changes/ultrafixer/specs/ultrafixer-dispatch/spec.md:69-73; openspec/changes/ultrafixer/design.md:44; openspec/changes/ultrafixer/tasks.md:40,42; internal/serve/handlers.go:336-337,943-953",
+      "affects": "Requirement: Isolated repair delivery — Scenario: Human declines fix; Design: serve.Model consumer; Evaluation area: disposition state machine"
+    },
+    {
+      "finding": "Packet template and coordination doc cover origin classification, two-axis eval, signal reproduction, isolated worktree, blocked envelope, and human-gated integrate retry at instruction level (correct for zero new dispatch Go). Gaps vs ultrafixer-dispatch MUSTs that the agy agent actually executes: (1) template is labeled 'Tier: B (auto-merge after audit)' while the spec MUST NOT auto-integrate — Tier is body prose not parsed by packet.Packet, so it does not mechanically merge, but it contradicts the hard stop on the same page; (2) template never mentions conventional commit formatting or forbidding Co-Authored-By (spec MUST at ultrafixer-dispatch/spec.md:55); (3) multi-branch encoding is only 'questions and findings' — it does not require distinct per-branch Question.WhyBlocking/Options/Recommendation or Finding.Affects; (4) TestUltrafixerPacketTemplateContract only asserts packet.Parse frontmatter plus section heading strings, not those protocol MUSTs, despite tasks.md threat-matrix claiming 3.1 asserts failing-command scope, isolated worktree, and zero AI attribution.",
+      "evidence": "plugin/claude-code/skills/lucind-ai/assets/ultrafixer-packet-template.md:13,26-44,47-61; plugin/claude-code/skills/lucind-ai/references/coordination/dependencies-defects.md:5-36; internal/packet/packet_test.go:2043-2094; openspec/changes/ultrafixer/tasks.md:79-83; internal/packet/packet.go:33-72",
+      "affects": "Requirements: Origin classification; Signal reproduction; Isolated repair delivery; Multi-branch blocked disposition encoding; Test quality"
+    },
+    {
+      "finding": "CLI does not validate --disposition against the four allowed values before RecordDefect. Empty disposition is defaulted to recorded (cli.go:1897-1900), but an explicit invalid string is forwarded as DefectDisposition(disp) and fails only at SQLite CHECK. That meets the spec's 'database CHECK MUST reject' scenario; it is a flag-validation hole the evaluation area called out, and there is no TestDefectRecordCLIInvalidDisposition asserting stderr.",
+      "evidence": "cmd/lucind-ai/cli.go:1873,1897-1927; cmd/lucind-ai/cli_test.go:4266-4356; internal/ledger/schema.go:368",
+      "affects": "Evaluation area: CLI flag validation for lucind-ai defect record"
+    },
+    {
+      "finding": "dependencies-defects.md was rewritten from a manual assessment contract to ultrafixer packet dispatch via lucind-ai run --packet, blocked-envelope handling via lucind-ai integrate retry, and feature-local regressions staying in the feature lane. That matches the MODIFIED spec. Context placeholders for the failing command and error transcript exist in the packet template (lines 48-52).",
+      "evidence": "plugin/claude-code/skills/lucind-ai/references/coordination/dependencies-defects.md:5-36; plugin/claude-code/skills/lucind-ai/assets/ultrafixer-packet-template.md:46-52; openspec/changes/ultrafixer/specs/dependencies-defects/spec.md:5-25",
+      "affects": "Requirement: Structured ultrafixer defect triage coordination"
+    }
+  ]
+}

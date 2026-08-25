@@ -66,6 +66,9 @@ var (
 
 	// ErrOverlapEvidenceNotFound is returned when overlap evidence is not found.
 	ErrOverlapEvidenceNotFound = errors.New("ledger: overlap evidence not found")
+
+	// ErrDefectNotFound is returned when a defect record is not found.
+	ErrDefectNotFound = errors.New("ledger: defect record not found")
 )
 
 // ExecutorNotAdmittedError is returned by RegisterLane when Executor is not
@@ -1432,4 +1435,173 @@ func (l *Ledger) AllReconciliationRequests(ctx context.Context) ([]Reconciliatio
 		return nil, fmt.Errorf("ledger: iterate reconciliation request rows: %w", err)
 	}
 	return out, nil
+}
+
+// DefectDisposition represents the triage outcome or status of a defect record.
+type DefectDisposition string
+
+const (
+	DefectDispositionRecorded DefectDisposition = "recorded"
+	DefectDispositionRepaired DefectDisposition = "repaired"
+	DefectDispositionDeclined DefectDisposition = "declined"
+	DefectDispositionDeferred DefectDisposition = "deferred"
+)
+
+// Valid reports whether the defect disposition is one of the supported values.
+func (d DefectDisposition) Valid() bool {
+	switch d {
+	case DefectDispositionRecorded, DefectDispositionRepaired, DefectDispositionDeclined, DefectDispositionDeferred:
+		return true
+	default:
+		return false
+	}
+}
+
+// DefectRecord represents a persisted defect record row in the defect_records table.
+type DefectRecord struct {
+	ID             string
+	FeatureID      string
+	RunID          string
+	LaneID         string
+	ErrorSignature string
+	Evidence       string
+	Disposition    DefectDisposition
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+}
+
+// RecordDefect inserts or replaces a defect record in the defect_records table.
+func (l *Ledger) RecordDefect(ctx context.Context, rec DefectRecord) error {
+	cAt := rec.CreatedAt
+	if cAt.IsZero() {
+		cAt = time.Now().UTC()
+	}
+	uAt := rec.UpdatedAt
+	if uAt.IsZero() {
+		uAt = cAt
+	}
+	_, err := l.db.ExecContext(ctx, `
+		INSERT INTO defect_records (
+			id, feature_id, run_id, lane_id, error_signature, evidence, disposition, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		rec.ID, rec.FeatureID, rec.RunID, rec.LaneID, rec.ErrorSignature, rec.Evidence,
+		string(rec.Disposition), cAt.UTC().Format(time.RFC3339), uAt.UTC().Format(time.RFC3339),
+	)
+	if err != nil {
+		return fmt.Errorf("ledger: record defect %q: %w", rec.ID, err)
+	}
+	return nil
+}
+
+// GetDefect returns a single defect record by ID.
+func (l *Ledger) GetDefect(ctx context.Context, id string) (DefectRecord, error) {
+	var (
+		rec                  DefectRecord
+		disp                 string
+		createdAt, updatedAt string
+	)
+	err := l.db.QueryRowContext(ctx, `
+		SELECT id, feature_id, run_id, lane_id, error_signature, evidence, disposition, created_at, updated_at
+		FROM defect_records WHERE id = ?`, id,
+	).Scan(
+		&rec.ID, &rec.FeatureID, &rec.RunID, &rec.LaneID, &rec.ErrorSignature, &rec.Evidence,
+		&disp, &createdAt, &updatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return DefectRecord{}, ErrDefectNotFound
+		}
+		return DefectRecord{}, fmt.Errorf("ledger: query defect %q: %w", id, err)
+	}
+	rec.Disposition = DefectDisposition(disp)
+	if t, err := time.Parse(time.RFC3339Nano, createdAt); err == nil {
+		rec.CreatedAt = t
+	} else if t, err := time.Parse(time.RFC3339, createdAt); err == nil {
+		rec.CreatedAt = t
+	} else {
+		return DefectRecord{}, fmt.Errorf("ledger: parse defect created_at %q: %w", createdAt, err)
+	}
+	if t, err := time.Parse(time.RFC3339Nano, updatedAt); err == nil {
+		rec.UpdatedAt = t
+	} else if t, err := time.Parse(time.RFC3339, updatedAt); err == nil {
+		rec.UpdatedAt = t
+	} else {
+		return DefectRecord{}, fmt.Errorf("ledger: parse defect updated_at %q: %w", updatedAt, err)
+	}
+	return rec, nil
+}
+
+// ListDefects returns all defect records for a specified feature_id ordered by created_at ASC.
+func (l *Ledger) ListDefects(ctx context.Context, featureID string) ([]DefectRecord, error) {
+	rows, err := l.db.QueryContext(ctx, `
+		SELECT id, feature_id, run_id, lane_id, error_signature, evidence, disposition, created_at, updated_at
+		FROM defect_records WHERE feature_id = ? ORDER BY created_at ASC`, featureID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("ledger: query defects for feature %q: %w", featureID, err)
+	}
+	defer rows.Close()
+
+	var out []DefectRecord
+	for rows.Next() {
+		var (
+			rec                  DefectRecord
+			disp                 string
+			createdAt, updatedAt string
+		)
+		if err := rows.Scan(
+			&rec.ID, &rec.FeatureID, &rec.RunID, &rec.LaneID, &rec.ErrorSignature, &rec.Evidence,
+			&disp, &createdAt, &updatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("ledger: scan defect row: %w", err)
+		}
+		rec.Disposition = DefectDisposition(disp)
+		if t, err := time.Parse(time.RFC3339Nano, createdAt); err == nil {
+			rec.CreatedAt = t
+		} else if t, err := time.Parse(time.RFC3339, createdAt); err == nil {
+			rec.CreatedAt = t
+		} else {
+			return nil, fmt.Errorf("ledger: parse defect created_at %q: %w", createdAt, err)
+		}
+		if t, err := time.Parse(time.RFC3339Nano, updatedAt); err == nil {
+			rec.UpdatedAt = t
+		} else if t, err := time.Parse(time.RFC3339, updatedAt); err == nil {
+			rec.UpdatedAt = t
+		} else {
+			return nil, fmt.Errorf("ledger: parse defect updated_at %q: %w", updatedAt, err)
+		}
+		out = append(out, rec)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("ledger: iterate defect rows: %w", err)
+	}
+	if out == nil {
+		out = []DefectRecord{}
+	}
+	return out, nil
+}
+
+// UpdateDefectDisposition transitions an existing defect record's disposition.
+func (l *Ledger) UpdateDefectDisposition(ctx context.Context, id string, disposition DefectDisposition) error {
+	if !disposition.Valid() {
+		return fmt.Errorf("ledger: invalid defect disposition %q", disposition)
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	res, err := l.db.ExecContext(ctx, `
+		UPDATE defect_records
+		SET disposition = ?, updated_at = ?
+		WHERE id = ?`,
+		string(disposition), now, id,
+	)
+	if err != nil {
+		return fmt.Errorf("ledger: update defect %q disposition: %w", id, err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("ledger: read rows affected: %w", err)
+	}
+	if affected == 0 {
+		return ErrDefectNotFound
+	}
+	return nil
 }

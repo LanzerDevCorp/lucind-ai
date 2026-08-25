@@ -7,7 +7,7 @@ import (
 )
 
 // schemaVersion is the migration version this schema represents.
-const schemaVersion = 7
+const schemaVersion = 8
 
 const schemaMigrationsDDL = `
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -357,6 +357,21 @@ CREATE INDEX IF NOT EXISTS idx_lane_progress_run_lane_seq
   ON lane_progress(run_id, lane_id, seq);
 `
 
+const migrateV7ToV8DDL = `
+CREATE TABLE IF NOT EXISTS defect_records (
+  id              TEXT PRIMARY KEY,
+  feature_id      TEXT NOT NULL,
+  run_id          TEXT NOT NULL DEFAULT '',
+  lane_id         TEXT NOT NULL DEFAULT '',
+  error_signature TEXT NOT NULL,
+  evidence        TEXT NOT NULL DEFAULT '',
+  disposition     TEXT NOT NULL CHECK (disposition IN ('recorded','repaired','declined','deferred')),
+  created_at      TEXT NOT NULL,
+  updated_at      TEXT NOT NULL
+) STRICT;
+CREATE INDEX IF NOT EXISTS idx_defect_records_feature ON defect_records(feature_id, id);
+`
+
 // migrate applies the schema inside one transaction and records the
 // migration version. It is idempotent: re-running it against an already
 // migrated database (e.g. a second Open on the same file) is a safe no-op.
@@ -466,6 +481,19 @@ func migrate(ctx context.Context, db *sql.DB) error {
 			return err
 		}
 		currentVersion = 7
+	}
+
+	if currentVersion < 8 {
+		if _, err := tx.ExecContext(ctx, migrateV7ToV8DDL); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)`,
+			8, time.Now().UTC().Format(time.RFC3339),
+		); err != nil {
+			return err
+		}
+		currentVersion = 8
 	}
 
 	return tx.Commit()

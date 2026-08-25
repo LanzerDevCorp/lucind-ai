@@ -1,0 +1,127 @@
+{
+  "packet_id": "ultrafixer-remediate",
+  "status": "done",
+  "summary": "Remediated the two confirmed verify violations and four non-blocking findings with Strict TDD. Linked-worktree primary root resolution and guard relaxation were implemented and verified with a real linked-worktree invocation. Added Ledger.UpdateDefectDisposition, CLI subcommand defect decline, template protocol updates, contract test assertions, and bumped plugin manifest versions to 2.0.6.",
+  "hard_stops": [
+    {
+      "hard_stop": "Any credential value would need to be chosen, generated, or written.",
+      "fired": false
+    },
+    {
+      "hard_stop": "A done-criterion turns out to be impossible, or already true for a reason the packet did not anticipate.",
+      "fired": false
+    },
+    {
+      "hard_stop": "The change would break something outside allowed_paths.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Two reasonable implementations exist for the IsLinkedWorktree fix (relax the guard vs. add an explicit --repo override flag) and neither verify.md nor precedent elsewhere in this codebase clearly favors one — stop and name the fork with your recommendation rather than picking silently.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "cmd/lucind-ai/cli.go",
+      "change": "modified",
+      "why": "Resolved primary repository root via git-common-dir, relaxed IsLinkedWorktree guard on feature status and defect subcommands, added defect decline subcommand, and added CLI-level disposition validation"
+    },
+    {
+      "path": "cmd/lucind-ai/cli_test.go",
+      "change": "modified",
+      "why": "Added unit and integration tests for defect decline CLI, invalid disposition rejection, and linked-worktree command execution"
+    },
+    {
+      "path": "internal/ledger/ledger.go",
+      "change": "modified",
+      "why": "Added DefectDisposition.Valid() and Ledger.UpdateDefectDisposition method"
+    },
+    {
+      "path": "internal/ledger/ledger_test.go",
+      "change": "modified",
+      "why": "Added unit tests for Ledger.UpdateDefectDisposition covering transition, not found, and invalid disposition rejection"
+    },
+    {
+      "path": "internal/packet/packet_test.go",
+      "change": "modified",
+      "why": "Expanded TestUltrafixerPacketTemplateContract to assert protocol MUSTs"
+    },
+    {
+      "path": "plugin/claude-code/skills/lucind-ai/assets/ultrafixer-packet-template.md",
+      "change": "modified",
+      "why": "Updated Tier label to human-gated CAS integration, added conventional commit and zero AI attribution requirement, and added defect decline instruction"
+    },
+    {
+      "path": ".claude-plugin/marketplace.json",
+      "change": "modified",
+      "why": "Bumped plugin manifest version to 2.0.6 for skill asset modification"
+    },
+    {
+      "path": "plugin/claude-code/.claude-plugin/plugin.json",
+      "change": "modified",
+      "why": "Bumped plugin manifest version to 2.0.6 for skill asset modification"
+    },
+    {
+      "path": "internal/packet/testdata/skill_content_hash.txt",
+      "change": "modified",
+      "why": "Updated recorded plugin version to 2.0.6 and updated sha256 skill content hash"
+    },
+    {
+      "path": "openspec/changes/ultrafixer/verify.md",
+      "change": "modified",
+      "why": "Updated Disposition section with Remediated notes and evidence"
+    },
+    {
+      "path": "openspec/changes/ultrafixer/state.yaml",
+      "change": "modified",
+      "why": "Updated phases.verify note with remediation summary while leaving status blocked for re-verify dispatch"
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every indirection introduced is demonstrably consumed by a terminal consumer.",
+      "met": true,
+      "evidence": "UpdateDefectDisposition is consumed by runDefectDecline in cmd/lucind-ai/cli.go:2064 which executes SQL UPDATE on defect_records table in SQLite. Valid() is consumed by runDefectRecord and UpdateDefectDisposition. resolvePrimaryRoot is consumed by all CLI commands to open the primary repository ledger database."
+    },
+    {
+      "criterion": "The work is committed. Evidence: git status --porcelain empty and git log --oneline -1. Conventional commit(s), no AI attribution.",
+      "met": true,
+      "evidence": "git log --oneline -1: 3441c81 fix(ultrafixer): remediate verify violations and non-blocking findings; git status --porcelain empty; git show -s --format=%b HEAD has no AI attribution trailers."
+    },
+    {
+      "criterion": "go build ./..., go vet ./..., gofmt -l (on touched files) all clean.",
+      "met": true,
+      "evidence": "go build ./... and go vet ./... exited with code 0; gofmt -l on touched files produced 0 diffs."
+    },
+    {
+      "criterion": "go test ./... -race -count=1 passes in full.",
+      "met": true,
+      "evidence": "All 21 packages passed under go test ./... -race -count=1 (62.8s total runtime, zero failures)."
+    },
+    {
+      "criterion": "Confirmed violation 1 resolved and proven with a REAL linked-worktree invocation, not just an in-process Go test.",
+      "met": true,
+      "evidence": "Built binary ./cmd/lucind-ai to /tmp/lucind-ai-test-bin, created linked worktree at /tmp/lucind-scratch-wt, ran feature status, defect list, defect record, defect decline from within /tmp/lucind-scratch-wt with exit code 0, verified records persisted to primary ledger, and cleaned up /tmp/lucind-scratch-wt and binary."
+    },
+    {
+      "criterion": "Confirmed violation 2 resolved: a disposition-transition method exists, is covered by a RED/GREEN test pair, and the packet template / coordination doc now actually instructs writing disposition=declined when a human declines a proposed fix.",
+      "met": true,
+      "evidence": "Ledger.UpdateDefectDisposition implemented in internal/ledger/ledger.go:1584, covered by TestLedgerUpdateDefectDisposition (internal/ledger/ledger_test.go:2047) and TestDefectDeclineCLI (cmd/lucind-ai/cli_test.go:4442). ultrafixer-packet-template.md:58 updated with instruction to run lucind-ai defect decline --id \u003cid\u003e."
+    },
+    {
+      "criterion": "All four non-blocking findings from verify.md are addressed.",
+      "met": true,
+      "evidence": "Tier label contradiction resolved in ultrafixer-packet-template.md:13; conventional commit and zero AI attribution requirement added in ultrafixer-packet-template.md:28; TestUltrafixerPacketTemplateContract in internal/packet/packet_test.go:2045-2115 expanded with protocol MUST assertions; CLI-level --disposition validation implemented in cmd/lucind-ai/cli.go:1897 and tested in cmd/lucind-ai/cli_test.go:4398; plugin manifest versions bumped to 2.0.6."
+    },
+    {
+      "criterion": "openspec/changes/ultrafixer/verify.md's Disposition section has each of the 3 items marked with a short 'Remediated:' note and evidence (commit/file:line), without deleting the original findings.",
+      "met": true,
+      "evidence": "openspec/changes/ultrafixer/verify.md:98,101,103 Disposition items 1, 2, and 3 annotated with Remediated notes and file:line citations while preserving original finding descriptions."
+    }
+  ],
+  "commit": "3441c815fc76c93e2d09fa39a12e1161307a8e34"
+}

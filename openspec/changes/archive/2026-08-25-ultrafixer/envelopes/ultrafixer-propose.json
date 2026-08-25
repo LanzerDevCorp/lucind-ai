@@ -1,0 +1,72 @@
+{
+  "packet_id": "ultrafixer-propose",
+  "status": "done",
+  "summary": "Authored openspec/changes/ultrafixer/proposal.md following the repository SDD proposal convention with verified file:line citations and confirmed two-axis evaluation architecture. Updated openspec/changes/ultrafixer/state.yaml to mark phases.proposal status done.",
+  "hard_stops": [
+    {
+      "hard_stop": "Any credential value would need to be chosen, generated, or written.",
+      "fired": false
+    },
+    {
+      "hard_stop": "A done-criterion turns out to be impossible, or already true for a reason the packet did not anticipate.",
+      "fired": false
+    },
+    {
+      "hard_stop": "The change would break something outside allowed_paths.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Two reasonable implementations exist and the packet does not say which.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    },
+    {
+      "hard_stop": "The confirmed design below turns out to contradict hard evidence in explore.md in a way that cannot be reconciled without a human product decision (e.g. a load-bearing assumption the design relies on turns out to be false). Name the contradiction precisely; do not paper over it.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/ultrafixer/proposal.md",
+      "change": "created",
+      "why": "Formalize SDD proposal for ultrafixer capability"
+    },
+    {
+      "path": "openspec/changes/ultrafixer/state.yaml",
+      "change": "modified",
+      "why": "Update phases.proposal status to done with summary note"
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every indirection introduced is demonstrably consumed by a terminal consumer. (Not applicable to a docs-only packet in the usual code sense — instead: every new capability/concept named in proposal.md's Capabilities section must be traceable to a concrete file/mechanism named in its own Impact table or Delta Specifications, not left as an abstract label with nothing pointing at it.)",
+      "met": true,
+      "evidence": "openspec/changes/ultrafixer/proposal.md:43-60 maps all 4 capabilities (ultrafixer-dispatch, defect-records, dependencies-defects, lane-execution) to concrete implementation seams in internal/executor/agy.go, internal/packet/packet.go, internal/result/result.go, internal/ledger/schema.go, cmd/lucind-ai/cli.go, and internal/overlap/overlap.go."
+    },
+    {
+      "criterion": "The work is committed. Evidence: git status --porcelain empty and git log --oneline -1. Conventional commit, no AI attribution.",
+      "met": true,
+      "evidence": "git log -1 --oneline output: '2be8102 docs(ultrafixer): formalize proposal and update state', and git status --porcelain is empty."
+    },
+    {
+      "criterion": "openspec/changes/ultrafixer/proposal.md exists, follows the local convention cited above, and every file:line citation in it is real (you verified it, not copied blind from explore.md without checking it still applies at this SHA).",
+      "met": true,
+      "evidence": "openspec/changes/ultrafixer/proposal.md contains all 13 standard proposal sections modeled after control-room-capture/proposal.md; every citation (e.g. internal/packet/packet.go:33-75, cmd/lucind-ai/cli.go:82-87, internal/executor/agy.go:69-83,136-150, internal/ledger/schema.go:10, internal/result/result.go:77-82,102-115) was directly inspected and verified against current worktree HEAD 2be8102."
+    },
+    {
+      "criterion": "openspec/changes/ultrafixer/state.yaml's phases.proposal is updated to status: done with a short note: summarizing what was written (do not touch any other phase's entry).",
+      "met": true,
+      "evidence": "openspec/changes/ultrafixer/state.yaml:21-27 has status: done and summary note, leaving all other phase entries untouched."
+    },
+    {
+      "criterion": "The proposal's ## Alternatives Considered section reflects the ACTUAL alternatives rejected during design grilling (see Context below — e.g. full autonomy vs. human-gated integration, standalone Claude-Code agent vs. real Lane dispatch, single vs. independent critical/blocking axes) — not fabricated generic alternatives.",
+      "met": true,
+      "evidence": "openspec/changes/ultrafixer/proposal.md:123-138 details the 5 actual rejected alternatives (autonomous background daemon with approval-timeout gate, standalone Claude Code SendMessage agent, baseline test snapshotting, single coupled critical/blocking severity axis, and pure syntactic path overlap)."
+    }
+  ],
+  "commit": "2be8102",
+  "session_id": "14e10daa-0bee-4e99-9060-efe51a37f17b"
+}
