@@ -1,20 +1,38 @@
 schema: spec-driven
 
+artifact_store:
+  mode: hybrid
+execution_mode: auto
+delivery_strategy: single-pr
+review_budget_lines: 2000
+strict_tdd: true
+
 context: |
-  Tech stack: Go 1.24.2, module github.com/LanzerDevCorp/lucind-ai
-  Architecture: single-binary CLI (cmd/lucind-ai) dispatching to executor CLIs (agy, cursor-agent)
-    in isolated git worktrees; SQLite ledger (internal/ledger) for lane/run/event state; batch
-    barrier (internal/barrier) joins lanes at a shared release point.
-  Testing: stdlib `testing` only (no testify); internal/ledger uses real on-disk SQLite via
-    t.TempDir(); internal/run uses a hand-written fakeExecutor test double against a real ledger.
-  Style: table-driven and one-scenario-per-function tests; doc comments tie test names to the
-    requirement they prove; internal/integrate.Check runs lucind-checks.sh at the worktree root
-    (this repo's own lucind-checks.sh wraps `go build ./...` + `go test ./... -race -count=1`).
+  Tech stack: Go 1.25.0, module github.com/LanzerDevCorp/lucind-ai, SQLite (modernc.org/sqlite).
+  Architecture: cmd/lucind-ai CLI orchestrates isolated git worktrees and internal services;
+    internal/ledger persists lane/run/event state, with barrier/reconciliation/integration packages.
+  Testing: Go stdlib testing; table-driven and scenario tests, t.TempDir real-SQLite fixtures,
+    fake executor seams, and testdata fixtures. No dedicated E2E runner or coverage gate detected.
+  Quality: lucind-checks.sh runs CGO_ENABLED=0 go build ./... then go test ./... -race -count=1.
+  Pre-existing working-tree changes are unvalidated scaffolding, not SDD artifacts, until inspected.
+
+testing:
+  runner: "go test ./... -race -count=1"
+  framework: "Go standard testing"
+  unit: true
+  integration: true
+  e2e: false
+  coverage_command: "go test ./... -cover"
+  coverage_threshold: 0
+  linter: "not detected"
+  typecheck: "go build ./..."
+  formatter: "gofmt"
 
 rules:
   proposal:
     - Include rollback plan for risky changes
     - State explicitly which existing lane-lifecycle call site the change hooks into
+    - Inspect pre-existing working-tree changes before treating them as valid SDD artifacts
   specs:
     - Use Given/When/Then for scenarios
     - Use RFC 2119 keywords (MUST, SHALL, SHOULD, MAY)

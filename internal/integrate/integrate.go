@@ -4,6 +4,7 @@
 package integrate
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -11,10 +12,25 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
+	"syscall"
+	"time"
 
 	"github.com/LanzerDevCorp/lucind-ai/internal/resolve"
 	"github.com/LanzerDevCorp/lucind-ai/internal/worktree"
 )
+
+const (
+	checkPolicyVersion    = "lucind-check:v1"
+	defaultCheckTimeout   = 20 * time.Minute
+	checkTerminationGrace = 250 * time.Millisecond
+	maxCheckOutput        = 64 << 10
+)
+
+var checkEnvironmentKeys = []string{
+	"PATH", "HOME", "TMPDIR", "XDG_CACHE_HOME", "GOCACHE", "GOMODCACHE", "GOPATH",
+	"GOENV", "GOFLAGS", "GOTOOLCHAIN", "CGO_ENABLED", "CC", "CXX", "LANG", "LC_ALL", "TZ",
+}
 
 // ErrMergeConflict is returned by Combine when a branch cannot be merged
 // cleanly into the combined tree.
@@ -98,25 +114,129 @@ func combine(ctx context.Context, primaryRoot, runID, parentRef, baseSHA string,
 // If the script exits zero, Check returns passed=true, the combined output, and err=nil.
 // Non-nil err is reserved for command execution failures (e.g. cancelled context or command cannot be started).
 func Check(ctx context.Context, worktreePath string) (passed bool, output string, err error) {
-	scriptPath := filepath.Join(worktreePath, "lucind-checks.sh")
+	if !filepath.IsAbs(worktreePath) {
+		return false, "", errors.New("integrate: checks root must be absolute")
+	}
+	ownedRoot, err := filepath.EvalSymlinks(worktreePath)
+	if err != nil {
+		return false, "", fmt.Errorf("integrate: resolve checks root: %w", err)
+	}
+	ownedRoot, err = filepath.Abs(ownedRoot)
+	if err != nil {
+		return false, "", fmt.Errorf("integrate: canonicalize checks root: %w", err)
+	}
+	scriptPath := filepath.Join(ownedRoot, "lucind-checks.sh")
 	if _, statErr := os.Stat(scriptPath); errors.Is(statErr, os.ErrNotExist) || os.IsNotExist(statErr) {
 		return false, "no lucind-checks.sh found at the project root; this project has not defined its verification checks yet", nil
 	} else if statErr != nil {
 		return false, "", fmt.Errorf("integrate: stat checks script: %w", statErr)
 	}
 
-	cmd := exec.CommandContext(ctx, "sh", scriptPath)
-	cmd.Dir = worktreePath
-	out, cmdErr := cmd.CombinedOutput()
+	env, envErr := checkEnvironment()
+	if envErr != nil {
+		return false, "", envErr
+	}
+	if ctx.Err() != nil {
+		return false, "", fmt.Errorf("integrate: checks context ended before start: %w", ctx.Err())
+	}
+	checkCtx := ctx
+	cancel := func() {}
+	if _, ok := ctx.Deadline(); !ok {
+		checkCtx, cancel = context.WithTimeout(ctx, defaultCheckTimeout)
+	}
+	defer cancel()
+
+	cmd := exec.Command("sh", scriptPath)
+	cmd.Dir = ownedRoot
+	cmd.Env = env
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	var out limitedBuffer
+	cmd.Stdout, cmd.Stderr = &out, &out
+	if startErr := cmd.Start(); startErr != nil {
+		return false, out.String(), fmt.Errorf("integrate: start checks script: %w", startErr)
+	}
+	wait := make(chan error, 1)
+	go func() { wait <- cmd.Wait() }()
+
+	var cmdErr error
+	select {
+	case cmdErr = <-wait:
+	case <-checkCtx.Done():
+		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
+		timer := time.NewTimer(checkTerminationGrace)
+		select {
+		case cmdErr = <-wait:
+			if !timer.Stop() {
+				<-timer.C
+			}
+		case <-timer.C:
+			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+			cmdErr = <-wait
+		}
+		return false, out.String(), nil
+	}
 	if cmdErr != nil {
 		var exitErr *exec.ExitError
 		if errors.As(cmdErr, &exitErr) {
-			return false, string(out), nil
+			return false, out.String(), nil
 		}
-		return false, string(out), fmt.Errorf("integrate: run checks script failed to execute: %w", cmdErr)
+		return false, out.String(), fmt.Errorf("integrate: wait checks script: %w", cmdErr)
 	}
 
-	return true, string(out), nil
+	return true, out.String(), nil
+}
+
+// CheckPolicySnapshot returns the ordered inputs hashed into acceptance policy/environment identity.
+func CheckPolicySnapshot() (string, time.Duration, []string, error) {
+	env, err := checkEnvironment()
+	return checkPolicyVersion, defaultCheckTimeout, env, err
+}
+
+func checkEnvironment() ([]string, error) {
+	env := make([]string, 0, len(checkEnvironmentKeys))
+	for _, key := range checkEnvironmentKeys {
+		value, ok := os.LookupEnv(key)
+		if key == "PATH" && (!ok || value == "") {
+			return nil, errors.New("integrate: required check environment PATH is missing")
+		}
+		if ok {
+			env = append(env, key+"="+value)
+		}
+	}
+	return env, nil
+}
+
+type limitedBuffer struct {
+	mu        sync.Mutex
+	b         bytes.Buffer
+	truncated bool
+}
+
+func (b *limitedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	written := len(p)
+	remaining := maxCheckOutput - b.b.Len()
+	if remaining > 0 {
+		if len(p) > remaining {
+			p = p[:remaining]
+			b.truncated = true
+		}
+		_, _ = b.b.Write(p)
+	} else {
+		b.truncated = true
+	}
+	return written, nil
+}
+
+func (b *limitedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	out := b.b.String()
+	if b.truncated {
+		out += "\n[output truncated]\n"
+	}
+	return out
 }
 
 // Promote fast-forwards primaryRoot to integrationBranch if primaryRoot
@@ -181,4 +301,3 @@ func PromoteCASWithRunner(ctx context.Context, runner worktree.GitRunner, primar
 
 	return nil
 }
-

@@ -11,12 +11,16 @@ package run
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -186,6 +190,9 @@ type Deps struct {
 	// AppendProgressBatch is an optional test seam. Production uses Ledger's
 	// atomic batch append when this is nil.
 	AppendProgressBatch func(context.Context, []ledger.LaneProgress) error
+	// ResolveCandidateIdentity freezes full commit/tree object IDs for a done lane.
+	// Production defaults to Git; tests inject deterministic identities.
+	ResolveCandidateIdentity func(ctx context.Context, primaryRoot, worktreePath, baseSHA string) (CandidateIdentity, error)
 
 	HasUniqueLaneCommits func(ctx context.Context, worktreePath, baseSHA string) (bool, error)
 	PorcelainEmpty       func(ctx context.Context, worktreePath string) (bool, error)
@@ -239,6 +246,11 @@ type Deps struct {
 	// set it to a couple of milliseconds to observe renewal deterministically
 	// without waiting out a real multi-second lease TTL.
 	RenewInterval time.Duration
+}
+
+// CandidateIdentity is Git's immutable object identity for a lane and its base.
+type CandidateIdentity struct {
+	BaseCommit, BaseTree, CandidateCommit, CandidateTree string
 }
 
 // Report is the outcome of running exactly one lane through Execute.
@@ -542,8 +554,17 @@ func Execute(ctx context.Context, deps Deps, p packet.Packet) (Report, error) {
 		}
 	}
 
-	if err := deps.Ledger.SetStatus(persistCtx, deps.RunID, p.ID, status, now); err != nil {
-		cause := fmt.Errorf("run: set lane %q terminal status: %w", p.ID, err)
+	var terminalErr error
+	if status == lane.Done {
+		terminalErr = setDoneCandidate(persistCtx, deps, p, wt.Path, wt.BaseSHA, envelope, now)
+	} else {
+		terminalErr = deps.Ledger.SetStatus(persistCtx, deps.RunID, p.ID, status, now)
+	}
+	if terminalErr != nil {
+		cause := fmt.Errorf("run: set lane %q terminal status: %w", p.ID, terminalErr)
+		if status == lane.Done {
+			cause = fmt.Errorf("run: set lane %q terminal status: freeze done candidate: %w", p.ID, terminalErr)
+		}
 		return report, recordLaneFailure(persistCtx, deps, p.ID, now, cause)
 	}
 
@@ -571,6 +592,100 @@ func Execute(ctx context.Context, deps Deps, p packet.Packet) (Report, error) {
 		OutputCaptureIncomplete: outcome.OutputTruncated,
 		Diagnosis:               diagnosis,
 	}, nil
+}
+
+func setDoneCandidate(ctx context.Context, deps Deps, p packet.Packet, worktreePath, recordedBaseSHA string, envelope *result.Envelope, at time.Time) error {
+	resolve := deps.ResolveCandidateIdentity
+	if resolve == nil {
+		resolve = ResolveCandidateIdentityFromGit
+	}
+	identity, err := resolve(ctx, deps.PrimaryRoot, worktreePath, recordedBaseSHA)
+	if err != nil {
+		return err
+	}
+	if identity.BaseCommit == "" || identity.BaseTree == "" || identity.CandidateCommit == "" || identity.CandidateTree == "" {
+		return errors.New("candidate identity is incomplete")
+	}
+	paths, err := normalizeAllowedPaths(p.AllowedPaths)
+	if err != nil {
+		return err
+	}
+	resultJSON, err := json.Marshal(envelope)
+	if err != nil {
+		return fmt.Errorf("encode frozen result: %w", err)
+	}
+	return deps.Ledger.SetDoneCandidate(ctx, ledger.LaneCandidate{
+		RunID: deps.RunID, LaneID: p.ID, PacketID: p.ID, PacketDigest: packetDigest(p, paths),
+		PrimaryRoot: deps.PrimaryRoot, WorktreePath: worktreePath,
+		BaseCommit: identity.BaseCommit, BaseTree: identity.BaseTree,
+		CandidateCommit: identity.CandidateCommit, CandidateTree: identity.CandidateTree,
+		AllowedPaths: paths, ResultPath: resultEnvelopePath, ResultJSON: string(resultJSON),
+		ResultHash: versionedHash("result:v1", string(resultJSON)), RecordedAt: at,
+	})
+}
+
+// ResolveCandidateIdentityFromGit reads complete object IDs for terminal identity persistence.
+func ResolveCandidateIdentityFromGit(ctx context.Context, primaryRoot, worktreePath, baseSHA string) (CandidateIdentity, error) {
+	resolve := func(dir, rev string) (string, error) {
+		out, err := exec.CommandContext(ctx, "git", "-C", dir, "rev-parse", "--verify", rev).CombinedOutput()
+		if err != nil {
+			return "", fmt.Errorf("git rev-parse %s: %w: %s", rev, err, strings.TrimSpace(string(out)))
+		}
+		return strings.TrimSpace(string(out)), nil
+	}
+	baseCommit, err := resolve(primaryRoot, baseSHA+"^{commit}")
+	if err != nil {
+		return CandidateIdentity{}, err
+	}
+	baseTree, err := resolve(primaryRoot, baseCommit+"^{tree}")
+	if err != nil {
+		return CandidateIdentity{}, err
+	}
+	candidateCommit, err := resolve(worktreePath, "HEAD^{commit}")
+	if err != nil {
+		return CandidateIdentity{}, err
+	}
+	candidateTree, err := resolve(worktreePath, candidateCommit+"^{tree}")
+	return CandidateIdentity{baseCommit, baseTree, candidateCommit, candidateTree}, err
+}
+
+func normalizeAllowedPaths(paths []string) ([]string, error) {
+	seen := make(map[string]struct{}, len(paths))
+	for _, raw := range paths {
+		if raw == "" || filepath.IsAbs(raw) || strings.Contains(raw, `\`) {
+			return nil, fmt.Errorf("invalid allowed path %q", raw)
+		}
+		clean := filepath.ToSlash(filepath.Clean(raw))
+		if clean == "." || clean == ".." || strings.HasPrefix(clean, "../") {
+			return nil, fmt.Errorf("invalid allowed path %q", raw)
+		}
+		seen[strings.TrimSuffix(clean, "/")] = struct{}{}
+	}
+	out := make([]string, 0, len(seen))
+	for path := range seen {
+		out = append(out, path)
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+func packetDigest(p packet.Packet, paths []string) string {
+	parts := []string{"packet:v1", p.ID, p.Executor, p.RoutedBy, p.Model, p.Agent,
+		fmt.Sprint(p.ReadOnly), p.Feature, p.ParentRef, p.BaseSHA, p.ExpectedParentSHA,
+		fmt.Sprint(p.LegacyMain), p.SDDPhase, p.FanoutGroup, p.Skill, p.Body}
+	parts = append(parts, paths...)
+	return versionedHash(parts...)
+}
+
+func versionedHash(parts ...string) string {
+	h := sha256.New()
+	var size [8]byte
+	for _, part := range parts {
+		binary.BigEndian.PutUint64(size[:], uint64(len(part)))
+		_, _ = h.Write(size[:])
+		_, _ = h.Write([]byte(part))
+	}
+	return fmt.Sprintf("sha256:%x", h.Sum(nil))
 }
 
 func writeLaneProgress(
