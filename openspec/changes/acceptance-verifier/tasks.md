@@ -49,5 +49,5 @@ Chain strategy: pending
 
 ## Phase 4: Verification and Rollback
 
-- [ ] 4.1 Run focused ledger/run, accept/integrate, and CLI tests; then run `go test ./... -race -count=1` and `CGO_ENABLED=0 go build ./...`.
-- [ ] 4.2 Verify receipt immutability; rollback removes callers/adapter while retaining audit rows; exclude Promotion/CAS, qualitative review, lease recovery, metadata/docs, and unrelated dirty files.
+- [x] 4.1 Run focused ledger/run, accept/integrate, and CLI tests; then run `go test ./... -race -count=1` and `CGO_ENABLED=0 go build ./...`.
+- [x] 4.2 Verify receipt immutability; rollback removes callers/adapter while retaining audit rows; exclude Promotion/CAS, qualitative review, lease recovery, metadata/docs, and unrelated dirty files.
