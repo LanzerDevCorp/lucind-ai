@@ -772,8 +772,24 @@ func evaluateOverlapGate(ctx context.Context, deps Deps, att Attempt, featSvc *f
 	// comparison in the same pass can never see an earlier resolution's SHA by mistake.
 	originalCandidateSHA := att.CandidateSHA
 	var (
-		resolvedOverrideSHA string   // the resolved candidate SHA, valid only when exactly one conflict resolves
-		resolvedAgainst     []string // otherFeat.ID for every conflict that resolved in this pass
+		resolvedOverrideSHA   string   // the resolved candidate SHA, valid only when exactly one conflict resolves
+		resolvedAgainst       []string // otherFeat.ID for every conflict that resolved in this pass
+		hasUnresolvedRequired bool     // true once any required overlap in this pass is found unresolved
+		unresolvedBlockReason string   // block reason for the first unresolved required overlap encountered
+
+		// hasUnresolvedRequired/unresolvedBlockReason exist so that an unresolved required
+		// overlap does NOT short-circuit-block before every other active feature has been
+		// evaluated. The old behavior returned immediately on the first unresolved required
+		// overlap encountered, in ActiveFeatures() iteration order -- which meant a genuinely
+		// resolved conflict later (or earlier) in the same list could be silently discarded
+		// for this pass whenever 2+ other features simultaneously had a required overlap and
+		// not all of them were resolved yet. That made the documented recovery path --
+		// "resolve and promote sequentially, one feature pair at a time" -- impossible to
+		// actually execute for 3+ simultaneously conflicting features: any partial resolution
+		// was either never reached (unresolved one hit first) or, once every conflict was
+		// resolved, rejected by the N-way block below. Deferring the block decision until
+		// after the full loop lets exactly-one-resolved passes succeed regardless of where in
+		// the list the still-unresolved features fall.
 	)
 
 	for _, otherFeat := range activeFeatures {
@@ -894,13 +910,63 @@ func evaluateOverlapGate(ctx context.Context, deps Deps, att Attempt, featSvc *f
 			// genuinely new content (a fresh dispatch, not a mere retry) must not silently
 			// adopt a stale resolved SHA that predates it -- doing so would CAS the branch
 			// backward, discarding real work landed since.
-			if matched != nil && matched.Status == string(reconcile.RequestStatusApproved) && matchedOtherSHA == otherSHA {
-				cand, cErr := deps.Ledger.ReconciliationCandidateByRequest(ctx, matched.ID)
-				if cErr == nil && cand.Status == string(reconcile.CandidateStatusIntegrated) && cand.CandidateSHA != "" &&
-					ownResolutionStillValid(ctx, deps, parentRef, cand.CandidateSHA) {
-					resolvedOverrideSHA = cand.CandidateSHA
-					resolvedAgainst = append(resolvedAgainst, otherFeat.ID)
-					continue
+			// blockReason distinguishes *why* this overlap is still blocking, rather than
+			// reporting the same generic message for a genuinely fresh conflict, an
+			// approved-but-not-yet-resolved request, a resolution registered against a
+			// stale tip for otherFeat, an unreadable/un-integrated candidate, and a
+			// resolution that predates this attempt's own current content. Before this,
+			// every one of those distinct states surfaced as the identical
+			// "promotion blocked: reconciliation-required overlap with feature X", making
+			// "you haven't resolved this yet" indistinguishable from "you resolved it
+			// against the wrong SHA" -- the single biggest time sink in diagnosing a
+			// non-converging reconcile/retry cycle.
+			blockReason := fmt.Sprintf("promotion blocked: reconciliation-required overlap with feature %s", otherFeat.ID)
+
+			if matched != nil {
+				switch {
+				case matched.Status != string(reconcile.RequestStatusApproved):
+					blockReason = fmt.Sprintf(
+						"promotion blocked: reconciliation-required overlap with feature %s (request %s exists but is not yet approved -- status %q; run reconcile approve, then reconcile resolve)",
+						otherFeat.ID, matched.ID, matched.Status,
+					)
+
+				case matchedOtherSHA != otherSHA:
+					blockReason = fmt.Sprintf(
+						"promotion blocked: reconciliation-required overlap with feature %s (request %s is approved but was registered against a stale tip for %s -- recorded %s, current %s; run reconcile renew against the current tip, then reconcile approve/resolve again)",
+						otherFeat.ID, matched.ID, otherFeat.ID, matchedOtherSHA, otherSHA,
+					)
+
+				default:
+					cand, cErr := deps.Ledger.ReconciliationCandidateByRequest(ctx, matched.ID)
+					switch {
+					case cErr != nil:
+						blockReason = fmt.Sprintf(
+							"promotion blocked: reconciliation-required overlap with feature %s (request %s is approved but its candidate could not be read: %v)",
+							otherFeat.ID, matched.ID, cErr,
+						)
+
+					case cand.Status != string(reconcile.CandidateStatusIntegrated) || cand.CandidateSHA == "":
+						blockReason = fmt.Sprintf(
+							"promotion blocked: reconciliation-required overlap with feature %s (request %s is approved but not yet resolved -- candidate %s status is %q; run reconcile resolve)",
+							otherFeat.ID, matched.ID, cand.ID, cand.Status,
+						)
+
+					case !ownResolutionStillValid(ctx, deps, parentRef, cand.CandidateSHA):
+						blockReason = fmt.Sprintf(
+							"promotion blocked: reconciliation-required overlap with feature %s (request %s's resolved candidate %s predates this attempt's own current content; resolve again against the current state)",
+							otherFeat.ID, matched.ID, cand.CandidateSHA,
+						)
+
+					default:
+						// This is the reuse path evaluateOverlapGate's older comment above
+						// describes: matchedOtherSHA==otherSHA proves the OTHER side hasn't
+						// moved, and ownResolutionStillValid proves this attempt's OWN content
+						// is still what the resolution was registered against. Adopt the
+						// resolved candidate and skip blocking for this otherFeat entirely.
+						resolvedOverrideSHA = cand.CandidateSHA
+						resolvedAgainst = append(resolvedAgainst, otherFeat.ID)
+						continue
+					}
 				}
 			}
 
@@ -921,19 +987,39 @@ func evaluateOverlapGate(ctx context.Context, deps Deps, att Attempt, featSvc *f
 				}
 			}
 
-			now := updateNow(deps)
-			att.Status = AttemptStatusBlocked
-			att.FailureReason = fmt.Sprintf("promotion blocked: reconciliation-required overlap with feature %s", otherFeat.ID)
-			att.UpdatedAt = now
-			if err := updateAttemptWithAudit(ctx, deps.Ledger, att, "attempt_blocked", att.FailureReason); err != nil {
-				return false, att, fmt.Errorf("update attempt blocked status: %w", err)
+			// Do NOT block-and-return here: an unresolved required overlap with THIS
+			// otherFeat must not prevent evaluating the remaining active features, some of
+			// which may be resolved and need to accumulate into resolvedAgainst below. Record
+			// the first unresolved reason encountered and keep looping; the actual block (or
+			// promotion, if this turns out to be the only unresolved one) is decided once,
+			// after every active feature has been evaluated.
+			if !hasUnresolvedRequired {
+				hasUnresolvedRequired = true
+				unresolvedBlockReason = blockReason
 			}
-			_ = featSvc.ReleaseLease(ctx, att.FeatureID, att.Owner, att.Fence)
-			return true, att, nil
+			continue
 
 		case overlap.ClassInformational:
 			// Informational evidence does not block
 		}
+	}
+
+	if hasUnresolvedRequired {
+		// At least one required overlap is still unresolved: block on it regardless of how
+		// many OTHER overlaps resolved in this same pass. Any resolutions accumulated above
+		// are simply not applied this round -- they remain valid (per ownResolutionStillValid)
+		// and will be picked up again, together with fewer outstanding unresolved conflicts,
+		// on the next retry once this blocking feature is also resolved.
+		now := updateNow(deps)
+		att.Status = AttemptStatusBlocked
+		att.FailureReason = unresolvedBlockReason
+		att.CandidateSHA = originalCandidateSHA
+		att.UpdatedAt = now
+		if err := updateAttemptWithAudit(ctx, deps.Ledger, att, "attempt_blocked", att.FailureReason); err != nil {
+			return false, att, fmt.Errorf("update attempt blocked status: %w", err)
+		}
+		_ = featSvc.ReleaseLease(ctx, att.FeatureID, att.Owner, att.Fence)
+		return true, att, nil
 	}
 
 	switch len(resolvedAgainst) {

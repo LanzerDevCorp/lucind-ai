@@ -1452,12 +1452,44 @@ func runReconcileCancel(ctx context.Context, args []string, stdout, stderr io.Wr
 	return 0
 }
 
+// resolveFeatureTipSHA resolves featureID's current real tip SHA using the
+// same fallback chain internal/run/attempt.go's evaluateOverlapGate uses for
+// the opposing feature in an overlap comparison: featureID's own declared
+// ParentRef, live-resolved in primaryRoot; falling back to its recorded
+// ExpectedParentSHA; falling back to its recorded BaseSHA. Returns an error
+// only when the feature itself cannot be found -- an unresolvable ParentRef
+// is not fatal here, since the ExpectedParentSHA/BaseSHA fallbacks may still
+// produce a usable value.
+func resolveFeatureTipSHA(ctx context.Context, ledg *ledger.Ledger, primaryRoot, featureID string) (string, error) {
+	feat, err := feature.NewService(ledg).Get(ctx, featureID)
+	if err != nil {
+		return "", err
+	}
+	if feat.ParentRef != "" {
+		if sha, err := worktree.ResolveCommitSHA(ctx, worktree.DefaultGitRunner, primaryRoot, worktree.CanonicalizeRef(feat.ParentRef)); err == nil && sha != "" {
+			return sha, nil
+		}
+	}
+	if feat.ExpectedParentSHA != "" {
+		return feat.ExpectedParentSHA, nil
+	}
+	return feat.BaseSHA, nil
+}
+
 // runReconcileRenew implements "lucind-ai reconcile renew": renews an expired or awaiting reconciliation request with fresh evidence.
+//
+// --source-sha/--target-sha are optional overrides. Left unset, each defaults to that feature's
+// own current real tip (resolveFeatureTipSHA) rather than silently carrying forward whatever SHA
+// the request being renewed already had stored -- which is what a caller who only ever passes one
+// of the two flags (or neither) would otherwise get, and which can permanently pin a stale seed
+// value (e.g. from the very first, automatically-created request) across every renew/approve/resolve
+// cycle, defeating the whole point of renewing.
 func runReconcileRenew(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("reconcile renew", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
 		fmt.Fprintln(stderr, "usage: lucind-ai reconcile renew --request <id> [--base-sha <sha>] [--source-sha <sha>] [--target-sha <sha>] [--ttl <duration>]")
+		fmt.Fprintln(stderr, "  --source-sha/--target-sha default to each feature's current real ParentRef tip when omitted.")
 		fs.PrintDefaults()
 	}
 
@@ -1510,6 +1542,9 @@ func runReconcileRenew(ctx context.Context, args []string, stdout, stderr io.Wri
 		CurrentSourceSHA: *sourceSHA,
 		CurrentTargetSHA: *targetSHA,
 		TTL:              *ttl,
+		ResolveFeatureTipSHA: func(ctx context.Context, featureID string) (string, error) {
+			return resolveFeatureTipSHA(ctx, ledg, primaryRoot, featureID)
+		},
 	})
 	if err != nil {
 		fmt.Fprintf(stderr, "lucind-ai: %v\n", err)

@@ -755,6 +755,177 @@ func TestRenewRecomputesFreshEvidenceViaOverlap(t *testing.T) {
 	}
 }
 
+// TestRenewDefaultsSHAsFromResolveFeatureTipSHAWhenOmitted reproduces the silent-stale-seed
+// scenario: a caller renews without ever recomputing --source-sha/--target-sha (e.g. only ever
+// passed one of the two flags, or neither), so without a default, Renew would silently carry
+// forward whatever SHA the very first, automatically-created request happened to be seeded with
+// -- possibly stale forever, since nothing forces it to be recomputed on any later renewal. With
+// ResolveFeatureTipSHA wired, Renew must resolve each omitted SHA from the live feature instead.
+func TestRenewDefaultsSHAsFromResolveFeatureTipSHAWhenOmitted(t *testing.T) {
+	ctx := context.Background()
+	l := openTestLedger(t)
+
+	now := time.Date(2026, 8, 20, 20, 0, 0, 0, time.UTC)
+
+	staleEv := sampleRequiredEvidence()
+	staleEv.FeatureASHA = "sha_stale_source_1111111111111111111111"
+	staleEv.FeatureBSHA = "sha_stale_target_2222222222222222222222"
+	staleEv.Hash, _ = staleEv.ComputeHash()
+
+	freshEv := sampleRequiredEvidence()
+	freshEv.FeatureASHA = "sha_current_source_333333333333333333333"
+	freshEv.FeatureBSHA = "sha_current_target_444444444444444444444"
+	freshEv.Hash, _ = freshEv.ComputeHash()
+
+	fakeEvaluator := func(ctx context.Context, repoDir, baseSHA, shaA, shaB string, opts ...overlap.EvaluateOption) (*overlap.Evidence, error) {
+		if shaA == freshEv.FeatureASHA && shaB == freshEv.FeatureBSHA {
+			return freshEv, nil
+		}
+		return staleEv, nil
+	}
+
+	svc := NewService(l, WithClock(func() time.Time { return now }), WithOverlapEvaluator(fakeEvaluator))
+
+	req1, err := svc.CreateRequest(ctx, CreateRequestParams{
+		ID:            "req-stale-seed",
+		FeatureID:     "feature-target",
+		SourceFeature: "feature-source",
+		SourceParent:  "refs/heads/feature-source",
+		TargetFeature: "feature-target",
+		TargetParent:  "refs/heads/feature-target",
+		SourceSHA:     staleEv.FeatureASHA,
+		TargetSHA:     staleEv.FeatureBSHA,
+		Evidence:      staleEv,
+		TTL:           5 * time.Minute,
+	})
+	if err != nil {
+		t.Fatalf("CreateRequest: %v", err)
+	}
+
+	renewTime := now.Add(10 * time.Minute)
+	svcRenew := NewService(l, WithClock(func() time.Time { return renewTime }), WithOverlapEvaluator(fakeEvaluator))
+
+	resolvedFor := map[string]string{
+		"feature-source": freshEv.FeatureASHA,
+		"feature-target": freshEv.FeatureBSHA,
+	}
+	var resolvedCalls []string
+	resolver := func(ctx context.Context, featureID string) (string, error) {
+		resolvedCalls = append(resolvedCalls, featureID)
+		sha, ok := resolvedFor[featureID]
+		if !ok {
+			return "", errors.New("unexpected featureID")
+		}
+		return sha, nil
+	}
+
+	renewedReq, err := svcRenew.Renew(ctx, RenewParams{
+		OldRequestID: req1.ID,
+		RepoDir:      t.TempDir(),
+		BaseSHA:      staleEv.BaseSHA,
+		// CurrentSourceSHA/CurrentTargetSHA deliberately omitted: this is the
+		// exact scenario reported -- a caller who never recomputes both SHAs
+		// against the live repository on renewal.
+		TTL:                  15 * time.Minute,
+		NewRequestID:         "req-renewed-fresh",
+		ResolveFeatureTipSHA: resolver,
+	})
+	if err != nil {
+		t.Fatalf("Renew failed: %v", err)
+	}
+
+	if renewedReq.SourceSHA != freshEv.FeatureASHA {
+		t.Errorf("renewedReq.SourceSHA = %q, want resolver value %q (must not silently carry forward stale seed %q)",
+			renewedReq.SourceSHA, freshEv.FeatureASHA, staleEv.FeatureASHA)
+	}
+	if renewedReq.TargetSHA != freshEv.FeatureBSHA {
+		t.Errorf("renewedReq.TargetSHA = %q, want resolver value %q (must not silently carry forward stale seed %q)",
+			renewedReq.TargetSHA, freshEv.FeatureBSHA, staleEv.FeatureBSHA)
+	}
+	if len(resolvedCalls) != 2 {
+		t.Fatalf("resolver called %d times, want 2 (once for source feature, once for target feature); calls = %v", len(resolvedCalls), resolvedCalls)
+	}
+}
+
+// TestRenewExplicitSHAOverridesResolveFeatureTipSHA proves an explicit CurrentSourceSHA/
+// CurrentTargetSHA still wins over ResolveFeatureTipSHA -- the resolver is a default for the
+// omitted-flag case, never a mandatory override for a caller who genuinely needs to pin a
+// specific historical SHA.
+func TestRenewExplicitSHAOverridesResolveFeatureTipSHA(t *testing.T) {
+	ctx := context.Background()
+	l := openTestLedger(t)
+
+	now := time.Date(2026, 8, 20, 20, 0, 0, 0, time.UTC)
+
+	staleEv := sampleRequiredEvidence()
+	staleEv.FeatureASHA = "sha_stale_source_1111111111111111111111"
+	staleEv.FeatureBSHA = "sha_stale_target_2222222222222222222222"
+	staleEv.Hash, _ = staleEv.ComputeHash()
+
+	explicitEv := sampleRequiredEvidence()
+	explicitEv.FeatureASHA = "sha_explicit_source_55555555555555555555"
+	explicitEv.FeatureBSHA = "sha_explicit_target_66666666666666666666"
+	explicitEv.Hash, _ = explicitEv.ComputeHash()
+
+	fakeEvaluator := func(ctx context.Context, repoDir, baseSHA, shaA, shaB string, opts ...overlap.EvaluateOption) (*overlap.Evidence, error) {
+		if shaA == explicitEv.FeatureASHA && shaB == explicitEv.FeatureBSHA {
+			return explicitEv, nil
+		}
+		return staleEv, nil
+	}
+
+	svc := NewService(l, WithClock(func() time.Time { return now }), WithOverlapEvaluator(fakeEvaluator))
+
+	req1, err := svc.CreateRequest(ctx, CreateRequestParams{
+		ID:            "req-stale-seed-2",
+		FeatureID:     "feature-target",
+		SourceFeature: "feature-source",
+		SourceParent:  "refs/heads/feature-source",
+		TargetFeature: "feature-target",
+		TargetParent:  "refs/heads/feature-target",
+		SourceSHA:     staleEv.FeatureASHA,
+		TargetSHA:     staleEv.FeatureBSHA,
+		Evidence:      staleEv,
+		TTL:           5 * time.Minute,
+	})
+	if err != nil {
+		t.Fatalf("CreateRequest: %v", err)
+	}
+
+	renewTime := now.Add(10 * time.Minute)
+	svcRenew := NewService(l, WithClock(func() time.Time { return renewTime }), WithOverlapEvaluator(fakeEvaluator))
+
+	resolverCalled := false
+	resolver := func(ctx context.Context, featureID string) (string, error) {
+		resolverCalled = true
+		return "should-not-be-used", nil
+	}
+
+	renewedReq, err := svcRenew.Renew(ctx, RenewParams{
+		OldRequestID:         req1.ID,
+		RepoDir:              t.TempDir(),
+		BaseSHA:              staleEv.BaseSHA,
+		CurrentSourceSHA:     explicitEv.FeatureASHA,
+		CurrentTargetSHA:     explicitEv.FeatureBSHA,
+		TTL:                  15 * time.Minute,
+		NewRequestID:         "req-renewed-explicit",
+		ResolveFeatureTipSHA: resolver,
+	})
+	if err != nil {
+		t.Fatalf("Renew failed: %v", err)
+	}
+
+	if resolverCalled {
+		t.Error("ResolveFeatureTipSHA must not be called when both CurrentSourceSHA and CurrentTargetSHA are explicitly supplied")
+	}
+	if renewedReq.SourceSHA != explicitEv.FeatureASHA {
+		t.Errorf("renewedReq.SourceSHA = %q, want explicit override %q", renewedReq.SourceSHA, explicitEv.FeatureASHA)
+	}
+	if renewedReq.TargetSHA != explicitEv.FeatureBSHA {
+		t.Errorf("renewedReq.TargetSHA = %q, want explicit override %q", renewedReq.TargetSHA, explicitEv.FeatureBSHA)
+	}
+}
+
 // TestRenewSupersedesAlreadyApprovedOldRequest proves Renew also expires the old
 // request when it is already "approved" (not just "awaiting"). Without this, an
 // approved request whose SHAs later go stale (e.g. the other feature promoted
