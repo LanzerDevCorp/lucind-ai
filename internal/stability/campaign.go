@@ -871,6 +871,50 @@ func continueTrialAfterDispatch(
 	}
 
 	// 9. Promote stage
+	var fixSHA string
+	var fixPromoted bool
+	if fixReportPtr != nil && fixReportPtr.Envelope != nil && fixReportPtr.Envelope.Commit != "" {
+		fixSHA = fixReportPtr.Envelope.Commit
+		if err := PromoteTargetCAS(ctx, deps.PrimaryRoot, cfg.ParentRefA, fixSHA, cfg.ExpectedParentSHA); err != nil {
+			_ = sm.RecordTrialOutcome(TrialFailed)
+			return nil, err
+		}
+		fixPromoted = true
+	}
+
+	var candidateASHA string
+	if len(batchReport.Lanes) > 0 && batchReport.Lanes[0].Envelope != nil {
+		candidateASHA = batchReport.Lanes[0].Envelope.Commit
+	}
+	if candidateASHA != "" {
+		if fixPromoted {
+			if err := PromoteChangeACAS(ctx, deps.PrimaryRoot, cfg, candidateASHA, fixSHA, true); err != nil {
+				_ = sm.RecordTrialOutcome(TrialFailed)
+				return nil, err
+			}
+		} else {
+			if err := PromoteTargetCAS(ctx, deps.PrimaryRoot, cfg.ParentRefA, candidateASHA, cfg.ExpectedParentSHA); err != nil {
+				_ = sm.RecordTrialOutcome(TrialFailed)
+				return nil, err
+			}
+		}
+	}
+
+	candidateBSHA := adoptedEnvB.Commit
+	if candidateBSHA != "" {
+		if err := PromoteTargetBCAS(ctx, deps.PrimaryRoot, cfg, candidateBSHA); err != nil {
+			_ = sm.RecordTrialOutcome(TrialFailed)
+			return nil, err
+		}
+	}
+
+	if candidateASHA != "" && candidateBSHA != "" {
+		if err := fixture.VerifyAncestryIsolation(ctx, deps.PrimaryRoot, cfg.BaseSHA, candidateASHA, candidateBSHA, fixSHA); err != nil {
+			_ = sm.RecordTrialOutcome(TrialFailed)
+			return nil, err
+		}
+	}
+
 	if err := sm.AdvanceTrial(TrialPromoted); err != nil {
 		_ = sm.RecordTrialOutcome(TrialFailed)
 		return nil, err

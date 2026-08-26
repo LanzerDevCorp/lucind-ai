@@ -822,20 +822,29 @@ func TestCampaignTimeoutBudgetsPure(t *testing.T) {
 
 // laneEnvelopeJSON returns a minimal envelope satisfying result.schema.json.
 func laneEnvelopeJSON(id, status string) string {
+	return laneEnvelopeJSONWithCommit(id, status, "")
+}
+
+// laneEnvelopeJSONWithCommit returns a minimal envelope with commit satisfying result.schema.json.
+func laneEnvelopeJSONWithCommit(id, status, commit string) string {
+	commitField := ""
+	if commit != "" {
+		commitField = fmt.Sprintf(",\n\t\t\t\"commit\": %q", commit)
+	}
 	if status == "blocked" {
 		return fmt.Sprintf(`{
 			"packet_id": %q,
 			"status": "blocked",
-			"summary": "hit a hard stop",
+			"summary": "hit a hard stop"%s,
 			"hard_stops": [{"hard_stop": "do not touch internal/barrier", "fired": true, "note": "would have had to edit it"}]
-		}`, id)
+		}`, id, commitField)
 	}
 	return fmt.Sprintf(`{
 		"packet_id": %q,
 		"status": "done",
-		"summary": "completed work cleanly",
+		"summary": "completed work cleanly"%s,
 		"hard_stops": [{"hard_stop": "do not touch internal/barrier", "fired": false}]
-	}`, id)
+	}`, id, commitField)
 }
 
 // fakeJourneyExecutor is a test double for running trial journey packets.
@@ -2325,4 +2334,417 @@ func TestTrialJourneyLiveNoKillWindowGracefulDegradation(t *testing.T) {
 	if sm.ActiveTrialState() != stability.TrialEvidenceCaptured {
 		t.Errorf("sm.ActiveTrialState() = %q, want %q", sm.ActiveTrialState(), stability.TrialEvidenceCaptured)
 	}
+}
+
+func TestTrialJourneyPromoteStageNoDefectMovesRefs(t *testing.T) {
+	ctx := context.Background()
+	fakeExec := newFakeJourneyExecutor()
+	deps, ledgerHandle, root := newJourneyTestDeps(t, fakeExec)
+	featSvc := feature.NewService(ledgerHandle)
+
+	runGit := func(args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", root}, args...)...)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v failed: %v\n%s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	runGit("init")
+	runGit("config", "user.name", "Test User")
+	runGit("config", "user.email", "test@example.com")
+	_ = fixture.MaterializeFixtures(root)
+	runGit("add", ".")
+	runGit("commit", "-m", "initial baseline")
+	baseSHA := runGit("rev-parse", "HEAD")
+
+	cfg := stability.DefaultJourneyConfig(1, baseSHA)
+	cfg.LeaseTTL = 100 * time.Millisecond
+	runGit("update-ref", cfg.ParentRefA, baseSHA)
+	runGit("update-ref", cfg.ParentRefB, baseSHA)
+
+	// Create Change A commit on baseSHA
+	_ = os.WriteFile(filepath.Join(root, "fixture", "change_a.txt"), []byte("CHANGE_A=DONE\n"), 0o644)
+	runGit("add", "fixture/change_a.txt")
+	runGit("commit", "-m", "change A functionality")
+	candidateASHA := runGit("rev-parse", "HEAD")
+	runGit("reset", "--hard", baseSHA)
+
+	// Create Change B commit on baseSHA
+	_ = os.WriteFile(filepath.Join(root, "fixture", "change_b.txt"), []byte("CHANGE_B=DONE\n"), 0o644)
+	runGit("add", "fixture/change_b.txt")
+	runGit("commit", "-m", "change B functionality")
+	candidateBSHA := runGit("rev-parse", "HEAD")
+	runGit("reset", "--hard", baseSHA)
+
+	wtPathA := reconcile.WorktreePathFor(root, "stability-change-a")
+	wtPathB := reconcile.WorktreePathFor(root, "stability-change-b")
+
+	fakeExec.runFuncFor[wtPathA] = func(ctx context.Context, req executor.Request) (executor.Outcome, error) {
+		envJSON := laneEnvelopeJSONWithCommit("stability-change-a", "done", candidateASHA)
+		lucindPath := filepath.Join(req.WorktreePath, ".lucind")
+		_ = os.MkdirAll(lucindPath, 0o755)
+		_ = os.WriteFile(filepath.Join(lucindPath, "result.json"), []byte(envJSON), 0o644)
+		return executor.Outcome{ExitCode: 0}, nil
+	}
+
+	fakeExec.runFuncFor[wtPathB] = func(ctx context.Context, req executor.Request) (executor.Outcome, error) {
+		envJSON := laneEnvelopeJSONWithCommit("stability-change-b", "done", candidateBSHA)
+		lucindPath := filepath.Join(req.WorktreePath, ".lucind")
+		_ = os.MkdirAll(lucindPath, 0o755)
+		_ = os.WriteFile(filepath.Join(lucindPath, "result.json"), []byte(envJSON), 0o644)
+		return executor.Outcome{ExitCode: 0}, nil
+	}
+
+	sm := stability.NewStateMachine()
+	if err := sm.Start(); err != nil {
+		t.Fatalf("sm.Start failed: %v", err)
+	}
+
+	res, err := stability.ExecuteTrialJourney(ctx, sm, deps, featSvc, cfg, 99999999, wtPathB)
+	if err != nil {
+		t.Fatalf("ExecuteTrialJourney failed: %v", err)
+	}
+	if res == nil {
+		t.Fatal("ExecuteTrialJourney returned nil result")
+	}
+
+	// Assert actual git ref states in primary root
+	refA := runGit("rev-parse", cfg.ParentRefA)
+	if refA != candidateASHA {
+		t.Errorf("ParentRefA = %s, want %s (candidateASHA)", refA, candidateASHA)
+	}
+	refB := runGit("rev-parse", cfg.ParentRefB)
+	if refB != candidateBSHA {
+		t.Errorf("ParentRefB = %s, want %s (candidateBSHA)", refB, candidateBSHA)
+	}
+
+	if sm.ActiveTrialState() != stability.TrialEvidenceCaptured {
+		t.Errorf("active trial state = %q, want %q", sm.ActiveTrialState(), stability.TrialEvidenceCaptured)
+	}
+}
+
+func TestTrialJourneyPromoteStageWithFixDependencyPromotesBothInOrder(t *testing.T) {
+	ctx := context.Background()
+	fakeExec := newFakeJourneyExecutor()
+	deps, ledgerHandle, root := newJourneyTestDeps(t, fakeExec)
+	featSvc := feature.NewService(ledgerHandle)
+
+	runGit := func(args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", root}, args...)...)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v failed: %v\n%s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	runGit("init")
+	runGit("config", "user.name", "Test User")
+	runGit("config", "user.email", "test@example.com")
+	_ = fixture.MaterializeFixtures(root)
+	runGit("add", ".")
+	runGit("commit", "-m", "initial baseline")
+	baseSHA := runGit("rev-parse", "HEAD")
+
+	cfg := stability.DefaultJourneyConfig(1, baseSHA)
+	cfg.LeaseTTL = 100 * time.Millisecond
+	runGit("update-ref", cfg.ParentRefA, baseSHA)
+	runGit("update-ref", cfg.ParentRefB, baseSHA)
+
+	// Create Fix commit on top of baseSHA
+	_ = os.WriteFile(filepath.Join(root, "fixture", "defect.txt"), []byte("STATUS=FIXED\n"), 0o644)
+	runGit("add", "fixture/defect.txt")
+	runGit("commit", "-m", "fix defect")
+	fixSHA := runGit("rev-parse", "HEAD")
+
+	// Create Change A candidate commit on top of fixSHA
+	_ = os.WriteFile(filepath.Join(root, "fixture", "change_a.txt"), []byte("CHANGE_A=DONE\n"), 0o644)
+	runGit("add", "fixture/change_a.txt")
+	runGit("commit", "-m", "change A functionality")
+	candidateASHA := runGit("rev-parse", "HEAD")
+	runGit("reset", "--hard", baseSHA)
+
+	// Create Change B commit on top of baseSHA
+	_ = os.WriteFile(filepath.Join(root, "fixture", "change_b.txt"), []byte("CHANGE_B=DONE\n"), 0o644)
+	runGit("add", "fixture/change_b.txt")
+	runGit("commit", "-m", "change B functionality")
+	candidateBSHA := runGit("rev-parse", "HEAD")
+	runGit("reset", "--hard", baseSHA)
+
+	wtPathA := reconcile.WorktreePathFor(root, "stability-change-a")
+	wtPathB := reconcile.WorktreePathFor(root, "stability-change-b")
+	wtPathFix := reconcile.WorktreePathFor(root, "stability-fix-a")
+
+	// Change A encounters defect and reports blocked with candidateASHA commit
+	fakeExec.runFuncFor[wtPathA] = func(ctx context.Context, req executor.Request) (executor.Outcome, error) {
+		out, checkErr := fixture.RunCheck(ctx, req.WorktreePath, "change-a")
+		if checkErr != nil {
+			_, _ = stability.AssessAndRecordDefect(ctx, deps.Ledger, req.WorktreePath, "stability-change-a", "fixture/check.sh", out, deps.Now())
+			envJSON := laneEnvelopeJSONWithCommit("stability-change-a", "blocked", candidateASHA)
+			lucindPath := filepath.Join(req.WorktreePath, ".lucind")
+			_ = os.MkdirAll(lucindPath, 0o755)
+			_ = os.WriteFile(filepath.Join(lucindPath, "result.json"), []byte(envJSON), 0o644)
+			return executor.Outcome{ExitCode: 0}, nil
+		}
+		return executor.Outcome{ExitCode: 0}, nil
+	}
+
+	// Change B envelope
+	fakeExec.runFuncFor[wtPathB] = func(ctx context.Context, req executor.Request) (executor.Outcome, error) {
+		envJSON := laneEnvelopeJSONWithCommit("stability-change-b", "done", candidateBSHA)
+		lucindPath := filepath.Join(req.WorktreePath, ".lucind")
+		_ = os.MkdirAll(lucindPath, 0o755)
+		_ = os.WriteFile(filepath.Join(lucindPath, "result.json"), []byte(envJSON), 0o644)
+		return executor.Outcome{ExitCode: 0}, nil
+	}
+
+	// Fix Change produces fixSHA
+	fakeExec.runFuncFor[wtPathFix] = func(ctx context.Context, req executor.Request) (executor.Outcome, error) {
+		envJSON := laneEnvelopeJSONWithCommit("stability-fix-a", "done", fixSHA)
+		lucindPath := filepath.Join(req.WorktreePath, ".lucind")
+		_ = os.MkdirAll(lucindPath, 0o755)
+		_ = os.WriteFile(filepath.Join(lucindPath, "result.json"), []byte(envJSON), 0o644)
+		return executor.Outcome{ExitCode: 0}, nil
+	}
+
+	sm := stability.NewStateMachine()
+	if err := sm.Start(); err != nil {
+		t.Fatalf("sm.Start failed: %v", err)
+	}
+
+	res, err := stability.ExecuteTrialJourney(ctx, sm, deps, featSvc, cfg, 99999999, wtPathB)
+	if err != nil {
+		t.Fatalf("ExecuteTrialJourney failed: %v", err)
+	}
+	if res == nil {
+		t.Fatal("ExecuteTrialJourney returned nil result")
+	}
+
+	// Assert final ref state in root
+	refA := runGit("rev-parse", cfg.ParentRefA)
+	if refA != candidateASHA {
+		t.Errorf("ParentRefA = %s, want %s (candidateASHA)", refA, candidateASHA)
+	}
+	refB := runGit("rev-parse", cfg.ParentRefB)
+	if refB != candidateBSHA {
+		t.Errorf("ParentRefB = %s, want %s (candidateBSHA)", refB, candidateBSHA)
+	}
+
+	// Verify ancestry: fixSHA is an ancestor of candidateASHA, baseSHA is ancestor of fixSHA, and fixSHA not in candidateBSHA
+	isBaseInFix, _ := fixture.IsAncestor(ctx, root, baseSHA, fixSHA)
+	if !isBaseInFix {
+		t.Errorf("baseSHA %s is not ancestor of fixSHA %s", baseSHA, fixSHA)
+	}
+	isFixInA, _ := fixture.IsAncestor(ctx, root, fixSHA, candidateASHA)
+	if !isFixInA {
+		t.Errorf("fixSHA %s is not ancestor of candidateASHA %s", fixSHA, candidateASHA)
+	}
+	isFixInB, _ := fixture.IsAncestor(ctx, root, fixSHA, candidateBSHA)
+	if isFixInB {
+		t.Errorf("fixSHA %s contaminated candidateBSHA %s", fixSHA, candidateBSHA)
+	}
+
+	if sm.ActiveTrialState() != stability.TrialEvidenceCaptured {
+		t.Errorf("active trial state = %q, want %q", sm.ActiveTrialState(), stability.TrialEvidenceCaptured)
+	}
+}
+
+func TestTrialJourneyPromoteStageStaleCASFailsTrial(t *testing.T) {
+	ctx := context.Background()
+	fakeExec := newFakeJourneyExecutor()
+	deps, ledgerHandle, root := newJourneyTestDeps(t, fakeExec)
+	featSvc := feature.NewService(ledgerHandle)
+
+	runGit := func(args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", root}, args...)...)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v failed: %v\n%s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	runGit("init")
+	runGit("config", "user.name", "Test User")
+	runGit("config", "user.email", "test@example.com")
+	_ = fixture.MaterializeFixtures(root)
+	runGit("add", ".")
+	runGit("commit", "-m", "initial baseline")
+	baseSHA := runGit("rev-parse", "HEAD")
+
+	// Create another commit so ParentRefA points to unexpected commit
+	_ = os.WriteFile(filepath.Join(root, "fixture", "other.txt"), []byte("OTHER=1\n"), 0o644)
+	runGit("add", "fixture/other.txt")
+	runGit("commit", "-m", "other commit")
+	otherSHA := runGit("rev-parse", "HEAD")
+
+	cfg := stability.DefaultJourneyConfig(1, baseSHA)
+	cfg.LeaseTTL = 100 * time.Millisecond
+	// ParentRefA points to otherSHA, but cfg.ExpectedParentSHA is baseSHA
+	runGit("update-ref", cfg.ParentRefA, otherSHA)
+	runGit("update-ref", cfg.ParentRefB, baseSHA)
+
+	// Create Change A commit on baseSHA
+	_ = os.WriteFile(filepath.Join(root, "fixture", "change_a.txt"), []byte("CHANGE_A=DONE\n"), 0o644)
+	runGit("add", "fixture/change_a.txt")
+	runGit("commit", "-m", "change A functionality")
+	candidateASHA := runGit("rev-parse", "HEAD")
+	runGit("reset", "--hard", baseSHA)
+
+	// Create Change B commit on baseSHA
+	_ = os.WriteFile(filepath.Join(root, "fixture", "change_b.txt"), []byte("CHANGE_B=DONE\n"), 0o644)
+	runGit("add", "fixture/change_b.txt")
+	runGit("commit", "-m", "change B functionality")
+	candidateBSHA := runGit("rev-parse", "HEAD")
+	runGit("reset", "--hard", baseSHA)
+
+	wtPathA := reconcile.WorktreePathFor(root, "stability-change-a")
+	wtPathB := reconcile.WorktreePathFor(root, "stability-change-b")
+
+	fakeExec.runFuncFor[wtPathA] = func(ctx context.Context, req executor.Request) (executor.Outcome, error) {
+		envJSON := laneEnvelopeJSONWithCommit("stability-change-a", "done", candidateASHA)
+		lucindPath := filepath.Join(req.WorktreePath, ".lucind")
+		_ = os.MkdirAll(lucindPath, 0o755)
+		_ = os.WriteFile(filepath.Join(lucindPath, "result.json"), []byte(envJSON), 0o644)
+		return executor.Outcome{ExitCode: 0}, nil
+	}
+
+	fakeExec.runFuncFor[wtPathB] = func(ctx context.Context, req executor.Request) (executor.Outcome, error) {
+		envJSON := laneEnvelopeJSONWithCommit("stability-change-b", "done", candidateBSHA)
+		lucindPath := filepath.Join(req.WorktreePath, ".lucind")
+		_ = os.MkdirAll(lucindPath, 0o755)
+		_ = os.WriteFile(filepath.Join(lucindPath, "result.json"), []byte(envJSON), 0o644)
+		return executor.Outcome{ExitCode: 0}, nil
+	}
+
+	sm := stability.NewStateMachine()
+	if err := sm.Start(); err != nil {
+		t.Fatalf("sm.Start failed: %v", err)
+	}
+
+	res, err := stability.ExecuteTrialJourney(ctx, sm, deps, featSvc, cfg, 99999999, wtPathB)
+	if err == nil {
+		t.Fatal("ExecuteTrialJourney with stale CAS succeeded, want error")
+	}
+	if !errors.Is(err, integrate.ErrStaleCAS) {
+		t.Fatalf("ExecuteTrialJourney error = %v, want integrate.ErrStaleCAS", err)
+	}
+	if res != nil {
+		t.Fatal("ExecuteTrialJourney returned non-nil result on failure")
+	}
+
+	if sm.ActiveTrialState() != stability.TrialFailed {
+		t.Errorf("active trial state = %q, want %q", sm.ActiveTrialState(), stability.TrialFailed)
+	}
+	if sm.State() != stability.CampaignFailed {
+		t.Errorf("campaign state = %q, want %q", sm.State(), stability.CampaignFailed)
+	}
+	if sm.ConsecutivePasses() != 0 {
+		t.Errorf("consecutive passes = %d, want 0", sm.ConsecutivePasses())
+	}
+}
+
+func TestTrialJourneyPromoteStageAncestryViolationFailsTrial(t *testing.T) {
+	ctx := context.Background()
+	fakeExec := newFakeJourneyExecutor()
+	deps, ledgerHandle, root := newJourneyTestDeps(t, fakeExec)
+	featSvc := feature.NewService(ledgerHandle)
+
+	runGit := func(args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", root}, args...)...)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v failed: %v\n%s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	runGit("init")
+	runGit("config", "user.name", "Test User")
+	runGit("config", "user.email", "test@example.com")
+	_ = fixture.MaterializeFixtures(root)
+	runGit("add", ".")
+	runGit("commit", "-m", "initial baseline")
+	baseSHA := runGit("rev-parse", "HEAD")
+
+	cfg := stability.DefaultJourneyConfig(1, baseSHA)
+	cfg.LeaseTTL = 100 * time.Millisecond
+	runGit("update-ref", cfg.ParentRefA, baseSHA)
+	runGit("update-ref", cfg.ParentRefB, baseSHA)
+
+	// Create Change A commit on top of baseSHA
+	_ = os.WriteFile(filepath.Join(root, "fixture", "change_a.txt"), []byte("CHANGE_A=DONE\n"), 0o644)
+	runGit("add", "fixture/change_a.txt")
+	runGit("commit", "-m", "change A functionality")
+	candidateASHA := runGit("rev-parse", "HEAD")
+
+	// Create Change B commit directly ON TOP OF Change A commit (ancestry contamination!)
+	_ = os.WriteFile(filepath.Join(root, "fixture", "change_b.txt"), []byte("CHANGE_B=DONE\n"), 0o644)
+	runGit("add", "fixture/change_b.txt")
+	runGit("commit", "-m", "change B functionality contaminated with A")
+	candidateBSHA := runGit("rev-parse", "HEAD")
+	runGit("reset", "--hard", baseSHA)
+
+	wtPathA := reconcile.WorktreePathFor(root, "stability-change-a")
+	wtPathB := reconcile.WorktreePathFor(root, "stability-change-b")
+
+	fakeExec.runFuncFor[wtPathA] = func(ctx context.Context, req executor.Request) (executor.Outcome, error) {
+		envJSON := laneEnvelopeJSONWithCommit("stability-change-a", "done", candidateASHA)
+		lucindPath := filepath.Join(req.WorktreePath, ".lucind")
+		_ = os.MkdirAll(lucindPath, 0o755)
+		_ = os.WriteFile(filepath.Join(lucindPath, "result.json"), []byte(envJSON), 0o644)
+		return executor.Outcome{ExitCode: 0}, nil
+	}
+
+	fakeExec.runFuncFor[wtPathB] = func(ctx context.Context, req executor.Request) (executor.Outcome, error) {
+		envJSON := laneEnvelopeJSONWithCommit("stability-change-b", "done", candidateBSHA)
+		lucindPath := filepath.Join(req.WorktreePath, ".lucind")
+		_ = os.MkdirAll(lucindPath, 0o755)
+		_ = os.WriteFile(filepath.Join(lucindPath, "result.json"), []byte(envJSON), 0o644)
+		return executor.Outcome{ExitCode: 0}, nil
+	}
+
+	sm := stability.NewStateMachine()
+	if err := sm.Start(); err != nil {
+		t.Fatalf("sm.Start failed: %v", err)
+	}
+
+	res, err := stability.ExecuteTrialJourney(ctx, sm, deps, featSvc, cfg, 99999999, wtPathB)
+	if err == nil {
+		t.Fatal("ExecuteTrialJourney with ancestry violation succeeded, want error")
+	}
+	if !errors.Is(err, fixture.ErrContaminatedTarget) && !errors.Is(err, fixture.ErrAncestryViolation) {
+		t.Fatalf("ExecuteTrialJourney error = %v, want ErrContaminatedTarget or ErrAncestryViolation", err)
+	}
+	if res != nil {
+		t.Fatal("ExecuteTrialJourney returned non-nil result on failure")
+	}
+
+	if sm.ActiveTrialState() != stability.TrialFailed {
+		t.Errorf("active trial state = %q, want %q", sm.ActiveTrialState(), stability.TrialFailed)
+	}
+	if sm.State() != stability.CampaignFailed {
+		t.Errorf("campaign state = %q, want %q", sm.State(), stability.CampaignFailed)
+	}
+	if sm.ConsecutivePasses() != 0 {
+		t.Errorf("consecutive passes = %d, want 0", sm.ConsecutivePasses())
+	}
+}
+
+func TestRemediationPromoteStageNoDefectMovesRefs(t *testing.T) {
+	TestTrialJourneyPromoteStageNoDefectMovesRefs(t)
+}
+
+func TestRemediationPromoteStageWithFixDependencyPromotesBothInOrder(t *testing.T) {
+	TestTrialJourneyPromoteStageWithFixDependencyPromotesBothInOrder(t)
+}
+
+func TestRemediationPromoteStageStaleCASFailsTrial(t *testing.T) {
+	TestTrialJourneyPromoteStageStaleCASFailsTrial(t)
+}
+
+func TestRemediationPromoteStageAncestryViolationFailsTrial(t *testing.T) {
+	TestTrialJourneyPromoteStageAncestryViolationFailsTrial(t)
 }
