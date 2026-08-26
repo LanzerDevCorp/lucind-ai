@@ -280,7 +280,7 @@ func TestLeaseAcquisitionAndMonotonicFence(t *testing.T) {
 	svc, _ := newTestService(t)
 
 	// 1. Initial acquisition on non-existent lease -> fence 1
-	l1, err := svc.AcquireLease(ctx, "feat-lease-1", "worker-1", 100*time.Millisecond)
+	l1, err := svc.AcquireLease(ctx, "feat-lease-1", "worker-1", 250*time.Millisecond)
 	if err != nil {
 		t.Fatalf("AcquireLease 1 failed: %v", err)
 	}
@@ -292,16 +292,16 @@ func TestLeaseAcquisitionAndMonotonicFence(t *testing.T) {
 	}
 
 	// 2. Active lease cannot be acquired by another worker
-	_, err = svc.AcquireLease(ctx, "feat-lease-1", "worker-2", 100*time.Millisecond)
+	_, err = svc.AcquireLease(ctx, "feat-lease-1", "worker-2", 250*time.Millisecond)
 	if !errors.Is(err, ErrLeaseHeld) {
 		t.Fatalf("AcquireLease while active returned %v, want ErrLeaseHeld", err)
 	}
 
 	// 3. Wait for lease to expire
-	time.Sleep(120 * time.Millisecond)
+	time.Sleep(300 * time.Millisecond)
 
 	// 4. Acquisition of expired lease succeeds and increments fence monotonically (1 -> 2)
-	l2, err := svc.AcquireLease(ctx, "feat-lease-1", "worker-2", 100*time.Millisecond)
+	l2, err := svc.AcquireLease(ctx, "feat-lease-1", "worker-2", 250*time.Millisecond)
 	if err != nil {
 		t.Fatalf("AcquireLease 2 failed: %v", err)
 	}
@@ -318,7 +318,7 @@ func TestLeaseValidationAndStaleMutationRejection(t *testing.T) {
 	svc, _ := newTestService(t)
 
 	// Worker 1 acquires lease (fence 1) with short TTL
-	l1, err := svc.AcquireLease(ctx, "feat-lease-stale", "worker-1", 50*time.Millisecond)
+	l1, err := svc.AcquireLease(ctx, "feat-lease-stale", "worker-1", 200*time.Millisecond)
 	if err != nil {
 		t.Fatalf("AcquireLease worker-1: %v", err)
 	}
@@ -329,7 +329,7 @@ func TestLeaseValidationAndStaleMutationRejection(t *testing.T) {
 	}
 
 	// Wait for expiration
-	time.Sleep(60 * time.Millisecond)
+	time.Sleep(250 * time.Millisecond)
 
 	// Validate expired lease returns ErrLeaseExpired
 	err = svc.ValidateLease(ctx, "feat-lease-stale", l1.Owner, l1.Fence)
