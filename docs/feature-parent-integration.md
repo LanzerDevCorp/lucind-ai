@@ -171,12 +171,20 @@ usage: lucind-ai reconcile renew --request <id> [--base-sha <sha>] [--source-sha
 lucind-ai reconcile renew \
   --request 7aa1b2c3-d4e5-6789-abcd-ef0123456789 \
   --base-sha "$BASE" \
-  --source-sha "$(git rev-parse refs/heads/feature-user-auth)" \
-  --target-sha "$(git rev-parse refs/heads/feature-billing)" \
   --ttl 15m
 ```
 
-`--ttl` is a Go duration (default `15m`). The same flags are accepted as the top-level alias
+`--ttl` is a Go duration (default `15m`). `--source-sha`/`--target-sha` are optional overrides;
+an omitted flag defaults to that feature's own current real `parent_ref` tip (falling back to
+`expected_parent_sha`, then `base_sha` — the same fallback chain the overlap gate itself uses),
+resolved live at renew time rather than carried forward from whatever the request being renewed
+already had stored. This matters because the very first, automatically-created request for a
+feature pair may have been seeded from a value that is not either feature's real branch tip (e.g.
+an internal integration-lens merge commit); relying on that stored value across every renewal
+would pin the reconciliation to a SHA neither feature is ever actually at, so the reuse check in
+`evaluateOverlapGate` (`matchedOtherSHA == otherSHA`) would never converge no matter how many
+times `approve`/`resolve` runs. Pass `--source-sha` and/or `--target-sha` explicitly only when
+pinning a specific historical SHA on purpose. The same flags are accepted as the top-level alias
 `lucind-ai renew` (same handler as `reconcile renew`).
 
 ## Legacy packets that do not name a feature

@@ -79,8 +79,35 @@ func combine(ctx context.Context, primaryRoot, runID, parentRef, baseSHA string,
 	}
 
 	for _, branch := range branches {
-		cmd := exec.CommandContext(ctx, "git", "merge", "--no-ff", branch)
+		// A clean "git merge --no-ff" otherwise produces byte-identical trees
+		// and parents across repeated retries of the exact same, unchanged
+		// lane branches, but the resulting merge commit is still
+		// non-deterministic across retries for two independent reasons:
+		//
+		//  1. Its author/committer dates default to the current wall-clock
+		//     time, which differs on every invocation.
+		//  2. Its auto-generated message is "Merge branch '<branch>' into
+		//     <current-branch>" -- and the current branch here is always
+		//     "integrate-"+runID (see worktree.CreateWithParent above),
+		//     freshly named per invocation, so the message text itself
+		//     differs on every retry even when merging the exact same
+		//     branch.
+		//
+		// Either alone changes the merge commit's SHA even though nothing
+		// about its content did, which defeats "lucind-ai integrate retry":
+		// a reconciliation resolution registered against one retry's
+		// candidate_sha can never carry forward to the next retry's
+		// freshly-regenerated, unrelated candidate_sha. Pinning the dates to
+		// branch's own tip commit date (immutable for a preserved "done"
+		// lane branch) and the message to a fixed, runID-independent string
+		// makes the merge commit -- and therefore candidate_sha --
+		// deterministic across retries as long as the merged branches
+		// themselves have not changed.
+		cmd := exec.CommandContext(ctx, "git", "merge", "--no-ff", "-m", "Merge branch '"+branch+"'", branch)
 		cmd.Dir = wt.Path
+		if commitDate, dateErr := branchCommitDate(ctx, wt.Path, branch); dateErr == nil && commitDate != "" {
+			cmd.Env = append(os.Environ(), "GIT_AUTHOR_DATE="+commitDate, "GIT_COMMITTER_DATE="+commitDate)
+		}
 		out, mergeErr := cmd.CombinedOutput()
 		if mergeErr != nil {
 			resolved, _, resolveErr := resolve.Resolve(ctx, wt.Path, invoke)
@@ -104,6 +131,22 @@ func combine(ctx context.Context, primaryRoot, runID, parentRef, baseSHA string,
 	}
 
 	return wt.Path, wt.Branch, nil
+}
+
+// branchCommitDate returns branch's tip commit date in strict ISO 8601
+// (git's %cI format), suitable for GIT_AUTHOR_DATE/GIT_COMMITTER_DATE. It
+// is used to pin a merge commit's dates to a value derived from the merged
+// content itself instead of the current wall-clock time, so that combining
+// the exact same unchanged branches on a later retry reproduces the exact
+// same merge commit SHA.
+func branchCommitDate(ctx context.Context, worktreePath, branch string) (string, error) {
+	cmd := exec.CommandContext(ctx, "git", "log", "-1", "--format=%cI", branch)
+	cmd.Dir = worktreePath
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("integrate: resolve commit date for branch %s: %w", branch, err)
+	}
+	return strings.TrimSpace(string(out)), nil
 }
 
 // Check runs the project's verification suite against worktreePath by

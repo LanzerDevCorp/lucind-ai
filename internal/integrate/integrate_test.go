@@ -112,6 +112,67 @@ func TestCombineHappyPath(t *testing.T) {
 	}
 }
 
+// TestCombineRetryProducesDeterministicCandidateSHA reproduces the
+// "integrate retry" non-determinism defect: combining the exact same,
+// unchanged lane branch onto the exact same parent twice in a row (as a
+// blocked feature attempt's retry does -- see internal/run/integrate_retry.go
+// RebuildBatchForRetry, which rebuilds from the same preserved "done" lane
+// branches without any redispatch) must produce the same combined tree AND
+// the same candidate commit SHA both times. Before the fix, each call
+// stamped its merge commit with the current wall-clock time, so two
+// back-to-back retries against byte-identical inputs produced two different
+// commit SHAs -- which meant a reconciliation resolved against retry N's
+// candidate could never carry forward to retry N+1's freshly-regenerated,
+// unrelated candidate SHA.
+func TestCombineRetryProducesDeterministicCandidateSHA(t *testing.T) {
+	if testing.Short() {
+		t.Skip("shells out to real git")
+	}
+
+	primaryRoot := initRepo(t)
+
+	runGit(t, primaryRoot, "checkout", "-b", "lucind/lane-retry")
+	if err := os.WriteFile(filepath.Join(primaryRoot, "lane.txt"), []byte("lane content\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(lane.txt) error = %v", err)
+	}
+	runGit(t, primaryRoot, "add", "lane.txt")
+	runGit(t, primaryRoot, "commit", "-m", "lane commit")
+	runGit(t, primaryRoot, "checkout", "main")
+
+	wtPath1, branchName1, err := integrate.Combine(context.Background(), primaryRoot, "run-retry-1", "", "", []string{"lucind/lane-retry"})
+	if err != nil {
+		t.Fatalf("Combine() first call error = %v, want nil", err)
+	}
+	sha1 := runGit(t, wtPath1, "rev-parse", "HEAD")
+	tree1 := runGit(t, wtPath1, "rev-parse", "HEAD^{tree}")
+	_ = worktree.Remove(context.Background(), primaryRoot, wtPath1)
+	_ = worktree.DeleteBranch(context.Background(), primaryRoot, branchName1)
+
+	// A real wall-clock gap between retries, matching the actual scenario
+	// (a human runs reconcile renew/approve/resolve between retries) --
+	// without the fix, this alone changes the merge commit's timestamp and
+	// therefore its SHA.
+	time.Sleep(1100 * time.Millisecond)
+
+	wtPath2, branchName2, err := integrate.Combine(context.Background(), primaryRoot, "run-retry-2", "", "", []string{"lucind/lane-retry"})
+	if err != nil {
+		t.Fatalf("Combine() second call (retry) error = %v, want nil", err)
+	}
+	defer func() {
+		_ = worktree.Remove(context.Background(), primaryRoot, wtPath2)
+		_ = worktree.DeleteBranch(context.Background(), primaryRoot, branchName2)
+	}()
+	sha2 := runGit(t, wtPath2, "rev-parse", "HEAD")
+	tree2 := runGit(t, wtPath2, "rev-parse", "HEAD^{tree}")
+
+	if tree1 != tree2 {
+		t.Fatalf("combined tree differs across retries of the exact same branch: tree1 = %s, tree2 = %s", tree1, tree2)
+	}
+	if sha1 != sha2 {
+		t.Errorf("candidate_sha differs across retries of the exact same, unchanged branch: sha1 = %s, sha2 = %s (want identical, same as identical tree1/tree2 = %s)", sha1, sha2, tree1)
+	}
+}
+
 func TestCombineBranchesFromFeatureParentNotPrimaryHEAD(t *testing.T) {
 	if testing.Short() {
 		t.Skip("shells out to real git")

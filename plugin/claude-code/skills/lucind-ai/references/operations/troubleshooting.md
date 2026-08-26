@@ -14,6 +14,7 @@ Load this module for dirty roots, stale worktrees, failed or reverted Lanes, tim
 | ID appears in `reverted_ids` | Reverted means excluded by integration recovery, not lost work: inspect `.lucind/result.json` and `git log -1 lucind/<id>` to confirm the Lane's own work is intact. Fix the cause first (most commonly the base itself was red — confirm with `lucind-ai check`), then run `lucind-ai integrate retry --run <run-id>` to re-integrate the preserved Lane branches with no redispatch. Only a Lane with a preserved worktree and a `"done"` envelope qualifies. |
 | Wrapper died but executor may remain | Check the worktree-associated process. If alive, let it finish and inspect its envelope and commit; do not race a duplicate dispatch. |
 | Synthesis timeout | Read partial branch work before rerun; use at least 30 minutes for synthesis Lanes. |
+| `integrate retry` blocks again after `reconcile approve`/`resolve` | Read the exact `failure_reason` — it now names why: no request yet, approved-but-not-resolved, a resolved candidate that predates this attempt's own current content, or (previously silent) "registered against a stale tip for `<feature>`". Only that last case needs `reconcile renew` before re-approving; renew's `--source-sha`/`--target-sha` default to each feature's live `parent_ref` tip when omitted, so passing neither flag is the normal, safe path. |
 
 ## Multi-wave hazards
 

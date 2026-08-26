@@ -1135,3 +1135,344 @@ func TestTwoRequiredConflictsBothResolvedBlocksNWayReconciliation(t *testing.T) 
 		t.Errorf("AcquireLease() after N-way block error = %v, want lease to have been released", err)
 	}
 }
+
+// newRequiredOverlapEvidence builds a ClassRequired overlap.Evidence with a fixed CreatedAt so its
+// hash is deterministic across calls -- shared by the N-way-deadlock regression tests below.
+func newRequiredOverlapEvidence(baseSHA, shaA, shaB string) *overlap.Evidence {
+	ev := &overlap.Evidence{
+		Version:     "v1",
+		BaseSHA:     baseSHA,
+		FeatureASHA: shaA,
+		FeatureBSHA: shaB,
+		Class:       overlap.ClassRequired,
+		Rationale:   []string{"predicted Git merge conflict detected"},
+		Signals: overlap.Signals{
+			PredictedConflict: true,
+			ConflictPaths:     []string{"conflict.go"},
+		},
+		CreatedAt: time.Date(2026, 8, 20, 12, 0, 0, 0, time.UTC),
+	}
+	h, _ := ev.ComputeHash()
+	ev.Hash = h
+	return ev
+}
+
+// setupResolvedConflictDirect registers an already-approved, already-integrated reconciliation
+// resolution between featMain and otherFeat directly through reconcile.Service, without routing
+// through run.ExecuteAttempt. Unlike the resolveOneConflict helper used by
+// TestTwoRequiredConflictsBothResolvedBlocksNWayReconciliation, this does not require otherFeat to
+// be the ONLY other active feature at setup time: it never runs an attempt, so it cannot be
+// affected by (and cannot affect) any other already-active, still-unresolved feature. That
+// isolation is exactly what the order-independence regression test below needs: it must be able to
+// set up a resolved conflict for a feature that already coexists with other unresolved active
+// features, or set one up before those other features even exist, without either path itself
+// tripping the overlap gate.
+//
+// otherCurrentSHA must equal exactly what evaluateOverlapGate will itself resolve for otherFeat's
+// tip (the gateSpies default ResolveRefSHA stub returns "expected-sha-"+ref for any ref), so the
+// matchedOtherSHA == otherSHA check inside evaluateOverlapGate's reuse path succeeds.
+func setupResolvedConflictDirect(t *testing.T, l *ledger.Ledger, reconcileSvc *reconcile.Service, featMain, otherFeat feature.Feature, otherCurrentSHA, resolvedSHA string) {
+	t.Helper()
+
+	ev := newRequiredOverlapEvidence("base-sha-common", "placeholder-source-sha", otherCurrentSHA)
+
+	req, err := reconcileSvc.CreateRequest(context.Background(), reconcile.CreateRequestParams{
+		FeatureID:     featMain.ID,
+		SourceFeature: featMain.ID,
+		SourceParent:  featMain.ParentRef,
+		TargetFeature: otherFeat.ID,
+		TargetParent:  otherFeat.ParentRef,
+		SourceSHA:     "placeholder-source-sha",
+		TargetSHA:     otherCurrentSHA,
+		Evidence:      ev,
+		TTL:           15 * time.Minute,
+	})
+	if err != nil {
+		t.Fatalf("reconcileSvc.CreateRequest(%s, %s) error = %v", featMain.ID, otherFeat.ID, err)
+	}
+
+	if _, _, err := reconcileSvc.Approve(context.Background(), reconcile.ApproveParams{
+		RequestID:     req.ID,
+		SourceFeature: featMain.ID,
+		TargetFeature: otherFeat.ID,
+		Actor:         "test-actor",
+	}); err != nil {
+		t.Fatalf("reconcileSvc.Approve(%s, %s) error = %v", featMain.ID, otherFeat.ID, err)
+	}
+
+	cand, err := l.ReconciliationCandidateByRequest(context.Background(), req.ID)
+	if err != nil {
+		t.Fatalf("ReconciliationCandidateByRequest(%s) error = %v", otherFeat.ID, err)
+	}
+	if _, err := reconcileSvc.UpdateCandidateStatus(context.Background(), cand.ID, reconcile.CandidateStatusIntegrated, resolvedSHA, ""); err != nil {
+		t.Fatalf("reconcileSvc.UpdateCandidateStatus(%s) error = %v", otherFeat.ID, err)
+	}
+}
+
+// TestThreeRequiredConflictsOneResolvedTwoUnresolvedOrderIndependent is the regression test for the
+// N-way deadlock: with 3 simultaneously active features all in required overlap with att's feature,
+// one resolved and two still unresolved, the attempt must block citing an unresolved feature --
+// never silently succeed, and never mis-fire the "N-way reconciliation not supported" block (which
+// only applies when the loop resolves 2+ conflicts in a single pass, not when 1 resolves and others
+// remain unresolved).
+//
+// Critically, this must hold regardless of where in ActiveFeatures()' iteration order (created_at
+// ASC) the resolved feature falls. Before this fix, evaluateOverlapGate returned immediately
+// (`return true, att, nil`) on the FIRST unresolved required overlap it encountered, without ever
+// evaluating the remaining active features. So if the resolved feature happened to sort BEFORE both
+// unresolved ones, the old code still (by luck) evaluated it before hitting the first unresolved
+// one and returning -- but if the resolved feature sorted AFTER even one unresolved feature, it was
+// never reached at all, and its resolution was silently discarded for the pass. Both subtests below
+// assert evalFunc was called exactly 3 times (once per other active feature): the old code called
+// it only 1 or 2 times depending on ordering, because it returned before the loop completed. That
+// call count, not just the block message, is what structurally distinguishes the fix from the bug:
+// the message alone happens to read identically in both the old buggy and new fixed behavior for
+// this exact pair of orderings, since either way the first unresolved feature encountered is the
+// same (unresolved-1 sorts before unresolved-2 in both subtests) -- only the fixed code proves it
+// got there by actually completing the loop.
+func TestThreeRequiredConflictsOneResolvedTwoUnresolvedOrderIndependent(t *testing.T) {
+	runCase := func(t *testing.T, resolvedFirst bool) {
+		spies := &gateSpies{}
+		deps, l, featSvc := newGateTestDeps(t, spies)
+		reconcileSvc := reconcile.NewService(l, reconcile.WithClock(deps.Now))
+
+		featMain, err := featSvc.Create(context.Background(), "feat-order-main", "refs/heads/feature-order-main-"+t.Name(), "base-sha-common", "expected-sha-refs/heads/feature-order-main-"+t.Name())
+		if err != nil {
+			t.Fatalf("featSvc.Create(feat-order-main) error = %v", err)
+		}
+
+		createOther := func(suffix string) feature.Feature {
+			f, err := featSvc.Create(context.Background(), "feat-order-"+suffix, "refs/heads/feature-order-"+suffix+"-"+t.Name(), "base-sha-common", "expected-sha-refs/heads/feature-order-"+suffix+"-"+t.Name())
+			if err != nil {
+				t.Fatalf("featSvc.Create(feat-order-%s) error = %v", suffix, err)
+			}
+			return f
+		}
+
+		var featResolved, featUnresolved1, featUnresolved2 feature.Feature
+		if resolvedFirst {
+			featResolved = createOther("resolved")
+			setupResolvedConflictDirect(t, l, reconcileSvc, featMain, featResolved, "expected-sha-"+featResolved.ParentRef, "resolved-sha-order")
+			featUnresolved1 = createOther("unresolved-1")
+			featUnresolved2 = createOther("unresolved-2")
+		} else {
+			featUnresolved1 = createOther("unresolved-1")
+			featUnresolved2 = createOther("unresolved-2")
+			featResolved = createOther("resolved")
+			setupResolvedConflictDirect(t, l, reconcileSvc, featMain, featResolved, "expected-sha-"+featResolved.ParentRef, "resolved-sha-order")
+		}
+
+		type shaCall struct{ ShaB string }
+		var calls []shaCall
+		spies.evaluateOverlapFunc = func(ctx context.Context, repoDir, baseSHA, shaA, shaB string, opts ...overlap.EvaluateOption) (*overlap.Evidence, error) {
+			calls = append(calls, shaCall{ShaB: shaB})
+			return newRequiredOverlapEvidence(baseSHA, shaA, shaB), nil
+		}
+
+		req := run.AttemptRequest{
+			ID:                "att-order-final-" + t.Name(),
+			FeatureID:         featMain.ID,
+			ParentRef:         featMain.ParentRef,
+			BaseSHA:           featMain.BaseSHA,
+			ExpectedParentSHA: featMain.ExpectedParentSHA,
+			IdempotencyKey:    "idem-order-final-" + t.Name(),
+			Owner:             "owner-order-final",
+			Branches:          []string{"lucind/lane-order-final-" + t.Name()},
+		}
+		res, err := run.ExecuteAttempt(context.Background(), deps, req)
+		if err != nil {
+			t.Fatalf("ExecuteAttempt() error = %v", err)
+		}
+
+		if res.Status != run.AttemptStatusBlocked {
+			t.Fatalf("res.Status = %v, want %v (an unresolved required overlap must still block, regardless of the resolved feature's position)", res.Status, run.AttemptStatusBlocked)
+		}
+		wantReason := "promotion blocked: reconciliation-required overlap with feature " + featUnresolved1.ID
+		if res.FailureReason != wantReason {
+			t.Errorf("res.FailureReason = %q, want %q (unresolved-1 sorts before unresolved-2 in both orderings, so it must be cited either way)", res.FailureReason, wantReason)
+		}
+		if strings.Contains(res.FailureReason, featResolved.ID) {
+			t.Errorf("res.FailureReason = %q, must not cite the already-resolved feature %q", res.FailureReason, featResolved.ID)
+		}
+
+		if len(calls) != 3 {
+			t.Fatalf("evalFunc called %d times, want 3 (one per other active feature -- the loop must not short-circuit on the first unresolved overlap)", len(calls))
+		}
+
+		expectedOriginalSHA := "candidate-sha-integrate-" + req.ID
+		if res.CandidateSHA != expectedOriginalSHA {
+			t.Errorf("res.CandidateSHA = %q, want %q (a blocked pass must not silently adopt the resolved override)", res.CandidateSHA, expectedOriginalSHA)
+		}
+
+		// One reconciliation_request already existed for featResolved (created during setup); a
+		// fresh awaiting request must now also exist for EACH unresolved feature (proving the loop
+		// reached and recorded both, not just the one it cited in FailureReason).
+		allReqs, err := l.AllReconciliationRequests(context.Background())
+		if err != nil {
+			t.Fatalf("AllReconciliationRequests() error = %v", err)
+		}
+		if len(allReqs) != 3 {
+			t.Fatalf("reconciliation_requests count = %d, want 3 (1 resolved + 2 newly created, one per unresolved feature)", len(allReqs))
+		}
+		var sawUnresolved2 bool
+		for _, r := range allReqs {
+			src, _, tgt, _ := reconcile.ParseDirection(r.Direction)
+			if (src == featUnresolved2.ID || tgt == featUnresolved2.ID) && r.Status == string(reconcile.RequestStatusAwaiting) {
+				sawUnresolved2 = true
+			}
+		}
+		if !sawUnresolved2 {
+			t.Errorf("no awaiting reconciliation_request found for %s, want the loop to have created one even though it was not the first unresolved feature cited", featUnresolved2.ID)
+		}
+	}
+
+	t.Run("resolved_first", func(t *testing.T) { runCase(t, true) })
+	t.Run("resolved_last", func(t *testing.T) { runCase(t, false) })
+}
+
+// TestThreeActiveFeaturesOneRemainingRequiredOverlapResolvedPromotes proves the fix's actual
+// convergence path: once every OTHER required overlap has been resolved or no longer applies (e.g.
+// content diverged, or an earlier sequential round already promoted past it), and exactly ONE
+// required overlap remains for this pass -- already resolved -- promotion succeeds using that
+// resolution, exactly as it would with only one other active feature. Two additional active
+// features are present but produce no required overlap at all (overlap.ClassInformational),
+// modeling "already promoted past in an earlier round" -- their mere presence in ActiveFeatures()
+// must not affect the single-resolution promotion path.
+func TestThreeActiveFeaturesOneRemainingRequiredOverlapResolvedPromotes(t *testing.T) {
+	spies := &gateSpies{}
+	deps, l, featSvc := newGateTestDeps(t, spies)
+	reconcileSvc := reconcile.NewService(l, reconcile.WithClock(deps.Now))
+
+	featMain, err := featSvc.Create(context.Background(), "feat-conv-main", "refs/heads/feature-conv-main", "base-sha-common", "expected-sha-refs/heads/feature-conv-main")
+	if err != nil {
+		t.Fatalf("featSvc.Create(feat-conv-main) error = %v", err)
+	}
+	featClearA, err := featSvc.Create(context.Background(), "feat-conv-clear-a", "refs/heads/feature-conv-clear-a", "base-sha-common", "expected-sha-refs/heads/feature-conv-clear-a")
+	if err != nil {
+		t.Fatalf("featSvc.Create(feat-conv-clear-a) error = %v", err)
+	}
+	featClearB, err := featSvc.Create(context.Background(), "feat-conv-clear-b", "refs/heads/feature-conv-clear-b", "base-sha-common", "expected-sha-refs/heads/feature-conv-clear-b")
+	if err != nil {
+		t.Fatalf("featSvc.Create(feat-conv-clear-b) error = %v", err)
+	}
+	featConflict, err := featSvc.Create(context.Background(), "feat-conv-conflict", "refs/heads/feature-conv-conflict", "base-sha-common", "expected-sha-refs/heads/feature-conv-conflict")
+	if err != nil {
+		t.Fatalf("featSvc.Create(feat-conv-conflict) error = %v", err)
+	}
+
+	const resolvedSHA = "resolved-sha-conv"
+	setupResolvedConflictDirect(t, l, reconcileSvc, featMain, featConflict, "expected-sha-"+featConflict.ParentRef, resolvedSHA)
+
+	spies.evaluateOverlapFunc = func(ctx context.Context, repoDir, baseSHA, shaA, shaB string, opts ...overlap.EvaluateOption) (*overlap.Evidence, error) {
+		switch shaB {
+		case "expected-sha-" + featConflict.ParentRef:
+			return newRequiredOverlapEvidence(baseSHA, shaA, shaB), nil
+		default:
+			// featClearA and featClearB: no longer conflicting at all -- the "already promoted
+			// past in an earlier round" case.
+			return &overlap.Evidence{Version: "v1", BaseSHA: baseSHA, FeatureASHA: shaA, FeatureBSHA: shaB, Class: overlap.ClassInformational}, nil
+		}
+	}
+
+	req := run.AttemptRequest{
+		ID:                "att-conv-final",
+		FeatureID:         featMain.ID,
+		ParentRef:         featMain.ParentRef,
+		BaseSHA:           featMain.BaseSHA,
+		ExpectedParentSHA: featMain.ExpectedParentSHA,
+		IdempotencyKey:    "idem-conv-final",
+		Owner:             "owner-conv-final",
+		Branches:          []string{"lucind/lane-conv-final"},
+	}
+	res, err := run.ExecuteAttempt(context.Background(), deps, req)
+	if err != nil {
+		t.Fatalf("ExecuteAttempt() error = %v", err)
+	}
+
+	if res.Status != run.AttemptStatusPromoted {
+		t.Fatalf("res.Status = %v, want %v (the one remaining resolved required overlap must not be blocked by the other two clear features)", res.Status, run.AttemptStatusPromoted)
+	}
+	if res.CandidateSHA != resolvedSHA {
+		t.Errorf("res.CandidateSHA = %q, want %q", res.CandidateSHA, resolvedSHA)
+	}
+	if len(spies.promoteCASCalls) != 1 || spies.promoteCASCalls[0].CandidateSHA != resolvedSHA {
+		t.Errorf("promoteCASCalls = %+v, want exactly one call with candidate_sha %q", spies.promoteCASCalls, resolvedSHA)
+	}
+
+	_ = featClearA
+	_ = featClearB
+}
+
+// TestThreeActiveFeaturesTwoResolvedZeroUnresolvedStillBlocksNWay proves the N-way safety limit is
+// unchanged by this fix: with 0 unresolved required overlaps and 2 simultaneously resolved ones,
+// the attempt still blocks explicitly rather than silently promoting either resolution -- even in
+// the presence of a third, entirely non-conflicting active feature.
+func TestThreeActiveFeaturesTwoResolvedZeroUnresolvedStillBlocksNWay(t *testing.T) {
+	spies := &gateSpies{}
+	deps, l, featSvc := newGateTestDeps(t, spies)
+	reconcileSvc := reconcile.NewService(l, reconcile.WithClock(deps.Now))
+
+	featMain, err := featSvc.Create(context.Background(), "feat-nway3-main", "refs/heads/feature-nway3-main", "base-sha-common", "expected-sha-refs/heads/feature-nway3-main")
+	if err != nil {
+		t.Fatalf("featSvc.Create(feat-nway3-main) error = %v", err)
+	}
+	featClear, err := featSvc.Create(context.Background(), "feat-nway3-clear", "refs/heads/feature-nway3-clear", "base-sha-common", "expected-sha-refs/heads/feature-nway3-clear")
+	if err != nil {
+		t.Fatalf("featSvc.Create(feat-nway3-clear) error = %v", err)
+	}
+	featB, err := featSvc.Create(context.Background(), "feat-nway3-b", "refs/heads/feature-nway3-b", "base-sha-common", "expected-sha-refs/heads/feature-nway3-b")
+	if err != nil {
+		t.Fatalf("featSvc.Create(feat-nway3-b) error = %v", err)
+	}
+	featC, err := featSvc.Create(context.Background(), "feat-nway3-c", "refs/heads/feature-nway3-c", "base-sha-common", "expected-sha-refs/heads/feature-nway3-c")
+	if err != nil {
+		t.Fatalf("featSvc.Create(feat-nway3-c) error = %v", err)
+	}
+
+	setupResolvedConflictDirect(t, l, reconcileSvc, featMain, featB, "expected-sha-"+featB.ParentRef, "resolved-sha-nway3-b")
+	setupResolvedConflictDirect(t, l, reconcileSvc, featMain, featC, "expected-sha-"+featC.ParentRef, "resolved-sha-nway3-c")
+
+	spies.evaluateOverlapFunc = func(ctx context.Context, repoDir, baseSHA, shaA, shaB string, opts ...overlap.EvaluateOption) (*overlap.Evidence, error) {
+		switch shaB {
+		case "expected-sha-" + featB.ParentRef, "expected-sha-" + featC.ParentRef:
+			return newRequiredOverlapEvidence(baseSHA, shaA, shaB), nil
+		default:
+			return &overlap.Evidence{Version: "v1", BaseSHA: baseSHA, FeatureASHA: shaA, FeatureBSHA: shaB, Class: overlap.ClassInformational}, nil
+		}
+	}
+
+	req := run.AttemptRequest{
+		ID:                "att-nway3-final",
+		FeatureID:         featMain.ID,
+		ParentRef:         featMain.ParentRef,
+		BaseSHA:           featMain.BaseSHA,
+		ExpectedParentSHA: featMain.ExpectedParentSHA,
+		IdempotencyKey:    "idem-nway3-final",
+		Owner:             "owner-nway3-final",
+		Branches:          []string{"lucind/lane-nway3-final"},
+	}
+	res, err := run.ExecuteAttempt(context.Background(), deps, req)
+	if err != nil {
+		t.Fatalf("ExecuteAttempt() error = %v", err)
+	}
+
+	if res.Status != run.AttemptStatusBlocked {
+		t.Fatalf("res.Status = %v, want %v (2 simultaneously resolved required overlaps must still block, unchanged)", res.Status, run.AttemptStatusBlocked)
+	}
+	if !strings.Contains(res.FailureReason, "N-way reconciliation not supported") {
+		t.Errorf("res.FailureReason = %q, want it to mention the N-way block", res.FailureReason)
+	}
+	if !strings.Contains(res.FailureReason, featB.ID) || !strings.Contains(res.FailureReason, featC.ID) {
+		t.Errorf("res.FailureReason = %q, want it to mention both %q and %q", res.FailureReason, featB.ID, featC.ID)
+	}
+
+	expectedOriginalSHA := "candidate-sha-integrate-att-nway3-final"
+	if res.CandidateSHA != expectedOriginalSHA {
+		t.Errorf("res.CandidateSHA = %q, want %q (unchanged -- neither resolution silently applied)", res.CandidateSHA, expectedOriginalSHA)
+	}
+	if len(spies.promoteCASCalls) != 0 {
+		t.Errorf("promoteCASCalls = %+v, want none", spies.promoteCASCalls)
+	}
+
+	_ = featClear
+}
