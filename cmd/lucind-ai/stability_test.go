@@ -1396,3 +1396,180 @@ func TestStabilityRunProductionDefaultWiresLiveJourney(t *testing.T) {
 		}
 	}
 }
+
+func TestRunCampaignPersistsTrialProgress(t *testing.T) {
+	ctx := context.Background()
+	dir, headSHA := setupCleanTestRepoForStability(t)
+
+	fakeExec := newFakeJourneyExecutor()
+	var stdout, stderr bytes.Buffer
+
+	campCfg := CampaignConfig{
+		PrimaryRoot:  dir,
+		CandidateSHA: headSHA,
+		BuildVersion: headSHA,
+		CampaignID:   "camp-sim-progress-test",
+		ReceiptID:    "rcpt-sim-progress-test",
+		PGIDB:        99999999,
+		LedgerOpener: func(ctx context.Context, primaryRoot string) (*ledger.Ledger, error) {
+			return ledger.Open(ctx, primaryRoot)
+		},
+		ExecuteJourney: func(ctx context.Context, sm *stability.StateMachine, deps lucindrun.Deps, featSvc *feature.Service, cfg stability.JourneyConfig, pgidB int, wtBPath string) (*stability.TrialJourneyResult, error) {
+			_ = os.MkdirAll(filepath.Join(wtBPath, ".lucind"), 0o755)
+			_ = os.WriteFile(filepath.Join(wtBPath, ".lucind", "result.json"), []byte(laneEnvelopeJSON("stability-change-b", "done")), 0o644)
+			cfg.LeaseTTL = 50 * time.Millisecond
+			// Trigger OnProcessStart to simulate process group registration
+			if deps.OnProcessStart != nil {
+				_, pB := stability.BuildJourneyPackets(cfg)
+				deps.OnProcessStart(pB.ID, 88888)
+			}
+			return stability.ExecuteTrialJourney(ctx, sm, deps, featSvc, cfg, pgidB, wtBPath)
+		},
+		DepsFactory: func(runID, primaryRoot string, l *ledger.Ledger, timeout, approvalTimeout time.Duration) lucindrun.Deps {
+			d, _ := newSimulatedTestDeps(t, primaryRoot, fakeExec)
+			d.RunID = runID
+			d.Ledger = l
+			return d
+		},
+		CheckRunner: func(ctx context.Context, dir string) (bool, string, error) {
+			return true, "PASS: all baseline checks passed", nil
+		},
+		Stdout: &stdout,
+		Stderr: &stderr,
+	}
+
+	code, err := RunCampaign(ctx, campCfg)
+	if err != nil || code != 0 {
+		t.Fatalf("RunCampaign failed: code = %d, err = %v, stderr = %s", code, err, stderr.String())
+	}
+
+	st, err := store.Open(ctx, worktree.DefaultGitRunner, dir)
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	defer st.Close()
+
+	// 1. GetTrialProgress returns highest trial (trial 3) in passed stage with pgid_b = 88888
+	progress, err := st.GetTrialProgress(ctx, "camp-sim-progress-test")
+	if err != nil {
+		t.Fatalf("GetTrialProgress: %v", err)
+	}
+	if progress.TrialNumber != 3 {
+		t.Errorf("progress.TrialNumber = %d, want 3", progress.TrialNumber)
+	}
+	if progress.Stage != "passed" {
+		t.Errorf("progress.Stage = %q, want 'passed'", progress.Stage)
+	}
+	if progress.PGIDB == nil || *progress.PGIDB != 88888 {
+		t.Errorf("progress.PGIDB = %v, want 88888", progress.PGIDB)
+	}
+
+	// 2. Query individual trial rows directly from DB to verify all 3 trials were persisted
+	rows, err := st.DB().QueryContext(ctx, "SELECT trial_number, stage, pgid_b FROM trial_progress WHERE campaign_id = ? ORDER BY trial_number ASC", "camp-sim-progress-test")
+	if err != nil {
+		t.Fatalf("query trial_progress rows: %v", err)
+	}
+	defer rows.Close()
+
+	var trialsFound int
+	for rows.Next() {
+		var (
+			tNum  int
+			stage string
+			pgidB int
+		)
+		if err := rows.Scan(&tNum, &stage, &pgidB); err != nil {
+			t.Fatalf("scan trial row: %v", err)
+		}
+		trialsFound++
+		if tNum != trialsFound {
+			t.Errorf("trial row number = %d, want %d", tNum, trialsFound)
+		}
+		if stage != "passed" {
+			t.Errorf("trial %d stage = %q, want 'passed'", tNum, stage)
+		}
+		if pgidB != 88888 {
+			t.Errorf("trial %d pgidB = %d, want 88888", tNum, pgidB)
+		}
+	}
+	if trialsFound != 3 {
+		t.Errorf("trialsFound = %d, want 3", trialsFound)
+	}
+}
+
+func TestStabilityResumePrintsPersistedTrialProgress(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("WithPersistedProgress", func(t *testing.T) {
+		dir := initTestGitRepo(t)
+		headSHA := runGitCmd(t, dir, "rev-parse", "HEAD")
+
+		st, err := store.Open(ctx, worktree.DefaultGitRunner, dir)
+		if err != nil {
+			t.Fatalf("store.Open failed: %v", err)
+		}
+		defer st.Close()
+
+		camp, err := st.CreateCampaign(ctx, "camp-resume-prog", headSHA)
+		if err != nil {
+			t.Fatalf("CreateCampaign failed: %v", err)
+		}
+
+		if err := st.UpsertTrialStage(ctx, camp.ID, 2, "dispatching"); err != nil {
+			t.Fatalf("UpsertTrialStage failed: %v", err)
+		}
+		if err := st.UpdateTrialPGID(ctx, camp.ID, 2, "b", 77777); err != nil {
+			t.Fatalf("UpdateTrialPGID failed: %v", err)
+		}
+
+		var stdout, stderr bytes.Buffer
+		code := runStabilityResumeWithDir(ctx, []string{}, &stdout, &stderr, dir)
+		if code != 0 {
+			t.Fatalf("runStabilityResumeWithDir failed: code = %d, stderr = %s", code, stderr.String())
+		}
+
+		out := stdout.String()
+		if !strings.Contains(out, "persisted trial:  2") {
+			t.Errorf("stdout missing 'persisted trial:  2':\n%s", out)
+		}
+		if !strings.Contains(out, "persisted stage:  dispatching") {
+			t.Errorf("stdout missing 'persisted stage:  dispatching':\n%s", out)
+		}
+		if !strings.Contains(out, "persisted pgid_b: 77777") {
+			t.Errorf("stdout missing 'persisted pgid_b: 77777':\n%s", out)
+		}
+		if stderr.Len() != 0 {
+			t.Errorf("stderr not empty: %s", stderr.String())
+		}
+	})
+
+	t.Run("WithoutPersistedProgress", func(t *testing.T) {
+		dir := initTestGitRepo(t)
+		headSHA := runGitCmd(t, dir, "rev-parse", "HEAD")
+
+		st, err := store.Open(ctx, worktree.DefaultGitRunner, dir)
+		if err != nil {
+			t.Fatalf("store.Open failed: %v", err)
+		}
+		defer st.Close()
+
+		_, err = st.CreateCampaign(ctx, "camp-resume-no-prog", headSHA)
+		if err != nil {
+			t.Fatalf("CreateCampaign failed: %v", err)
+		}
+
+		var stdout, stderr bytes.Buffer
+		code := runStabilityResumeWithDir(ctx, []string{}, &stdout, &stderr, dir)
+		if code != 0 {
+			t.Fatalf("runStabilityResumeWithDir failed: code = %d, stderr = %s", code, stderr.String())
+		}
+
+		out := stdout.String()
+		if strings.Contains(out, "persisted trial:") || strings.Contains(out, "persisted stage:") || strings.Contains(out, "persisted pgid_b:") {
+			t.Errorf("stdout unexpectedly contains persisted progress lines:\n%s", out)
+		}
+		if stderr.Len() != 0 {
+			t.Errorf("stderr unexpectedly contains error for ErrTrialProgressNotFound: %s", stderr.String())
+		}
+	})
+}

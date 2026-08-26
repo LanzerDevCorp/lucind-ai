@@ -298,13 +298,29 @@ func CheckCampaignBudget(elapsed, budget time.Duration) bool {
 }
 
 // StateMachine coordinates the pure in-memory state of a Campaign and its Trials.
-// It has no clock, timer, or I/O.
+// It has no clock, timer, or I/O. StateMachine performs no I/O itself; invoking any
+// persistence or side effects via the optional transition observer is the caller's
+// responsibility, invoked synchronously.
 type StateMachine struct {
 	state             CampaignState
 	consecutivePasses int
 	currentTrial      int
 	activeTrialState  TrialState
 	hasActiveTrial    bool
+	onTransition      func(trialNumber int, stage TrialState)
+}
+
+// SetOnTransition sets an optional synchronous observer callback invoked on trial-state transitions.
+// StateMachine performs no I/O itself; invoking any persistence or side effects in the callback
+// is the caller's responsibility.
+func (sm *StateMachine) SetOnTransition(fn func(trialNumber int, stage TrialState)) {
+	sm.onTransition = fn
+}
+
+func (sm *StateMachine) notifyTransition() {
+	if sm.onTransition != nil {
+		sm.onTransition(sm.currentTrial, sm.activeTrialState)
+	}
 }
 
 // NewStateMachine constructs a StateMachine initialized in CampaignPreflight.
@@ -384,6 +400,7 @@ func (sm *StateMachine) StartNextTrial() (int, error) {
 	sm.currentTrial++
 	sm.activeTrialState = TrialAdmitted
 	sm.hasActiveTrial = true
+	sm.notifyTransition()
 	return sm.currentTrial, nil
 }
 
@@ -399,6 +416,7 @@ func (sm *StateMachine) AdvanceTrial(to TrialState) error {
 	if to.Terminal() {
 		sm.hasActiveTrial = false
 	}
+	sm.notifyTransition()
 	return nil
 }
 
@@ -430,6 +448,7 @@ func (sm *StateMachine) RecordTrialOutcome(outcome TrialState) error {
 		sm.state = CampaignFailed
 	}
 
+	sm.notifyTransition()
 	return nil
 }
 
@@ -647,7 +666,11 @@ func ExecuteTrialJourneyLive(
 	pidBChan := make(chan int, 1)
 	liveDeps := deps
 	liveDeps.Setpgid = true
+	originalOnStart := deps.OnProcessStart
 	liveDeps.OnProcessStart = func(laneID string, pid int) {
+		if originalOnStart != nil {
+			originalOnStart(laneID, pid)
+		}
 		if laneID == pB.ID {
 			select {
 			case pidBChan <- pid:

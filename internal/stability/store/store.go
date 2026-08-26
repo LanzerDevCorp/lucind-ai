@@ -39,10 +39,11 @@ const (
 
 // Errors returned by Store.
 var (
-	ErrPragmaNotApplied = errors.New("stability/store: required SQLite pragma was not applied")
-	ErrCampaignActive   = errors.New("stability/store: an active campaign is already in progress")
-	ErrCampaignNotFound = errors.New("stability/store: campaign not found")
-	ErrInvalidStatus    = errors.New("stability/store: invalid campaign status")
+	ErrPragmaNotApplied      = errors.New("stability/store: required SQLite pragma was not applied")
+	ErrCampaignActive        = errors.New("stability/store: an active campaign is already in progress")
+	ErrCampaignNotFound      = errors.New("stability/store: campaign not found")
+	ErrTrialProgressNotFound = errors.New("stability/store: trial progress not found")
+	ErrInvalidStatus         = errors.New("stability/store: invalid campaign status")
 )
 
 // Campaign represents a persisted stability campaign record.
@@ -53,6 +54,18 @@ type Campaign struct {
 	CreatedAt    time.Time  `json:"created_at"`
 	UpdatedAt    time.Time  `json:"updated_at"`
 	ClosedAt     *time.Time `json:"closed_at,omitempty"`
+}
+
+// TrialProgress represents a persisted trial-progress record.
+type TrialProgress struct {
+	CampaignID  string    `json:"campaign_id"`
+	TrialNumber int       `json:"trial_number"`
+	Stage       string    `json:"stage"`
+	PGIDA       *int      `json:"pgid_a,omitempty"`
+	PGIDB       *int      `json:"pgid_b,omitempty"`
+	PGIDFix     *int      `json:"pgid_fix,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 // Store represents a SQLite-backed stability campaign authority store.
@@ -181,6 +194,18 @@ CREATE TABLE IF NOT EXISTS campaigns (
 ) STRICT;
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_campaigns_single_active ON campaigns(status) WHERE status = 'running';
+
+CREATE TABLE IF NOT EXISTS trial_progress (
+  campaign_id TEXT NOT NULL,
+  trial_number INTEGER NOT NULL,
+  stage TEXT NOT NULL,
+  pgid_a INTEGER,
+  pgid_b INTEGER,
+  pgid_fix INTEGER,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (campaign_id, trial_number)
+) STRICT;
 `
 
 func migrate(ctx context.Context, db *sql.DB) error {
@@ -202,6 +227,13 @@ func migrate(ctx context.Context, db *sql.DB) error {
 	if currentVersion < 1 {
 		now := time.Now().UTC().Format(time.RFC3339Nano)
 		if _, err := tx.ExecContext(ctx, `INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)`, 1, now); err != nil {
+			return err
+		}
+	}
+
+	if currentVersion < 2 {
+		now := time.Now().UTC().Format(time.RFC3339Nano)
+		if _, err := tx.ExecContext(ctx, `INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)`, 2, now); err != nil {
 			return err
 		}
 	}
@@ -368,4 +400,107 @@ func (s *Store) UpdateCampaignStatus(ctx context.Context, id string, status Stat
 		return ErrCampaignNotFound
 	}
 	return nil
+}
+
+// UpsertTrialStage inserts or updates the active stage for a campaign trial.
+func (s *Store) UpsertTrialStage(ctx context.Context, campaignID string, trialNumber int, stage string) error {
+	if strings.TrimSpace(campaignID) == "" {
+		return errors.New("stability/store: campaign ID must not be empty")
+	}
+	if trialNumber <= 0 {
+		return errors.New("stability/store: trial number must be > 0")
+	}
+	if strings.TrimSpace(stage) == "" {
+		return errors.New("stability/store: stage must not be empty")
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO trial_progress (campaign_id, trial_number, stage, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT(campaign_id, trial_number) DO UPDATE SET stage = excluded.stage, updated_at = excluded.updated_at`,
+		campaignID, trialNumber, stage, now, now,
+	)
+	if err != nil {
+		return fmt.Errorf("stability/store: upsert trial stage: %w", err)
+	}
+	return nil
+}
+
+// UpdateTrialPGID inserts or updates the process group ID for a specific lane in a trial.
+// lane must be "a", "b", or "fix".
+func (s *Store) UpdateTrialPGID(ctx context.Context, campaignID string, trialNumber int, lane string, pgid int) error {
+	if strings.TrimSpace(campaignID) == "" {
+		return errors.New("stability/store: campaign ID must not be empty")
+	}
+	if trialNumber <= 0 {
+		return errors.New("stability/store: trial number must be > 0")
+	}
+
+	var col string
+	switch lane {
+	case "a":
+		col = "pgid_a"
+	case "b":
+		col = "pgid_b"
+	case "fix":
+		col = "pgid_fix"
+	default:
+		return fmt.Errorf("stability/store: invalid lane %q (must be 'a', 'b', or 'fix')", lane)
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	query := fmt.Sprintf(`
+		INSERT INTO trial_progress (campaign_id, trial_number, stage, %s, created_at, updated_at)
+		VALUES (?, ?, '', ?, ?, ?)
+		ON CONFLICT(campaign_id, trial_number) DO UPDATE SET %s = excluded.%s, updated_at = excluded.updated_at`,
+		col, col, col,
+	)
+	_, err := s.db.ExecContext(ctx, query, campaignID, trialNumber, pgid, now, now)
+	if err != nil {
+		return fmt.Errorf("stability/store: update trial pgid: %w", err)
+	}
+	return nil
+}
+
+// GetTrialProgress returns the trial progress record with the highest trial number for the campaign.
+// If no record exists, ErrTrialProgressNotFound is returned.
+func (s *Store) GetTrialProgress(ctx context.Context, campaignID string) (TrialProgress, error) {
+	var (
+		tp        TrialProgress
+		pgidA     sql.NullInt64
+		pgidB     sql.NullInt64
+		pgidFix   sql.NullInt64
+		createdAt string
+		updatedAt string
+	)
+	err := s.db.QueryRowContext(ctx, `
+		SELECT campaign_id, trial_number, stage, pgid_a, pgid_b, pgid_fix, created_at, updated_at
+		FROM trial_progress
+		WHERE campaign_id = ?
+		ORDER BY trial_number DESC
+		LIMIT 1`, campaignID,
+	).Scan(&tp.CampaignID, &tp.TrialNumber, &tp.Stage, &pgidA, &pgidB, &pgidFix, &createdAt, &updatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return TrialProgress{}, ErrTrialProgressNotFound
+	}
+	if err != nil {
+		return TrialProgress{}, fmt.Errorf("stability/store: get trial progress: %w", err)
+	}
+
+	if pgidA.Valid {
+		v := int(pgidA.Int64)
+		tp.PGIDA = &v
+	}
+	if pgidB.Valid {
+		v := int(pgidB.Int64)
+		tp.PGIDB = &v
+	}
+	if pgidFix.Valid {
+		v := int(pgidFix.Int64)
+		tp.PGIDFix = &v
+	}
+	tp.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt)
+	tp.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updatedAt)
+	return tp, nil
 }
