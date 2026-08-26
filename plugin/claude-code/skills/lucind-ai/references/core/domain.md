@@ -64,20 +64,20 @@ _Avoid_: Execution Route or an unapproved workflow change
 The declared area of the repository that a Lane may modify. Lanes with overlapping Write Scopes must have an explicit execution order and cannot run as independent concurrent work.
 _Avoid_: An informal file list or an undeclared editing boundary
 
-**Defect Assessment**:
-The classification of a discovered defect by its origin and its effect on the current Lane, other active Lanes, and their Dependencies. Only affected Lanes are blocked; unaffected Lanes continue, and a repair with no active dependents can be scheduled as non-blocking work.
+**Defect Assessment** (production-wired via ultrafixer):
+The classification of a discovered defect by its origin (`base_sha` diff — feature-introduced vs. pre-existing) and its independent critical/blocking evaluation per active feature branch, dispatched via the ultrafixer packet template. Only affected Lanes are blocked; unaffected Lanes continue, and a non-critical, non-blocking defect is recorded rather than treated as an immediate fix.
 _Avoid_: Treating every failure as an immediate blocking fix
 
-**Defect Record**:
-The durable account of a discovered problem, its evidence, impact, and disposition. Every assessed defect must be committed to Shared Memory before remediation can begin, even when no external issue is created.
+**Defect Record** (production-wired via ultrafixer):
+The durable account of a discovered problem, its evidence, and disposition — the SQLite `defect_records` ledger table, written and read via `lucind-ai defect record`/`list`/`decline`. Every assessed defect is committed to durable state before remediation can begin, even when no external issue is created. See `references/coordination/dependencies-defects.md` for the full protocol.
 _Avoid_: Requiring an external tracker for defect history
 
-**Remediation Proposal**:
-The prepared fix Change and Dependencies produced from a Defect Assessment, with a recommendation about whether an External Work Item is warranted. One human confirmation selects the external tracking decision and activates remediation; approved work can then proceed within its Execution Strategy.
-_Avoid_: Automatically launched repair or unapproved issue creation
+**Remediation Proposal** (not yet built):
+The still-aspirational shape of a prepared fix as a full Change with its own Dependencies, distinct from what ultrafixer actually does today: ultrafixer repairs directly in an isolated worktree and delivers the commit via a `blocked` result envelope for human-gated CAS integration (`lucind-ai integrate retry`) or decline (`lucind-ai defect decline`) — no separate Change or Dependency graph is created, and no recommendation about an External Work Item is produced.
+_Avoid_: Assuming ultrafixer's `blocked` envelope is a Remediation Proposal in this fuller sense — it is a narrower, already-shipped increment
 
-**External Work Item**:
-An optional representation of work that merits independent tracking, such as a new feature or a defect affecting multiple active Changes. It supports collaboration and traceability but is not required and is not the Repository Coordinator's source of truth.
+**External Work Item** (not yet built):
+An optional representation of work that merits independent tracking, such as a new feature or a defect affecting multiple active Changes. It supports collaboration and traceability but is not required and is not the Repository Coordinator's source of truth. No automation creates one today, including ultrafixer.
 _Avoid_: Required Change identity or authoritative local state
 
 **Dependency**:
