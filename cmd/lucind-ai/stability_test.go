@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -1572,4 +1573,261 @@ func TestStabilityResumePrintsPersistedTrialProgress(t *testing.T) {
 			t.Errorf("stderr unexpectedly contains error for ErrTrialProgressNotFound: %s", stderr.String())
 		}
 	})
+}
+
+func TestRunCampaignCrossTrialWorktreeCleanupRealWorktrees(t *testing.T) {
+	ctx := context.Background()
+	dir, headSHA := setupCleanTestRepoForStability(t)
+
+	fakeExec := newFakeJourneyExecutor()
+	baselineChecksCount := 0
+	var stdout, stderr bytes.Buffer
+
+	campCfg := CampaignConfig{
+		PrimaryRoot:  dir,
+		CandidateSHA: headSHA,
+		BuildVersion: headSHA,
+		CampaignID:   "camp-wt-cleanup-test",
+		ReceiptID:    "rcpt-wt-cleanup-test",
+		PGIDB:        99999999,
+		LedgerOpener: func(ctx context.Context, primaryRoot string) (*ledger.Ledger, error) {
+			return ledger.Open(ctx, primaryRoot)
+		},
+		ExecuteJourney: func(ctx context.Context, sm *stability.StateMachine, deps lucindrun.Deps, featSvc *feature.Service, cfg stability.JourneyConfig, pgidB int, wtBPath string) (*stability.TrialJourneyResult, error) {
+			cfg.LeaseTTL = 50 * time.Millisecond
+			return stability.ExecuteTrialJourney(ctx, sm, deps, featSvc, cfg, pgidB, wtBPath)
+		},
+		DepsFactory: func(runID, primaryRoot string, l *ledger.Ledger, timeout, approvalTimeout time.Duration) lucindrun.Deps {
+			d, _ := newSimulatedTestDeps(t, primaryRoot, fakeExec)
+			d.RunID = runID
+			d.Ledger = l
+			// Use REAL worktree.Create so that stale directories from previous trials collide!
+			d.CreateWorktree = func(ctx context.Context, primaryRoot, laneID, parentRef, baseSHA string) (worktree.Worktree, error) {
+				wt, err := worktree.Create(ctx, primaryRoot, laneID)
+				if err != nil {
+					return worktree.Worktree{}, err
+				}
+				_ = fixture.MaterializeFixtures(wt.Path)
+				if laneID == "stability-change-a" {
+					_ = os.WriteFile(filepath.Join(wt.Path, "fixture", "change_a.txt"), []byte("CHANGE_A=DONE\n"), 0o644)
+				} else if laneID == "stability-change-b" {
+					_ = os.WriteFile(filepath.Join(wt.Path, "fixture", "change_b.txt"), []byte("CHANGE_B=DONE\n"), 0o644)
+				} else if laneID == "stability-fix-a" {
+					_ = os.WriteFile(filepath.Join(wt.Path, "fixture", "defect.txt"), []byte("STATUS=FIXED\n"), 0o644)
+				}
+				runGitCmd(t, wt.Path, "add", ".")
+				runGitCmd(t, wt.Path, "commit", "-m", "lane change for "+laneID)
+				lucindPath := filepath.Join(wt.Path, ".lucind")
+				_ = os.MkdirAll(lucindPath, 0o755)
+				_ = os.WriteFile(filepath.Join(lucindPath, "result.json"), []byte(laneEnvelopeJSON(laneID, "done")), 0o644)
+				return wt, nil
+			}
+			return d
+		},
+		CheckRunner: func(ctx context.Context, dir string) (bool, string, error) {
+			baselineChecksCount++
+			return true, "PASS: baseline checks", nil
+		},
+		Stdout: &stdout,
+		Stderr: &stderr,
+	}
+
+	code, err := RunCampaign(ctx, campCfg)
+	if err != nil || code != 0 {
+		t.Fatalf("RunCampaign failed: code = %d, err = %v, stderr = %s", code, err, stderr.String())
+	}
+
+	if baselineChecksCount != 1 {
+		t.Errorf("baselineChecksCount = %d, want 1", baselineChecksCount)
+	}
+
+	// Verify that after all 3 trials complete, worktrees on disk are cleaned up
+	wtPathA := reconcile.WorktreePathFor(dir, "stability-change-a")
+	wtPathB := reconcile.WorktreePathFor(dir, "stability-change-b")
+	if _, err := os.Stat(wtPathA); !os.IsNotExist(err) {
+		t.Errorf("worktree path A %s still exists after campaign completion", wtPathA)
+	}
+	if _, err := os.Stat(wtPathB); !os.IsNotExist(err) {
+		t.Errorf("worktree path B %s still exists after campaign completion", wtPathB)
+	}
+}
+
+func TestRunCampaignFailedTrialPreservesWorktrees(t *testing.T) {
+	ctx := context.Background()
+	dir, headSHA := setupCleanTestRepoForStability(t)
+
+	fakeExec := newFakeJourneyExecutor()
+	var stdout, stderr bytes.Buffer
+
+	campCfg := CampaignConfig{
+		PrimaryRoot:  dir,
+		CandidateSHA: headSHA,
+		BuildVersion: headSHA,
+		CampaignID:   "camp-wt-fail-preserve",
+		ReceiptID:    "rcpt-wt-fail-preserve",
+		PGIDB:        99999999,
+		LedgerOpener: func(ctx context.Context, primaryRoot string) (*ledger.Ledger, error) {
+			return ledger.Open(ctx, primaryRoot)
+		},
+		ExecuteJourney: func(ctx context.Context, sm *stability.StateMachine, deps lucindrun.Deps, featSvc *feature.Service, cfg stability.JourneyConfig, pgidB int, wtBPath string) (*stability.TrialJourneyResult, error) {
+			pA, pB := stability.BuildJourneyPackets(cfg)
+			// Create worktrees explicitly using the real CreateWorktree hook
+			_, errA := deps.CreateWorktree(ctx, dir, pA.ID, "", "")
+			if errA != nil {
+				return nil, errA
+			}
+			_, errB := deps.CreateWorktree(ctx, dir, pB.ID, "", "")
+			if errB != nil {
+				return nil, errB
+			}
+			// Simulate trial failure
+			return nil, errors.New("simulated trial execution error")
+		},
+		DepsFactory: func(runID, primaryRoot string, l *ledger.Ledger, timeout, approvalTimeout time.Duration) lucindrun.Deps {
+			d, _ := newSimulatedTestDeps(t, primaryRoot, fakeExec)
+			d.RunID = runID
+			d.Ledger = l
+			d.CreateWorktree = func(ctx context.Context, primaryRoot, laneID, parentRef, baseSHA string) (worktree.Worktree, error) {
+				wt, err := worktree.Create(ctx, primaryRoot, laneID)
+				if err != nil {
+					return worktree.Worktree{}, err
+				}
+				return wt, nil
+			}
+			return d
+		},
+		Stdout: &stdout,
+		Stderr: &stderr,
+	}
+
+	code, err := RunCampaign(ctx, campCfg)
+	if err == nil || code == 0 {
+		t.Fatalf("RunCampaign succeeded, want failure; code = %d, err = %v", code, err)
+	}
+
+	// Verify that failed trial's worktrees are preserved on disk for post-hoc inspection
+	wtPathA := reconcile.WorktreePathFor(dir, "stability-change-a")
+	wtPathB := reconcile.WorktreePathFor(dir, "stability-change-b")
+	if _, err := os.Stat(wtPathA); os.IsNotExist(err) {
+		t.Errorf("worktree path A %s was unexpectedly removed on trial failure", wtPathA)
+	}
+	if _, err := os.Stat(wtPathB); os.IsNotExist(err) {
+		t.Errorf("worktree path B %s was unexpectedly removed on trial failure", wtPathB)
+	}
+	// Cleanup for test hygiene
+	_ = worktree.Cleanup(ctx, dir, "stability-change-a")
+	_ = worktree.Cleanup(ctx, dir, "stability-change-b")
+}
+
+func TestStabilityResumeAndAbortWithPersistedPGID(t *testing.T) {
+	ctx := context.Background()
+	dir := initTestGitRepo(t)
+	headSHA := runGitCmd(t, dir, "rev-parse", "HEAD")
+
+	st, err := store.Open(ctx, worktree.DefaultGitRunner, dir)
+	if err != nil {
+		t.Fatalf("store.Open failed: %v", err)
+	}
+	defer st.Close()
+
+	camp, err := st.CreateCampaign(ctx, "camp-pgid-test", headSHA)
+	if err != nil {
+		t.Fatalf("CreateCampaign failed: %v", err)
+	}
+
+	// Spawn a real background sleep process in a new process group
+	cmd := exec.Command("sleep", "30")
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("failed to start sleep process: %v", err)
+	}
+	targetPGID := cmd.Process.Pid
+	t.Cleanup(func() {
+		_ = syscall.Kill(-targetPGID, syscall.SIGKILL)
+		_ = cmd.Wait()
+	})
+
+	// Persist the active process PGID
+	if err := st.UpsertTrialStage(ctx, camp.ID, 1, "dispatching"); err != nil {
+		t.Fatalf("UpsertTrialStage failed: %v", err)
+	}
+	if err := st.UpdateTrialPGID(ctx, camp.ID, 1, "b", targetPGID); err != nil {
+		t.Fatalf("UpdateTrialPGID failed: %v", err)
+	}
+
+	// Resume: should inspect with ProcessGroups populated -> detects surviving sleep process -> returns DecisionFailClosed (exit code 1)
+	var stdout, stderr bytes.Buffer
+	code := runStabilityResumeWithDir(ctx, []string{}, &stdout, &stderr, dir)
+	if code != 1 {
+		t.Fatalf("runStabilityResume exit = %d, want 1 (fail_closed due to surviving PGID); stdout = %s", code, stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "fail_closed") {
+		t.Errorf("resume stdout = %q, want 'fail_closed'", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "surviving") && !strings.Contains(stdout.String(), "survivor") {
+		t.Errorf("resume stdout = %q, want mention of surviving processes", stdout.String())
+	}
+
+	// Abort: should abort with ProcessGroups populated -> terminates targetPGID -> returns 0
+	stdout.Reset()
+	stderr.Reset()
+	code = runStabilityAbortWithDir(ctx, []string{}, &stdout, &stderr, dir)
+	if code != 0 {
+		t.Fatalf("runStabilityAbort exit = %d, want 0; stderr = %s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "failed") {
+		t.Errorf("abort stdout = %q, want status failed", stdout.String())
+	}
+
+	// Confirm the sleep process was killed
+	_ = cmd.Wait()
+	if probeErr := syscall.Kill(targetPGID, 0); probeErr == nil {
+		t.Errorf("process %d still alive after abort killed it", targetPGID)
+	}
+}
+
+func TestStabilityResumeAndAbortWithoutPersistedPGID(t *testing.T) {
+	ctx := context.Background()
+	dir := initTestGitRepo(t)
+	headSHA := runGitCmd(t, dir, "rev-parse", "HEAD")
+
+	st, err := store.Open(ctx, worktree.DefaultGitRunner, dir)
+	if err != nil {
+		t.Fatalf("store.Open failed: %v", err)
+	}
+	defer st.Close()
+
+	camp, err := st.CreateCampaign(ctx, "camp-no-pgid-test", headSHA)
+	if err != nil {
+		t.Fatalf("CreateCampaign failed: %v", err)
+	}
+
+	// Resume: with clean state and no persisted PGID -> safe (exit code 0)
+	var stdout, stderr bytes.Buffer
+	code := runStabilityResumeWithDir(ctx, []string{}, &stdout, &stderr, dir)
+	if code != 0 {
+		t.Fatalf("runStabilityResume exit = %d, want 0; stderr = %s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "decision: safe") {
+		t.Errorf("resume stdout = %q, want 'decision: safe'", stdout.String())
+	}
+
+	// Abort: with active campaign and no persisted PGID -> cleans worktrees/branches -> status failed (exit code 0)
+	stdout.Reset()
+	stderr.Reset()
+	code = runStabilityAbortWithDir(ctx, []string{}, &stdout, &stderr, dir)
+	if code != 0 {
+		t.Fatalf("runStabilityAbort exit = %d, want 0; stderr = %s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "status:   failed") {
+		t.Errorf("abort stdout = %q, want 'status:   failed'", stdout.String())
+	}
+
+	updatedCamp, err := st.GetCampaign(ctx, camp.ID)
+	if err != nil {
+		t.Fatalf("GetCampaign failed: %v", err)
+	}
+	if updatedCamp.Status != store.StatusFailed {
+		t.Errorf("updatedCamp.Status = %q, want %q", updatedCamp.Status, store.StatusFailed)
+	}
 }

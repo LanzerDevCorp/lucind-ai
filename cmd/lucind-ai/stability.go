@@ -543,7 +543,8 @@ func RunCampaign(ctx context.Context, cfg CampaignConfig) (int, error) {
 		runID := fmt.Sprintf("stability-%s-trial-%d", cfg.CampaignID, tNum)
 		deps := cfg.DepsFactory(runID, cfg.PrimaryRoot, ledg, stability.DispatchTimeout, 0)
 
-		_, pB := stability.BuildJourneyPackets(journeyCfg)
+		pA, pB := stability.BuildJourneyPackets(journeyCfg)
+		wtPathA := reconcile.WorktreePathFor(cfg.PrimaryRoot, pA.ID)
 		wtPathB := reconcile.WorktreePathFor(cfg.PrimaryRoot, pB.ID)
 
 		deps.OnProcessStart = func(laneID string, pid int) {
@@ -570,6 +571,22 @@ func RunCampaign(ctx context.Context, cfg CampaignConfig) (int, error) {
 			_ = st.UpdateCampaignStatus(ctx, cfg.CampaignID, store.StatusFailed)
 			fmt.Fprintf(cfg.Stderr, "stability trial %d advance cleanup error: %v\n", tNum, err)
 			return 1, fmt.Errorf("advance trial %d cleanup: %w", tNum, err)
+		}
+
+		cleanupLane := func(id, path string) {
+			if err := worktree.Remove(ctx, cfg.PrimaryRoot, path); err != nil {
+				fmt.Fprintf(cfg.Stderr, "stability trial %d cleanup warning: remove worktree %s: %v\n", tNum, path, err)
+			}
+			if err := worktree.DeleteBranch(ctx, cfg.PrimaryRoot, worktree.BranchFor(id)); err != nil {
+				fmt.Fprintf(cfg.Stderr, "stability trial %d cleanup warning: delete branch for %s: %v\n", tNum, id, err)
+			}
+		}
+		cleanupLane(pA.ID, wtPathA)
+		cleanupLane(pB.ID, wtPathB)
+		if res != nil && res.FixReport != nil {
+			pFix := stability.BuildFixPacket(journeyCfg)
+			wtPathFix := reconcile.WorktreePathFor(cfg.PrimaryRoot, pFix.ID)
+			cleanupLane(pFix.ID, wtPathFix)
 		}
 
 		if err := sm.RecordTrialOutcome(stability.TrialPassed); err != nil {
@@ -733,6 +750,27 @@ func runStabilityStatusWithDir(ctx context.Context, args []string, stdout, stder
 	return 0
 }
 
+func pgidsForActiveCampaign(ctx context.Context, st *store.Store) []int {
+	if st == nil {
+		return nil
+	}
+	var pgids []int
+	if camp, campErr := st.GetActiveCampaign(ctx); campErr == nil {
+		if progress, progErr := st.GetTrialProgress(ctx, camp.ID); progErr == nil {
+			if progress.PGIDA != nil {
+				pgids = append(pgids, *progress.PGIDA)
+			}
+			if progress.PGIDB != nil {
+				pgids = append(pgids, *progress.PGIDB)
+			}
+			if progress.PGIDFix != nil {
+				pgids = append(pgids, *progress.PGIDFix)
+			}
+		}
+	}
+	return pgids
+}
+
 // runStabilityResume implements "lucind-ai stability resume": delegates to reconcile.Inspect.
 func runStabilityResume(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	return runStabilityResumeWithDir(ctx, args, stdout, stderr, "")
@@ -773,8 +811,9 @@ func runStabilityResumeWithDir(ctx context.Context, args []string, stdout, stder
 	defer st.Close()
 
 	report, err := reconcile.Inspect(ctx, reconcile.InspectParams{
-		Store:       st,
-		PrimaryRoot: primaryRoot,
+		Store:         st,
+		PrimaryRoot:   primaryRoot,
+		ProcessGroups: pgidsForActiveCampaign(ctx, st),
 	})
 	if err != nil {
 		fmt.Fprintf(stderr, "lucind-ai: stability resume inspect: %v\n", err)
@@ -847,8 +886,9 @@ func runStabilityAbortWithDir(ctx context.Context, args []string, stdout, stderr
 	defer st.Close()
 
 	res, err := reconcile.Abort(ctx, reconcile.AbortParams{
-		Store:       st,
-		PrimaryRoot: primaryRoot,
+		Store:         st,
+		PrimaryRoot:   primaryRoot,
+		ProcessGroups: pgidsForActiveCampaign(ctx, st),
 	})
 	if res != nil {
 		fmt.Fprintf(stdout, "campaign: %s\n", res.CampaignID)
