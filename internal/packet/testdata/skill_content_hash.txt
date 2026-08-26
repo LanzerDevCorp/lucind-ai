@@ -1,9 +1,8 @@
 # Recorded content hash for plugin/claude-code/skills/lucind-ai/**, checked
-# by internal/packet/packet_test.go's TestPluginVersionGuardsSkillContent.
+# by `make verify-plugin-content` (internal/skillcontent.Verify).
 #
-# Regenerate BOTH lines below in the same commit as any change under that
-# tree, together with a matching version bump in
-# plugin/claude-code/.claude-plugin/plugin.json and .claude-plugin/marketplace.json.
+# Regenerate BOTH lines below with `make bump-plugin-version` -- a deliberate,
+# human-run action, never an automatic side effect of a skill-tree content edit.
 version: 2.0.9
 sha256: b384cd11678fc16016f0bb504079cecedd910a6f1bc7a7682529abf4faebbf0c
 
