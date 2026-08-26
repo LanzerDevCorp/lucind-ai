@@ -560,3 +560,85 @@ func TestExportedHelpersAndEdgeCases(t *testing.T) {
 		t.Error("expected gotL to be invalid in 2 hours")
 	}
 }
+
+func TestFeatureListMethods(t *testing.T) {
+	ctx := context.Background()
+	svc, ledg := newTestService(t)
+
+	// Test empty lists
+	features, err := svc.List(ctx)
+	if err != nil {
+		t.Fatalf("List on empty DB: %v", err)
+	}
+	if len(features) != 0 {
+		t.Errorf("List returned %d features, want 0", len(features))
+	}
+
+	leases, err := svc.ListLeases(ctx)
+	if err != nil {
+		t.Fatalf("ListLeases on empty DB: %v", err)
+	}
+	if len(leases) != 0 {
+		t.Errorf("ListLeases returned %d leases, want 0", len(leases))
+	}
+
+	// Create features
+	f1, err := svc.Create(ctx, "feat-1", "refs/heads/branch-1", "sha1")
+	if err != nil {
+		t.Fatalf("Create feat-1: %v", err)
+	}
+	f2, err := svc.Create(ctx, "feat-2", "refs/heads/branch-2", "sha2")
+	if err != nil {
+		t.Fatalf("Create feat-2: %v", err)
+	}
+
+	features, err = svc.List(ctx)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(features) != 2 {
+		t.Fatalf("List returned %d features, want 2", len(features))
+	}
+	if features[0].ID != f1.ID || features[1].ID != f2.ID {
+		t.Errorf("features = [%s, %s], want [%s, %s]", features[0].ID, features[1].ID, f1.ID, f2.ID)
+	}
+
+	// Acquire leases
+	l1, err := svc.AcquireLease(ctx, "feat-1", "worker-1", time.Hour)
+	if err != nil {
+		t.Fatalf("AcquireLease: %v", err)
+	}
+
+	leases, err = svc.ListLeases(ctx)
+	if err != nil {
+		t.Fatalf("ListLeases: %v", err)
+	}
+	if len(leases) != 1 {
+		t.Fatalf("ListLeases returned %d leases, want 1", len(leases))
+	}
+	if leases[0].FeatureID != l1.FeatureID {
+		t.Errorf("leases[0].FeatureID = %q, want %q", leases[0].FeatureID, l1.FeatureID)
+	}
+
+	// Insert test integration_attempts
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	_, err = ledg.DB().ExecContext(ctx, `
+		INSERT INTO integration_attempts (id, feature_id, idempotency_key, status, owner, fence, candidate_sha, failure_reason, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		"att-1", "feat-1", "key-1", "promoted", "worker-1", 1, "cand-sha", "", now, now)
+	if err != nil {
+		t.Fatalf("insert integration_attempt: %v", err)
+	}
+
+	attempts, err := svc.ListAttempts(ctx, "feat-1")
+	if err != nil {
+		t.Fatalf("ListAttempts: %v", err)
+	}
+	if len(attempts) != 1 {
+		t.Fatalf("ListAttempts returned %d attempts, want 1", len(attempts))
+	}
+	if attempts[0].ID != "att-1" || attempts[0].Status != "promoted" {
+		t.Errorf("attempts[0] = %+v, want ID=att-1 Status=promoted", attempts[0])
+	}
+}
+

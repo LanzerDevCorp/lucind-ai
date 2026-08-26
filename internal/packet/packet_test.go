@@ -581,7 +581,6 @@ func TestSkillAssetContract(t *testing.T) {
 		"references/contracts/acceptance-promotion.md",
 		"references/adapters/executors.md",
 		"references/adapters/claude-agent-teams.md",
-		"references/operations/control-room.md",
 		"references/operations/troubleshooting.md",
 	}
 	for _, reference := range references {
