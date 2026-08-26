@@ -659,6 +659,18 @@ type RenewParams struct {
 	CurrentTargetSHA string
 	TTL              time.Duration
 	NewRequestID     string
+	// ResolveFeatureTipSHA resolves featureID's current real tip SHA (the
+	// same fallback chain evaluateOverlapGate itself uses for the opposing
+	// feature: live ParentRef resolution, then ExpectedParentSHA, then
+	// BaseSHA). It is used to default CurrentSourceSHA/CurrentTargetSHA
+	// when the caller omits them, instead of silently carrying forward
+	// whatever SHA the request being renewed already had stored -- which
+	// may be stale (e.g. the very first, automatically-created request's
+	// seed value) and would otherwise never converge with the current
+	// state of either feature. An explicit CurrentSourceSHA/CurrentTargetSHA
+	// always wins over this resolver; nil disables the default entirely
+	// and preserves the old carry-forward behavior.
+	ResolveFeatureTipSHA func(ctx context.Context, featureID string) (string, error)
 }
 
 // Renew recomputes fresh overlap evidence via overlap evaluation and creates a new awaiting reconciliation request,
@@ -675,11 +687,21 @@ func (s *Service) Renew(ctx context.Context, params RenewParams) (Request, error
 	}
 
 	sourceSHA := params.CurrentSourceSHA
+	if sourceSHA == "" && params.ResolveFeatureTipSHA != nil {
+		if sha, resolveErr := params.ResolveFeatureTipSHA(ctx, oldReq.SourceFeature); resolveErr == nil && sha != "" {
+			sourceSHA = sha
+		}
+	}
 	if sourceSHA == "" {
 		sourceSHA = oldReq.SourceSHA
 	}
 
 	targetSHA := params.CurrentTargetSHA
+	if targetSHA == "" && params.ResolveFeatureTipSHA != nil {
+		if sha, resolveErr := params.ResolveFeatureTipSHA(ctx, oldReq.TargetFeature); resolveErr == nil && sha != "" {
+			targetSHA = sha
+		}
+	}
 	if targetSHA == "" {
 		targetSHA = oldReq.TargetSHA
 	}

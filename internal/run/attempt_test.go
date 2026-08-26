@@ -1230,4 +1230,20 @@ func TestFixtureRetryReblocksOnTipDrift(t *testing.T) {
 	if len(spies.promoteCASCalls) != 0 {
 		t.Errorf("PromoteCAS called %d times, want 0 on tip drift", len(spies.promoteCASCalls))
 	}
+
+	// The block reason must distinguish "a resolution exists but was registered
+	// against a stale tip" from a genuinely fresh, unresolved conflict -- reusing
+	// the exact same generic message for both is indistinguishable from "you
+	// haven't resolved this yet" and was the reported silent trap: an operator has
+	// no way to tell a correctly-registered resolution from one pinned to a SHA
+	// that has since moved.
+	if !strings.Contains(res2.FailureReason, "registered against a stale tip for") {
+		t.Errorf("res2.FailureReason = %q, want it to explicitly call out a stale-tip resolution, not the generic overlap message", res2.FailureReason)
+	}
+	if !strings.Contains(res2.FailureReason, fix.FeatureBSHA) {
+		t.Errorf("res2.FailureReason = %q, want it to include the recorded (stale) SHA %q", res2.FailureReason, fix.FeatureBSHA)
+	}
+	if !strings.Contains(res2.FailureReason, otherTip) {
+		t.Errorf("res2.FailureReason = %q, want it to include the current (drifted) SHA %q", res2.FailureReason, otherTip)
+	}
 }

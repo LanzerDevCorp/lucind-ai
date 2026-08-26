@@ -18,7 +18,9 @@ Use the current `lucind-ai reconcile` operations in the order below; inspect CLI
 4. Remove the blocked Lane's preserved worktree and lane branch before reusing the same ID. `lucind-ai worktree cleanup --lane <id>` only removes the worktree; it does not delete the `lucind/<id>` branch, so deleting the branch is a separate manual `git branch -D lucind/<id>` step.
 5. Retry the blocked feature. When the opposing feature still matches the recorded resolution basis, Promotion uses the registered SHA.
 
-Decline or cancel when no candidate should proceed. Renew re-anchors a stale reconciliation request; it is unrelated to feature lease renewal.
+Decline or cancel when no candidate should proceed. Renew re-anchors a stale reconciliation request; it is unrelated to feature lease renewal. `--source-sha`/`--target-sha` on `reconcile renew` are optional: an omitted flag now defaults to that feature's own current real `parent_ref` tip (falling back to `expected_parent_sha`, then `base_sha`) instead of silently carrying forward whatever SHA the request being renewed already had stored. Pass one or both explicitly only to pin a specific historical SHA on purpose — do not rely on partially-supplied flags to "refresh" the other side; an omitted flag is always recomputed live, never copied from the old request.
+
+If a retry blocks again after approve/resolve, read the failure reason before re-running the sequence: `evaluateOverlapGate` names the exact reason a resolution did not clear the block — a request that exists but is not yet approved, one that is approved but not yet resolved, a resolved candidate that predates this attempt's own current content, or (the previously silent trap) a resolution *approved and registered but against a stale tip for the opposing feature* ("registered against a stale tip for `<feature>` -- recorded `<sha>`, current `<sha>`"). Only that last case, and only when unresolved, requires `reconcile renew` before re-approving; a generic "reconciliation-required overlap with feature `<id>`" with none of that detail means no request has ever existed for this pair yet.
 
 ## Multi-wave sequencing
 
