@@ -1,0 +1,28 @@
+=== lucind-ai mechanical check ===
+Git Commit SHA: 68736fd76f384aa864fd7086a83df8a5ab1152f2
+Command: lucind-checks.sh
+Duration: 1m12.743364521s
+Exit Code: 0
+==================================
+ok  	github.com/LanzerDevCorp/lucind-ai/cmd/lucind-ai	70.758s
+ok  	github.com/LanzerDevCorp/lucind-ai/internal/accept	8.251s
+ok  	github.com/LanzerDevCorp/lucind-ai/internal/barrier	1.020s
+ok  	github.com/LanzerDevCorp/lucind-ai/internal/buildcheck	2.117s
+ok  	github.com/LanzerDevCorp/lucind-ai/internal/conflicttriage	2.946s
+ok  	github.com/LanzerDevCorp/lucind-ai/internal/conflicttriage/fixture	3.792s
+ok  	github.com/LanzerDevCorp/lucind-ai/internal/dag	1.076s
+ok  	github.com/LanzerDevCorp/lucind-ai/internal/executor	17.011s
+ok  	github.com/LanzerDevCorp/lucind-ai/internal/feature	5.296s
+ok  	github.com/LanzerDevCorp/lucind-ai/internal/integrate	6.921s
+ok  	github.com/LanzerDevCorp/lucind-ai/internal/lane	1.013s
+ok  	github.com/LanzerDevCorp/lucind-ai/internal/lanecheck	1.216s
+ok  	github.com/LanzerDevCorp/lucind-ai/internal/ledger	24.688s
+ok  	github.com/LanzerDevCorp/lucind-ai/internal/ledgerpath	1.017s
+ok  	github.com/LanzerDevCorp/lucind-ai/internal/overlap	1.911s
+ok  	github.com/LanzerDevCorp/lucind-ai/internal/packet	1.055s
+ok  	github.com/LanzerDevCorp/lucind-ai/internal/reconcile	7.981s
+ok  	github.com/LanzerDevCorp/lucind-ai/internal/resolve	1.914s
+ok  	github.com/LanzerDevCorp/lucind-ai/internal/result	1.059s
+ok  	github.com/LanzerDevCorp/lucind-ai/internal/run	52.281s
+ok  	github.com/LanzerDevCorp/lucind-ai/internal/serve	15.610s
+ok  	github.com/LanzerDevCorp/lucind-ai/internal/worktree	2.029s
