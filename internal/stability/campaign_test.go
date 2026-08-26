@@ -2748,3 +2748,230 @@ func TestRemediationPromoteStageStaleCASFailsTrial(t *testing.T) {
 func TestRemediationPromoteStageAncestryViolationFailsTrial(t *testing.T) {
 	TestTrialJourneyPromoteStageAncestryViolationFailsTrial(t)
 }
+
+func TestStateMachineSetOnTransition(t *testing.T) {
+	sm := stability.NewStateMachine()
+	if err := sm.Start(); err != nil {
+		t.Fatalf("sm.Start failed: %v", err)
+	}
+
+	type transitionEvent struct {
+		trial int
+		stage stability.TrialState
+	}
+	var (
+		events []transitionEvent
+		mu     sync.Mutex
+	)
+
+	sm.SetOnTransition(func(trialNumber int, stage stability.TrialState) {
+		mu.Lock()
+		defer mu.Unlock()
+		events = append(events, transitionEvent{trial: trialNumber, stage: stage})
+	})
+
+	// Start Trial 1
+	t1, err := sm.StartNextTrial()
+	if err != nil {
+		t.Fatalf("StartNextTrial failed: %v", err)
+	}
+	if t1 != 1 {
+		t.Fatalf("StartNextTrial = %d, want 1", t1)
+	}
+
+	// Advance through stages
+	stages := []stability.TrialState{
+		stability.TrialDispatching,
+		stability.TrialAwaitingDefectAssessment,
+		stability.TrialAwaitingRemediationApproval,
+		stability.TrialFixDispatched,
+		stability.TrialCrashInjected,
+		stability.TrialLeaseWait,
+		stability.TrialReclaimed,
+		stability.TrialPromoted,
+		stability.TrialEvidenceCaptured,
+		stability.TrialCleanedUp,
+	}
+	for _, stg := range stages {
+		if err := sm.AdvanceTrial(stg); err != nil {
+			t.Fatalf("AdvanceTrial(%q) failed: %v", stg, err)
+		}
+	}
+
+	// Record outcome TrialPassed
+	if err := sm.RecordTrialOutcome(stability.TrialPassed); err != nil {
+		t.Fatalf("RecordTrialOutcome(TrialPassed) failed: %v", err)
+	}
+
+	// Attempt an invalid transition when no active trial -> must fail and NOT notify
+	mu.Lock()
+	countBeforeInvalid := len(events)
+	mu.Unlock()
+	if err := sm.AdvanceTrial(stability.TrialAdmitted); err == nil {
+		t.Fatal("AdvanceTrial on inactive trial succeeded, want error")
+	}
+	mu.Lock()
+	countAfterInvalid := len(events)
+	mu.Unlock()
+	if countAfterInvalid != countBeforeInvalid {
+		t.Errorf("observer fired on invalid transition: before=%d, after=%d", countBeforeInvalid, countAfterInvalid)
+	}
+
+	// Start Trial 2 and fail it
+	t2, err := sm.StartNextTrial()
+	if err != nil {
+		t.Fatalf("StartNextTrial 2 failed: %v", err)
+	}
+	if t2 != 2 {
+		t.Fatalf("StartNextTrial 2 = %d, want 2", t2)
+	}
+
+	if err := sm.AdvanceTrial(stability.TrialDispatching); err != nil {
+		t.Fatalf("AdvanceTrial(TrialDispatching) 2 failed: %v", err)
+	}
+	if err := sm.RecordTrialOutcome(stability.TrialFailed); err != nil {
+		t.Fatalf("RecordTrialOutcome(TrialFailed) failed: %v", err)
+	}
+
+	expectedEvents := []transitionEvent{
+		{trial: 1, stage: stability.TrialAdmitted},
+		{trial: 1, stage: stability.TrialDispatching},
+		{trial: 1, stage: stability.TrialAwaitingDefectAssessment},
+		{trial: 1, stage: stability.TrialAwaitingRemediationApproval},
+		{trial: 1, stage: stability.TrialFixDispatched},
+		{trial: 1, stage: stability.TrialCrashInjected},
+		{trial: 1, stage: stability.TrialLeaseWait},
+		{trial: 1, stage: stability.TrialReclaimed},
+		{trial: 1, stage: stability.TrialPromoted},
+		{trial: 1, stage: stability.TrialEvidenceCaptured},
+		{trial: 1, stage: stability.TrialCleanedUp},
+		{trial: 1, stage: stability.TrialPassed},
+		{trial: 2, stage: stability.TrialAdmitted},
+		{trial: 2, stage: stability.TrialDispatching},
+		{trial: 2, stage: stability.TrialFailed},
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(events) != len(expectedEvents) {
+		t.Fatalf("recorded events length = %d, want %d: %+v", len(events), len(expectedEvents), events)
+	}
+	for i, exp := range expectedEvents {
+		got := events[i]
+		if got.trial != exp.trial || got.stage != exp.stage {
+			t.Errorf("event %d: got {trial: %d, stage: %q}, want {trial: %d, stage: %q}", i, got.trial, got.stage, exp.trial, exp.stage)
+		}
+	}
+}
+
+func TestExecuteTrialJourneyLiveChainedOnProcessStart(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping subprocess test in -short mode")
+	}
+
+	ctx := context.Background()
+	fakeExec := newFakeJourneyExecutor()
+	deps, ledgerHandle, _ := newJourneyTestDeps(t, fakeExec)
+	featSvc := feature.NewService(ledgerHandle)
+
+	cfg := stability.DefaultJourneyConfig(1, "b000000000000000000000000000000000000000")
+	cfg.LeaseTTL = 200 * time.Millisecond
+
+	wtPathB := reconcile.WorktreePathFor(deps.PrimaryRoot, "stability-change-b")
+	lucindB := filepath.Join(wtPathB, ".lucind")
+	_ = os.MkdirAll(lucindB, 0o755)
+
+	// Stub writes .lucind/result.json then sleeps awaiting live kill
+	stubScript := fmt.Sprintf(`#!/bin/sh
+mkdir -p %q
+cat << 'EOF' > %q
+{
+  "packet_id": "stability-change-b",
+  "status": "done",
+  "summary": "change B work completed before live crash",
+  "hard_stops": [{"hard_stop": "do not touch internal/barrier", "fired": false}]
+}
+EOF
+sleep 10
+`, lucindB, filepath.Join(lucindB, "result.json"))
+	stubPath := writeStubScript(t, stubScript)
+
+	var (
+		capturedStubPID int
+		pidMu           sync.Mutex
+	)
+
+	supervisor := process.NewSupervisor()
+	fakeExec.runFuncFor[wtPathB] = func(ctx context.Context, req executor.Request) (executor.Outcome, error) {
+		cmd := exec.Command(stubPath)
+		cmd.Dir = wtPathB
+		pgid, err := supervisor.Start(cmd)
+		if err != nil {
+			return executor.Outcome{}, err
+		}
+		pidMu.Lock()
+		capturedStubPID = pgid
+		pidMu.Unlock()
+		if req.Setpgid && req.OnStart != nil {
+			req.OnStart(pgid)
+		}
+		// Wait for command to exit or be killed
+		_ = cmd.Wait()
+		return executor.Outcome{ExitCode: 0, PGID: pgid}, nil
+	}
+
+	var (
+		callerObservedLane string
+		callerObservedPID  int
+		callerMu           sync.Mutex
+	)
+	deps.OnProcessStart = func(laneID string, pid int) {
+		callerMu.Lock()
+		callerObservedLane = laneID
+		callerObservedPID = pid
+		callerMu.Unlock()
+	}
+
+	sm := stability.NewStateMachine()
+	if err := sm.Start(); err != nil {
+		t.Fatalf("sm.Start failed: %v", err)
+	}
+
+	start := time.Now()
+	res, err := stability.ExecuteTrialJourneyLive(ctx, sm, deps, featSvc, cfg)
+	elapsed := time.Since(start)
+
+	if err != nil {
+		t.Fatalf("ExecuteTrialJourneyLive failed: %v", err)
+	}
+	if res == nil {
+		t.Fatal("ExecuteTrialJourneyLive returned nil result")
+	}
+
+	// (1) Assert caller's OnProcessStart was chained and invoked
+	callerMu.Lock()
+	obsLane := callerObservedLane
+	obsPID := callerObservedPID
+	callerMu.Unlock()
+
+	if obsLane != "stability-change-b" {
+		t.Errorf("caller observed lane = %q, want 'stability-change-b'", obsLane)
+	}
+	if obsPID <= 1 {
+		t.Errorf("caller observed pid = %d, want > 1", obsPID)
+	}
+
+	// (2) Assert live kill / zero-survivors mechanics still worked
+	pidMu.Lock()
+	pid := capturedStubPID
+	pidMu.Unlock()
+	if pid <= 1 {
+		t.Fatalf("capturedStubPID = %d, want > 1", pid)
+	}
+	if err := supervisor.VerifyZero(pid); err != nil {
+		t.Errorf("stub process %d still alive after ExecuteTrialJourneyLive: %v", pid, err)
+	}
+	if elapsed >= 5*time.Second {
+		t.Errorf("ExecuteTrialJourneyLive took %v, want < 5s (proving abrupt kill occurred)", elapsed)
+	}
+}

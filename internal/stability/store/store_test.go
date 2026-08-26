@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/LanzerDevCorp/lucind-ai/internal/ledgerpath"
 	"github.com/LanzerDevCorp/lucind-ai/internal/stability/store"
@@ -260,5 +261,158 @@ func TestStoreOpenWithGitRunner(t *testing.T) {
 	}
 	if fetched.ID != c.ID || fetched.CandidateSHA != c.CandidateSHA || fetched.Status != store.StatusRunning {
 		t.Errorf("fetched mismatch: %+v", fetched)
+	}
+}
+
+func TestStoreTrialProgressUpsertAndGet(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "lucind-ai", "stability", "v1", "stability.db")
+
+	s, err := store.OpenAtPath(ctx, dbPath)
+	if err != nil {
+		t.Fatalf("OpenAtPath failed: %v", err)
+	}
+	defer s.Close()
+
+	// 1. GetTrialProgress on non-existent campaign returns ErrTrialProgressNotFound
+	_, err = s.GetTrialProgress(ctx, "nonexistent-campaign")
+	if !errors.Is(err, store.ErrTrialProgressNotFound) {
+		t.Fatalf("GetTrialProgress for nonexistent campaign returned %v, want ErrTrialProgressNotFound", err)
+	}
+
+	// 2. UpsertTrialStage for trial 1: initial insert
+	if err := s.UpsertTrialStage(ctx, "camp-1", 1, "admitted"); err != nil {
+		t.Fatalf("UpsertTrialStage(camp-1, 1, admitted) failed: %v", err)
+	}
+
+	p1, err := s.GetTrialProgress(ctx, "camp-1")
+	if err != nil {
+		t.Fatalf("GetTrialProgress(camp-1) failed: %v", err)
+	}
+	if p1.CampaignID != "camp-1" || p1.TrialNumber != 1 || p1.Stage != "admitted" {
+		t.Errorf("p1 mismatch: %+v", p1)
+	}
+	if p1.PGIDA != nil || p1.PGIDB != nil || p1.PGIDFix != nil {
+		t.Errorf("expected nil PGIDs, got A=%v, B=%v, Fix=%v", p1.PGIDA, p1.PGIDB, p1.PGIDFix)
+	}
+	if p1.CreatedAt.IsZero() || p1.UpdatedAt.IsZero() {
+		t.Errorf("timestamps not populated: created=%v, updated=%v", p1.CreatedAt, p1.UpdatedAt)
+	}
+
+	// 3. UpsertTrialStage for trial 1: update stage and verify updated_at advances
+	time.Sleep(5 * time.Millisecond)
+	if err := s.UpsertTrialStage(ctx, "camp-1", 1, "dispatching"); err != nil {
+		t.Fatalf("UpsertTrialStage(camp-1, 1, dispatching) failed: %v", err)
+	}
+
+	p1Updated, err := s.GetTrialProgress(ctx, "camp-1")
+	if err != nil {
+		t.Fatalf("GetTrialProgress(camp-1) failed: %v", err)
+	}
+	if p1Updated.Stage != "dispatching" {
+		t.Errorf("p1Updated.Stage = %q, want 'dispatching'", p1Updated.Stage)
+	}
+	if p1Updated.UpdatedAt.Before(p1.UpdatedAt) || p1Updated.UpdatedAt.Equal(p1.UpdatedAt) {
+		t.Errorf("p1Updated.UpdatedAt (%v) did not advance after p1.UpdatedAt (%v)", p1Updated.UpdatedAt, p1.UpdatedAt)
+	}
+	if !p1Updated.CreatedAt.Equal(p1.CreatedAt) {
+		t.Errorf("p1Updated.CreatedAt (%v) changed from original (%v)", p1Updated.CreatedAt, p1.CreatedAt)
+	}
+
+	// 4. UpdateTrialPGID: lane "b"
+	if err := s.UpdateTrialPGID(ctx, "camp-1", 1, "b", 12345); err != nil {
+		t.Fatalf("UpdateTrialPGID(camp-1, 1, b, 12345) failed: %v", err)
+	}
+
+	p1WithB, err := s.GetTrialProgress(ctx, "camp-1")
+	if err != nil {
+		t.Fatalf("GetTrialProgress(camp-1) failed: %v", err)
+	}
+	if p1WithB.PGIDB == nil || *p1WithB.PGIDB != 12345 {
+		t.Errorf("p1WithB.PGIDB = %v, want 12345", p1WithB.PGIDB)
+	}
+	if p1WithB.PGIDA != nil || p1WithB.PGIDFix != nil {
+		t.Errorf("PGIDA or PGIDFix unexpectedly set: A=%v, Fix=%v", p1WithB.PGIDA, p1WithB.PGIDFix)
+	}
+	if p1WithB.Stage != "dispatching" {
+		t.Errorf("stage corrupted during UpdateTrialPGID: got %q, want dispatching", p1WithB.Stage)
+	}
+
+	// 5. UpdateTrialPGID: lanes "a" and "fix"
+	if err := s.UpdateTrialPGID(ctx, "camp-1", 1, "a", 11111); err != nil {
+		t.Fatalf("UpdateTrialPGID(camp-1, 1, a, 11111) failed: %v", err)
+	}
+	if err := s.UpdateTrialPGID(ctx, "camp-1", 1, "fix", 22222); err != nil {
+		t.Fatalf("UpdateTrialPGID(camp-1, 1, fix, 22222) failed: %v", err)
+	}
+
+	p1AllLanes, err := s.GetTrialProgress(ctx, "camp-1")
+	if err != nil {
+		t.Fatalf("GetTrialProgress(camp-1) failed: %v", err)
+	}
+	if p1AllLanes.PGIDA == nil || *p1AllLanes.PGIDA != 11111 {
+		t.Errorf("p1AllLanes.PGIDA = %v, want 11111", p1AllLanes.PGIDA)
+	}
+	if p1AllLanes.PGIDB == nil || *p1AllLanes.PGIDB != 12345 {
+		t.Errorf("p1AllLanes.PGIDB = %v, want 12345", p1AllLanes.PGIDB)
+	}
+	if p1AllLanes.PGIDFix == nil || *p1AllLanes.PGIDFix != 22222 {
+		t.Errorf("p1AllLanes.PGIDFix = %v, want 22222", p1AllLanes.PGIDFix)
+	}
+
+	// 6. UpdateTrialPGID: invalid lane returns error
+	if err := s.UpdateTrialPGID(ctx, "camp-1", 1, "invalid_lane", 9999); err == nil {
+		t.Errorf("UpdateTrialPGID with invalid lane returned nil error, want error")
+	}
+
+	// 7. UpdateTrialPGID before UpsertTrialStage on new trial 2 (defensive upsert)
+	if err := s.UpdateTrialPGID(ctx, "camp-1", 2, "b", 54321); err != nil {
+		t.Fatalf("UpdateTrialPGID on new trial 2 failed: %v", err)
+	}
+	p2Initial, err := s.GetTrialProgress(ctx, "camp-1")
+	if err != nil {
+		t.Fatalf("GetTrialProgress(camp-1) for trial 2 failed: %v", err)
+	}
+	if p2Initial.TrialNumber != 2 {
+		t.Errorf("GetTrialProgress did not return highest trial number (2), got %d", p2Initial.TrialNumber)
+	}
+	if p2Initial.PGIDB == nil || *p2Initial.PGIDB != 54321 {
+		t.Errorf("p2Initial.PGIDB = %v, want 54321", p2Initial.PGIDB)
+	}
+
+	// Now UpsertTrialStage on trial 2 should preserve PGIDB
+	if err := s.UpsertTrialStage(ctx, "camp-1", 2, "dispatching"); err != nil {
+		t.Fatalf("UpsertTrialStage on trial 2 failed: %v", err)
+	}
+	p2Updated, err := s.GetTrialProgress(ctx, "camp-1")
+	if err != nil {
+		t.Fatalf("GetTrialProgress(camp-1) after upsert stage failed: %v", err)
+	}
+	if p2Updated.Stage != "dispatching" {
+		t.Errorf("p2Updated.Stage = %q, want dispatching", p2Updated.Stage)
+	}
+	if p2Updated.PGIDB == nil || *p2Updated.PGIDB != 54321 {
+		t.Errorf("p2Updated.PGIDB = %v, want 54321 (preserved)", p2Updated.PGIDB)
+	}
+}
+
+func TestStoreMigrationCreatesTrialProgressTable(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "lucind-ai", "stability", "v1", "stability.db")
+
+	s, err := store.OpenAtPath(ctx, dbPath)
+	if err != nil {
+		t.Fatalf("OpenAtPath failed: %v", err)
+	}
+	defer s.Close()
+
+	var version int
+	if err := s.DB().QueryRowContext(ctx, "SELECT MAX(version) FROM schema_migrations").Scan(&version); err != nil {
+		t.Fatalf("query schema_migrations version: %v", err)
+	}
+	if version != 2 {
+		t.Errorf("schema_migrations MAX(version) = %d, want 2", version)
 	}
 }

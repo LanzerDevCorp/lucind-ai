@@ -509,6 +509,9 @@ func RunCampaign(ctx context.Context, cfg CampaignConfig) (int, error) {
 	}
 
 	sm := stability.NewStateMachine()
+	sm.SetOnTransition(func(trialNumber int, stage stability.TrialState) {
+		_ = st.UpsertTrialStage(ctx, cfg.CampaignID, trialNumber, string(stage))
+	})
 	if err := sm.Start(); err != nil {
 		_ = st.UpdateCampaignStatus(ctx, cfg.CampaignID, store.StatusFailed)
 		fmt.Fprintf(cfg.Stderr, "stability campaign error: start state machine: %v\n", err)
@@ -542,6 +545,12 @@ func RunCampaign(ctx context.Context, cfg CampaignConfig) (int, error) {
 
 		_, pB := stability.BuildJourneyPackets(journeyCfg)
 		wtPathB := reconcile.WorktreePathFor(cfg.PrimaryRoot, pB.ID)
+
+		deps.OnProcessStart = func(laneID string, pid int) {
+			if laneID == pB.ID {
+				_ = st.UpdateTrialPGID(ctx, cfg.CampaignID, tNum, "b", pid)
+			}
+		}
 
 		res, err := cfg.ExecuteJourney(ctx, sm, deps, featSvc, journeyCfg, cfg.PGIDB, wtPathB)
 		if err != nil {
@@ -780,6 +789,16 @@ func runStabilityResumeWithDir(ctx context.Context, args []string, stdout, stder
 		for _, amb := range report.Ambiguities {
 			fmt.Fprintf(stdout, "  - %s\n", amb)
 		}
+	}
+
+	if progress, err := st.GetTrialProgress(ctx, report.Campaign.ID); err == nil {
+		fmt.Fprintf(stdout, "persisted trial:  %d\n", progress.TrialNumber)
+		fmt.Fprintf(stdout, "persisted stage:  %s\n", progress.Stage)
+		if progress.PGIDB != nil {
+			fmt.Fprintf(stdout, "persisted pgid_b: %d\n", *progress.PGIDB)
+		}
+	} else if !errors.Is(err, store.ErrTrialProgressNotFound) {
+		fmt.Fprintf(stderr, "lucind-ai: read trial progress: %v\n", err)
 	}
 
 	if report.Decision != reconcile.DecisionSafe {
