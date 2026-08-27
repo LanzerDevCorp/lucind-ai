@@ -1,0 +1,54 @@
+{
+  "packet_id": "propose-skill-anchoring-guardrails-lens-a",
+  "status": "done",
+  "summary": "Authored propose-lens-a.md selecting Candidate 1 (fail-closed worktree cleanup, CLI banner anchoring, and prescriptive TDD WIP-rescue protocol). Documented the ErrWorktreeDirty sentinel error, force bool parameter additions across worktree.Cleanup and worktree.Remove, CLI --force/-f flags, and internal teardown call site requirements.",
+  "hard_stops": [
+    {
+      "hard_stop": "The technical approach cannot be grounded in existing codebase patterns or proposal context.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Candidate selection contradicts frozen exploration conclusions without justification.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/skill-anchoring-guardrails/propose-lens-a.md",
+      "change": "created",
+      "why": "Proposal Lens A document covering candidate selection, core technical approach, conceptual changes, architecture rationale, alternatives considered, and citation manifest."
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "A `## Citation Manifest` section lists every unique citation, grouped by file, with the claim each one supports.",
+      "met": true,
+      "evidence": "openspec/changes/skill-anchoring-guardrails/propose-lens-a.md:57-90"
+    },
+    {
+      "criterion": "`lucind-lane-check.sh --verify-citations` was run before committing and reported no FAIL against this draft's own manifest.",
+      "met": true,
+      "evidence": "Pre-commit check output:\nlucind-lane-check.sh report for openspec/changes/skill-anchoring-guardrails/propose-lens-a.md\n----------------------------------------\nPASS  word budget: 756 / 1000 words\nPASS  section present: ## Selected Candidate \u0026 Approach\nPASS  section present: ## Conceptual Changes \u0026 Architecture Rationale\nPASS  section present: ## Alternatives Considered \u0026 Rejected\nPASS  section present: ## Open Questions\nPASS  section present: ## Citation Manifest\nPASS  citation .agents/skills/lucind-apply/SKILL.md:10-21: file exists, has 33 lines\nPASS  citation cmd/lucind-ai/cli.go:37-44: file exists, has 2319 lines\nPASS  citation cmd/lucind-ai/cli.go:58: file exists, has 2319 lines\nPASS  citation cmd/lucind-ai/cli.go:485-516: file exists, has 2319 lines\nPASS  citation cmd/lucind-ai/cli.go:685-690: file exists, has 2319 lines\nPASS  citation cmd/lucind-ai/cli.go:698-726: file exists, has 2319 lines\nPASS  citation cmd/lucind-ai/cli.go:730-740: file exists, has 2319 lines\nPASS  citation cmd/lucind-ai/cli.go:858-863: file exists, has 2319 lines\nPASS  citation cmd/lucind-ai/cli.go:864-869: file exists, has 2319 lines\nPASS  citation cmd/lucind-ai/cli.go:1934-1978: file exists, has 2319 lines\nPASS  citation cmd/lucind-ai/cli.go:1997-2023: file exists, has 2319 lines\nPASS  citation cmd/lucind-ai/cli_test.go:2974-3010: file exists, has 4802 lines\nPASS  citation internal/dag/split.go:34-43: file exists, has 46 lines\nPASS  citation internal/integrate/candidate.go:262-265: file exists, has 275 lines\nPASS  citation internal/integrate/integrate.go:118-124: file exists, has 346 lines\nPASS  citation internal/run/integrate.go:159-165: file exists, has 301 lines\nPASS  citation internal/run/run.go:452-465: file exists, has 958 lines\nPASS  citation internal/run/run.go:906-940: file exists, has 958 lines\nPASS  citation internal/worktree/worktree.go:150-159: file exists, has 328 lines\nPASS  citation internal/worktree/worktree.go:247-253: file exists, has 328 lines\nPASS  citation internal/worktree/worktree.go:256-261: file exists, has 328 lines\nPASS  citation internal/worktree/worktree.go:319-325: file exists, has 328 lines\nPASS  citation internal/worktree/worktree_test.go:1034-1057: file exists, has 1072 lines\nPASS  citation internal/worktree/worktree_test.go:1059-1069: file exists, has 1072 lines\nPASS  citation openspec/changes/skill-anchoring-guardrails/explore.md:24-32: file exists, has 98 lines\nPASS  citation plugin/claude-code/skills/lucind-ai/SKILL.md:18-49: file exists, has 63 lines\nPASS  citation plugin/claude-code/skills/lucind-ai/references/contracts/acceptance-promotion.md:18-30: file exists, has 50 lines\nPASS  citation plugin/claude-code/skills/lucind-ai/references/coordination/recovery-reconciliation.md:27-30: file exists, has 35 lines\nPASS  citation plugin/claude-code/skills/lucind-ai/references/coordination/recovery-reconciliation.md:33-35: file exists, has 35 lines\nPASS  citation plugin/claude-code/skills/lucind-ai/references/operations/troubleshooting.md:7-18: file exists, has 38 lines\n----------------------------------------\nRESULT: PASS"
+    },
+    {
+      "criterion": "Every candidate and approach claim carries `file:line` citations to real code in this worktree.",
+      "met": true,
+      "evidence": "openspec/changes/skill-anchoring-guardrails/propose-lens-a.md:3-54 cites real code across internal/worktree/worktree.go, cmd/lucind-ai/cli.go, internal/integrate/integrate.go, internal/integrate/candidate.go, internal/run/integrate.go, internal/run/run.go, and internal/dag/split.go"
+    },
+    {
+      "criterion": "`propose-lens-a.md` exists, is under 1000 words excluding the Citation Manifest, and carries every skeleton section plus `## Citation Manifest`.",
+      "met": true,
+      "evidence": "openspec/changes/skill-anchoring-guardrails/propose-lens-a.md (756 words excluding Citation Manifest); passes lucind-lane-check.sh word budget check"
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution, confirmed by the final `lucind-lane-check.sh` run reporting a clean `git status --porcelain` and a valid `.lucind/result.json`. Strip any injected `Co-authored-by:` trailer.",
+      "met": true,
+      "evidence": "Post-commit check output:\nlucind-lane-check.sh report for openspec/changes/skill-anchoring-guardrails/propose-lens-a.md\n----------------------------------------\nPASS  git status --porcelain: clean\nPASS  result envelope: .lucind/result.json exists and parses as JSON\n----------------------------------------\nRESULT: PASS\nCommit: 4f990b671f636ac4b1ac240d9872d4a338115f01"
+    }
+  ],
+  "commit": "4f990b671f636ac4b1ac240d9872d4a338115f01"
+}

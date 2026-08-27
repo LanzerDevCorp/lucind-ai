@@ -1,0 +1,79 @@
+{
+  "packet_id": "design-skill-anchoring-guardrails-synthesis",
+  "status": "done",
+  "summary": "Synthesized canonical design.md and design-synthesis-notes.md from the three planning lens drafts for skill-anchoring-guardrails. Verified all 58 citations in this worktree and confirmed independent architectural convergence on Candidate 1 with fail-closed worktree cleanup guardrails, static CLI guidance banners, and prescriptive TDD WIP-rescue protocol.",
+  "hard_stops": [
+    {
+      "hard_stop": "The three ## Assumed architecture blocks are mutually irreconcilable and the proposal/specs do not choose between them. Write the notes file, leave design.md uncreated, and block.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Lens A's architecture is refuted by code you verified. Do not substitute your own.",
+      "fired": false
+    },
+    {
+      "hard_stop": "One or more lens drafts is missing from this worktree.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Covering all eight spine items honestly would require exceeding 1800 words.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/skill-anchoring-guardrails/design.md",
+      "change": "created",
+      "why": "Canonical synthesized design document covering all eight spine items."
+    },
+    {
+      "path": "openspec/changes/skill-anchoring-guardrails/design-synthesis-notes.md",
+      "change": "created",
+      "why": "Synthesis notes recording arbitration, verification, and convergence."
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "design.md was committed as its own commit before design-synthesis-notes.md was started, confirmed by the mid-flow lucind-lane-check.sh run reporting a clean git status --porcelain.",
+      "met": true,
+      "evidence": "lucind-lane-check.sh report for openspec/changes/skill-anchoring-guardrails/design.md:\nPASS  word budget: 1741 / 1800 words\nPASS  git status --porcelain: clean\nRESULT: PASS"
+    },
+    {
+      "criterion": "Every file:line citation surviving into design.md was opened and confirmed in this worktree, and every dropped claim is listed under ## Dropped Citations.",
+      "met": true,
+      "evidence": "All 58 citations from the union of lens manifests were opened and verified against repository code; all support their claims and survive into design.md. Zero dropped claims listed in design-synthesis-notes.md:12-16."
+    },
+    {
+      "criterion": "design.md exists, is under 1800 words, and substantively covers all eight spine items, with anything missing reported under ## Coverage Gaps.",
+      "met": true,
+      "evidence": "openspec/changes/skill-anchoring-guardrails/design.md exists at 1741 words (PASS under 1800-word budget), covering technical approach, 4 architecture decisions with terminal consumers, flow/invariants diagram, surface deltas, file changes with terminal consumers, testing strategy/seams, 5-row threat matrix, rollback, and out of scope. Zero coverage gaps reported in design-synthesis-notes.md:8-10."
+    },
+    {
+      "criterion": "design-synthesis-notes.md exists with exactly the four required sections, each either populated or explicitly \"None\".",
+      "met": true,
+      "evidence": "openspec/changes/skill-anchoring-guardrails/design-synthesis-notes.md contains ## Unresolved Contradictions (None), ## Coverage Gaps (None), ## Dropped Citations (None), and ## Architecture Divergence (None — all three converged)."
+    },
+    {
+      "criterion": "The work is committed with two conventional commits and no AI attribution, confirmed by the final lucind-lane-check.sh run reporting a clean git status --porcelain and a valid .lucind/result.json.",
+      "met": true,
+      "evidence": "lucind-lane-check.sh report for openspec/changes/skill-anchoring-guardrails/design-synthesis-notes.md:\nPASS  section present: ## Unresolved Contradictions\nPASS  section present: ## Coverage Gaps\nPASS  section present: ## Dropped Citations\nPASS  section present: ## Architecture Divergence\nPASS  git status --porcelain: clean\nPASS  result envelope: .lucind/result.json exists and parses as JSON\nRESULT: PASS\nCommits 21865b9 and af44ec4 contain no AI attribution trailers."
+    }
+  ],
+  "commit": "af44ec496a50f89aca715c758c0e97604b7526ee",
+  "findings": [
+    {
+      "finding": "58 citations verified across lens drafts, 0 citations dropped, 0 contradictions escalated, 0 coverage gaps.",
+      "evidence": "openspec/changes/skill-anchoring-guardrails/design-synthesis-notes.md:4-24",
+      "affects": "openspec/changes/skill-anchoring-guardrails/"
+    },
+    {
+      "finding": "All three lens drafts independently converged on Candidate 1 architecture with direct trailing force bool parameter and static banner stream separation.",
+      "evidence": "openspec/changes/skill-anchoring-guardrails/design-synthesis-notes.md:18-30",
+      "affects": "openspec/changes/skill-anchoring-guardrails/design.md"
+    }
+  ]
+}
