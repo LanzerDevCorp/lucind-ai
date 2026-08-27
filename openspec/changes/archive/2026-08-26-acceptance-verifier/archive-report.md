@@ -7,8 +7,7 @@ verdict: pass_with_warnings, blockers: 0, critical_findings: 0, requirements 8/8
 
 ## What Shipped
 New capability `acceptance-verifier`: fail-closed mechanical acceptance for a frozen lane
-candidate. 8 requirements / 13 scenarios (read the exact counts
-from the merged live spec). Core: `internal/accept` deep module, schema v9 immutable
+candidate. 8 requirements / 13 scenarios. Core: `internal/accept` deep module, schema v9 immutable
 `lane_candidates` + `acceptance_receipts` with abort triggers, done-candidate identity hook in
 `internal/run`, hardened `internal/integrate` checks, and the thin `lucind-ai accept --run --lane`
 CLI adapter (mechanical evidence only — never Promotion/CAS, never qualitative approval).
