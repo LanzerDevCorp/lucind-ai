@@ -524,6 +524,37 @@ func (s *Service) ReleaseLease(ctx context.Context, featureID, owner string, fen
 	return nil
 }
 
+// ForceReleaseLease forcefully expires any active lease on featureID, enabling immediate recovery or re-acquisition.
+func (s *Service) ForceReleaseLease(ctx context.Context, featureID string) error {
+	if strings.TrimSpace(featureID) == "" {
+		return ErrFeatureIDMissing
+	}
+
+	now := time.Now().UTC()
+	nowStr := formatTimestamp(now)
+	pastStr := formatTimestamp(time.Unix(0, 0).UTC())
+
+	res, err := s.ledger.DB().ExecContext(ctx, `
+		UPDATE feature_leases
+		SET expires_at = ?, updated_at = ?
+		WHERE feature_id = ?`,
+		pastStr, nowStr, featureID,
+	)
+	if err != nil {
+		return fmt.Errorf("feature: force release lease: %w", err)
+	}
+
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("feature: read rows affected: %w", err)
+	}
+	if affected == 0 {
+		return ErrLeaseNotFound
+	}
+
+	return nil
+}
+
 // ValidateLease verifies that (owner, fence) is the current active, unexpired leaseholder.
 // Returns ErrLeaseNotFound if no lease exists, ErrStaleLease if owner/fence does not match,
 // or ErrLeaseExpired if the lease has expired.

@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/LanzerDevCorp/lucind-ai/internal/accept"
 	"github.com/LanzerDevCorp/lucind-ai/internal/executor"
 	"github.com/LanzerDevCorp/lucind-ai/internal/feature"
 	"github.com/LanzerDevCorp/lucind-ai/internal/lane"
@@ -529,6 +530,7 @@ func TestRunOverlappingAllowedPathsFailsBeforeCreateWorktree(t *testing.T) {
 	defer func() { depsFactory = origFactory }()
 	depsFactory = func(runID, primaryRoot string, ledg *ledger.Ledger, timeout, approvalTimeout time.Duration) lucindrun.Deps {
 		deps := origFactory(runID, primaryRoot, ledg, timeout, approvalTimeout)
+		deps.ResolveCandidateIdentity = stubCandidateIdentity
 		deps.CreateWorktree = func(ctx context.Context, primaryRoot, laneID, parentRef, baseSHA string) (worktree.Worktree, error) {
 			createCalled = true
 			return origFactory(runID, primaryRoot, ledg, timeout, approvalTimeout).CreateWorktree(ctx, primaryRoot, laneID, parentRef, baseSHA)
@@ -1137,6 +1139,7 @@ func TestRunSequentialInvocationsProduceDistinctRunIDs(t *testing.T) {
 	defer func() { depsFactory = origFactory }()
 	depsFactory = func(runID, primaryRoot string, ledg *ledger.Ledger, timeout, approvalTimeout time.Duration) lucindrun.Deps {
 		deps := origFactory(runID, primaryRoot, ledg, timeout, approvalTimeout)
+		deps.ResolveCandidateIdentity = stubCandidateIdentity
 		deps.CreateWorktree = func(ctx context.Context, primaryRoot, laneID, parentRef, baseSHA string) (worktree.Worktree, error) {
 			return worktree.Worktree{Path: t.TempDir(), Branch: "branch-" + laneID}, nil
 		}
@@ -1577,6 +1580,7 @@ func TestRunDispatchPersistsIntegratedLaneEnvelopeToPrimaryRoot(t *testing.T) {
 	defer func() { depsFactory = origFactory }()
 	depsFactory = func(runID, primaryRoot string, ledg *ledger.Ledger, timeout, approvalTimeout time.Duration) lucindrun.Deps {
 		deps := origFactory(runID, primaryRoot, ledg, timeout, approvalTimeout)
+		deps.ResolveCandidateIdentity = stubCandidateIdentity
 		deps.CreateWorktree = func(ctx context.Context, primaryRoot, laneID, parentRef, baseSHA string) (worktree.Worktree, error) {
 			return worktree.Worktree{Path: t.TempDir(), Branch: "branch-" + laneID}, nil
 		}
@@ -1798,6 +1802,7 @@ func overrideDispatchDeps(t *testing.T, exec executor.Executor) {
 	t.Cleanup(func() { depsFactory = origFactory })
 	depsFactory = func(runID, primaryRoot string, ledg *ledger.Ledger, timeout, approvalTimeout time.Duration) lucindrun.Deps {
 		deps := origFactory(runID, primaryRoot, ledg, timeout, approvalTimeout)
+		deps.ResolveCandidateIdentity = stubCandidateIdentity
 		deps.CreateWorktree = origFactory(runID, primaryRoot, ledg, timeout, approvalTimeout).CreateWorktree
 		deps.HasUniqueLaneCommits = func(ctx context.Context, worktreePath, baseSHA string) (bool, error) {
 			return true, nil
@@ -1828,6 +1833,12 @@ func overrideDispatchDeps(t *testing.T, exec executor.Executor) {
 		}
 		return deps
 	}
+}
+
+func stubCandidateIdentity(context.Context, string, string, string) (lucindrun.CandidateIdentity, error) {
+	return lucindrun.CandidateIdentity{
+		BaseCommit: "base-commit", BaseTree: "base-tree", CandidateCommit: "candidate-commit", CandidateTree: "candidate-tree",
+	}, nil
 }
 
 // TestApplyDagTwoWaveSequentialDispatch (Phase 7.3) parses the two
@@ -2027,6 +2038,9 @@ func TestRunCheckScriptPasses(t *testing.T) {
 	}
 	if !strings.Contains(strings.ToLower(outStr), "duration") {
 		t.Errorf("stdout = %q, want it to contain execution duration", outStr)
+	}
+	if !strings.Contains(outStr, "resolved root:") {
+		t.Errorf("stdout = %q, want it to contain 'resolved root:'", outStr)
 	}
 }
 
@@ -3899,6 +3913,7 @@ func featureDispatchDeps(t *testing.T, promoted *[]string) func(string, string, 
 	origFactory := depsFactory
 	return func(runID, primaryRoot string, ledg *ledger.Ledger, timeout, approvalTimeout time.Duration) lucindrun.Deps {
 		deps := origFactory(runID, primaryRoot, ledg, timeout, approvalTimeout)
+		deps.ResolveCandidateIdentity = stubCandidateIdentity
 		deps.CreateWorktree = func(ctx context.Context, primaryRoot, laneID, parentRef, baseSHA string) (worktree.Worktree, error) {
 			return worktree.Worktree{Path: t.TempDir(), Branch: "branch-" + laneID}, nil
 		}
@@ -4042,6 +4057,7 @@ func TestRunDispatchRejectsMixedFeatureTargets(t *testing.T) {
 	t.Cleanup(func() { depsFactory = origFactory })
 	depsFactory = func(runID, primaryRoot string, ledg *ledger.Ledger, timeout, approvalTimeout time.Duration) lucindrun.Deps {
 		deps := origFactory(runID, primaryRoot, ledg, timeout, approvalTimeout)
+		deps.ResolveCandidateIdentity = stubCandidateIdentity
 		deps.CreateWorktree = func(ctx context.Context, primaryRoot, laneID, parentRef, baseSHA string) (worktree.Worktree, error) {
 			t.Errorf("CreateWorktree called for lane %q; a mixed-target batch must be rejected before any lane dispatches", laneID)
 			return worktree.Worktree{}, nil
@@ -4100,6 +4116,7 @@ func TestIntegrateRetryCLI(t *testing.T) {
 	t.Cleanup(func() { depsFactory = origFactory })
 	depsFactory = func(runID, primaryRoot string, ledg *ledger.Ledger, timeout, approvalTimeout time.Duration) lucindrun.Deps {
 		deps := origFactory(runID, primaryRoot, ledg, timeout, approvalTimeout)
+		deps.ResolveCandidateIdentity = stubCandidateIdentity
 		deps.CreateWorktree = func(ctx context.Context, primaryRoot, laneID, parentRef, baseSHA string) (worktree.Worktree, error) {
 			return worktree.Worktree{Path: t.TempDir(), Branch: "branch-" + laneID}, nil
 		}
@@ -4738,5 +4755,348 @@ func TestRunCheckFromLinkedWorktreeTestsWorktreeOwnCode(t *testing.T) {
 	}
 	if strings.Contains(outStr, primaryHead) {
 		t.Errorf("stdout = %q, unexpectedly reports the PRIMARY checkout's commit %q instead of the worktree's own %q", outStr, primaryHead, worktreeHead)
+	}
+}
+
+func TestAcceptNoFlags(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := run(context.Background(), []string{"accept"}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("run(accept with no flags) = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "--run and --lane are required") {
+		t.Fatalf("stderr = %q, want required persisted identity", stderr.String())
+	}
+}
+
+// TestUsageAdvertisesAcceptRunAndLane guards the top-level usage string against
+// drift: accept takes exactly --run and --lane, so the one invocation a person
+// sees on a usage error must not describe flags the subcommand does not parse.
+func TestUsageAdvertisesAcceptRunAndLane(t *testing.T) {
+	if !strings.Contains(usage, "lucind-ai accept --run <run-id> --lane <lane-id>") {
+		t.Fatalf("usage = %q, want it to advertise the real accept signature", usage)
+	}
+}
+
+type fakeAcceptanceVerifier struct {
+	receipt ledger.AcceptanceReceipt
+	err     error
+	request accept.AcceptanceRequest
+}
+
+func runGitOutput(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v: %v: %s", args, err, out)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+func (f *fakeAcceptanceVerifier) Verify(_ context.Context, request accept.AcceptanceRequest) (ledger.AcceptanceReceipt, error) {
+	f.request = request
+	return f.receipt, f.err
+}
+
+func TestAcceptRequiresExactReceiptAndRendersMechanicalEvidenceOnly(t *testing.T) {
+	primaryRoot := t.TempDir()
+	runGit(t, primaryRoot, "init", "-b", "main")
+	runGit(t, primaryRoot, "config", "user.name", "lucind-test")
+	runGit(t, primaryRoot, "config", "user.email", "test@lucind.ai")
+	if err := os.WriteFile(filepath.Join(primaryRoot, "README.md"), []byte("seed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, primaryRoot, "add", "README.md")
+	runGit(t, primaryRoot, "commit", "-m", "seed commit")
+	refsBefore := runGitOutput(t, primaryRoot, "show-ref")
+
+	fake := &fakeAcceptanceVerifier{receipt: ledger.AcceptanceReceipt{
+		ReceiptID: "receipt-1", BindingHash: "binding-1", ResultHash: "result-1", ChecksHash: "checks-1",
+		Binding: ledger.AcceptanceBinding{RunID: "run-1", LaneID: "lane-1", CandidateCommit: "candidate-1"}, Cleanup: "removed",
+	}}
+	originalFactory := acceptVerifierFactory
+	acceptVerifierFactory = func(string, *ledger.Ledger) acceptanceVerifier { return fake }
+	t.Cleanup(func() { acceptVerifierFactory = originalFactory })
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(primaryRoot); err != nil {
+		t.Fatalf("os.Chdir: %v", err)
+	}
+	defer os.Chdir(cwd)
+
+	var stdout, stderr bytes.Buffer
+	code := run(context.Background(), []string{"accept", "--run", "run-1", "--lane", "lane-1"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("accept exit code = %d, want 0; stderr = %q, stdout = %q", code, stderr.String(), stdout.String())
+	}
+	out := stdout.String()
+	for _, want := range []string{"receipt-1", "binding-1", "mechanical evidence", "qualitative approval remains separate"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("stdout %q missing %q", out, want)
+		}
+	}
+	if strings.Contains(strings.ToLower(out), "semantically approved") {
+		t.Fatalf("output escalates authority: %q", out)
+	}
+	if fake.request != (accept.AcceptanceRequest{RunID: "run-1", LaneID: "lane-1"}) {
+		t.Fatalf("request = %+v", fake.request)
+	}
+	if refsAfter := runGitOutput(t, primaryRoot, "show-ref"); refsAfter != refsBefore {
+		t.Fatalf("CLI mutated refs")
+	}
+
+	fake.err = errors.New("exact receipt absent")
+	stdout.Reset()
+	stderr.Reset()
+	if code := run(context.Background(), []string{"accept", "--run", "run-1", "--lane", "lane-1"}, &stdout, &stderr); code == 0 {
+		t.Fatal("accept succeeded without receipt")
+	}
+}
+
+func TestFeatureLeaseReleaseCLI(t *testing.T) {
+	primaryRoot := t.TempDir()
+
+	runGit(t, primaryRoot, "init", "-b", "main")
+	runGit(t, primaryRoot, "config", "user.name", "lucind-test")
+	runGit(t, primaryRoot, "config", "user.email", "test@lucind.ai")
+
+	seedFile := filepath.Join(primaryRoot, "README.md")
+	if err := os.WriteFile(seedFile, []byte("# Test\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(README.md): %v", err)
+	}
+	runGit(t, primaryRoot, "add", "README.md")
+	runGit(t, primaryRoot, "commit", "-m", "initial commit")
+
+	cmd := exec.Command("git", "rev-parse", "HEAD")
+	cmd.Dir = primaryRoot
+	baseSHABytes, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("rev-parse HEAD: %v", err)
+	}
+	baseSHA := strings.TrimSpace(string(baseSHABytes))
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(primaryRoot); err != nil {
+		t.Fatalf("os.Chdir: %v", err)
+	}
+	defer os.Chdir(cwd)
+
+	// Create feature in ledger
+	var stdout, stderr bytes.Buffer
+	code := run(context.Background(), []string{"feature", "create", "--id", "feat-lease-test", "--parent", "refs/heads/feature-test", "--base-sha", baseSHA}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("feature create exit code = %d: %s", code, stderr.String())
+	}
+
+	// Acquire lease via ledger
+	ledg, err := ledger.Open(context.Background(), primaryRoot)
+	if err != nil {
+		t.Fatalf("open ledger: %v", err)
+	}
+	featSvc := feature.NewService(ledg)
+	l, err := featSvc.AcquireLease(context.Background(), "feat-lease-test", "test-worker", time.Hour)
+	if err != nil {
+		t.Fatalf("AcquireLease: %v", err)
+	}
+	ledg.Close()
+
+	// Check status
+	stdout.Reset()
+	stderr.Reset()
+	code = run(context.Background(), []string{"feature", "lease", "status", "--id", "feat-lease-test"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("feature lease status exit code = %d: %s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "valid:      true") {
+		t.Errorf("stdout = %q, want valid: true", stdout.String())
+	}
+
+	// Try release with live PID (should fail)
+	stdout.Reset()
+	stderr.Reset()
+	code = run(context.Background(), []string{"feature", "lease", "release", "--id", "feat-lease-test", "--pid", fmt.Sprintf("%d", os.Getpid())}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("feature lease release with live PID exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "is still alive") {
+		t.Errorf("stderr = %q, want it to mention process is still alive", stderr.String())
+	}
+
+	// Release with matching owner and fence
+	stdout.Reset()
+	stderr.Reset()
+	code = run(context.Background(), []string{"feature", "lease", "release", "--id", "feat-lease-test", "--owner", l.Owner, "--fence", fmt.Sprintf("%d", l.Fence)}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("feature lease release exit code = %d: %s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "lease:   released") {
+		t.Errorf("stdout = %q, want lease: released", stdout.String())
+	}
+
+	// Check status after release
+	stdout.Reset()
+	stderr.Reset()
+	code = run(context.Background(), []string{"feature", "lease", "status", "--id", "feat-lease-test"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("feature lease status after release exit code = %d: %s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "valid:      false") {
+		t.Errorf("stdout = %q, want valid: false", stdout.String())
+	}
+}
+
+func TestReconcileWaitStableCLI(t *testing.T) {
+	primaryRoot := t.TempDir()
+
+	runGit(t, primaryRoot, "init", "-b", "main")
+	runGit(t, primaryRoot, "config", "user.name", "lucind-test")
+	runGit(t, primaryRoot, "config", "user.email", "test@lucind.ai")
+
+	seedFile := filepath.Join(primaryRoot, "README.md")
+	if err := os.WriteFile(seedFile, []byte("# Test\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(README.md): %v", err)
+	}
+	runGit(t, primaryRoot, "add", "README.md")
+	runGit(t, primaryRoot, "commit", "-m", "initial commit")
+
+	cmd := exec.Command("git", "rev-parse", "HEAD")
+	cmd.Dir = primaryRoot
+	baseSHABytes, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("rev-parse HEAD: %v", err)
+	}
+	baseSHA := strings.TrimSpace(string(baseSHABytes))
+
+	// Source branch
+	runGit(t, primaryRoot, "checkout", "-b", "feature-src")
+	if err := os.WriteFile(filepath.Join(primaryRoot, "conflict.txt"), []byte("source content\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, primaryRoot, "add", "conflict.txt")
+	runGit(t, primaryRoot, "commit", "-m", "source commit")
+	srcSHABytes, _ := exec.Command("git", "-C", primaryRoot, "rev-parse", "HEAD").Output()
+	srcSHA := strings.TrimSpace(string(srcSHABytes))
+
+	// Target branch
+	runGit(t, primaryRoot, "checkout", "main")
+	runGit(t, primaryRoot, "checkout", "-b", "feature-tgt")
+	if err := os.WriteFile(filepath.Join(primaryRoot, "conflict.txt"), []byte("target content\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, primaryRoot, "add", "conflict.txt")
+	runGit(t, primaryRoot, "commit", "-m", "target commit")
+	tgtSHABytes, _ := exec.Command("git", "-C", primaryRoot, "rev-parse", "HEAD").Output()
+	tgtSHA := strings.TrimSpace(string(tgtSHABytes))
+
+	runGit(t, primaryRoot, "checkout", "main")
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(primaryRoot); err != nil {
+		t.Fatalf("os.Chdir: %v", err)
+	}
+	defer os.Chdir(cwd)
+
+	ledg, err := ledger.Open(context.Background(), primaryRoot)
+	if err != nil {
+		t.Fatalf("open ledger: %v", err)
+	}
+	featSvc := feature.NewService(ledg)
+	_, _ = featSvc.Create(context.Background(), "feat-s", "refs/heads/feature-src", baseSHA)
+	_, _ = featSvc.Create(context.Background(), "feat-t", "refs/heads/feature-tgt", baseSHA)
+
+	reconcileSvc := reconcile.NewService(ledg)
+	ev := &overlap.Evidence{
+		Version:     "1.0",
+		BaseSHA:     baseSHA,
+		FeatureASHA: srcSHA,
+		FeatureBSHA: tgtSHA,
+		Class:       overlap.ClassRequired,
+		Signals: overlap.Signals{
+			ConflictPaths: []string{"conflict.txt"},
+		},
+	}
+
+	req, err := reconcileSvc.CreateRequest(context.Background(), reconcile.CreateRequestParams{
+		ID:            "req-ws-1",
+		FeatureID:     "feat-t",
+		SourceFeature: "feat-s",
+		SourceParent:  "refs/heads/feature-src",
+		TargetFeature: "feat-t",
+		TargetParent:  "refs/heads/feature-tgt",
+		SourceSHA:     srcSHA,
+		TargetSHA:     tgtSHA,
+		Evidence:      ev,
+		TTL:           10 * time.Minute,
+	})
+	if err != nil {
+		t.Fatalf("CreateRequest: %v", err)
+	}
+	ledg.Close()
+
+	// Renew with --wait-stable
+	var stdout, stderr bytes.Buffer
+	code := run(context.Background(), []string{"reconcile", "renew", "--request", req.ID, "--target-sha", "refs/heads/feature-tgt", "--wait-stable", "50ms"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("reconcile renew exit code = %d: %s", code, stderr.String())
+	}
+	renewOut := stdout.String()
+	var newReqID string
+	for _, line := range strings.Split(renewOut, "\n") {
+		if strings.HasPrefix(line, "request:") {
+			newReqID = strings.TrimSpace(strings.TrimPrefix(line, "request:"))
+			break
+		}
+	}
+	if newReqID == "" {
+		t.Fatalf("could not parse new request ID from renew output: %s", renewOut)
+	}
+
+	// Read renewed request from ledger
+	ledg, _ = ledger.Open(context.Background(), primaryRoot)
+	renewedReq, err := ledg.ReconciliationRequest(context.Background(), newReqID)
+	if err != nil {
+		t.Fatalf("ReconciliationRequest failed: %v", err)
+	}
+	ledg.Close()
+
+	sourceFeat, _, targetFeat, _ := reconcile.ParseDirection(renewedReq.Direction)
+
+	// Approve renewed request to create candidate
+	stdout.Reset()
+	stderr.Reset()
+	code = run(context.Background(), []string{"reconcile", "approve", "--request", newReqID, "--source", sourceFeat, "--target", targetFeat}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("reconcile approve exit code = %d: %s", code, stderr.String())
+	}
+
+	// Read candidate ID from ledger
+	ledg, _ = ledger.Open(context.Background(), primaryRoot)
+	cand, err := ledg.ReconciliationCandidateByRequest(context.Background(), newReqID)
+	if err != nil || cand.ID == "" {
+		t.Fatalf("ReconciliationCandidateByRequest failed: %v", err)
+	}
+	candID := cand.ID
+	ledg.Close()
+
+	// Resolve candidate with --wait-stable
+	stdout.Reset()
+	stderr.Reset()
+	code = run(context.Background(), []string{"reconcile", "resolve", "--candidate", candID, "--sha", srcSHA, "--wait-stable", "50ms"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("reconcile resolve exit code = %d: %s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "status:    integrated") {
+		t.Errorf("stdout = %q, want status: integrated", stdout.String())
 	}
 }

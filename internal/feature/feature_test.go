@@ -559,4 +559,19 @@ func TestExportedHelpersAndEdgeCases(t *testing.T) {
 	if gotL.Valid(time.Now().UTC().Add(2 * time.Hour)) {
 		t.Error("expected gotL to be invalid in 2 hours")
 	}
+
+	// ForceReleaseLease
+	if err := svc.ForceReleaseLease(ctx, "feat-get-lease"); err != nil {
+		t.Fatalf("ForceReleaseLease: %v", err)
+	}
+	releasedL, err := svc.GetLease(ctx, "feat-get-lease")
+	if err != nil {
+		t.Fatalf("GetLease after force release: %v", err)
+	}
+	if releasedL.Valid(time.Now().UTC()) {
+		t.Error("expected forced release lease to be expired")
+	}
+	if err := svc.ForceReleaseLease(ctx, ""); !errors.Is(err, ErrFeatureIDMissing) {
+		t.Errorf("ForceReleaseLease empty ID returned %v, want ErrFeatureIDMissing", err)
+	}
 }

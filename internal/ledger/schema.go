@@ -7,7 +7,7 @@ import (
 )
 
 // schemaVersion is the migration version this schema represents.
-const schemaVersion = 8
+const schemaVersion = 9
 
 const schemaMigrationsDDL = `
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -372,6 +372,56 @@ CREATE TABLE IF NOT EXISTS defect_records (
 CREATE INDEX IF NOT EXISTS idx_defect_records_feature ON defect_records(feature_id, id);
 `
 
+const migrateV8ToV9DDL = `
+CREATE TABLE lane_candidates (
+  run_id          TEXT NOT NULL,
+  lane_id         TEXT NOT NULL,
+  packet_id       TEXT NOT NULL,
+  packet_digest   TEXT NOT NULL,
+  primary_root    TEXT NOT NULL,
+  worktree_path   TEXT NOT NULL,
+  base_commit     TEXT NOT NULL,
+  base_tree       TEXT NOT NULL,
+  candidate_commit TEXT NOT NULL,
+  candidate_tree  TEXT NOT NULL,
+  allowed_paths   TEXT NOT NULL,
+  result_path     TEXT NOT NULL,
+  result_json     TEXT NOT NULL,
+  result_hash     TEXT NOT NULL,
+  recorded_at     TEXT NOT NULL,
+  PRIMARY KEY (run_id, lane_id)
+) STRICT;
+
+CREATE TABLE acceptance_receipts (
+  receipt_id       TEXT PRIMARY KEY,
+  binding_hash     TEXT NOT NULL UNIQUE,
+  run_id           TEXT NOT NULL,
+  lane_id          TEXT NOT NULL,
+  packet_id        TEXT NOT NULL,
+  packet_digest    TEXT NOT NULL,
+  base_commit      TEXT NOT NULL,
+  base_tree        TEXT NOT NULL,
+  candidate_commit TEXT NOT NULL,
+  candidate_tree   TEXT NOT NULL,
+  allowed_paths_hash TEXT NOT NULL,
+  check_policy_hash TEXT NOT NULL,
+  environment_hash TEXT NOT NULL,
+  result_hash      TEXT NOT NULL,
+  checks_hash      TEXT NOT NULL,
+  cleanup          TEXT NOT NULL,
+  created_at       TEXT NOT NULL
+) STRICT;
+
+CREATE TRIGGER lane_candidates_no_update BEFORE UPDATE ON lane_candidates
+BEGIN SELECT RAISE(ABORT, 'lane_candidates are immutable'); END;
+CREATE TRIGGER lane_candidates_no_delete BEFORE DELETE ON lane_candidates
+BEGIN SELECT RAISE(ABORT, 'lane_candidates are immutable'); END;
+CREATE TRIGGER acceptance_receipts_no_update BEFORE UPDATE ON acceptance_receipts
+BEGIN SELECT RAISE(ABORT, 'acceptance_receipts are immutable'); END;
+CREATE TRIGGER acceptance_receipts_no_delete BEFORE DELETE ON acceptance_receipts
+BEGIN SELECT RAISE(ABORT, 'acceptance_receipts are immutable'); END;
+`
+
 // migrate applies the schema inside one transaction and records the
 // migration version. It is idempotent: re-running it against an already
 // migrated database (e.g. a second Open on the same file) is a safe no-op.
@@ -494,6 +544,19 @@ func migrate(ctx context.Context, db *sql.DB) error {
 			return err
 		}
 		currentVersion = 8
+	}
+
+	if currentVersion < 9 {
+		if _, err := tx.ExecContext(ctx, migrateV8ToV9DDL); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)`,
+			9, time.Now().UTC().Format(time.RFC3339),
+		); err != nil {
+			return err
+		}
+		currentVersion = 9
 	}
 
 	return tx.Commit()

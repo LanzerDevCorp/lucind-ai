@@ -11,6 +11,26 @@ import (
 	"github.com/LanzerDevCorp/lucind-ai/internal/ledgerpath"
 )
 
+func TestSchemaV9AddsImmutableAcceptanceEvidence(t *testing.T) {
+	l := openTestLedger(t)
+	var version int
+	if err := l.db.QueryRow(`SELECT MAX(version) FROM schema_migrations`).Scan(&version); err != nil {
+		t.Fatal(err)
+	}
+	if version != 9 {
+		t.Fatalf("schema version = %d, want 9", version)
+	}
+	assertTableColumns(t, l.db, "lane_candidates", []string{
+		"run_id", "lane_id", "packet_id", "packet_digest", "primary_root", "worktree_path",
+		"base_commit", "base_tree", "candidate_commit", "candidate_tree", "allowed_paths", "result_path", "result_json", "result_hash", "recorded_at",
+	})
+	assertTableColumns(t, l.db, "acceptance_receipts", []string{
+		"receipt_id", "binding_hash", "run_id", "lane_id", "packet_id", "packet_digest",
+		"base_commit", "base_tree", "candidate_commit", "candidate_tree", "allowed_paths_hash",
+		"check_policy_hash", "environment_hash", "result_hash", "checks_hash", "cleanup", "created_at",
+	})
+}
+
 func TestMigrateV5ToV6PreservesRowsAndAddsSchema(t *testing.T) {
 	ctx := context.Background()
 	root := createV5SchemaFixture(t, ctx)

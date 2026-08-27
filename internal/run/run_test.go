@@ -138,6 +138,71 @@ func TestExecuteUpdatesLaneMetadataAfterRegisterLane(t *testing.T) {
 	}
 }
 
+func TestExecuteDoneAtomicallyFreezesAcceptanceCandidate(t *testing.T) {
+	wtPath := t.TempDir()
+	runGit(t, wtPath, "init", "-b", "main")
+	runGit(t, wtPath, "config", "user.name", "acceptance-test")
+	runGit(t, wtPath, "config", "user.email", "acceptance-test@example.com")
+	if err := os.WriteFile(filepath.Join(wtPath, "seed.txt"), []byte("seed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, wtPath, "add", "seed.txt")
+	runGit(t, wtPath, "commit", "-m", "seed")
+	baseSHA := gitRevParse(t, wtPath, "HEAD")
+	if err := os.MkdirAll(filepath.Join(wtPath, "internal", "run"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wtPath, "internal", "run", "candidate.go"), []byte("package run\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, wtPath, "add", "internal/run/candidate.go")
+	runGit(t, wtPath, "commit", "-m", "candidate")
+	deps := newTestDeps(t, wtPath, func(string) fs.FS {
+		return fstest.MapFS{resultEnvelopePathForTest(): {Data: []byte(doneEnvelopeJSON)}}
+	}, &fakeExecutor{}, baseSHA)
+	deps.ResolveCandidateIdentity = func(context.Context, string, string, string) (run.CandidateIdentity, error) {
+		return run.CandidateIdentity{
+			BaseCommit: "base-full", BaseTree: "base-tree", CandidateCommit: "candidate-full", CandidateTree: "candidate-tree",
+		}, nil
+	}
+	p := testPacket()
+	p.BaseSHA = baseSHA
+	p.ExpectedParentSHA = baseSHA
+	p.AllowedPaths = []string{"internal/run/", "cmd/lucind-ai", "internal/run"}
+
+	report, err := run.Execute(context.Background(), deps, p)
+	if err != nil || report.Status != lane.Done {
+		t.Fatalf("Execute() = %+v, %v", report, err)
+	}
+	got, err := deps.Ledger.GetLaneCandidate(context.Background(), deps.RunID, p.ID)
+	if err != nil {
+		t.Fatalf("GetLaneCandidate() error = %v", err)
+	}
+	if got.BaseCommit != "base-full" || got.BaseTree != "base-tree" || got.CandidateCommit != "candidate-full" || got.CandidateTree != "candidate-tree" {
+		t.Fatalf("candidate git identity = %+v", got)
+	}
+	if got.PacketDigest == "" || !reflect.DeepEqual(got.AllowedPaths, []string{"cmd/lucind-ai", "internal/run"}) {
+		t.Fatalf("candidate packet identity = digest:%q paths:%v", got.PacketDigest, got.AllowedPaths)
+	}
+}
+
+func TestExecuteDoneRejectsAbsentCandidateIdentity(t *testing.T) {
+	wtPath := t.TempDir()
+	deps := newTestDeps(t, wtPath, func(string) fs.FS {
+		return fstest.MapFS{resultEnvelopePathForTest(): {Data: []byte(doneEnvelopeJSON)}}
+	}, &fakeExecutor{})
+	deps.ResolveCandidateIdentity = func(context.Context, string, string, string) (run.CandidateIdentity, error) {
+		return run.CandidateIdentity{}, errors.New("identity unavailable")
+	}
+	_, err := run.Execute(context.Background(), deps, testPacket())
+	if err == nil || !strings.Contains(err.Error(), "freeze done candidate") {
+		t.Fatalf("Execute() error = %v, want frozen identity failure", err)
+	}
+	if _, err := deps.Ledger.GetLaneCandidate(context.Background(), deps.RunID, "lane-a"); !errors.Is(err, ledger.ErrLaneCandidateNotFound) {
+		t.Fatalf("GetLaneCandidate() error = %v, want no candidate", err)
+	}
+}
+
 // newTestDeps builds a run.Deps wired to a real on-disk ledger (never
 // faked — the point of this package's tests is proving the real ledger is
 // wired), a stubbed CreateWorktree that never touches git, and a pinned
@@ -171,6 +236,9 @@ func newTestDeps(t *testing.T, wtPath string, fsys func(string) fs.FS, exec exec
 		},
 		WorktreeFS: fsys,
 		Now:        func() time.Time { return now },
+		ResolveCandidateIdentity: func(context.Context, string, string, string) (run.CandidateIdentity, error) {
+			return run.CandidateIdentity{BaseCommit: "base", BaseTree: "base-tree", CandidateCommit: "candidate", CandidateTree: "candidate-tree"}, nil
+		},
 		HasUniqueLaneCommits: func(context.Context, string, string) (bool, error) {
 			return true, nil
 		},

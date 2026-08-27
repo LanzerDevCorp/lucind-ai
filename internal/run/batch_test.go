@@ -201,6 +201,9 @@ func newBatchTestDeps(t *testing.T, worktreeRoot func(laneID string) string, env
 			return fstest.MapFS{".lucind/result.json": {Data: data}}
 		},
 		Now: func() time.Time { return now },
+		ResolveCandidateIdentity: func(context.Context, string, string, string) (run.CandidateIdentity, error) {
+			return run.CandidateIdentity{BaseCommit: "base", BaseTree: "base-tree", CandidateCommit: "candidate", CandidateTree: "candidate-tree"}, nil
+		},
 		HasUniqueLaneCommits: func(context.Context, string, string) (bool, error) {
 			return true, nil
 		},
@@ -1058,7 +1061,7 @@ func TestExecuteBatchOutOfScopeUntrackedFileDeviatedExcludedFromIntegrate(t *tes
 	}
 
 	if len(report.Outcome.Integrate) != 1 || report.Outcome.Integrate[0] != "lane-b" {
-		t.Errorf("report.Outcome.Integrate = %v, want [lane-b]", report.Outcome.Integrate)
+		t.Errorf("report.Outcome.Integrate = %v, want [lane-b]; lanes=%+v", report.Outcome.Integrate, report.Lanes)
 	}
 	if len(report.Outcome.Preserve) != 1 || report.Outcome.Preserve[0] != "lane-a" {
 		t.Errorf("report.Outcome.Preserve = %v, want [lane-a]", report.Outcome.Preserve)

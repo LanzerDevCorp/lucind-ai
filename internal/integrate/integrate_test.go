@@ -3,10 +3,12 @@ package integrate_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -542,6 +544,122 @@ func TestCheckExecutionError(t *testing.T) {
 	}
 }
 
+func TestCheckUsesFixedScriptArgumentOwnedCWDAndAllowlistedEnvironment(t *testing.T) {
+	if testing.Short() {
+		t.Skip("shells out to sh")
+	}
+	parent := t.TempDir()
+	dir := filepath.Join(parent, "candidate; touch escaped")
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("LUCIND_HOSTILE_SECRET", "must-not-leak")
+	script := `#!/bin/sh
+printf 'argv0=%s\n' "$0"
+printf 'cwd=%s\n' "$PWD"
+printf 'hostile=%s\n' "${LUCIND_HOSTILE_SECRET-unset}"
+printf 'path=%s\n' "${PATH-unset}"
+`
+	if err := os.WriteFile(filepath.Join(dir, "lucind-checks.sh"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	passed, out, err := integrate.Check(context.Background(), dir)
+	if err != nil || !passed {
+		t.Fatalf("Check() = %t, %q, %v", passed, out, err)
+	}
+	for _, want := range []string{"argv0=" + filepath.Join(dir, "lucind-checks.sh"), "cwd=" + dir, "hostile=unset", "path=" + os.Getenv("PATH")} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("output %q missing %q", out, want)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(parent, "escaped")); !os.IsNotExist(err) {
+		t.Fatalf("metacharacter path escaped argv boundary: %v", err)
+	}
+}
+
+func TestCheckRejectsRelativeRootAndMissingRequiredEnvironment(t *testing.T) {
+	if _, _, err := integrate.Check(context.Background(), "relative/root"); err == nil {
+		t.Fatal("relative root accepted")
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "lucind-checks.sh"), []byte("exit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", "")
+	if _, _, err := integrate.Check(context.Background(), dir); err == nil || !strings.Contains(err.Error(), "PATH") {
+		t.Fatalf("missing PATH error = %v", err)
+	}
+}
+
+func TestCheckReportsExitSignalAndTimeoutAsMechanicalFailure(t *testing.T) {
+	if testing.Short() {
+		t.Skip("shells out to sh")
+	}
+	tests := []struct {
+		name, script string
+		timeout      time.Duration
+	}{
+		{name: "exit seven", script: "echo exit-seven; exit 7\n"},
+		{name: "self term", script: "echo self-term; kill -TERM $$\n"},
+		{name: "timeout", script: "sleep 30\n", timeout: 100 * time.Millisecond},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, "lucind-checks.sh"), []byte(tt.script), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			ctx := context.Background()
+			cancel := func() {}
+			if tt.timeout > 0 {
+				ctx, cancel = context.WithTimeout(ctx, tt.timeout)
+			}
+			defer cancel()
+			start := time.Now()
+			passed, _, err := integrate.Check(ctx, dir)
+			if passed || err != nil {
+				t.Fatalf("Check() = %t, err %v; want mechanical failure", passed, err)
+			}
+			if tt.timeout > 0 && time.Since(start) > 2*time.Second {
+				t.Fatalf("timeout returned after %v", time.Since(start))
+			}
+		})
+	}
+}
+
+func TestCheckReapsTermIgnoringDescendant(t *testing.T) {
+	if testing.Short() {
+		t.Skip("shells out to sh")
+	}
+	dir := t.TempDir()
+	pidFile := filepath.Join(dir, "child.pid")
+	script := `#!/bin/sh
+sh -c 'trap "" TERM; echo $$ > "$1"; while :; do sleep 1; done' child "` + pidFile + `" &
+wait
+`
+	if err := os.WriteFile(filepath.Join(dir, "lucind-checks.sh"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	defer cancel()
+	passed, _, err := integrate.Check(ctx, dir)
+	if passed || err != nil {
+		t.Fatalf("Check() = %t, %v", passed, err)
+	}
+	data, err := os.ReadFile(pidFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pid int
+	if _, err := fmt.Sscanf(strings.TrimSpace(string(data)), "%d", &pid); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(50 * time.Millisecond)
+	if err := syscall.Kill(pid, 0); !errors.Is(err, syscall.ESRCH) {
+		t.Fatalf("descendant pid %d still exists: %v", pid, err)
+	}
+}
+
 func TestPromoteHappyPath(t *testing.T) {
 	if testing.Short() {
 		t.Skip("shells out to real git")
@@ -928,4 +1046,3 @@ func (m *mockGitRunner) Run(ctx context.Context, dir string, args ...string) ([]
 	}
 	return nil, nil
 }
-
