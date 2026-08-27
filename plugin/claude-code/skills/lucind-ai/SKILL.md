@@ -45,7 +45,6 @@ Read only the modules whose trigger branch fires. When multiple branches fire, r
 | Lane Acceptance, batch outcome, checks, or Change Promotion | `references/contracts/acceptance-promotion.md` |
 | Executor, model, provider, agent, quota, or route selection | `references/adapters/executors.md` |
 | Claude Agent Teams or provider collaboration question | `references/adapters/claude-agent-teams.md` |
-| `serve`, approvals, ledger, status, or operator monitoring | `references/operations/control-room.md` |
 | Dirty tree, stale worktree, reverted Lane, timeout, flaky check, or environment failure | `references/operations/troubleshooting.md` |
 
 ## Execution Steps

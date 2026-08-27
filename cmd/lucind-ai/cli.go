@@ -31,7 +31,6 @@ import (
 	"github.com/LanzerDevCorp/lucind-ai/internal/reconcile"
 	"github.com/LanzerDevCorp/lucind-ai/internal/result"
 	lucindrun "github.com/LanzerDevCorp/lucind-ai/internal/run"
-	"github.com/LanzerDevCorp/lucind-ai/internal/serve"
 	"github.com/LanzerDevCorp/lucind-ai/internal/worktree"
 )
 
@@ -56,7 +55,7 @@ const attemptOwner = "lucind-ai run"
 // error, so a person driving the binary from a terminal always sees the one
 // invocation that works rather than a stack trace. --packet is repeatable:
 // each occurrence adds one more lane to the batch.
-const usage = "usage: lucind-ai run --packet <path> [--packet <path> ...] [--timeout <duration>] [--approval-timeout <duration>] [--legacy-main] [--expected-parent-sha <sha>] [--min-quota <fraction>]\n       lucind-ai split --dag <path> --out <dir>\n       lucind-ai check [--out <path>]\n       lucind-ai accept --run <run-id> --lane <lane-id>\n       lucind-ai serve [--addr <addr>] [--approver <name>] [--approval-timeout <duration>] [--enable-dispatch] [--dispatch-token <token>]\n       lucind-ai feature create --id <id> --parent <ref> --base-sha <sha> [--expected-parent-sha <sha>]\n       lucind-ai feature status [--id <id>]\n       lucind-ai feature recover --attempt <id>\n       lucind-ai feature renew --id <id> --owner <owner> --fence <fence> [--ttl <duration>]\n       lucind-ai feature lease release --id <id> [--owner <owner>] [--fence <fence>] [--pid <pid>] [--force]\n       lucind-ai feature lease status --id <id>\n       lucind-ai feature disable --id <id>\n       lucind-ai reconcile approve --request <id> --source <feature> --target <feature> [--actor <name>]\n       lucind-ai reconcile decline --request <id> [--actor <name>] [--reason <reason>]\n       lucind-ai reconcile cancel --request <id> [--actor <name>] [--reason <reason>]\n       lucind-ai reconcile renew --request <id> [--base-sha <sha>] [--source-sha <sha>] [--target-sha <sha>] [--wait-stable <duration>]\n       lucind-ai reconcile resolve --candidate <id> --sha <sha> [--actor <name>] [--wait-stable <duration>]\n       lucind-ai defect record --id <id> --feature <id> --signature <sig> [--evidence <ev>] [--disposition <disp>] [--run <run-id>] [--lane <lane-id>]\n       lucind-ai defect list --feature <id>\n       lucind-ai defect decline --id <id>\n       lucind-ai worktree cleanup --lane <id>\n       lucind-ai integrate retry --run <run-id> [--lane <id> ...] [--timeout <duration>] [--approval-timeout <duration>]\n       lucind-ai --version"
+const usage = "usage: lucind-ai run --packet <path> [--packet <path> ...] [--timeout <duration>] [--approval-timeout <duration>] [--legacy-main] [--expected-parent-sha <sha>] [--min-quota <fraction>]\n       lucind-ai split --dag <path> --out <dir>\n       lucind-ai check [--out <path>]\n       lucind-ai accept --run <run-id> --lane <lane-id>\n       lucind-ai feature create --id <id> --parent <ref> --base-sha <sha> [--expected-parent-sha <sha>]\n       lucind-ai feature status [--id <id>]\n       lucind-ai feature recover --attempt <id>\n       lucind-ai feature renew --id <id> --owner <owner> --fence <fence> [--ttl <duration>]\n       lucind-ai feature lease release --id <id> [--owner <owner>] [--fence <fence>] [--pid <pid>] [--force]\n       lucind-ai feature lease status --id <id>\n       lucind-ai feature disable --id <id>\n       lucind-ai reconcile approve --request <id> --source <feature> --target <feature> [--actor <name>]\n       lucind-ai reconcile decline --request <id> [--actor <name>] [--reason <reason>]\n       lucind-ai reconcile cancel --request <id> [--actor <name>] [--reason <reason>]\n       lucind-ai reconcile renew --request <id> [--base-sha <sha>] [--source-sha <sha>] [--target-sha <sha>] [--wait-stable <duration>]\n       lucind-ai reconcile resolve --candidate <id> --sha <sha> [--actor <name>] [--wait-stable <duration>]\n       lucind-ai defect record --id <id> --feature <id> --signature <sig> [--evidence <ev>] [--disposition <disp>] [--run <run-id>] [--lane <lane-id>]\n       lucind-ai defect list --feature <id>\n       lucind-ai defect decline --id <id>\n       lucind-ai worktree cleanup --lane <id>\n       lucind-ai integrate retry --run <run-id> [--lane <id> ...] [--timeout <duration>] [--approval-timeout <duration>]\n       lucind-ai --version"
 
 // depsFactory constructs run.Deps for runDispatch. In production it is
 // productionDeps; tests may override it to inject test doubles or observe dependency calls.
@@ -149,8 +148,6 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return runCheck(ctx, args[1:], stdout, stderr)
 	case "accept":
 		return runAccept(ctx, args[1:], stdout, stderr)
-	case "serve":
-		return serveDispatch(ctx, args[1:], stdout, stderr)
 	case "feature":
 		return featureDispatch(ctx, args[1:], stdout, stderr)
 	case "reconcile":
@@ -357,11 +354,10 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 	deps := depsFactory(runID, primaryRoot, ledg, *timeout, *approvalTimeout)
 
 	// Register this run before anything else touches the ledger: every lane
-	// and event ExecuteBatch is about to write carries this runID, and
-	// serve.Model derives its whole run/lane/event/progress window from the
-	// runs table (see internal/serve/handlers.go buildServerState). Without
-	// this row, that data is invisible to the Control Room even though the
-	// lane and event rows themselves are written with a valid run_id.
+	// and event ExecuteBatch is about to write carries this runID, and the
+	// ledger derives run/lane/event/progress records from the runs table.
+	// Without this row, that data is detached even though the lane and event
+	// rows themselves are written with a valid run_id.
 	//
 	// runID is a fresh uuid.NewString() minted a few lines above and never
 	// reused across invocations or retries (recovery of a crashed feature
@@ -393,8 +389,7 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 	// every early "return 1" leaves it at this pessimistic default, and only
 	// the success path at the end of this function overwrites it with
 	// lane.Done. This is deliberate: a run row must never linger at
-	// "running" (which serve.Model.GetOverview counts as an active
-	// dispatch) just because a later step returned early.
+	// "running" just because a later step returned early.
 	finalStatus := string(lane.Failed)
 	defer func() {
 		if err := ledg.UpdateRunStatus(ctx, runID, finalStatus, deps.Now()); err != nil {
@@ -899,85 +894,6 @@ func defaultApprover() string {
 	return "anonymous"
 }
 
-// serveDispatch implements the "serve" subcommand: localhost approvals web UI.
-func serveDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) int {
-	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	fs.Usage = func() {
-		fmt.Fprintln(stderr, usage)
-		fs.PrintDefaults()
-	}
-
-	addr := fs.String("addr", "127.0.0.1:7433", "listen address (loopback only)")
-	approver := fs.String("approver", defaultApprover(), "signed-in approver identity")
-	approvalTimeout := fs.Duration("approval-timeout", 30*time.Minute, "informational only -- does not gate lanes; pass --approval-timeout to 'lucind-ai run' to actually enable the wait")
-	enableDispatch := fs.Bool("enable-dispatch", false, "enable control mutations (approvals/defects)")
-	dispatchToken := fs.String("dispatch-token", "", "bearer token for control mutations when --enable-dispatch is set")
-
-	if err := fs.Parse(args); err != nil {
-		return 1
-	}
-
-	if !serve.IsLoopback(*addr) {
-		fmt.Fprintf(stderr, "lucind-ai: %v\n", fmt.Errorf("%w: %s", serve.ErrNonLoopback, *addr))
-		return 1
-	}
-
-	primaryRoot, err := resolvePrimaryRoot(ctx)
-	if err != nil {
-		fmt.Fprintf(stderr, "lucind-ai: %v\n", err)
-		return 1
-	}
-
-	toplevel, err := gitShowToplevel(ctx)
-	if err == nil && worktree.IsLinkedWorktree(toplevel) {
-		fmt.Fprintf(stderr, "lucind-ai: refusing to run from inside a linked worktree (%s); run from the primary repository instead\n", toplevel)
-		return 1
-	}
-
-	ledg, err := ledger.Open(ctx, primaryRoot)
-	if err != nil {
-		fmt.Fprintf(stderr, "lucind-ai: open ledger: %v\n", err)
-		return 1
-	}
-	defer ledg.Close()
-
-	token := *dispatchToken
-	if *enableDispatch && token == "" {
-		token = uuid.New().String()
-	}
-
-	hub := serve.NewHub(ledg, "", serve.HubConfig{})
-	go func() {
-		_ = hub.Run(ctx)
-	}()
-	sweeper := serve.NewSweeper(ledg, serve.SweeperConfig{})
-	go func() {
-		_ = sweeper.Run(ctx)
-	}()
-
-	opencodeCmd := "opencode run --agent build -m openai/gpt-5.6-sol"
-	config := serve.HandlerConfig{
-		Hub:            hub,
-		EnableDispatch: *enableDispatch,
-		DispatchToken:  token,
-	}
-	handler := serve.NewHandlerWithConfig(serve.NewModel(ledg), *approver, opencodeCmd, config)
-
-	if *enableDispatch {
-		fmt.Fprintf(stdout, "lucind-ai serve listening on http://%s (approver: %s, approval timeout: %s, dispatch: enabled)\n", *addr, *approver, *approvalTimeout)
-	} else {
-		fmt.Fprintf(stdout, "lucind-ai serve listening on http://%s (approver: %s, approval timeout: %s)\n", *addr, *approver, *approvalTimeout)
-	}
-
-	if err := serve.ListenAndServe(ctx, *addr, handler); err != nil {
-		fmt.Fprintf(stderr, "lucind-ai: %v\n", err)
-		return 1
-	}
-
-	return 0
-}
-
 // featureDispatch dispatches feature subcommands (create, status, recover, renew, disable, lease).
 func featureDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	_ = reconcile.ErrInvalidDirection
@@ -1076,7 +992,7 @@ func runFeatureCreate(ctx context.Context, args []string, stdout, stderr io.Writ
 	return 0
 }
 
-// runFeatureStatus implements "lucind-ai feature status": queries feature, attempt, and lease state via serve.Model.
+// runFeatureStatus implements "lucind-ai feature status": queries feature, attempt, and lease state via feature.Service.
 func runFeatureStatus(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("feature status", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -1103,10 +1019,10 @@ func runFeatureStatus(ctx context.Context, args []string, stdout, stderr io.Writ
 	}
 	defer ledg.Close()
 
-	model := serve.NewModel(ledg)
+	featSvc := feature.NewService(ledg)
 
 	if *id != "" {
-		feat, err := model.GetFeature(ctx, *id)
+		feat, err := featSvc.Get(ctx, *id)
 		if err != nil {
 			fmt.Fprintf(stderr, "lucind-ai: %v\n", err)
 			return 1
@@ -1122,14 +1038,14 @@ func runFeatureStatus(ctx context.Context, args []string, stdout, stderr io.Writ
 		fmt.Fprintf(stdout, "created_at:           %s\n", feat.CreatedAt.Format(time.RFC3339))
 		fmt.Fprintf(stdout, "updated_at:           %s\n", feat.UpdatedAt.Format(time.RFC3339))
 
-		lease, err := model.GetLease(ctx, *id)
+		lease, err := featSvc.GetLease(ctx, *id)
 		if err == nil {
 			fmt.Fprintf(stdout, "lease:                owner=%s fence=%d expires_at=%s\n", lease.Owner, lease.Fence, lease.ExpiresAt.Format(time.RFC3339))
 		} else {
 			fmt.Fprintf(stdout, "lease:                none\n")
 		}
 
-		attempts, err := model.ListAttempts(ctx, *id)
+		attempts, err := featSvc.ListAttempts(ctx, *id)
 		if err == nil && len(attempts) > 0 {
 			fmt.Fprintln(stdout, "attempts:")
 			for _, att := range attempts {
@@ -1141,14 +1057,14 @@ func runFeatureStatus(ctx context.Context, args []string, stdout, stderr io.Writ
 		return 0
 	}
 
-	features, err := model.ListFeatures(ctx)
+	features, err := featSvc.List(ctx)
 	if err != nil {
 		fmt.Fprintf(stderr, "lucind-ai: list features: %v\n", err)
 		return 1
 	}
 
-	leases, _ := model.ListLeases(ctx)
-	leaseByFeature := make(map[string]serve.Lease, len(leases))
+	leases, _ := featSvc.ListLeases(ctx)
+	leaseByFeature := make(map[string]feature.Lease, len(leases))
 	for _, l := range leases {
 		leaseByFeature[l.FeatureID] = l
 	}

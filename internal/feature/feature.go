@@ -36,7 +36,10 @@ func formatTimestamp(t time.Time) string {
 }
 
 func parseTimestamp(s string) (time.Time, error) {
-	return time.Parse(time.RFC3339Nano, s)
+	if t, err := time.Parse(time.RFC3339Nano, s); err == nil {
+		return t, nil
+	}
+	return time.Parse(time.RFC3339, s)
 }
 
 // Status represents the lifecycle status of a feature.
@@ -83,6 +86,20 @@ type Lease struct {
 // Valid reports whether the lease is held and unexpired at the given time.
 func (l Lease) Valid(now time.Time) bool {
 	return now.Before(l.ExpiresAt)
+}
+
+// Attempt represents one row of the integration_attempts table.
+type Attempt struct {
+	ID             string
+	FeatureID      string
+	IdempotencyKey string
+	Status         string
+	Owner          string
+	Fence          int64
+	CandidateSHA   string
+	FailureReason  string
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
 }
 
 // Service provides feature lifecycle and lease operations backed by the ledger.
@@ -621,4 +638,108 @@ func (s *Service) GetLease(ctx context.Context, featureID string) (Lease, error)
 	}
 
 	return l, nil
+}
+
+// List returns all features ordered by creation time ascending.
+func (s *Service) List(ctx context.Context) ([]Feature, error) {
+	rows, err := s.ledger.DB().QueryContext(ctx, `
+		SELECT id, parent_ref, base_sha, expected_parent_sha, status, created_at, updated_at
+		FROM features ORDER BY created_at ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("feature: list features: %w", err)
+	}
+	defer rows.Close()
+
+	out := []Feature{}
+	for rows.Next() {
+		var (
+			f                    Feature
+			status               string
+			createdAt, updatedAt string
+		)
+		if err := rows.Scan(&f.ID, &f.ParentRef, &f.BaseSHA, &f.ExpectedParentSHA, &status, &createdAt, &updatedAt); err != nil {
+			return nil, fmt.Errorf("feature: scan feature row: %w", err)
+		}
+		f.Status = Status(status)
+		if t, err := parseTimestamp(createdAt); err == nil {
+			f.CreatedAt = t
+		}
+		if t, err := parseTimestamp(updatedAt); err == nil {
+			f.UpdatedAt = t
+		}
+		out = append(out, f)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("feature: iterate features: %w", err)
+	}
+	return out, nil
+}
+
+// ListLeases returns all feature leases ordered by acquired time ascending.
+func (s *Service) ListLeases(ctx context.Context) ([]Lease, error) {
+	rows, err := s.ledger.DB().QueryContext(ctx, `
+		SELECT feature_id, owner, fence, expires_at, acquired_at, updated_at
+		FROM feature_leases ORDER BY acquired_at ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("feature: list leases: %w", err)
+	}
+	defer rows.Close()
+
+	out := []Lease{}
+	for rows.Next() {
+		var (
+			l                                Lease
+			expiresAt, acquiredAt, updatedAt string
+		)
+		if err := rows.Scan(&l.FeatureID, &l.Owner, &l.Fence, &expiresAt, &acquiredAt, &updatedAt); err != nil {
+			return nil, fmt.Errorf("feature: scan lease row: %w", err)
+		}
+		if t, err := parseTimestamp(expiresAt); err == nil {
+			l.ExpiresAt = t
+		}
+		if t, err := parseTimestamp(acquiredAt); err == nil {
+			l.AcquiredAt = t
+		}
+		if t, err := parseTimestamp(updatedAt); err == nil {
+			l.UpdatedAt = t
+		}
+		out = append(out, l)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("feature: iterate leases: %w", err)
+	}
+	return out, nil
+}
+
+// ListAttempts returns all integration attempts for featureID ordered by creation time ascending.
+func (s *Service) ListAttempts(ctx context.Context, featureID string) ([]Attempt, error) {
+	rows, err := s.ledger.DB().QueryContext(ctx, `
+		SELECT id, feature_id, idempotency_key, status, owner, fence, candidate_sha, failure_reason, created_at, updated_at
+		FROM integration_attempts WHERE feature_id = ? ORDER BY created_at ASC`, featureID)
+	if err != nil {
+		return nil, fmt.Errorf("feature: list attempts: %w", err)
+	}
+	defer rows.Close()
+
+	out := []Attempt{}
+	for rows.Next() {
+		var (
+			a                    Attempt
+			createdAt, updatedAt string
+		)
+		if err := rows.Scan(&a.ID, &a.FeatureID, &a.IdempotencyKey, &a.Status, &a.Owner, &a.Fence, &a.CandidateSHA, &a.FailureReason, &createdAt, &updatedAt); err != nil {
+			return nil, fmt.Errorf("feature: scan attempt row: %w", err)
+		}
+		if t, err := parseTimestamp(createdAt); err == nil {
+			a.CreatedAt = t
+		}
+		if t, err := parseTimestamp(updatedAt); err == nil {
+			a.UpdatedAt = t
+		}
+		out = append(out, a)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("feature: iterate attempts: %w", err)
+	}
+	return out, nil
 }

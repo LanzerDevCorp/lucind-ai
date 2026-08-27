@@ -85,8 +85,9 @@ func (c Claude) KnownModels() []string {
 // in with a new executor.
 //
 // When req.Progress is set the dispatch switches to --output-format
-// stream-json so the Control Room timeline sees incremental activity. That
-// switch drags one mandatory companion flag with it: claude refuses
+// stream-json so lane progress is persisted to the ledger incrementally as
+// it happens, rather than only once at exit. That switch drags one
+// mandatory companion flag with it: claude refuses
 // stream-json without --verbose outright rather than degrading. Verified in
 // the real CLI (2.1.241), which guards the pair with `if (outputFormat ===
 // "stream-json" && !verbose)`, prints `Error: When using --print,
