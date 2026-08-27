@@ -25,7 +25,7 @@ To make acceptance repeatable, execute the canonical 10-step sequence after ever
 6. **Assert genuine test semantics (Irreducible)**: Review changed/added test files to ensure they assert real behavior and error conditions, rather than superficial passes.
 7. **Isolated worktree execution**: Always verify in a detached worktree, never the primary checkout.
 8. **Full-repo suite pass**: Ensure mechanical checks cover the whole repository, not only the touched package.
-9. **Clean worktree teardown**: Remove temporary worktrees after verification (`lucind-ai worktree cleanup --lane <id>`).
+9. **Clean worktree teardown**: Remove temporary worktrees after verification (`lucind-ai worktree cleanup --lane <id> [--force]`).
 10. **Persist verification memory**: Record acceptance reasoning (`mem_save`) before reporting acceptance to the user or merging.
 
 ## Acceptance subagent delegation

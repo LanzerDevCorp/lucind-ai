@@ -51,7 +51,7 @@ func realIsolationDeps(t *testing.T, primaryRoot string, now time.Time) run.Deps
 			return worktree.ResolveCommitSHA(ctx, worktree.DefaultGitRunner, worktreePath, "HEAD")
 		},
 		DiscardCombined: func(ctx context.Context, primaryRoot, path, branch string) error {
-			if err := worktree.Remove(ctx, primaryRoot, path); err != nil {
+			if err := worktree.Remove(ctx, primaryRoot, path, true); err != nil {
 				return err
 			}
 			return worktree.DeleteBranch(ctx, primaryRoot, branch)
@@ -265,7 +265,7 @@ func TestFeatureAttemptCandidateIsolatedFromUnrelatedPrimaryCheckout(t *testing.
 	if _, err := os.Stat(leftoverPath); err != nil {
 		t.Errorf("stale attempt's combined worktree missing at %s, want preserved: %v", leftoverPath, err)
 	} else {
-		_ = worktree.Remove(context.Background(), primaryRoot, leftoverPath)
+		_ = worktree.Remove(context.Background(), primaryRoot, leftoverPath, true)
 		_ = worktree.DeleteBranch(context.Background(), primaryRoot, "integrate-att-a-2")
 	}
 }

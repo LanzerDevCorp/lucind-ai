@@ -43,6 +43,10 @@ var ErrInvalidParentRef = errors.New("worktree: invalid parent ref")
 // or fails ancestry validation.
 var ErrInvalidBaseSHA = errors.New("worktree: invalid base SHA")
 
+// ErrWorktreeDirty is returned when attempting to remove or cleanup a linked
+// worktree that contains uncommitted changes without passing force: true.
+var ErrWorktreeDirty = errors.New("worktree: linked worktree has uncommitted changes")
+
 // GitRunner is an interface for running git commands in a specified working directory.
 type GitRunner interface {
 	Run(ctx context.Context, dir string, args ...string) ([]byte, error)
@@ -147,15 +151,19 @@ func resolveCommitSHA(ctx context.Context, runner GitRunner, primaryRoot, rev st
 	return sha, nil
 }
 
-// pathFor returns the target worktree path for laneID off primaryRoot:
+// PathFor returns the target worktree path for laneID off primaryRoot:
 // "<parent-of-primaryRoot>/<basename-of-primaryRoot>-worktrees/<laneID>".
 // This is a hard project rule, never a temp directory, because each
 // worktree needs its own CodeGraph index rooted at a stable, discoverable
 // location alongside the primary repository.
-func pathFor(primaryRoot, laneID string) string {
+func PathFor(primaryRoot, laneID string) string {
 	parent := filepath.Dir(primaryRoot)
 	base := filepath.Base(primaryRoot)
 	return filepath.Join(parent, base+worktreesDirSuffix, laneID)
+}
+
+func pathFor(primaryRoot, laneID string) string {
+	return PathFor(primaryRoot, laneID)
 }
 
 // Worktree is a created linked git worktree for one lane.
@@ -229,7 +237,7 @@ func createWithRunner(ctx context.Context, runner GitRunner, primaryRoot, laneID
 
 	headOut, err := runner.Run(ctx, path, "rev-parse", "HEAD")
 	if err != nil {
-		_ = Remove(ctx, primaryRoot, path)
+		_ = Remove(ctx, primaryRoot, path, true)
 		return Worktree{}, fmt.Errorf("worktree: git rev-parse HEAD failed: %w", err)
 	}
 	recordedSHA := strings.TrimSpace(string(headOut))
@@ -244,16 +252,29 @@ func createWithRunner(ctx context.Context, runner GitRunner, primaryRoot, laneID
 // directory behind. Cleanup is the operator-facing way to clear it: it is
 // idempotent, so cleaning up a lane with no worktree on disk is a success
 // (nil), not an error.
-func Cleanup(ctx context.Context, primaryRoot, laneID string) error {
+// If force is false, Cleanup refuses to delete a worktree that contains
+// uncommitted changes and returns ErrWorktreeDirty.
+func Cleanup(ctx context.Context, primaryRoot, laneID string, force bool) error {
 	path := pathFor(primaryRoot, laneID)
 	if _, err := os.Stat(path); err != nil {
 		return nil
 	}
-	return Remove(ctx, primaryRoot, path)
+	return Remove(ctx, primaryRoot, path, force)
 }
 
 // Remove removes a linked git worktree at path off primaryRoot.
-func Remove(ctx context.Context, primaryRoot, path string) error {
+// If force is false, Remove checks whether the worktree has uncommitted changes
+// and returns ErrWorktreeDirty without deleting anything.
+func Remove(ctx context.Context, primaryRoot, path string, force bool) error {
+	if !force {
+		clean, err := PorcelainEmpty(ctx, path)
+		if err != nil {
+			return err
+		}
+		if !clean {
+			return ErrWorktreeDirty
+		}
+	}
 	if _, err := DefaultGitRunner.Run(ctx, primaryRoot, "worktree", "remove", "--force", path); err != nil {
 		return fmt.Errorf("worktree: git worktree remove failed: %w", err)
 	}
@@ -323,6 +344,3 @@ func PorcelainEmpty(ctx context.Context, worktreePath string) (bool, error) {
 	}
 	return len(strings.TrimSpace(string(out))) == 0, nil
 }
-
-
-

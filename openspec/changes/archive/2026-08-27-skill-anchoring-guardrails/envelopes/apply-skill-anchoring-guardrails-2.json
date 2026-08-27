@@ -1,0 +1,137 @@
+{
+  "packet_id": "apply-skill-anchoring-guardrails-2",
+  "status": "done",
+  "summary": "Landed commit d71d2f9 via clean cherry-pick onto base_sha eb02a8a as commit f621d68. Verified all unit test suites, full project checks (./lucind-checks.sh), 4 manual verification scenarios, and confirmed every terminal consumer for worktree guardrails and CLI guidance banners.",
+  "hard_stops": [
+    {
+      "hard_stop": "The cherry-pick does not apply cleanly (any conflict). Report the exact conflicting file(s) and hunk(s); do not resolve by guessing.",
+      "fired": false
+    },
+    {
+      "hard_stop": "lucind/apply-skill-anchoring-guardrails or its commit d71d2f9 cannot be found in this worktree's git history.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Any of the proving commands fail after a clean cherry-pick — this would mean the prior verification was wrong; report exactly what failed.",
+      "fired": false
+    },
+    {
+      "hard_stop": "The resulting diff touches a path outside allowed_paths.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Any credential value would need to be chosen, generated, or written.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": ".agents/skills/lucind-apply/SKILL.md",
+      "change": "modified",
+      "why": "Document TDD WIP-rescue protocol referencing troubleshooting.md"
+    },
+    {
+      "path": "cmd/lucind-ai/cli.go",
+      "change": "modified",
+      "why": "Add --force/-f flags to worktree cleanup, integrate guidance banners across printReport, printIntegrateReport, and renderAcceptanceReceipt"
+    },
+    {
+      "path": "cmd/lucind-ai/cli_test.go",
+      "change": "modified",
+      "why": "Add tests for worktree cleanup --force/-f, dirty tree handling, and guidance banners"
+    },
+    {
+      "path": "internal/dag/split.go",
+      "change": "modified",
+      "why": "Add multi-wave DAG warning printed to stderr citing recovery-reconciliation.md"
+    },
+    {
+      "path": "internal/dag/split_test.go",
+      "change": "modified",
+      "why": "Test multi-wave warning printed to stderr on split"
+    },
+    {
+      "path": "internal/integrate/candidate.go",
+      "change": "modified",
+      "why": "Update worktree.Remove caller to pass force: true"
+    },
+    {
+      "path": "internal/integrate/integrate.go",
+      "change": "modified",
+      "why": "Update worktree.Remove caller in Combine to pass force: true"
+    },
+    {
+      "path": "internal/integrate/integrate_test.go",
+      "change": "modified",
+      "why": "Update test worktree.Remove callers to pass force bool"
+    },
+    {
+      "path": "internal/run/isolation_test.go",
+      "change": "modified",
+      "why": "Update test worktree.Remove callers to pass force bool"
+    },
+    {
+      "path": "internal/worktree/worktree.go",
+      "change": "modified",
+      "why": "Add ErrWorktreeDirty sentinel and force parameter to Remove and Cleanup"
+    },
+    {
+      "path": "internal/worktree/worktree_test.go",
+      "change": "modified",
+      "why": "Add tests for force parameter and ErrWorktreeDirty on dirty worktree removal"
+    },
+    {
+      "path": "openspec/changes/skill-anchoring-guardrails/tasks.md",
+      "change": "modified",
+      "why": "Task tracking bookkeeping for completed tasks"
+    },
+    {
+      "path": "plugin/claude-code/skills/lucind-ai/references/contracts/acceptance-promotion.md",
+      "change": "modified",
+      "why": "Document qualitative checklist review steps"
+    },
+    {
+      "path": "plugin/claude-code/skills/lucind-ai/references/coordination/recovery-reconciliation.md",
+      "change": "modified",
+      "why": "Document retry integration and multi-wave SHA discipline"
+    },
+    {
+      "path": "plugin/claude-code/skills/lucind-ai/references/operations/troubleshooting.md",
+      "change": "modified",
+      "why": "Add TDD WIP-rescue table entry"
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "The cherry-pick applied cleanly, confirmed by git status --porcelain empty and git log --oneline -2 showing the new commit atop base_sha.",
+      "met": true,
+      "evidence": "git cherry-pick d71d2f9 applied cleanly as commit f621d68. git status --porcelain produced empty output. git log --oneline -2 shows: f621d68 feat(worktree): add fail-closed dirty cleanup guardrail and CLI guidance banners / eb02a8a Merge branch 'lucind/tasks-skill-anchoring-guardrails-synthesis'."
+    },
+    {
+      "criterion": "go test ./internal/worktree ./internal/integrate ./internal/run ./internal/dag ./cmd/lucind-ai -count=1 passes — paste the output.",
+      "met": true,
+      "evidence": "ok  \tgithub.com/LanzerDevCorp/lucind-ai/internal/worktree\t7.077s\nok  \tgithub.com/LanzerDevCorp/lucind-ai/internal/integrate\t14.326s\nok  \tgithub.com/LanzerDevCorp/lucind-ai/internal/run\t33.957s\nok  \tgithub.com/LanzerDevCorp/lucind-ai/internal/dag\t0.300s\nok  \tgithub.com/LanzerDevCorp/lucind-ai/cmd/lucind-ai\t64.937s"
+    },
+    {
+      "criterion": "./lucind-checks.sh passes on this worktree's tree.",
+      "met": true,
+      "evidence": "./lucind-checks.sh exited 0 with all 23 packages passing (cmd/lucind-ai, internal/accept, internal/barrier, internal/buildcheck, internal/conflicttriage, internal/conflicttriage/fixture, internal/dag, internal/executor, internal/feature, internal/integrate, internal/lane, internal/lanecheck, internal/ledger, internal/ledgerpath, internal/overlap, internal/packet, internal/reconcile, internal/resolve, internal/result, internal/run, internal/skillcontent, internal/worktree)."
+    },
+    {
+      "criterion": "The 4 manual verification scenarios above are demonstrated with exact commands and observed output.",
+      "met": true,
+      "evidence": "Scenario 1 (dirty cleanup unforced fails \u0026 preserves file): `go test -v ./cmd/lucind-ai -run TestWorktreeCleanupCLI/unforced_dirty_cleanup_exits_1_with_diagnostics_and_preserves_files` exited 0 (asserting exit code 1, stderr with diff inspection and troubleshooting.md pointer, file preserved). Scenario 2 (dirty cleanup with --force removes worktree): `go test -v ./cmd/lucind-ai -run TestWorktreeCleanupCLI/dirty_cleanup_with_--force_exits_0_and_removes_files` exited 0 (asserting exit code 0, worktree deleted). Scenario 3 (non-done lane report troubleshooting banner): `go test -v ./cmd/lucind-ai -run TestPrintReportEmitsTroubleshootingBannerOnNonDone` exited 0 (asserting banner printed with git diff/status and troubleshooting.md). Scenario 4 (multi-wave split warning on stderr): `go test -v ./internal/dag -run TestSplit_TwoWaveDAGSuccess` exited 0 (asserting multi-wave warning printed to stderr citing recovery-reconciliation.md, omitted from stdout)."
+    },
+    {
+      "criterion": "Every introduced indirection names and proves a terminal consumer: ErrWorktreeDirty consumed by errors.Is checks in worktree.Remove/runWorktreeCleanup; force bool consumed by every listed call site; --force/-f consumed by runWorktreeCleanup's flag parsing; each of the four banners consumed by its own printing function and reachable.",
+      "met": true,
+      "evidence": "1. ErrWorktreeDirty: defined in internal/worktree/worktree.go:28, returned in Remove (internal/worktree/worktree.go:278) and Cleanup (internal/worktree/worktree.go:250), consumed by errors.Is in runWorktreeCleanup (cmd/lucind-ai/cli.go:1987) and worktree_test.go:547.\n2. force bool: accepted by worktree.Remove / worktree.Cleanup; consumed in Combine merge recovery (internal/integrate/integrate.go:121), ResolveCandidate teardown (internal/integrate/candidate.go:263), completeIntegration (internal/run/integrate.go:163), DiscardCombined / RemoveLaneWorktree (cmd/lucind-ai/cli.go:862,867), and runWorktreeCleanup (cmd/lucind-ai/cli.go:1986).\n3. --force / -f: defined and parsed in cmd/lucind-ai/cli.go:1962-1963, passed directly to worktree.Cleanup.\n4. Banners: (a) non-done lane banner in printReport (cmd/lucind-ai/cli.go:713-730); (b) retry integrate banner in printIntegrateReport (cmd/lucind-ai/cli.go:750-752); (c) qualitative acceptance banner in renderAcceptanceReceipt (cmd/lucind-ai/cli.go:690-692); (d) multi-wave split warning in dag.Split (internal/dag/split.go:45-49)."
+    },
+    {
+      "criterion": "The work is committed (the cherry-picked commit itself, or a commit carrying it), git status --porcelain empty, git log --oneline -1 evidence. Conventional commit, no AI attribution — verify the cherry-picked commit message is still clean; strip any injected Co-authored-by: trailer if your tooling added one.",
+      "met": true,
+      "evidence": "Committed as f621d6831d9d271f0d5463e8a991e59785476c28 with message 'feat(worktree): add fail-closed dirty cleanup guardrail and CLI guidance banners'. git show -s --format='%B' confirms no AI attribution or Co-authored-by trailers. git status --porcelain is empty."
+    }
+  ],
+  "commit": "f621d6831d9d271f0d5463e8a991e59785476c28"
+}

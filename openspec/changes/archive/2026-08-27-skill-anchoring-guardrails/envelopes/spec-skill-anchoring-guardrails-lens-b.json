@@ -1,0 +1,59 @@
+{
+  "packet_id": "spec-skill-anchoring-guardrails-lens-b",
+  "status": "done",
+  "summary": "Authored spec-lens-b.md specifying Given/When/Then scenarios, coverage analysis, untestable assertions, and citation manifest for skill anchoring and worktree cleanup guardrails.",
+  "hard_stops": [
+    {
+      "hard_stop": "The proposal does not determine what the system should do in a case, so the scenario would assert an outcome nobody chose.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Every scenario for a requirement would be untestable, meaning the requirement as proposed is unobservable.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/skill-anchoring-guardrails/spec-lens-b.md",
+      "change": "created",
+      "why": "Lens B specification defining scenarios, coverage table, and citation manifest."
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "A `## Citation Manifest` section lists every unique citation, grouped by file, with the claim each one supports.",
+      "met": true,
+      "evidence": "openspec/changes/skill-anchoring-guardrails/spec-lens-b.md:116-146 lists 30 unique citations grouped alphabetically by file with supporting claims."
+    },
+    {
+      "criterion": "`lucind-lane-check.sh --verify-citations` was run before committing and reported no FAIL against this draft's own manifest.",
+      "met": true,
+      "evidence": "Pre-commit check output: PASS citation verification across 30 entries; RESULT: PASS."
+    },
+    {
+      "criterion": "Every requirement named in `## Assumed requirements` has at least one scenario, and every scenario is in GIVEN / WHEN / THEN form.",
+      "met": true,
+      "evidence": "openspec/changes/skill-anchoring-guardrails/spec-lens-b.md:11-94 defines 12 Given/When/Then scenarios across all 6 assumed requirements."
+    },
+    {
+      "criterion": "Every scenario's THEN names an observable outcome, and the coverage table cites the seam it is observable through or marks it \"new seam required\".",
+      "met": true,
+      "evidence": "openspec/changes/skill-anchoring-guardrails/spec-lens-b.md:96-107 maps each requirement to happy paths, edge cases, error states, and observable test seams (internal/worktree/worktree_test.go:255-266,536-595,1034-1069, cmd/lucind-ai/cli_test.go:685-724,729-777,2974-3012,4503-4545, internal/dag/split_test.go:13-111, internal/accept/accept.go:118-130)."
+    },
+    {
+      "criterion": "`spec-lens-b.md` exists, is under 1000 words excluding the Citation Manifest, and carries `## Assumed requirements`, `## Coverage`, `## Untestable Assertions`, and `## Citation Manifest`.",
+      "met": true,
+      "evidence": "lucind-lane-check.sh reports: PASS word budget: 956 / 1000 words; all required sections present."
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution, confirmed by the final `lucind-lane-check.sh` run reporting a clean `git status --porcelain` and a valid `.lucind/result.json`. Strip any injected `Co-authored-by:` trailer.",
+      "met": true,
+      "evidence": "Commit 805fcf58e666ba56681880bb9fbb669d052b907c ('spec: add lens-b scenarios and coverage for skill anchoring and cleanup guardrails'). lucind-lane-check.sh output: PASS git status --porcelain: clean; PASS result envelope: .lucind/result.json exists and parses as JSON; RESULT: PASS."
+    }
+  ],
+  "commit": "805fcf58e666ba56681880bb9fbb669d052b907c"
+}

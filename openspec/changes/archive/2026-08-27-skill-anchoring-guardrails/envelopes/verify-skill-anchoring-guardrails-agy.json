@@ -1,0 +1,78 @@
+{
+  "packet_id": "verify-skill-anchoring-guardrails-agy",
+  "status": "done",
+  "summary": "Completed qualitative verification of change 'skill-anchoring-guardrails' across spec compliance, edge case handling, and test quality against frozen mechanical check evidence. All 5 capabilities satisfy requirements with strict fail-closed worktree cleanup, cleanly separated stderr/stdout banners, and comprehensive TDD WIP-rescue guidance.",
+  "hard_stops": [
+    {
+      "hard_stop": "Executing mechanical test/build commands when mechanical results are already provided.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Any credential value would need to be chosen, generated, or written.",
+      "fired": false
+    },
+    {
+      "hard_stop": "A done-criterion turns out to be impossible, or already true for a reason the packet did not anticipate.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Two reasonable interpretations exist for a spec requirement and the specification does not say which.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": ".lucind/result.json",
+      "change": "created",
+      "why": "Populate packet result envelope with qualitative verification evaluation"
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every indirection introduced is demonstrably consumed by a terminal consumer. Verification citations trace to concrete symbols, spec requirements, or tests.",
+      "met": true,
+      "evidence": "ErrWorktreeDirty (internal/worktree/worktree.go:48) is consumed in cmd/lucind-ai/cli.go:1987; force parameter on worktree.Cleanup and Remove (internal/worktree/worktree.go:257,268) is consumed in cmd/lucind-ai/cli.go:872,878,1986, internal/integrate/integrate.go:122, and internal/integrate/candidate.go:263; stderr writer on dag.Split (internal/dag/split.go:18) is consumed in cmd/lucind-ai/cli.go:511."
+    },
+    {
+      "criterion": "The worktree carries no unique commits and no working-tree changes relative to the lane's birth point (git status --porcelain empty AND HEAD equals git merge-base HEAD \u003cprimary HEAD\u003e).",
+      "met": true,
+      "evidence": "git status --porcelain is empty; git rev-parse HEAD (231640d72332e9c3ac2e30f2b7b792a5290d032f) matches git merge-base HEAD feature/skill-anchoring-guardrails (231640d72332e9c3ac2e30f2b7b792a5290d032f)."
+    },
+    {
+      "criterion": "Qualitative evaluation completed (.lucind/result.json populated with status, summary, and structured findings).",
+      "met": true,
+      "evidence": ".lucind/result.json populated with status=done, summary, 5 hard stops declared not fired, 3 done criteria with evidence, and 5 structured findings across all evaluation dimensions."
+    }
+  ],
+  "findings": [
+    {
+      "finding": "Fail-closed dirty worktree guardrail verified across all three dirty categories (staged, unstaged, untracked) with explicit --force override.",
+      "evidence": "internal/worktree/worktree.go:268-282, internal/worktree/worktree_test.go:268-384,1189-1297",
+      "affects": "specs/worktree-dirty-guardrail/spec.md"
+    },
+    {
+      "finding": "Internal machine-managed worktree teardowns pass force=true consistently across promotion, merge abort, and integration teardowns.",
+      "evidence": "cmd/lucind-ai/cli.go:871-882, internal/integrate/integrate.go:122, internal/integrate/candidate.go:263",
+      "affects": "specs/lane-worktree-lifecycle/spec.md"
+    },
+    {
+      "finding": "Worktree cleanup CLI enforces --force/-f, reports actionable git status/diff inspection guidance citing troubleshooting.md, and rejects linked worktree execution.",
+      "evidence": "cmd/lucind-ai/cli.go:1953-2006, cmd/lucind-ai/cli_test.go:3007-3156",
+      "affects": "specs/worktree-cleanup-cli/spec.md"
+    },
+    {
+      "finding": "All four CLI guidance banners (non-done report, reverted IDs retry, acceptance qualitative reminder, multi-wave split warning) trigger under exact conditions with multi-wave routed exclusively to stderr.",
+      "evidence": "cmd/lucind-ai/cli.go:485-516,685-692,711-730,745-753, internal/dag/split.go:45-49, internal/dag/split_test.go:13-160",
+      "affects": "specs/failure-guidance-banners/spec.md"
+    },
+    {
+      "finding": "Prescriptive TDD WIP-rescue protocol is thoroughly documented in both troubleshooting operations manual and apply lane skill guide.",
+      "evidence": ".agents/skills/lucind-apply/SKILL.md:22-30, plugin/claude-code/skills/lucind-ai/references/operations/troubleshooting.md:14",
+      "affects": "specs/tdd-wip-rescue-protocol/spec.md"
+    }
+  ]
+}

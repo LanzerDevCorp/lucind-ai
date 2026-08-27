@@ -1,0 +1,105 @@
+{
+  "packet_id": "verify-skill-anchoring-guardrails-cursor-agent",
+  "status": "done",
+  "summary": "Qualitative verification of skill-anchoring-guardrails at 231640d (implementation f621d68 / merge ad00d71) found the candidate satisfies all five capability specs. worktree.Cleanup/Remove fail closed on staged, unstaged, and untracked dirt unless force is true; the four CLI banners fire on the specified triggers and stay silent otherwise; the multi-wave split warning is written to stderr. Test gaps exist around relative/absolute path selection and the accept-failure reminder omission, but they do not break the spec in code.",
+  "hard_stops": [
+    {
+      "hard_stop": "Executing mechanical test/build commands when mechanical results are already provided.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Any credential value would need to be chosen, generated, or written.",
+      "fired": false
+    },
+    {
+      "hard_stop": "A done-criterion turns out to be impossible, or already true for a reason the packet did not anticipate.",
+      "fired": false,
+      "note": "Porcelain-empty and HEAD==birth SHA 231640d are the expected initial state of this read-only verify worktree, not an unanticipated pre-completion. merge-base with dev (ade62b5) differs from HEAD because the candidate has not landed; the packet's birth point is the candidate branch, not dev."
+    },
+    {
+      "hard_stop": "Two reasonable interpretations exist for a spec requirement and the specification does not say which.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": ".lucind/result.json",
+      "change": "created",
+      "why": "Read-only verify lane envelope required by the dispatching binary."
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every indirection introduced is demonstrably consumed by a terminal consumer. Verification citations trace to concrete symbols, spec requirements, or tests.",
+      "met": true,
+      "evidence": "ErrWorktreeDirty consumed by runWorktreeCleanup via errors.Is (cmd/lucind-ai/cli.go:1987-1998). force bool consumed by Remove skipping PorcelainEmpty (internal/worktree/worktree.go:268-277) and by CLI --force/-f (cli.go:1962-1963,1986) plus DiscardCombined/RemoveLaneWorktree/Combine abort/ResolveCandidate/createWithRunner all passing true (cli.go:871-879, integrate.go:122, candidate.go:263, worktree.go:240). Exported PathFor consumed by dirty-diagnostic path printing (cli.go:1988). dag.Split variadic stderr consumed by runSplit passing stderr (cli.go:511) and by TestSplit_TwoWaveDAGSuccess (internal/dag/split_test.go:59-122). Banner strings consumed by printReport (cli.go:711-729), printIntegrateReport (cli.go:745-751), renderAcceptanceReceipt (cli.go:685-691), and dag.Split (internal/dag/split.go:45-48), asserted by cli_test.go and split_test.go."
+    },
+    {
+      "criterion": "The worktree carries no unique commits and no working-tree changes relative to the lane's birth point (git status --porcelain empty AND HEAD equals git merge-base HEAD \u003cprimary HEAD\u003e).",
+      "met": true,
+      "evidence": "git status --porcelain empty. HEAD=231640d72332e9c3ac2e30f2b7b792a5290d032f equals birth SHA and feature/skill-anchoring-guardrails. git merge-base HEAD feature/skill-anchoring-guardrails = 231640d. git rev-list --count feature/skill-anchoring-guardrails..HEAD = 0."
+    },
+    {
+      "criterion": "Qualitative evaluation completed (.lucind/result.json populated with status, summary, and structured findings).",
+      "met": true,
+      "evidence": ".lucind/result.json written with status=done, summary, findings covering spec compliance, threat-matrix edge cases, and test quality; hard_stops all declared; mechanical checks not re-run (frozen log at openspec/changes/skill-anchoring-guardrails/verify-mechanical.log, exit 0 at ad00d71)."
+    }
+  ],
+  "findings": [
+    {
+      "finding": "worktree.Cleanup and worktree.Remove fail closed on all three dirty categories. When force is false, Remove calls PorcelainEmpty (git status --porcelain) and returns ErrWorktreeDirty without invoking git worktree remove, so staged (M /A), unstaged ( M), and untracked (??) trees are preserved. force true skips the check and proceeds to git worktree remove --force.",
+      "evidence": "internal/worktree/worktree.go:257-281; TestRemoveDirtyFailsClosedWithoutForce staged/unstaged/untracked subtests at internal/worktree/worktree_test.go:268-355; TestCleanupDirtyFailsClosedWithoutForce at 1189-1269; TestRemoveDirtySucceedsWithForce at 357-383; TestCleanupDirtySucceedsWithForce at 1271-1297",
+      "affects": "worktree-dirty-guardrail: Worktree dirty guardrail check"
+    },
+    {
+      "finding": "CLI --force and -f both bypass the dirty guardrail. Unforced dirty cleanup exits 1, prints porcelain plus git diff/status commands citing troubleshooting.md, and leaves files on disk. Clean and nonexistent lanes still exit 0 without --force.",
+      "evidence": "cmd/lucind-ai/cli.go:1961-2005; TestWorktreeCleanupCLI subtests unforced dirty / --force / -f / clean / nonexistent at cmd/lucind-ai/cli_test.go:3022-3120; usage advertises [--force] at cli.go:58",
+      "affects": "worktree-cleanup-cli: Worktree cleanup CLI force flag and diagnostic status reporting"
+    },
+    {
+      "finding": "All four specified automated teardown callers pass force true, so the new guardrail cannot block scratch-tree deletion. createWithRunner also passes true on failed HEAD parse, which is an extra internal site beyond the spec list and is correct.",
+      "evidence": "DiscardCombined and RemoveLaneWorktree at cmd/lucind-ai/cli.go:871-879; Combine abort at internal/integrate/integrate.go:122; ResolveCandidate at internal/integrate/candidate.go:263; completeIntegration uses deps.RemoveLaneWorktree (internal/run/integrate.go:162) which is the productionDeps closure above; createWithRunner at internal/worktree/worktree.go:240",
+      "affects": "lane-worktree-lifecycle: Lane worktree lifecycle force parameter and automated teardown"
+    },
+    {
+      "finding": "All four guidance banners fire on the specified condition and stay silent otherwise. Dispatch timeout maps to lane.Blocked (decideStatus), so the non-done printReport test using Blocked covers timeout and blocked; failed/deviated share the same != Done branch. Multi-wave warning is written to the stderr writer after stdout wave commands, and tests assert it is absent from stdout.",
+      "evidence": "printReport cli.go:711-729 and tests cli_test.go:701-746; printIntegrateReport cli.go:745-751 and tests cli_test.go:752-809; renderAcceptanceReceipt cli.go:685-691 and TestAcceptRequiresExactReceiptAndRendersMechanicalEvidenceOnly cli_test.go:4670-4673; dag.Split internal/dag/split.go:45-48, runSplit cli.go:511, TestSplit_TwoWaveDAGSuccess split_test.go:112-122, TestSplit_SingleWaveDAGSuccess split_test.go:159-162; timeout-\u003eBlocked at internal/run/run.go:800-802",
+      "affects": "failure-guidance-banners: all four banner requirements"
+    },
+    {
+      "finding": "TDD WIP-rescue is documented as specified: inspect preserved worktree diffs, commit WIP, adjust timeout, re-dispatch, and require human consent before --force cleanup.",
+      "evidence": "plugin/claude-code/skills/lucind-ai/references/operations/troubleshooting.md:14; .agents/skills/lucind-apply/SKILL.md:22-29",
+      "affects": "tdd-wip-rescue-protocol: Prescriptive TDD WIP-rescue protocol documentation"
+    },
+    {
+      "finding": "The design's ignored-file false-positive risk is handled by reusing PorcelainEmpty, which already treats a repo ignoring .lucind/ as clean when only .lucind/result.json is present. Root .gitignore ignores .lucind/. There is no dedicated Cleanup/Remove test that unforced cleanup succeeds when only ignored files exist; that behavior is compositional on PorcelainEmpty returning true.",
+      "evidence": "internal/worktree/worktree.go:268-277,338-345; TestPorcelainEmpty internal/worktree/worktree_test.go:673-710; .gitignore:2",
+      "affects": "design.md dirty false positives on ignored files; worktree-dirty-guardrail"
+    },
+    {
+      "finding": "Threat-matrix Git repository selection is only partially covered by new tests. Invocation inside a linked worktree is a real CLI test (chdir, exit 1, stderr refusal). TestRemoveInvalidPathFailsCleanly uses a non-git temp dir plus an absolute nonexistent path and only asserts err != nil; that would also have failed against pre-change Remove (git worktree remove on a non-repo). There is no test that distinguishes relative vs absolute operator-supplied paths, because cleanup never takes a path argument (pathFor derives it from primaryRoot+laneID).",
+      "evidence": "TestWorktreeCleanupCLI refuses invocation at cmd/lucind-ai/cli_test.go:3133-3155; runWorktreeCleanup IsLinkedWorktree check at cli.go:1980-1984; TestRemoveInvalidPathFailsCleanly at internal/worktree/worktree_test.go:401-412; PathFor at internal/worktree/worktree.go:159-167",
+      "affects": "tasks.md Threat-matrix RED tests: Git repository selection"
+    },
+    {
+      "finding": "New tests generally assert terminal observables (exit codes, stderr/stdout substrings, file presence, errors.Is) rather than mocked internals. CLI dirty coverage uses only an untracked file; staged/unstaged are covered at the worktree unit layer, not the CLI layer. TestAcceptRequiresExactReceiptAndRendersMechanicalEvidenceOnly asserts the qualitative reminder on success and a non-zero exit on fake verifier error, but after the error path it does not assert stdout lacks the receipt or the steps 2-10 reminder (implementation early-returns before renderAcceptanceReceipt, so the spec scenario holds in code).",
+      "evidence": "cli_test.go:3039-3072 (untracked dirty CLI), 4685-4690 (accept error checks code==0 only); renderAcceptanceReceipt only reached after Verify success at cli.go:676-681",
+      "affects": "failure-guidance-banners: Failing mechanical checks exit non-zero without receipt; test quality"
+    },
+    {
+      "finding": "dag.Split's new variadic stderr parameter is fail-open: if a caller omits stderr, a multi-wave DAG emits no warning. lucind-ai split always passes stderr, so the CLI spec is met. The pre-existing e2e two-wave test still calls Split without stderr and therefore cannot catch a missing banner.",
+      "evidence": "internal/dag/split.go:18,45-48; cmd/lucind-ai/cli.go:511; internal/dag/e2e_test.go:60",
+      "affects": "failure-guidance-banners: DAG split multi-wave base SHA warning banner"
+    },
+    {
+      "finding": "RED-then-GREEN is plausible from the diff even though tests and implementation landed in one commit (f621d68). Positive assertions (ErrWorktreeDirty, exit 1, troubleshooting.md, integrate retry, acceptance-promotion.md steps 2-10, stderr recovery-reconciliation.md) would have failed against pre-change Cleanup/Remove (unconditional git worktree remove --force) and pre-change CLI output. Omission tests (Done lane silent, single-wave silent, empty reverted_ids silent) would have passed vacuously on old code; they are paired with the positive tests.",
+      "evidence": "git show f621d68 -- cmd/lucind-ai/cli.go internal/worktree/worktree.go internal/dag/split.go vs new tests in worktree_test.go:268-355, cli_test.go:701-746,3039-3155,4670-4673, split_test.go:112-162",
+      "affects": "tasks.md Phase 1-3 RED/GREEN discipline"
+    }
+  ],
+  "session_id": "verify-skill-anchoring-guardrails-cursor-agent"
+}

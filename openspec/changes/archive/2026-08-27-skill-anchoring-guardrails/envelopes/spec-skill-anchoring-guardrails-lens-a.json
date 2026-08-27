@@ -1,0 +1,59 @@
+{
+  "packet_id": "spec-skill-anchoring-guardrails-lens-a",
+  "status": "done",
+  "summary": "Authored spec-lens-a.md with capability mapping, ADDED requirement definitions, open questions, and verified citation manifest for skill anchoring and worktree cleanup guardrails.",
+  "hard_stops": [
+    {
+      "hard_stop": "The proposal has no Capabilities section and no Affected Areas section to infer one from.",
+      "fired": false
+    },
+    {
+      "hard_stop": "A requirement cannot be stated without deciding an implementation detail the design phase has not decided.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/skill-anchoring-guardrails/spec-lens-a.md",
+      "change": "created",
+      "why": "Spec Lens A planning artifact for skill anchoring guardrails"
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "A `## Citation Manifest` section lists every unique citation, grouped by file, with the claim each one supports.",
+      "met": true,
+      "evidence": "openspec/changes/skill-anchoring-guardrails/spec-lens-a.md:57-89 lists 25 unique citations across 11 files in alphabetical order with exact claims."
+    },
+    {
+      "criterion": "`lucind-lane-check.sh --verify-citations` was run before committing and reported no FAIL against this draft's own manifest.",
+      "met": true,
+      "evidence": "Pre-commit report:\nlucind-lane-check.sh report for openspec/changes/skill-anchoring-guardrails/spec-lens-a.md\n----------------------------------------\nPASS  word budget: 772 / 1000 words\nPASS  section present: ## Assumed requirements\nPASS  section present: ## Capability Map\nPASS  section present: ## Open Questions\nPASS  section present: ## Citation Manifest\nPASS  citation .agents/skills/lucind-apply/SKILL.md:10-21: file exists, has 33 lines\nPASS  citation cmd/lucind-ai/cli.go:485-516: file exists, has 2319 lines\nPASS  citation cmd/lucind-ai/cli.go:685-690: file exists, has 2319 lines\nPASS  citation cmd/lucind-ai/cli.go:698-726: file exists, has 2319 lines\nPASS  citation cmd/lucind-ai/cli.go:730-740: file exists, has 2319 lines\nPASS  citation cmd/lucind-ai/cli.go:858-869: file exists, has 2319 lines\nPASS  citation cmd/lucind-ai/cli.go:1934-1978: file exists, has 2319 lines\nPASS  citation cmd/lucind-ai/cli.go:1997-2023: file exists, has 2319 lines\nPASS  citation internal/accept/accept.go:120-130: file exists, has 333 lines\nPASS  citation internal/dag/split.go:34-43: file exists, has 46 lines\nPASS  citation internal/integrate/candidate.go:262-265: file exists, has 275 lines\nPASS  citation internal/integrate/integrate.go:118-124: file exists, has 346 lines\nPASS  citation internal/run/integrate.go:159-165: file exists, has 301 lines\nPASS  citation internal/run/run.go:452-465: file exists, has 958 lines\nPASS  citation internal/worktree/worktree.go:150-159: file exists, has 328 lines\nPASS  citation internal/worktree/worktree.go:247-253: file exists, has 328 lines\nPASS  citation internal/worktree/worktree.go:256-261: file exists, has 328 lines\nPASS  citation internal/worktree/worktree.go:319-325: file exists, has 328 lines\nPASS  citation openspec/changes/skill-anchoring-guardrails/proposal.md:29-39: file exists, has 160 lines\nPASS  citation openspec/specs/acceptance-verifier/spec.md:1-121: file exists, has 121 lines\nPASS  citation openspec/specs/lane-execution/spec.md:1-84: file exists, has 84 lines\nPASS  citation plugin/claude-code/skills/lucind-ai/references/contracts/acceptance-promotion.md:18-30: file exists, has 50 lines\nPASS  citation plugin/claude-code/skills/lucind-ai/references/coordination/recovery-reconciliation.md:27-30: file exists, has 35 lines\nPASS  citation plugin/claude-code/skills/lucind-ai/references/coordination/recovery-reconciliation.md:33-35: file exists, has 35 lines\nPASS  citation plugin/claude-code/skills/lucind-ai/references/operations/troubleshooting.md:7-18: file exists, has 38 lines\n----------------------------------------\nRESULT: PASS"
+    },
+    {
+      "criterion": "Every capability-map row is classified new or existing, and every \"existing\" row cites the live spec with `file:line` that resolves in this worktree.",
+      "met": true,
+      "evidence": "openspec/changes/skill-anchoring-guardrails/spec-lens-a.md:9-17 classifies all 5 candidate capabilities (worktree-dirty-guardrail, failure-guidance-banners, tdd-wip-rescue-protocol, lane-worktree-lifecycle, worktree-cleanup-cli) as New after auditing openspec/specs/ and confirming no live specs exist."
+    },
+    {
+      "criterion": "Every requirement carries an RFC 2119 keyword and states observable behavior rather than implementation.",
+      "met": true,
+      "evidence": "openspec/changes/skill-anchoring-guardrails/spec-lens-a.md:19-51 defines 6 requirements using MUST, SHALL NOT, and explicit terminal consumers."
+    },
+    {
+      "criterion": "`spec-lens-a.md` exists, is under 1000 words excluding the Citation Manifest, and carries `## Assumed requirements`, `## Capability Map`, and `## Citation Manifest`.",
+      "met": true,
+      "evidence": "openspec/changes/skill-anchoring-guardrails/spec-lens-a.md exists with 772 words (excluding Citation Manifest) and carries all required sections."
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution, confirmed by the final `lucind-lane-check.sh` run reporting a clean `git status --porcelain` and a valid `.lucind/result.json`. Strip any injected `Co-authored-by:` trailer.",
+      "met": true,
+      "evidence": "Post-commit report:\nlucind-lane-check.sh report for openspec/changes/skill-anchoring-guardrails/spec-lens-a.md\n----------------------------------------\nPASS  git status --porcelain: clean\nPASS  result envelope: .lucind/result.json exists and parses as JSON\n----------------------------------------\nRESULT: PASS\nCommit: 8c430787c1f84ef82cf1da923c24a71eefb0831b"
+    }
+  ],
+  "commit": "8c430787c1f84ef82cf1da923c24a71eefb0831b"
+}

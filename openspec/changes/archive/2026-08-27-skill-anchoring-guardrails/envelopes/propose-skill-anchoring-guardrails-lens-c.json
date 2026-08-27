@@ -1,0 +1,54 @@
+{
+  "packet_id": "propose-skill-anchoring-guardrails-lens-c",
+  "status": "done",
+  "summary": "Authored propose-lens-c.md covering technical risks, failure modes, rollback plan, additivity, and test validation impact for skill-anchoring-guardrails. All claims and seams are grounded in concrete file:line citations across CLI, worktree, dag, integrate, and skill layers. Verified mechanically with lucind-lane-check.sh and committed with conventional commit.",
+  "hard_stops": [
+    {
+      "hard_stop": "Whether a schema or format change is additive cannot be determined, making rollback a guess.",
+      "fired": false
+    },
+    {
+      "hard_stop": "A critical failure mode has no identifiable mitigation or test seam.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/skill-anchoring-guardrails/propose-lens-c.md",
+      "change": "created",
+      "why": "Author Lens C proposal document analyzing risks, rollback, additivity, and test impact for skill-anchoring-guardrails"
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "A ## Citation Manifest section lists every unique citation, grouped by file, with the claim each one supports.",
+      "met": true,
+      "evidence": "openspec/changes/skill-anchoring-guardrails/propose-lens-c.md:46-81 contains ## Citation Manifest with 33 unique citations grouped alphabetically by file with ascending line ranges and exact claims."
+    },
+    {
+      "criterion": "lucind-lane-check.sh --verify-citations was run before committing and reported no FAIL against this draft's own manifest.",
+      "met": true,
+      "evidence": "Pre-commit check:\nlucind-lane-check.sh report for openspec/changes/skill-anchoring-guardrails/propose-lens-c.md\n----------------------------------------\nPASS  word budget: 947 / 1000 words\nPASS  section present: ## Technical Risks \u0026 Failure Modes\nPASS  section present: ## Rollback \u0026 Additivity\nPASS  section present: ## Test \u0026 Validation Impact\nPASS  section present: ## Out of Scope\nPASS  section present: ## Open Questions\nPASS  section present: ## Citation Manifest\nPASS  citation .agents/skills/lucind-apply/SKILL.md:10-21: file exists, has 33 lines\nPASS  citation cmd/lucind-ai/cli.go:485-516: file exists, has 2319 lines\nPASS  citation cmd/lucind-ai/cli.go:685-690: file exists, has 2319 lines\nPASS  citation cmd/lucind-ai/cli.go:698-726: file exists, has 2319 lines\nPASS  citation cmd/lucind-ai/cli.go:730-740: file exists, has 2319 lines\nPASS  citation cmd/lucind-ai/cli.go:742-750: file exists, has 2319 lines\nPASS  citation cmd/lucind-ai/cli.go:858-869: file exists, has 2319 lines\nPASS  citation cmd/lucind-ai/cli.go:1934-1978: file exists, has 2319 lines\nPASS  citation cmd/lucind-ai/cli_test.go:685-724: file exists, has 4802 lines\nPASS  citation cmd/lucind-ai/cli_test.go:729-777: file exists, has 4802 lines\nPASS  citation cmd/lucind-ai/cli_test.go:2974-3020: file exists, has 4802 lines\nPASS  citation cmd/lucind-ai/cli_test.go:4503-4545: file exists, has 4802 lines\nPASS  citation internal/accept/accept.go:121-130: file exists, has 333 lines\nPASS  citation internal/dag/split.go:34-43: file exists, has 46 lines\nPASS  citation internal/dag/split_test.go:13-111: file exists, has 212 lines\nPASS  citation internal/feature/feature.go:348-350: file exists, has 745 lines\nPASS  citation internal/integrate/candidate.go:262-265: file exists, has 275 lines\nPASS  citation internal/integrate/integrate.go:118-124: file exists, has 346 lines\nPASS  citation internal/ledger/acceptance.go:41-47: file exists, has 175 lines\nPASS  citation internal/result/result.go:26-34: file exists, has 162 lines\nPASS  citation internal/run/integrate.go:159-165: file exists, has 301 lines\nPASS  citation internal/run/run.go:452-465: file exists, has 958 lines\nPASS  citation internal/worktree/worktree.go:150-159: file exists, has 328 lines\nPASS  citation internal/worktree/worktree.go:247-253: file exists, has 328 lines\nPASS  citation internal/worktree/worktree.go:256-261: file exists, has 328 lines\nPASS  citation internal/worktree/worktree.go:319-325: file exists, has 328 lines\nPASS  citation internal/worktree/worktree_test.go:255-266: file exists, has 1072 lines\nPASS  citation internal/worktree/worktree_test.go:536-595: file exists, has 1072 lines\nPASS  citation internal/worktree/worktree_test.go:1034-1057: file exists, has 1072 lines\nPASS  citation internal/worktree/worktree_test.go:1059-1069: file exists, has 1072 lines\nPASS  citation lucind-checks.sh:1-4: file exists, has 4 lines\nPASS  citation plugin/claude-code/skills/lucind-ai/references/coordination/recovery-reconciliation.md:27-30: file exists, has 35 lines\nPASS  citation plugin/claude-code/skills/lucind-ai/references/operations/troubleshooting.md:7-18: file exists, has 38 lines\n----------------------------------------\nRESULT: PASS"
+    },
+    {
+      "criterion": "Every risk, test seam, and rollback claim carries file:line citations to real code in this worktree.",
+      "met": true,
+      "evidence": "Every row in Technical Risks \u0026 Failure Modes, Rollback \u0026 Additivity, and Test \u0026 Validation Impact cites real code locations verified against internal/worktree/worktree.go, cmd/lucind-ai/cli.go, internal/integrate, internal/dag, internal/ledger, and skill references."
+    },
+    {
+      "criterion": "propose-lens-c.md exists, is under 1000 words excluding the Citation Manifest, and carries every skeleton section plus ## Citation Manifest.",
+      "met": true,
+      "evidence": "lucind-lane-check.sh reported PASS for all 6 required sections (Technical Risks \u0026 Failure Modes, Rollback \u0026 Additivity, Test \u0026 Validation Impact, Out of Scope, Open Questions, Citation Manifest) and word count 947 / 1000 words."
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution, confirmed by the final lucind-lane-check.sh run reporting a clean git status --porcelain and a valid .lucind/result.json. Strip any injected Co-authored-by: trailer.",
+      "met": true,
+      "evidence": "Commit 38c68d30edf0ba708820578df113045d12452e67 'docs(propose): author lens-c risks, rollback, and test impact for skill-anchoring-guardrails' carries no Co-authored-by trailer. Post-commit check:\nlucind-lane-check.sh report for openspec/changes/skill-anchoring-guardrails/propose-lens-c.md\n----------------------------------------\nPASS  git status --porcelain: clean\nPASS  result envelope: .lucind/result.json exists and parses as JSON\n----------------------------------------\nRESULT: PASS"
+    }
+  ],
+  "commit": "38c68d30edf0ba708820578df113045d12452e67"
+}

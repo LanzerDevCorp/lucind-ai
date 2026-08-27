@@ -15,7 +15,7 @@ import (
 // 5. Prints one copy-pasteable "lucind-ai run" command per wave to stdout in dependency order.
 //
 // Stdout is the wave plan. A waves.json (or any other plan file) must not be written to disk.
-func Split(dagPath, outDir string, stdout io.Writer) error {
+func Split(dagPath, outDir string, stdout io.Writer, stderr ...io.Writer) error {
 	d, err := Parse(dagPath)
 	if err != nil {
 		return err
@@ -40,6 +40,12 @@ func Split(dagPath, outDir string, stdout io.Writer) error {
 		if _, err := fmt.Fprintf(stdout, "lucind-ai run %s\n", strings.Join(flags, " ")); err != nil {
 			return fmt.Errorf("dag: failed to write wave command to stdout: %w", err)
 		}
+	}
+
+	if len(waves) > 1 && len(stderr) > 0 && stderr[0] != nil {
+		fmt.Fprintf(stderr[0], "\nWarning: Multi-wave DAG detected (%d waves).\n", len(waves))
+		fmt.Fprintln(stderr[0], "Between wave dispatches, advance primary repository checkout and refresh base_sha and expected_parent_sha in next-wave packets.")
+		fmt.Fprintln(stderr[0], "See plugin/claude-code/skills/lucind-ai/references/coordination/recovery-reconciliation.md for multi-wave protocol.")
 	}
 
 	return nil
