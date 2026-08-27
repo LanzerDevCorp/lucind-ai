@@ -1,0 +1,179 @@
+{
+  "packet_id": "archive-acceptance-verifier",
+  "status": "done",
+  "summary": "Merged the acceptance-verifier delta spec into openspec/specs/acceptance-verifier/spec.md via mechanical shell copy, wrote archive-report.md documenting final state and follow-ups, and moved the change folder to openspec/changes/archive/2026-08-26-acceptance-verifier/. Committed all archival changes with conventional commit 53d6b12.",
+  "hard_stops": [
+    {
+      "hard_stop": "An implementation task in tasks.md is unchecked.",
+      "fired": false
+    },
+    {
+      "hard_stop": "verify-report.md records a CRITICAL issue (critical_findings \u003e 0).",
+      "fired": false
+    },
+    {
+      "hard_stop": "A diff -r readback is non-empty. Report the difference verbatim; never retry the copy over it.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Shell access for the mechanical copy is unavailable. Never fall back to Read/Write copying.",
+      "fired": false
+    },
+    {
+      "hard_stop": "The archive destination openspec/changes/archive/2026-08-26-acceptance-verifier/ already exists.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/specs/acceptance-verifier/spec.md",
+      "change": "created",
+      "why": "Merged live capability specification from delta spec via shell cp"
+    },
+    {
+      "path": "openspec/changes/archive/2026-08-26-acceptance-verifier/apply-base-check.log",
+      "change": "created",
+      "why": "Archived change artifact moved from openspec/changes/acceptance-verifier/"
+    },
+    {
+      "path": "openspec/changes/archive/2026-08-26-acceptance-verifier/apply-progress.md",
+      "change": "created",
+      "why": "Archived change artifact moved from openspec/changes/acceptance-verifier/"
+    },
+    {
+      "path": "openspec/changes/archive/2026-08-26-acceptance-verifier/archive-report.md",
+      "change": "created",
+      "why": "Terminal SDD cycle archive report"
+    },
+    {
+      "path": "openspec/changes/archive/2026-08-26-acceptance-verifier/design.md",
+      "change": "created",
+      "why": "Archived change artifact moved from openspec/changes/acceptance-verifier/"
+    },
+    {
+      "path": "openspec/changes/archive/2026-08-26-acceptance-verifier/exploration.md",
+      "change": "created",
+      "why": "Archived change artifact moved from openspec/changes/acceptance-verifier/"
+    },
+    {
+      "path": "openspec/changes/archive/2026-08-26-acceptance-verifier/proposal.md",
+      "change": "created",
+      "why": "Archived change artifact moved from openspec/changes/acceptance-verifier/"
+    },
+    {
+      "path": "openspec/changes/archive/2026-08-26-acceptance-verifier/specs/acceptance-verifier/spec.md",
+      "change": "created",
+      "why": "Archived change artifact moved from openspec/changes/acceptance-verifier/"
+    },
+    {
+      "path": "openspec/changes/archive/2026-08-26-acceptance-verifier/tasks.md",
+      "change": "created",
+      "why": "Archived change artifact moved from openspec/changes/acceptance-verifier/"
+    },
+    {
+      "path": "openspec/changes/archive/2026-08-26-acceptance-verifier/verify-report.md",
+      "change": "created",
+      "why": "Archived change artifact moved from openspec/changes/acceptance-verifier/"
+    },
+    {
+      "path": "openspec/changes/acceptance-verifier/apply-base-check.log",
+      "change": "deleted",
+      "why": "Moved to openspec/changes/archive/2026-08-26-acceptance-verifier/"
+    },
+    {
+      "path": "openspec/changes/acceptance-verifier/apply-progress.md",
+      "change": "deleted",
+      "why": "Moved to openspec/changes/archive/2026-08-26-acceptance-verifier/"
+    },
+    {
+      "path": "openspec/changes/acceptance-verifier/design.md",
+      "change": "deleted",
+      "why": "Moved to openspec/changes/archive/2026-08-26-acceptance-verifier/"
+    },
+    {
+      "path": "openspec/changes/acceptance-verifier/exploration.md",
+      "change": "deleted",
+      "why": "Moved to openspec/changes/archive/2026-08-26-acceptance-verifier/"
+    },
+    {
+      "path": "openspec/changes/acceptance-verifier/proposal.md",
+      "change": "deleted",
+      "why": "Moved to openspec/changes/archive/2026-08-26-acceptance-verifier/"
+    },
+    {
+      "path": "openspec/changes/acceptance-verifier/specs/acceptance-verifier/spec.md",
+      "change": "deleted",
+      "why": "Moved to openspec/changes/archive/2026-08-26-acceptance-verifier/"
+    },
+    {
+      "path": "openspec/changes/acceptance-verifier/tasks.md",
+      "change": "deleted",
+      "why": "Moved to openspec/changes/archive/2026-08-26-acceptance-verifier/"
+    },
+    {
+      "path": "openspec/changes/acceptance-verifier/verify-report.md",
+      "change": "deleted",
+      "why": "Moved to openspec/changes/archive/2026-08-26-acceptance-verifier/"
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "The delta spec reached openspec/specs/acceptance-verifier/spec.md via shell cp, with an empty diff -r in the envelope.",
+      "met": true,
+      "evidence": "diff -r openspec/changes/acceptance-verifier/specs/acceptance-verifier openspec/specs/acceptance-verifier exited 0 with empty output (verbatim: ''); live spec exists at openspec/specs/acceptance-verifier/spec.md (122 lines, 8 requirements, 13 scenarios)."
+    },
+    {
+      "criterion": "openspec/changes/acceptance-verifier/archive-report.md exists with every section populated; every follow-up named.",
+      "met": true,
+      "evidence": "archive-report.md created and moved to openspec/changes/archive/2026-08-26-acceptance-verifier/archive-report.md containing all required sections (## Verdict, ## What Shipped, ## Dispatch Record, ## Follow-ups, ## Gaps and Contradictions) and listing all follow-ups."
+    },
+    {
+      "criterion": "The change folder is at openspec/changes/archive/2026-08-26-acceptance-verifier/ and no longer at openspec/changes/acceptance-verifier/, with an empty diff -r in the envelope.",
+      "met": true,
+      "evidence": "git mv openspec/changes/acceptance-verifier openspec/changes/archive/2026-08-26-acceptance-verifier; diff -r .lucind/archive-premove-snapshot/acceptance-verifier openspec/changes/archive/2026-08-26-acceptance-verifier exited 0 with empty output (verbatim: ''); openspec/changes/acceptance-verifier no longer exists."
+    },
+    {
+      "criterion": "The absent per-lane dispatch record is recorded in the archive report, not silently skipped.",
+      "met": true,
+      "evidence": "archive-report.md ## Dispatch Record notes that per-lane packet/result-envelope dispatch record was unavailable at archive time (.lucind/packets/ and .lucind/results/ absent) and noted in ## Gaps and Contradictions."
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (git status --porcelain empty, git log --oneline -1).",
+      "met": true,
+      "evidence": "commit 53d6b12 ('chore(acceptance): archive acceptance-verifier change (verify: pass with warnings)'); git status --porcelain empty; git log -1 contains no Co-Authored-By or AI attribution."
+    }
+  ],
+  "commit": "53d6b12",
+  "findings": [
+    {
+      "finding": "Verbatim diff -r readback for delta spec copy to openspec/specs/acceptance-verifier",
+      "evidence": "diff -r output was empty: '' (exit code 0)",
+      "affects": "openspec/specs/acceptance-verifier/spec.md"
+    },
+    {
+      "finding": "Verbatim diff -r readback for change folder move to openspec/changes/archive/2026-08-26-acceptance-verifier",
+      "evidence": "diff -r output was empty: '' (exit code 0)",
+      "affects": "openspec/changes/archive/2026-08-26-acceptance-verifier"
+    },
+    {
+      "finding": "Follow-up: Accepted out-of-scope creep",
+      "evidence": "verify-report.md WARNING 1/2: Service.ForceReleaseLease, feature lease release/status CLI, reconcile --wait-stable, check resolved root line, docs/orchestrator-acceptance-protocol.md, CONTEXT.md glossary",
+      "affects": "internal/feature, cmd/lucind-ai, docs"
+    },
+    {
+      "finding": "Follow-up: integrate.Check timeout diagnostic",
+      "evidence": "verify-report.md SUGGESTION 3: integrate.Check returns (false, output, nil) on context-cancellation timeout",
+      "affects": "internal/integrate/integrate.go"
+    },
+    {
+      "finding": "Follow-up: CLI/ledger executor list drift",
+      "evidence": "archive-report.md ## Follow-ups: executor claude passes CLI supportedExecutors check but rejected by ledger lanes.executor CHECK constraint",
+      "affects": "cmd/lucind-ai/cli.go, internal/ledger/schema.go"
+    }
+  ],
+  "session_id": "9bfbf93b-6d1e-4fc2-bef9-c455a73a493d"
+}
