@@ -94,11 +94,29 @@ Tasks 1.1-3.3 and their implementation predate this verification-only batch. The
 
 ## Deviations and Issues
 
-- Design deviations: none.
+- Design deviations (disclosed post-verify; the earlier "none" was inaccurate — the
+  acceptance authority itself stays in scope, but commit `68736fd` "checkpoint isolated
+  apply baseline" folded pre-existing uncommitted working-tree scaffolding into the branch):
+  - `internal/feature/feature.go` `Service.ForceReleaseLease` + `internal/feature/feature_test.go`
+    coverage — proposal/design place lease-recovery redesign out of scope.
+  - `cmd/lucind-ai/cli.go` new command surface `feature lease release` / `feature lease status`
+    (`featureLeaseDispatch`, `runFeatureLeaseRelease`, `runFeatureLeaseStatus`, `processAlive`).
+  - `cmd/lucind-ai/cli.go` `reconcile renew|resolve --wait-stable <duration>` flag +
+    `TestReconcileWaitStableCLI`.
+  - `cmd/lucind-ai` `check` now prints a `resolved root:` line (+ test assertion).
+  - New `docs/orchestrator-acceptance-protocol.md` (recommendations 5–6 correspond to the
+    lease/`--wait-stable` additions above) and unrelated `CONTEXT.md` ultrafixer-glossary edits.
+  All of the above are test-covered and the full `-race` suite is green. The maintainer
+  reviewed the verify report and chose to accept the expanded scope rather than trim it, so
+  it ships with this change; the rollback boundary is correspondingly larger than the design's
+  "removes callers but retains audit rows" description.
+- The task 4.2 "Lease recovery exclusion … Confirmed" row above refers to `runAccept` not
+  invoking lease code; it does not mean the branch is free of lease additions (see above).
 - Delivery metadata in the original task forecast says `single-pr` with pending chain strategy; this batch proceeded under the explicit maintainer-approved `exception-ok` / `size:exception` authority supplied for apply.
 - CodeGraph was unavailable because this worktree has no `.codegraph/` index. Creating one would have violated the batch's file-write restriction, so task 4.2 used targeted read-only source inspection after the failed CodeGraph lookup.
 - Test totals are reported only where commands emitted them; individual test counts were not fabricated.
 
 ## Remaining Tasks
 
-None. All 16 tasks are visibly complete; next recommended phase is `sdd-verify`.
+None. All 16 tasks are visibly complete. `sdd-verify` ran and returned PASS WITH WARNINGS
+(see `verify-report.md`); next recommended phase is `sdd-archive`.
