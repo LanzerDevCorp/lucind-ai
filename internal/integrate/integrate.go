@@ -119,7 +119,7 @@ func combine(ctx context.Context, primaryRoot, runID, parentRef, baseSHA string,
 			abortCmd.Dir = wt.Path
 			_ = abortCmd.Run()
 
-			_ = worktree.Remove(ctx, primaryRoot, wt.Path)
+			_ = worktree.Remove(ctx, primaryRoot, wt.Path, true)
 			_ = worktree.DeleteBranch(ctx, primaryRoot, wt.Branch)
 
 			errMsg := strings.TrimSpace(string(out))

@@ -81,7 +81,7 @@ func TestCombineHappyPath(t *testing.T) {
 		t.Fatalf("Combine() error = %v, want nil", err)
 	}
 	defer func() {
-		_ = worktree.Remove(context.Background(), primaryRoot, wtPath)
+		_ = worktree.Remove(context.Background(), primaryRoot, wtPath, true)
 		_ = worktree.DeleteBranch(context.Background(), primaryRoot, branchName)
 	}()
 
@@ -145,7 +145,7 @@ func TestCombineRetryProducesDeterministicCandidateSHA(t *testing.T) {
 	}
 	sha1 := runGit(t, wtPath1, "rev-parse", "HEAD")
 	tree1 := runGit(t, wtPath1, "rev-parse", "HEAD^{tree}")
-	_ = worktree.Remove(context.Background(), primaryRoot, wtPath1)
+	_ = worktree.Remove(context.Background(), primaryRoot, wtPath1, true)
 	_ = worktree.DeleteBranch(context.Background(), primaryRoot, branchName1)
 
 	// A real wall-clock gap between retries, matching the actual scenario
@@ -159,7 +159,7 @@ func TestCombineRetryProducesDeterministicCandidateSHA(t *testing.T) {
 		t.Fatalf("Combine() second call (retry) error = %v, want nil", err)
 	}
 	defer func() {
-		_ = worktree.Remove(context.Background(), primaryRoot, wtPath2)
+		_ = worktree.Remove(context.Background(), primaryRoot, wtPath2, true)
 		_ = worktree.DeleteBranch(context.Background(), primaryRoot, branchName2)
 	}()
 	sha2 := runGit(t, wtPath2, "rev-parse", "HEAD")
@@ -205,7 +205,7 @@ func TestCombineBranchesFromFeatureParentNotPrimaryHEAD(t *testing.T) {
 		t.Fatalf("Combine() error = %v, want nil", err)
 	}
 	defer func() {
-		_ = worktree.Remove(context.Background(), primaryRoot, wtPath)
+		_ = worktree.Remove(context.Background(), primaryRoot, wtPath, true)
 		_ = worktree.DeleteBranch(context.Background(), primaryRoot, branchName)
 	}()
 
@@ -375,7 +375,7 @@ func TestCombineConflictResolved(t *testing.T) {
 		t.Fatalf("CombineWithInvoker() error = %v, want nil", err)
 	}
 	defer func() {
-		_ = worktree.Remove(context.Background(), primaryRoot, wtPath)
+		_ = worktree.Remove(context.Background(), primaryRoot, wtPath, true)
 		_ = worktree.DeleteBranch(context.Background(), primaryRoot, branchName)
 	}()
 

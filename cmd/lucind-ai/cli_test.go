@@ -698,6 +698,25 @@ func TestPrintReportOmitsDiagnosisBlockWhenNoneCaptured(t *testing.T) {
 	}
 }
 
+func TestPrintReportEmitsTroubleshootingBannerOnNonDone(t *testing.T) {
+	var stdout bytes.Buffer
+	r := lucindrun.Report{
+		LaneID:   "lane-a",
+		Status:   lane.Blocked,
+		Worktree: "/tmp/worktrees/lane-a",
+	}
+
+	printReport(&stdout, r)
+
+	out := stdout.String()
+	if !strings.Contains(out, "troubleshooting.md") {
+		t.Errorf("printReport output = %q, want reference to troubleshooting.md", out)
+	}
+	if !strings.Contains(out, "git -C /tmp/worktrees/lane-a status") || !strings.Contains(out, "git -C /tmp/worktrees/lane-a diff") {
+		t.Errorf("printReport output = %q, want git diff and status inspection commands", out)
+	}
+}
+
 // TestPrintReportOmitsDiagnosisBlockForDoneLane proves a lane that
 // reached lane.Done never prints a diagnosis block, even in the
 // (currently impossible) case its Diagnosis field were somehow set --
@@ -721,14 +740,19 @@ func TestPrintReportOmitsDiagnosisBlockForDoneLane(t *testing.T) {
 	if strings.Contains(out, "captured diagnosis") {
 		t.Errorf("printReport output = %q, want no diagnosis block for a lane.Done report", out)
 	}
+	if strings.Contains(out, "troubleshooting.md") {
+		t.Errorf("printReport output = %q, want no troubleshooting banner for a lane.Done report", out)
+	}
 }
 
 // TestPrintIntegrateReportIncludesIntegratedAndRevertedIDs (Task 5.1) proves that
 // given an IntegrateReport with both integrated and reverted lanes, printIntegrateReport
-// writes the integrate summary line and the integrated_ids and reverted_ids lines.
+// writes the integrate summary line, the integrated_ids and reverted_ids lines, and
+// the integrate retry banner citing recovery-reconciliation.md.
 func TestPrintIntegrateReportIncludesIntegratedAndRevertedIDs(t *testing.T) {
 	var stdout bytes.Buffer
 	rep := lucindrun.IntegrateReport{
+		RunID:      "run-456",
 		Attempted:  true,
 		Passed:     true,
 		Integrated: []string{"apply-ledger"},
@@ -748,11 +772,17 @@ func TestPrintIntegrateReportIncludesIntegratedAndRevertedIDs(t *testing.T) {
 	if !strings.Contains(out, "reverted_ids: apply-serve") {
 		t.Errorf("printIntegrateReport output = %q, want it to contain reverted_ids: apply-serve", out)
 	}
+	if !strings.Contains(out, "lucind-ai integrate retry --run run-456") {
+		t.Errorf("printIntegrateReport output = %q, want integrate retry command banner", out)
+	}
+	if !strings.Contains(out, "recovery-reconciliation.md") {
+		t.Errorf("printIntegrateReport output = %q, want reference to recovery-reconciliation.md", out)
+	}
 }
 
 // TestPrintIntegrateReportAllIntegratedExplicitlyEmptyRevertedIDs (Task 5.2) proves that
 // when all lanes integrate and none are reverted, printIntegrateReport writes integrated_ids
-// and an explicitly empty reverted_ids: line (not omitted).
+// and an explicitly empty reverted_ids: line (not omitted), and omits the retry guidance banner.
 func TestPrintIntegrateReportAllIntegratedExplicitlyEmptyRevertedIDs(t *testing.T) {
 	var stdout bytes.Buffer
 	rep := lucindrun.IntegrateReport{
@@ -773,6 +803,9 @@ func TestPrintIntegrateReportAllIntegratedExplicitlyEmptyRevertedIDs(t *testing.
 	}
 	if !strings.Contains(out, "reverted_ids:\n") {
 		t.Errorf("printIntegrateReport output = %q, want it to contain explicitly empty reverted_ids:", out)
+	}
+	if strings.Contains(out, "integrate retry") || strings.Contains(out, "recovery-reconciliation.md") {
+		t.Errorf("printIntegrateReport output = %q, want retry banner omitted when no reverted lanes", out)
 	}
 }
 
@@ -3003,6 +3036,81 @@ func TestWorktreeCleanupCLI(t *testing.T) {
 		}
 	})
 
+	t.Run("unforced dirty cleanup exits 1 with diagnostics and preserves files", func(t *testing.T) {
+		wt, err := worktree.Create(context.Background(), primaryRoot, "dirty-lane")
+		if err != nil {
+			t.Fatalf("worktree.Create error = %v", err)
+		}
+
+		dirtyFile := filepath.Join(wt.Path, "wip.txt")
+		if err := os.WriteFile(dirtyFile, []byte("uncommitted work in progress\n"), 0o644); err != nil {
+			t.Fatalf("WriteFile error = %v", err)
+		}
+
+		var stdout, stderr bytes.Buffer
+		code := run(context.Background(), []string{"worktree", "cleanup", "--lane", "dirty-lane"}, &stdout, &stderr)
+		if code != 1 {
+			t.Fatalf("worktree cleanup without --force on dirty tree exit code = %d, want 1; stderr = %q", code, stderr.String())
+		}
+
+		stderrStr := stderr.String()
+		if !strings.Contains(stderrStr, "troubleshooting.md") {
+			t.Errorf("stderr = %q, want diagnostic pointer to troubleshooting.md", stderrStr)
+		}
+		if !strings.Contains(stderrStr, "--force") {
+			t.Errorf("stderr = %q, want mention of --force flag", stderrStr)
+		}
+		if !strings.Contains(stderrStr, "git") || !strings.Contains(stderrStr, "diff") {
+			t.Errorf("stderr = %q, want git diff / status inspection commands", stderrStr)
+		}
+
+		if _, err := os.Stat(dirtyFile); err != nil {
+			t.Errorf("dirty file was deleted: %v", err)
+		}
+		if !worktree.IsLinkedWorktree(wt.Path) {
+			t.Errorf("worktree was removed despite being dirty")
+		}
+	})
+
+	t.Run("dirty cleanup with --force exits 0 and removes files", func(t *testing.T) {
+		wtPath := filepath.Join(filepath.Dir(primaryRoot), filepath.Base(primaryRoot)+"-worktrees", "dirty-lane")
+		if !worktree.IsLinkedWorktree(wtPath) {
+			t.Fatalf("dirty-lane worktree does not exist before --force cleanup")
+		}
+
+		var stdout, stderr bytes.Buffer
+		code := run(context.Background(), []string{"worktree", "cleanup", "--lane", "dirty-lane", "--force"}, &stdout, &stderr)
+		if code != 0 {
+			t.Fatalf("worktree cleanup with --force exit code = %d, want 0; stderr = %q", code, stderr.String())
+		}
+
+		if _, err := os.Stat(wtPath); !os.IsNotExist(err) {
+			t.Errorf("os.Stat(%q) err = %v, want os.IsNotExist after forced cleanup", wtPath, err)
+		}
+	})
+
+	t.Run("dirty cleanup with -f exits 0 and removes files", func(t *testing.T) {
+		wt, err := worktree.Create(context.Background(), primaryRoot, "dirty-lane-short")
+		if err != nil {
+			t.Fatalf("worktree.Create error = %v", err)
+		}
+
+		dirtyFile := filepath.Join(wt.Path, "wip.txt")
+		if err := os.WriteFile(dirtyFile, []byte("uncommitted work\n"), 0o644); err != nil {
+			t.Fatalf("WriteFile error = %v", err)
+		}
+
+		var stdout, stderr bytes.Buffer
+		code := run(context.Background(), []string{"worktree", "cleanup", "--lane", "dirty-lane-short", "-f"}, &stdout, &stderr)
+		if code != 0 {
+			t.Fatalf("worktree cleanup with -f exit code = %d, want 0; stderr = %q", code, stderr.String())
+		}
+
+		if _, err := os.Stat(wt.Path); !os.IsNotExist(err) {
+			t.Errorf("os.Stat(%q) err = %v, want os.IsNotExist after -f cleanup", wt.Path, err)
+		}
+	})
+
 	t.Run("nonexistent lane is idempotent and still exits 0", func(t *testing.T) {
 		var stdout, stderr bytes.Buffer
 		code := run(context.Background(), []string{"worktree", "cleanup", "--lane", "never-existed"}, &stdout, &stderr)
@@ -3019,6 +3127,30 @@ func TestWorktreeCleanupCLI(t *testing.T) {
 		}
 		if !strings.Contains(stderr.String(), "--lane") {
 			t.Errorf("stderr = %q, want --lane mentioned", stderr.String())
+		}
+	})
+
+	t.Run("refuses invocation from inside linked worktree", func(t *testing.T) {
+		wt, err := worktree.Create(context.Background(), primaryRoot, "inner-wt")
+		if err != nil {
+			t.Fatalf("worktree.Create error = %v", err)
+		}
+		defer func() {
+			_ = os.Chdir(primaryRoot)
+			_ = worktree.Remove(context.Background(), primaryRoot, wt.Path, true)
+		}()
+
+		if err := os.Chdir(wt.Path); err != nil {
+			t.Fatalf("Chdir error = %v", err)
+		}
+
+		var stdout, stderr bytes.Buffer
+		code := run(context.Background(), []string{"worktree", "cleanup", "--lane", "inner-wt"}, &stdout, &stderr)
+		if code != 1 {
+			t.Fatalf("worktree cleanup inside linked worktree exit code = %d, want 1; stderr = %q", code, stderr.String())
+		}
+		if !strings.Contains(stderr.String(), "refusing to run from inside a linked worktree") {
+			t.Errorf("stderr = %q, want linked worktree refusal error", stderr.String())
 		}
 	})
 }
@@ -4285,7 +4417,7 @@ func TestLinkedWorktreeCommands(t *testing.T) {
 	if err != nil {
 		t.Fatalf("worktree.Create: %v", err)
 	}
-	defer worktree.Remove(ctx, primaryRoot, wt.Path)
+	defer worktree.Remove(ctx, primaryRoot, wt.Path, true)
 
 	if !worktree.IsLinkedWorktree(wt.Path) {
 		t.Fatalf("IsLinkedWorktree(%q) = false, want true", wt.Path)
@@ -4393,7 +4525,7 @@ func TestRunCheckFromLinkedWorktreeTestsWorktreeOwnCode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("worktree.Create: %v", err)
 	}
-	defer worktree.Remove(ctx, primaryRoot, wt.Path)
+	defer worktree.Remove(ctx, primaryRoot, wt.Path, true)
 
 	if !worktree.IsLinkedWorktree(wt.Path) {
 		t.Fatalf("IsLinkedWorktree(%q) = false, want true", wt.Path)
@@ -4535,7 +4667,7 @@ func TestAcceptRequiresExactReceiptAndRendersMechanicalEvidenceOnly(t *testing.T
 		t.Fatalf("accept exit code = %d, want 0; stderr = %q, stdout = %q", code, stderr.String(), stdout.String())
 	}
 	out := stdout.String()
-	for _, want := range []string{"receipt-1", "binding-1", "mechanical evidence", "qualitative approval remains separate"} {
+	for _, want := range []string{"receipt-1", "binding-1", "mechanical evidence", "qualitative approval remains separate", "acceptance-promotion.md", "steps 2–10"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("stdout %q missing %q", out, want)
 		}
