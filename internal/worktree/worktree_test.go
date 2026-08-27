@@ -252,7 +252,7 @@ func TestRemoveRemovesLinkedWorktree(t *testing.T) {
 		t.Fatalf("IsLinkedWorktree(%q) = false, want true before removal", wt.Path)
 	}
 
-	if err := worktree.Remove(context.Background(), primaryRoot, wt.Path); err != nil {
+	if err := worktree.Remove(context.Background(), primaryRoot, wt.Path, false); err != nil {
 		t.Fatalf("Remove() error = %v, want nil", err)
 	}
 
@@ -265,6 +265,123 @@ func TestRemoveRemovesLinkedWorktree(t *testing.T) {
 	}
 }
 
+func TestRemoveDirtyFailsClosedWithoutForce(t *testing.T) {
+	if testing.Short() {
+		t.Skip("shells out to real git")
+	}
+
+	t.Run("staged changes", func(t *testing.T) {
+		primaryRoot := initRepo(t)
+		wt, err := worktree.Create(context.Background(), primaryRoot, "lane-staged")
+		if err != nil {
+			t.Fatalf("Create() error = %v", err)
+		}
+
+		stagedFile := filepath.Join(wt.Path, "staged.txt")
+		if err := os.WriteFile(stagedFile, []byte("staged content\n"), 0o644); err != nil {
+			t.Fatalf("WriteFile() error = %v", err)
+		}
+		runGit(t, wt.Path, "add", "staged.txt")
+
+		err = worktree.Remove(context.Background(), primaryRoot, wt.Path, false)
+		if !errors.Is(err, worktree.ErrWorktreeDirty) {
+			t.Fatalf("Remove(force=false) error = %v, want %v", err, worktree.ErrWorktreeDirty)
+		}
+
+		if !worktree.IsLinkedWorktree(wt.Path) {
+			t.Errorf("worktree was removed despite being dirty")
+		}
+		if _, err := os.Stat(stagedFile); err != nil {
+			t.Errorf("staged file was deleted: %v", err)
+		}
+	})
+
+	t.Run("unstaged changes", func(t *testing.T) {
+		primaryRoot := initRepo(t)
+		wt, err := worktree.Create(context.Background(), primaryRoot, "lane-unstaged")
+		if err != nil {
+			t.Fatalf("Create() error = %v", err)
+		}
+
+		trackedFile := filepath.Join(wt.Path, "tracked.txt")
+		if err := os.WriteFile(trackedFile, []byte("initial\n"), 0o644); err != nil {
+			t.Fatalf("WriteFile() error = %v", err)
+		}
+		runGit(t, wt.Path, "add", "tracked.txt")
+		runGit(t, wt.Path, "commit", "-m", "add tracked.txt")
+
+		if err := os.WriteFile(trackedFile, []byte("modified\n"), 0o644); err != nil {
+			t.Fatalf("WriteFile() error = %v", err)
+		}
+
+		err = worktree.Remove(context.Background(), primaryRoot, wt.Path, false)
+		if !errors.Is(err, worktree.ErrWorktreeDirty) {
+			t.Fatalf("Remove(force=false) error = %v, want %v", err, worktree.ErrWorktreeDirty)
+		}
+
+		if !worktree.IsLinkedWorktree(wt.Path) {
+			t.Errorf("worktree was removed despite being dirty")
+		}
+		data, err := os.ReadFile(trackedFile)
+		if err != nil || string(data) != "modified\n" {
+			t.Errorf("tracked file content corrupted or missing: %v, data=%q", err, string(data))
+		}
+	})
+
+	t.Run("untracked files", func(t *testing.T) {
+		primaryRoot := initRepo(t)
+		wt, err := worktree.Create(context.Background(), primaryRoot, "lane-untracked")
+		if err != nil {
+			t.Fatalf("Create() error = %v", err)
+		}
+
+		untrackedFile := filepath.Join(wt.Path, "untracked.txt")
+		if err := os.WriteFile(untrackedFile, []byte("untracked content\n"), 0o644); err != nil {
+			t.Fatalf("WriteFile() error = %v", err)
+		}
+
+		err = worktree.Remove(context.Background(), primaryRoot, wt.Path, false)
+		if !errors.Is(err, worktree.ErrWorktreeDirty) {
+			t.Fatalf("Remove(force=false) error = %v, want %v", err, worktree.ErrWorktreeDirty)
+		}
+
+		if !worktree.IsLinkedWorktree(wt.Path) {
+			t.Errorf("worktree was removed despite being dirty")
+		}
+		if _, err := os.Stat(untrackedFile); err != nil {
+			t.Errorf("untracked file was deleted: %v", err)
+		}
+	})
+}
+
+func TestRemoveDirtySucceedsWithForce(t *testing.T) {
+	if testing.Short() {
+		t.Skip("shells out to real git")
+	}
+
+	primaryRoot := initRepo(t)
+	wt, err := worktree.Create(context.Background(), primaryRoot, "lane-force")
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	untrackedFile := filepath.Join(wt.Path, "untracked.txt")
+	if err := os.WriteFile(untrackedFile, []byte("untracked content\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	if err := worktree.Remove(context.Background(), primaryRoot, wt.Path, true); err != nil {
+		t.Fatalf("Remove(force=true) error = %v, want nil", err)
+	}
+
+	if worktree.IsLinkedWorktree(wt.Path) {
+		t.Errorf("IsLinkedWorktree(%q) = true, want false after forced removal", wt.Path)
+	}
+	if _, err := os.Stat(wt.Path); !os.IsNotExist(err) {
+		t.Errorf("os.Stat(%q) err = %v, want os.IsNotExist", wt.Path, err)
+	}
+}
+
 func TestRemoveWrapsGitFailureWithStderr(t *testing.T) {
 	if testing.Short() {
 		t.Skip("shells out to real git")
@@ -272,12 +389,25 @@ func TestRemoveWrapsGitFailureWithStderr(t *testing.T) {
 
 	primaryRoot := t.TempDir()
 
-	err := worktree.Remove(context.Background(), primaryRoot, filepath.Join(primaryRoot, "non-existent"))
+	err := worktree.Remove(context.Background(), primaryRoot, filepath.Join(primaryRoot, "non-existent"), true)
 	if err == nil {
 		t.Fatalf("Remove() error = nil, want non-nil")
 	}
 	if !strings.Contains(strings.ToLower(err.Error()), "not a git repository") && !strings.Contains(strings.ToLower(err.Error()), "fatal") {
 		t.Errorf("Remove() error = %q, want it to contain git's stderr", err.Error())
+	}
+}
+
+func TestRemoveInvalidPathFailsCleanly(t *testing.T) {
+	if testing.Short() {
+		t.Skip("shells out to real git")
+	}
+
+	primaryRoot := t.TempDir()
+
+	err := worktree.Remove(context.Background(), primaryRoot, filepath.Join(primaryRoot, "non-existent"), false)
+	if err == nil {
+		t.Fatalf("Remove(force=false) on invalid path error = nil, want non-nil")
 	}
 }
 
@@ -296,7 +426,7 @@ func TestRemoveHonoursCancelledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	err = worktree.Remove(ctx, primaryRoot, wt.Path)
+	err = worktree.Remove(ctx, primaryRoot, wt.Path, false)
 	if err == nil {
 		t.Fatalf("Remove() error = nil, want non-nil for an already-cancelled context")
 	}
@@ -318,7 +448,7 @@ func TestDeleteBranch(t *testing.T) {
 		t.Fatalf("Create() error = %v, want nil", err)
 	}
 
-	if err := worktree.Remove(context.Background(), primaryRoot, wt.Path); err != nil {
+	if err := worktree.Remove(context.Background(), primaryRoot, wt.Path, false); err != nil {
 		t.Fatalf("Remove() error = %v, want nil", err)
 	}
 
@@ -367,7 +497,7 @@ func TestDeleteBranchHonoursCancelledContext(t *testing.T) {
 		t.Fatalf("Create() error = %v, want nil", err)
 	}
 
-	if err := worktree.Remove(context.Background(), primaryRoot, wt.Path); err != nil {
+	if err := worktree.Remove(context.Background(), primaryRoot, wt.Path, false); err != nil {
 		t.Fatalf("Remove() error = %v, want nil", err)
 	}
 
@@ -1047,10 +1177,120 @@ func TestCleanupRemovesExistingWorktree(t *testing.T) {
 		t.Fatalf("IsLinkedWorktree(%q) = false, want true before cleanup", wt.Path)
 	}
 
-	if err := worktree.Cleanup(context.Background(), primaryRoot, "fix-auth"); err != nil {
+	if err := worktree.Cleanup(context.Background(), primaryRoot, "fix-auth", false); err != nil {
 		t.Fatalf("Cleanup() error = %v, want nil", err)
 	}
 
+	if _, err := os.Stat(wt.Path); !os.IsNotExist(err) {
+		t.Errorf("os.Stat(%q) err = %v, want os.IsNotExist", wt.Path, err)
+	}
+}
+
+func TestCleanupDirtyFailsClosedWithoutForce(t *testing.T) {
+	if testing.Short() {
+		t.Skip("shells out to real git")
+	}
+
+	t.Run("staged changes", func(t *testing.T) {
+		primaryRoot := initRepo(t)
+		wt, err := worktree.Create(context.Background(), primaryRoot, "lane-staged")
+		if err != nil {
+			t.Fatalf("Create() error = %v", err)
+		}
+
+		stagedFile := filepath.Join(wt.Path, "staged.txt")
+		if err := os.WriteFile(stagedFile, []byte("staged content\n"), 0o644); err != nil {
+			t.Fatalf("WriteFile() error = %v", err)
+		}
+		runGit(t, wt.Path, "add", "staged.txt")
+
+		err = worktree.Cleanup(context.Background(), primaryRoot, "lane-staged", false)
+		if !errors.Is(err, worktree.ErrWorktreeDirty) {
+			t.Fatalf("Cleanup(force=false) error = %v, want %v", err, worktree.ErrWorktreeDirty)
+		}
+
+		if !worktree.IsLinkedWorktree(wt.Path) {
+			t.Errorf("worktree was removed despite being dirty")
+		}
+		if _, err := os.Stat(stagedFile); err != nil {
+			t.Errorf("staged file was deleted: %v", err)
+		}
+	})
+
+	t.Run("unstaged changes", func(t *testing.T) {
+		primaryRoot := initRepo(t)
+		wt, err := worktree.Create(context.Background(), primaryRoot, "lane-unstaged")
+		if err != nil {
+			t.Fatalf("Create() error = %v", err)
+		}
+
+		trackedFile := filepath.Join(wt.Path, "tracked.txt")
+		if err := os.WriteFile(trackedFile, []byte("initial\n"), 0o644); err != nil {
+			t.Fatalf("WriteFile() error = %v", err)
+		}
+		runGit(t, wt.Path, "add", "tracked.txt")
+		runGit(t, wt.Path, "commit", "-m", "add tracked.txt")
+
+		if err := os.WriteFile(trackedFile, []byte("modified\n"), 0o644); err != nil {
+			t.Fatalf("WriteFile() error = %v", err)
+		}
+
+		err = worktree.Cleanup(context.Background(), primaryRoot, "lane-unstaged", false)
+		if !errors.Is(err, worktree.ErrWorktreeDirty) {
+			t.Fatalf("Cleanup(force=false) error = %v, want %v", err, worktree.ErrWorktreeDirty)
+		}
+
+		if !worktree.IsLinkedWorktree(wt.Path) {
+			t.Errorf("worktree was removed despite being dirty")
+		}
+	})
+
+	t.Run("untracked files", func(t *testing.T) {
+		primaryRoot := initRepo(t)
+		wt, err := worktree.Create(context.Background(), primaryRoot, "lane-untracked")
+		if err != nil {
+			t.Fatalf("Create() error = %v", err)
+		}
+
+		untrackedFile := filepath.Join(wt.Path, "untracked.txt")
+		if err := os.WriteFile(untrackedFile, []byte("untracked content\n"), 0o644); err != nil {
+			t.Fatalf("WriteFile() error = %v", err)
+		}
+
+		err = worktree.Cleanup(context.Background(), primaryRoot, "lane-untracked", false)
+		if !errors.Is(err, worktree.ErrWorktreeDirty) {
+			t.Fatalf("Cleanup(force=false) error = %v, want %v", err, worktree.ErrWorktreeDirty)
+		}
+
+		if !worktree.IsLinkedWorktree(wt.Path) {
+			t.Errorf("worktree was removed despite being dirty")
+		}
+	})
+}
+
+func TestCleanupDirtySucceedsWithForce(t *testing.T) {
+	if testing.Short() {
+		t.Skip("shells out to real git")
+	}
+
+	primaryRoot := initRepo(t)
+	wt, err := worktree.Create(context.Background(), primaryRoot, "lane-force")
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	untrackedFile := filepath.Join(wt.Path, "untracked.txt")
+	if err := os.WriteFile(untrackedFile, []byte("untracked content\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	if err := worktree.Cleanup(context.Background(), primaryRoot, "lane-force", true); err != nil {
+		t.Fatalf("Cleanup(force=true) error = %v, want nil", err)
+	}
+
+	if worktree.IsLinkedWorktree(wt.Path) {
+		t.Errorf("IsLinkedWorktree(%q) = true, want false after forced cleanup", wt.Path)
+	}
 	if _, err := os.Stat(wt.Path); !os.IsNotExist(err) {
 		t.Errorf("os.Stat(%q) err = %v, want os.IsNotExist", wt.Path, err)
 	}
@@ -1063,10 +1303,11 @@ func TestCleanupOnLaneWithNoWorktreeIsNoOp(t *testing.T) {
 
 	primaryRoot := initRepo(t)
 
-	if err := worktree.Cleanup(context.Background(), primaryRoot, "never-created"); err != nil {
-		t.Fatalf("Cleanup() on lane with no worktree error = %v, want nil", err)
+	if err := worktree.Cleanup(context.Background(), primaryRoot, "never-created", false); err != nil {
+		t.Fatalf("Cleanup(force=false) on lane with no worktree error = %v, want nil", err)
+	}
+
+	if err := worktree.Cleanup(context.Background(), primaryRoot, "never-created", true); err != nil {
+		t.Fatalf("Cleanup(force=true) on lane with no worktree error = %v, want nil", err)
 	}
 }
-
-
-

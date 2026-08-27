@@ -56,9 +56,9 @@ packets:
 	}
 
 	outDir := filepath.Join(tempDir, "packets")
-	var stdout bytes.Buffer
+	var stdout, stderr bytes.Buffer
 
-	if err := dag.Split(dagPath, outDir, &stdout); err != nil {
+	if err := dag.Split(dagPath, outDir, &stdout, &stderr); err != nil {
 		t.Fatalf("Split failed unexpectedly: %v", err)
 	}
 
@@ -107,6 +107,58 @@ packets:
 	expectedLine2 := "lucind-ai run --packet " + filepath.Join(outDir, "apply-serve.md") + " --packet " + filepath.Join(outDir, "apply-run.md")
 	if lines[1] != expectedLine2 {
 		t.Errorf("wave line 2 mismatch:\ngot:  %q\nwant: %q", lines[1], expectedLine2)
+	}
+
+	// Stderr must carry multi-wave warning banner citing recovery-reconciliation.md
+	stderrStr := stderr.String()
+	if !strings.Contains(stderrStr, "recovery-reconciliation.md") {
+		t.Errorf("stderr = %q, want multi-wave warning referencing recovery-reconciliation.md", stderrStr)
+	}
+	if !strings.Contains(stderrStr, "base_sha") || !strings.Contains(stderrStr, "expected_parent_sha") {
+		t.Errorf("stderr = %q, want multi-wave warning mentioning base_sha and expected_parent_sha", stderrStr)
+	}
+	if strings.Contains(stdout.String(), "recovery-reconciliation.md") {
+		t.Errorf("stdout = %q, unexpectedly contains recovery-reconciliation.md banner; stdout must remain pipeable", stdout.String())
+	}
+}
+
+func TestSplit_SingleWaveDAGSuccess(t *testing.T) {
+	tempDir := t.TempDir()
+	bodiesDir := filepath.Join(tempDir, "bodies")
+	if err := os.MkdirAll(bodiesDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	body := "# Goal\n\nSingle wave\n\n## Done criteria\n\n- [ ] Done\n"
+	if err := os.WriteFile(filepath.Join(bodiesDir, "apply-single.md"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	yamlContent := `change: apply-single-wave
+packets:
+  - id: apply-single
+    executor: agy
+    routed_by: single
+    allowed_paths:
+      - internal/single/
+    depends_on: []
+    body_path: bodies/apply-single.md
+`
+	dagPath := filepath.Join(tempDir, "apply-dag.yaml")
+	if err := os.WriteFile(dagPath, []byte(yamlContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	outDir := filepath.Join(tempDir, "packets")
+	var stdout, stderr bytes.Buffer
+
+	if err := dag.Split(dagPath, outDir, &stdout, &stderr); err != nil {
+		t.Fatalf("Split failed unexpectedly: %v", err)
+	}
+
+	// Single wave must omit the multi-wave warning banner on stderr
+	if strings.Contains(stderr.String(), "recovery-reconciliation.md") {
+		t.Errorf("stderr = %q, unexpectedly contained multi-wave warning for single-wave DAG", stderr.String())
 	}
 }
 

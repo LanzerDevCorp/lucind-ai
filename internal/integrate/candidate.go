@@ -260,7 +260,7 @@ func ResolveAndPromoteCandidate(ctx context.Context, params CandidateParams) (Ca
 	}
 
 	// Cleanup worktree and branch only after successful promotion
-	_ = worktree.Remove(ctx, params.PrimaryRoot, wt.Path)
+	_ = worktree.Remove(ctx, params.PrimaryRoot, wt.Path, true)
 	_ = worktree.DeleteBranch(ctx, params.PrimaryRoot, wt.Branch)
 
 	return CandidateResult{

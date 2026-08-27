@@ -19,6 +19,15 @@ description: >-
    - Run the full project check: `CGO_ENABLED=0 go build ./...` and `go test ./... -race -count=1`.
    - Run `go vet ./...` and verify `gofmt -l` produces no diffs.
 
+## Mid-Cycle Timeout and Blocker Recovery (TDD WIP-Rescue)
+If a lane runs low on time, times out, or gets blocked mid-cycle:
+1. Do NOT delete or force-clean the worktree. The worktree is preserved on disk for inspection.
+2. Follow the TDD WIP-rescue protocol documented in `plugin/claude-code/skills/lucind-ai/references/operations/troubleshooting.md`:
+   - Inspect uncommitted changes with `git status` and `git diff`.
+   - If RED tests or partial GREEN implementations have value, commit them as WIP (`git commit -m "wip: <description>"`).
+   - Adjust packet timeout and re-dispatch to continue from the preserved state.
+   - Only use `lucind-ai worktree cleanup --lane <id> --force` after explicit human confirmation when work is genuinely non-recoverable.
+
 ## Mutation Testing for New Assertions
 If adding new assertions:
 1. Temporarily break the production logic.

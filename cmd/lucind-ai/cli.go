@@ -55,7 +55,7 @@ const attemptOwner = "lucind-ai run"
 // error, so a person driving the binary from a terminal always sees the one
 // invocation that works rather than a stack trace. --packet is repeatable:
 // each occurrence adds one more lane to the batch.
-const usage = "usage: lucind-ai run --packet <path> [--packet <path> ...] [--timeout <duration>] [--approval-timeout <duration>] [--legacy-main] [--expected-parent-sha <sha>] [--min-quota <fraction>]\n       lucind-ai split --dag <path> --out <dir>\n       lucind-ai check [--out <path>]\n       lucind-ai accept --run <run-id> --lane <lane-id>\n       lucind-ai feature create --id <id> --parent <ref> --base-sha <sha> [--expected-parent-sha <sha>]\n       lucind-ai feature status [--id <id>]\n       lucind-ai feature recover --attempt <id>\n       lucind-ai feature renew --id <id> --owner <owner> --fence <fence> [--ttl <duration>]\n       lucind-ai feature lease release --id <id> [--owner <owner>] [--fence <fence>] [--pid <pid>] [--force]\n       lucind-ai feature lease status --id <id>\n       lucind-ai feature disable --id <id>\n       lucind-ai reconcile approve --request <id> --source <feature> --target <feature> [--actor <name>]\n       lucind-ai reconcile decline --request <id> [--actor <name>] [--reason <reason>]\n       lucind-ai reconcile cancel --request <id> [--actor <name>] [--reason <reason>]\n       lucind-ai reconcile renew --request <id> [--base-sha <sha>] [--source-sha <sha>] [--target-sha <sha>] [--wait-stable <duration>]\n       lucind-ai reconcile resolve --candidate <id> --sha <sha> [--actor <name>] [--wait-stable <duration>]\n       lucind-ai defect record --id <id> --feature <id> --signature <sig> [--evidence <ev>] [--disposition <disp>] [--run <run-id>] [--lane <lane-id>]\n       lucind-ai defect list --feature <id>\n       lucind-ai defect decline --id <id>\n       lucind-ai worktree cleanup --lane <id>\n       lucind-ai integrate retry --run <run-id> [--lane <id> ...] [--timeout <duration>] [--approval-timeout <duration>]\n       lucind-ai --version"
+const usage = "usage: lucind-ai run --packet <path> [--packet <path> ...] [--timeout <duration>] [--approval-timeout <duration>] [--legacy-main] [--expected-parent-sha <sha>] [--min-quota <fraction>]\n       lucind-ai split --dag <path> --out <dir>\n       lucind-ai check [--out <path>]\n       lucind-ai accept --run <run-id> --lane <lane-id>\n       lucind-ai feature create --id <id> --parent <ref> --base-sha <sha> [--expected-parent-sha <sha>]\n       lucind-ai feature status [--id <id>]\n       lucind-ai feature recover --attempt <id>\n       lucind-ai feature renew --id <id> --owner <owner> --fence <fence> [--ttl <duration>]\n       lucind-ai feature lease release --id <id> [--owner <owner>] [--fence <fence>] [--pid <pid>] [--force]\n       lucind-ai feature lease status --id <id>\n       lucind-ai feature disable --id <id>\n       lucind-ai reconcile approve --request <id> --source <feature> --target <feature> [--actor <name>]\n       lucind-ai reconcile decline --request <id> [--actor <name>] [--reason <reason>]\n       lucind-ai reconcile cancel --request <id> [--actor <name>] [--reason <reason>]\n       lucind-ai reconcile renew --request <id> [--base-sha <sha>] [--source-sha <sha>] [--target-sha <sha>] [--wait-stable <duration>]\n       lucind-ai reconcile resolve --candidate <id> --sha <sha> [--actor <name>] [--wait-stable <duration>]\n       lucind-ai defect record --id <id> --feature <id> --signature <sig> [--evidence <ev>] [--disposition <disp>] [--run <run-id>] [--lane <lane-id>]\n       lucind-ai defect list --feature <id>\n       lucind-ai defect decline --id <id>\n       lucind-ai worktree cleanup --lane <id> [--force]\n       lucind-ai integrate retry --run <run-id> [--lane <id> ...] [--timeout <duration>] [--approval-timeout <duration>]\n       lucind-ai --version"
 
 // depsFactory constructs run.Deps for runDispatch. In production it is
 // productionDeps; tests may override it to inject test doubles or observe dependency calls.
@@ -508,7 +508,7 @@ func runSplit(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 		return 1
 	}
 
-	if err := dag.Split(*dagPath, *outDir, stdout); err != nil {
+	if err := dag.Split(*dagPath, *outDir, stdout, stderr); err != nil {
 		fmt.Fprintf(stderr, "lucind-ai: %v\n", err)
 		return 1
 	}
@@ -687,6 +687,8 @@ func renderAcceptanceReceipt(w io.Writer, receipt accept.AcceptanceReceipt) {
 	fmt.Fprintf(w, "binding: %s\n", receipt.BindingHash)
 	fmt.Fprintf(w, "candidate: %s\n", receipt.Binding.CandidateCommit)
 	fmt.Fprintln(w, "meaning: mechanical evidence only; qualitative approval remains separate")
+	fmt.Fprintln(w, "\nReminder: Complete qualitative review checklist steps 2–10 before promotion.")
+	fmt.Fprintln(w, "See plugin/claude-code/skills/lucind-ai/references/contracts/acceptance-promotion.md for review steps.")
 }
 
 // printReport prints a short, human-readable summary of one lane's run.
@@ -722,6 +724,9 @@ func printReport(w io.Writer, r lucindrun.Report) {
 			fmt.Fprintln(w, r.Diagnosis)
 			fmt.Fprintln(w, "---------------------------")
 		}
+
+		fmt.Fprintf(w, "Inspect changes:\n  git -C %s status\n  git -C %s diff\n", r.Worktree, r.Worktree)
+		fmt.Fprintln(w, "See plugin/claude-code/skills/lucind-ai/references/operations/troubleshooting.md for recovery steps.")
 	}
 }
 
@@ -737,6 +742,14 @@ func printIntegrateReport(w io.Writer, rep lucindrun.IntegrateReport) {
 	}
 	printIDList(w, "integrated_ids", rep.Integrated)
 	printIDList(w, "reverted_ids", rep.Reverted)
+	if len(rep.Reverted) > 0 {
+		runIDStr := rep.RunID
+		if runIDStr == "" {
+			runIDStr = "<run-id>"
+		}
+		fmt.Fprintf(w, "\nReverted lanes preserved. To retry integration without redispatching:\n  lucind-ai integrate retry --run %s\n", runIDStr)
+		fmt.Fprintln(w, "See plugin/claude-code/skills/lucind-ai/references/coordination/recovery-reconciliation.md for recovery steps.")
+	}
 }
 
 // printIDList formats an ID list on a single line. When ids is empty, it
@@ -856,13 +869,13 @@ func productionDeps(runID, primaryRoot string, ledg *ledger.Ledger, timeout, app
 		// same clock a lane gets.
 		FeatureLeaseTTL: timeout,
 		DiscardCombined: func(ctx context.Context, primaryRoot, path, branch string) error {
-			if err := worktree.Remove(ctx, primaryRoot, path); err != nil {
+			if err := worktree.Remove(ctx, primaryRoot, path, true); err != nil {
 				return err
 			}
 			return worktree.DeleteBranch(ctx, primaryRoot, branch)
 		},
 		RemoveLaneWorktree: func(ctx context.Context, primaryRoot, path, branch string) error {
-			if err := worktree.Remove(ctx, primaryRoot, path); err != nil {
+			if err := worktree.Remove(ctx, primaryRoot, path, true); err != nil {
 				return err
 			}
 			return worktree.DeleteBranch(ctx, primaryRoot, branch)
@@ -1941,11 +1954,13 @@ func runWorktreeCleanup(ctx context.Context, args []string, stdout, stderr io.Wr
 	fs := flag.NewFlagSet("worktree cleanup", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
-		fmt.Fprintln(stderr, "usage: lucind-ai worktree cleanup --lane <id>")
+		fmt.Fprintln(stderr, "usage: lucind-ai worktree cleanup --lane <id> [--force]")
 		fs.PrintDefaults()
 	}
 
 	laneID := fs.String("lane", "", "lane identifier whose worktree should be cleaned up")
+	force := fs.Bool("force", false, "force removal of worktree even if it contains uncommitted changes")
+	fs.BoolVar(force, "f", false, "alias for --force")
 	if err := fs.Parse(args); err != nil {
 		return 1
 	}
@@ -1968,7 +1983,20 @@ func runWorktreeCleanup(ctx context.Context, args []string, stdout, stderr io.Wr
 		return 1
 	}
 
-	if err := worktree.Cleanup(ctx, primaryRoot, *laneID); err != nil {
+	if err := worktree.Cleanup(ctx, primaryRoot, *laneID, *force); err != nil {
+		if errors.Is(err, worktree.ErrWorktreeDirty) {
+			wtPath := worktree.PathFor(primaryRoot, *laneID)
+			fmt.Fprintf(stderr, "lucind-ai: worktree for lane %q has uncommitted changes\n", *laneID)
+			fmt.Fprintf(stderr, "Worktree path: %s\n", wtPath)
+			out, _ := worktree.DefaultGitRunner.Run(ctx, wtPath, "status", "--porcelain")
+			if len(out) > 0 {
+				fmt.Fprintf(stderr, "Uncommitted changes:\n%s", string(out))
+			}
+			fmt.Fprintf(stderr, "Inspect changes:\n  git -C %s status\n  git -C %s diff\n", wtPath, wtPath)
+			fmt.Fprintln(stderr, "See plugin/claude-code/skills/lucind-ai/references/operations/troubleshooting.md for recovery steps.")
+			fmt.Fprintf(stderr, "To discard all uncommitted changes and remove the worktree, re-run with --force:\n  lucind-ai worktree cleanup --lane %s --force\n", *laneID)
+			return 1
+		}
 		fmt.Fprintf(stderr, "lucind-ai: %v\n", err)
 		return 1
 	}
