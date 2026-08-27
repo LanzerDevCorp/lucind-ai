@@ -4769,6 +4769,15 @@ func TestAcceptNoFlags(t *testing.T) {
 	}
 }
 
+// TestUsageAdvertisesAcceptRunAndLane guards the top-level usage string against
+// drift: accept takes exactly --run and --lane, so the one invocation a person
+// sees on a usage error must not describe flags the subcommand does not parse.
+func TestUsageAdvertisesAcceptRunAndLane(t *testing.T) {
+	if !strings.Contains(usage, "lucind-ai accept --run <run-id> --lane <lane-id>") {
+		t.Fatalf("usage = %q, want it to advertise the real accept signature", usage)
+	}
+}
+
 type fakeAcceptanceVerifier struct {
 	receipt ledger.AcceptanceReceipt
 	err     error

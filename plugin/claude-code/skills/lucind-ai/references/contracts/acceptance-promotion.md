@@ -17,7 +17,7 @@ Accept a Lane only after independently confirming packet scope, result schema, d
 
 To make acceptance repeatable, execute the canonical 10-step sequence after every lane completes:
 
-1. **Mechanical acceptance automation**: Run `lucind-ai accept --lane <id>` (or `--packet <path>`). This sets up an isolated worktree, validates changed paths against `allowed_paths`, executes repository check suites (`./lucind-checks.sh`), and tears down the worktree.
+1. **Mechanical acceptance automation**: Run `lucind-ai accept --run <run-id> --lane <lane-id>`, using the run and lane identifiers from the dispatch (`lucind-ai run` output / ledger). It loads the frozen done-candidate for that run and lane from the ledger — not the live branch — re-confirms the exact binding (packet digest, base and candidate commit/tree, `allowed_paths`), fails closed if any hard stop fired or a done criterion is unmet, then runs the repository checks (`lucind-checks.sh`) inside a verifier-owned detached worktree at the candidate commit and tears it down. On success it persists an immutable acceptance receipt and prints the receipt id, binding hash, and candidate commit; a missing candidate or failing checks exit nonzero with no receipt and no ref changes. The receipt is mechanical evidence only — never Promotion/CAS and never qualitative approval. Run `lucind-ai accept` with no flags for live usage rather than trusting cached syntax.
 2. **Confirm lane tip & base**: Verify `git rev-parse refs/heads/lucind/<id>` against packet `base_sha`.
 3. **Verify diffstat & scope**: Confirm actual changes stayed strictly inside declared `allowed_paths`.
 4. **Line-by-line diff review (Irreducible)**: Read the full diff (`git diff <base_sha>..<new_tip>`). Summaries are claims, not proof.
