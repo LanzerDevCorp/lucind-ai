@@ -1523,7 +1523,11 @@ type DefectRecord struct {
 	UpdatedAt      time.Time
 }
 
-// RecordDefect inserts or replaces a defect record in the defect_records table.
+// RecordDefect inserts a new defect record into the defect_records table.
+// The id is a TEXT PRIMARY KEY and this is a plain INSERT, so recording the
+// same id twice fails rather than overwriting. Use UpdateDefectDisposition
+// (exposed as "lucind-ai defect resolve|decline|defer") to move an existing
+// record, never a second RecordDefect call.
 func (l *Ledger) RecordDefect(ctx context.Context, rec DefectRecord) error {
 	cAt := rec.CreatedAt
 	if cAt.IsZero() {

@@ -55,7 +55,7 @@ const attemptOwner = "lucind-ai run"
 // error, so a person driving the binary from a terminal always sees the one
 // invocation that works rather than a stack trace. --packet is repeatable:
 // each occurrence adds one more lane to the batch.
-const usage = "usage: lucind-ai run --packet <path> [--packet <path> ...] [--timeout <duration>] [--approval-timeout <duration>] [--legacy-main] [--expected-parent-sha <sha>] [--min-quota <fraction>]\n       lucind-ai split --dag <path> --out <dir>\n       lucind-ai check [--out <path>]\n       lucind-ai accept --run <run-id> --lane <lane-id>\n       lucind-ai feature create --id <id> --parent <ref> --base-sha <sha> [--expected-parent-sha <sha>]\n       lucind-ai feature status [--id <id>]\n       lucind-ai feature recover --attempt <id>\n       lucind-ai feature renew --id <id> --owner <owner> --fence <fence> [--ttl <duration>]\n       lucind-ai feature lease release --id <id> [--owner <owner>] [--fence <fence>] [--pid <pid>] [--force]\n       lucind-ai feature lease status --id <id>\n       lucind-ai feature disable --id <id>\n       lucind-ai reconcile approve --request <id> --source <feature> --target <feature> [--actor <name>]\n       lucind-ai reconcile decline --request <id> [--actor <name>] [--reason <reason>]\n       lucind-ai reconcile cancel --request <id> [--actor <name>] [--reason <reason>]\n       lucind-ai reconcile renew --request <id> [--base-sha <sha>] [--source-sha <sha>] [--target-sha <sha>] [--wait-stable <duration>]\n       lucind-ai reconcile resolve --candidate <id> --sha <sha> [--actor <name>] [--wait-stable <duration>]\n       lucind-ai defect record --id <id> --feature <id> --signature <sig> [--evidence <ev>] [--disposition <disp>] [--run <run-id>] [--lane <lane-id>]\n       lucind-ai defect list --feature <id>\n       lucind-ai defect decline --id <id>\n       lucind-ai worktree cleanup --lane <id> [--force]\n       lucind-ai integrate retry --run <run-id> [--lane <id> ...] [--timeout <duration>] [--approval-timeout <duration>]\n       lucind-ai --version"
+const usage = "usage: lucind-ai run --packet <path> [--packet <path> ...] [--timeout <duration>] [--approval-timeout <duration>] [--legacy-main --expected-parent-sha <sha>] [--min-quota <fraction>]\n       lucind-ai split --dag <path> --out <dir>\n       lucind-ai check [--out <path>]\n       lucind-ai accept --run <run-id> --lane <lane-id>\n       lucind-ai feature create --id <id> --parent <ref> --base-sha <sha> [--expected-parent-sha <sha>]\n       lucind-ai feature status [--id <id>]\n       lucind-ai feature recover --attempt <id>\n       lucind-ai feature renew --id <id> --owner <owner> --fence <fence> [--ttl <duration>]\n       lucind-ai feature lease release --id <id> [--owner <owner>] [--fence <fence>] [--pid <pid>] [--force]\n       lucind-ai feature lease status --id <id>\n       lucind-ai feature disable --id <id>\n       lucind-ai reconcile approve --request <id> --source <feature> --target <feature> [--actor <name>]\n       lucind-ai reconcile decline --request <id> [--actor <name>] [--reason <reason>]\n       lucind-ai reconcile cancel --request <id> [--actor <name>] [--reason <reason>]\n       lucind-ai reconcile renew --request <id> [--base-sha <sha>] [--source-sha <sha>] [--target-sha <sha>] [--wait-stable <duration>]\n       lucind-ai reconcile resolve --candidate <id> --sha <sha> [--actor <name>] [--wait-stable <duration>]\n       lucind-ai defect record --id <id> --feature <id> --signature <sig> [--evidence <ev>] [--disposition <disp>] [--run <run-id>] [--lane <lane-id>]\n       lucind-ai defect list --feature <id>\n       lucind-ai defect resolve --id <id>\n       lucind-ai defect decline --id <id>\n       lucind-ai defect defer --id <id>\n       lucind-ai worktree cleanup --lane <id> [--force]\n       lucind-ai integrate retry --run <run-id> [--lane <id> ...] [--timeout <duration>] [--approval-timeout <duration>]\n       lucind-ai --version"
 
 // depsFactory constructs run.Deps for runDispatch. In production it is
 // productionDeps; tests may override it to inject test doubles or observe dependency calls.
@@ -2162,7 +2162,7 @@ func runIntegrateRetry(ctx context.Context, args []string, stdout, stderr io.Wri
 // defectDispatch dispatches defect subcommands (record, list, decline).
 func defectDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "lucind-ai: defect subcommand requires an action (record, list, decline)")
+		fmt.Fprintln(stderr, "lucind-ai: defect subcommand requires an action (record, list, resolve, decline, defer)")
 		fmt.Fprintln(stderr, usage)
 		return 1
 	}
@@ -2172,9 +2172,10 @@ func defectDispatch(ctx context.Context, args []string, stdout, stderr io.Writer
 		return runDefectRecord(ctx, args[1:], stdout, stderr)
 	case "list":
 		return runDefectList(ctx, args[1:], stdout, stderr)
-	case "decline":
-		return runDefectDecline(ctx, args[1:], stdout, stderr)
 	default:
+		if _, ok := defectTransitions[args[0]]; ok {
+			return runDefectTransition(ctx, args[0], args[1:], stdout, stderr)
+		}
 		fmt.Fprintf(stderr, "lucind-ai: unknown defect subcommand %q\n%s\n", args[0], usage)
 		return 1
 	}
@@ -2312,12 +2313,35 @@ func runDefectList(ctx context.Context, args []string, stdout, stderr io.Writer)
 	return 0
 }
 
-// runDefectDecline implements "lucind-ai defect decline": transitions an existing defect record to declined.
-func runDefectDecline(ctx context.Context, args []string, stdout, stderr io.Writer) int {
-	fs := flag.NewFlagSet("defect decline", flag.ContinueOnError)
+// defectTransitions maps each "lucind-ai defect <verb>" subcommand to the
+// disposition it records. Every disposition in the defect_records vocabulary
+// other than the "recorded" creation default MUST appear here. A disposition
+// with no verb is a state the ledger can enter and never leave: before
+// "resolve" existed, a genuinely repaired defect stayed "recorded" forever,
+// indistinguishable from one nobody had looked at, and the only transition the
+// tool implemented was the one where a fix is refused.
+var defectTransitions = map[string]struct {
+	Disposition  ledger.DefectDisposition
+	Confirmation string
+}{
+	"resolve": {ledger.DefectDispositionRepaired, "resolved"},
+	"decline": {ledger.DefectDispositionDeclined, "declined"},
+	"defer":   {ledger.DefectDispositionDeferred, "deferred"},
+}
+
+// runDefectTransition implements every "lucind-ai defect <verb>" subcommand
+// that transitions an existing defect record's disposition.
+func runDefectTransition(ctx context.Context, verb string, args []string, stdout, stderr io.Writer) int {
+	transition, ok := defectTransitions[verb]
+	if !ok {
+		fmt.Fprintf(stderr, "lucind-ai: unknown defect subcommand %q\n%s\n", verb, usage)
+		return 1
+	}
+
+	fs := flag.NewFlagSet("defect "+verb, flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
-		fmt.Fprintln(stderr, "usage: lucind-ai defect decline --id <id>")
+		fmt.Fprintf(stderr, "usage: lucind-ai defect %s --id <id>\n", verb)
 		fs.PrintDefaults()
 	}
 
@@ -2345,11 +2369,11 @@ func runDefectDecline(ctx context.Context, args []string, stdout, stderr io.Writ
 	}
 	defer ledg.Close()
 
-	if err := ledg.UpdateDefectDisposition(ctx, *id, ledger.DefectDispositionDeclined); err != nil {
+	if err := ledg.UpdateDefectDisposition(ctx, *id, transition.Disposition); err != nil {
 		fmt.Fprintf(stderr, "lucind-ai: %v\n", err)
 		return 1
 	}
 
-	fmt.Fprintf(stdout, "declined defect %s\n", *id)
+	fmt.Fprintf(stdout, "%s defect %s\n", transition.Confirmation, *id)
 	return 0
 }
