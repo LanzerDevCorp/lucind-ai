@@ -5422,3 +5422,123 @@ func TestReconcileWaitStableCLI(t *testing.T) {
 		t.Errorf("stdout = %q, want status: integrated", stdout.String())
 	}
 }
+
+// TestEveryDefectDispositionIsReachableFromCLI is the guard for the class of
+// defect that lets a durable record enter a state it can never leave. The
+// defect_records CHECK constraint admits four dispositions, and
+// UpdateDefectDisposition accepts any of them, but for a long time only
+// "declined" had a CLI path: a genuinely repaired defect stayed "recorded"
+// forever, indistinguishable from one nobody had looked at.
+//
+// This drives the real CLI for every value in the declared vocabulary rather
+// than grepping for call sites, so a disposition added to the schema without a
+// way to reach it fails here.
+func TestEveryDefectDispositionIsReachableFromCLI(t *testing.T) {
+	for _, tc := range []struct {
+		disposition ledger.DefectDisposition
+		args        func(id string) []string
+	}{
+		{ledger.DefectDispositionRecorded, func(id string) []string { return nil }},
+		{ledger.DefectDispositionRepaired, func(id string) []string {
+			return []string{"defect", "resolve", "--id", id}
+		}},
+		{ledger.DefectDispositionDeclined, func(id string) []string {
+			return []string{"defect", "decline", "--id", id}
+		}},
+		{ledger.DefectDispositionDeferred, func(id string) []string {
+			return []string{"defect", "defer", "--id", id}
+		}},
+	} {
+		t.Run(string(tc.disposition), func(t *testing.T) {
+			primaryRoot := initRepo(t)
+			cwd, err := os.Getwd()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chdir(primaryRoot); err != nil {
+				t.Fatal(err)
+			}
+			defer os.Chdir(cwd)
+
+			ctx := context.Background()
+			var stdout, stderr bytes.Buffer
+
+			featureID := "feat-reach-" + string(tc.disposition)
+			if code := run(ctx, []string{
+				"feature", "create", "--id", featureID,
+				"--parent", "refs/heads/" + featureID,
+				"--base-sha", strings.Repeat("7", 40),
+			}, &stdout, &stderr); code != 0 {
+				t.Fatalf("feature create exit = %d; stderr = %q", code, stderr.String())
+			}
+
+			defectID := "def-reach-" + string(tc.disposition)
+			if code := run(ctx, []string{
+				"defect", "record",
+				"--id", defectID,
+				"--feature", featureID,
+				"--signature", "sig-" + string(tc.disposition),
+			}, &stdout, &stderr); code != 0 {
+				t.Fatalf("defect record exit = %d; stderr = %q", code, stderr.String())
+			}
+
+			if args := tc.args(defectID); args != nil {
+				stdout.Reset()
+				stderr.Reset()
+				if code := run(ctx, args, &stdout, &stderr); code != 0 {
+					t.Fatalf("%v exit = %d, want 0; stderr = %q", args, code, stderr.String())
+				}
+			}
+
+			ledg, err := ledger.Open(ctx, primaryRoot)
+			if err != nil {
+				t.Fatalf("open ledger: %v", err)
+			}
+			defer ledg.Close()
+
+			rec, err := ledg.GetDefect(ctx, defectID)
+			if err != nil {
+				t.Fatalf("GetDefect: %v", err)
+			}
+			if rec.Disposition != tc.disposition {
+				t.Errorf("Disposition = %q, want %q", rec.Disposition, tc.disposition)
+			}
+		})
+	}
+}
+
+func TestDefectResolveCLIRequiresID(t *testing.T) {
+	primaryRoot := initRepo(t)
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(primaryRoot); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(cwd)
+
+	ctx := context.Background()
+	var stdout, stderr bytes.Buffer
+	if code := run(ctx, []string{"defect", "resolve"}, &stdout, &stderr); code == 0 || !strings.Contains(stderr.String(), "--id") {
+		t.Fatalf("defect resolve without --id code = %d, want non-zero naming --id; stderr = %q", code, stderr.String())
+	}
+}
+
+func TestDefectResolveCLINotFound(t *testing.T) {
+	primaryRoot := initRepo(t)
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(primaryRoot); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(cwd)
+
+	ctx := context.Background()
+	var stdout, stderr bytes.Buffer
+	if code := run(ctx, []string{"defect", "resolve", "--id", "nonexistent-id"}, &stdout, &stderr); code == 0 {
+		t.Fatalf("defect resolve on unknown id code = %d, want non-zero", code)
+	}
+}
