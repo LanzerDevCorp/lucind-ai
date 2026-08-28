@@ -1305,3 +1305,59 @@ func TestIntegratePassedDoneLanesBranchesPassedToCombineTreeWithoutReadOnlyFilte
 		t.Errorf("CombineTree branches = %v, want [lucind/lane-write, lucind/lane-readonly]", gotBranches)
 	}
 }
+
+// TestIntegrateSuccessRecordsDoneForPreviouslyRevertedLane guards the class of
+// defect where a durable record enters a state it can never leave.
+//
+// revertLanes writes the pair (status=Blocked, preserved=true). The success
+// path in completeIntegration wrote only preserved=false and no status at all,
+// so a lane that was reverted once and later integrated -- by bisection or by
+// "lucind-ai integrate retry" -- kept status=blocked in the ledger forever
+// while stdout reported it integrated. The two sources of truth disagreed, and
+// anything gating on lanes.status misreported merged work as unintegrated.
+func TestIntegrateSuccessRecordsDoneForPreviouslyRevertedLane(t *testing.T) {
+	rec := &integrateRecorder{
+		combineRetPath:   "/wt/integrate-run-1",
+		combineRetBranch: "lucind/integrate-run-1",
+		checkRetPassed:   true,
+		checkRetOutput:   "PASS: all tests passed",
+	}
+	deps, l := newIntegrateTestDeps(t, rec)
+
+	// A lane in exactly the state revertLanes leaves behind.
+	registerTestLane(t, l, "run-1", "lane-a", lane.Blocked, "/wt/lane-a", true)
+
+	batch := run.BatchReport{
+		RunID:    "run-1",
+		Released: true,
+		Outcome: barrier.Outcome{
+			Released:  true,
+			Integrate: []string{"lane-a"},
+		},
+		Lanes: []run.Report{
+			{LaneID: "lane-a", Status: lane.Done, Worktree: "/wt/lane-a"},
+		},
+	}
+
+	report, err := run.Integrate(context.Background(), deps, batch)
+	if err != nil {
+		t.Fatalf("Integrate() error = %v, want nil", err)
+	}
+	if !report.Passed || len(report.Integrated) != 1 {
+		t.Fatalf("report = %+v, want one integrated lane", report)
+	}
+
+	lanes, err := l.Lanes(context.Background(), "run-1")
+	if err != nil {
+		t.Fatalf("Lanes: %v", err)
+	}
+	if len(lanes) != 1 {
+		t.Fatalf("lanes = %d, want 1", len(lanes))
+	}
+	if lanes[0].Status != lane.Done {
+		t.Errorf("ledger lane status = %q, want %q: a successfully integrated lane must not stay blocked", lanes[0].Status, lane.Done)
+	}
+	if lanes[0].WorktreePreserved {
+		t.Errorf("WorktreePreserved = true, want false after successful integration")
+	}
+}
