@@ -4,7 +4,7 @@ artifact_store:
   mode: hybrid
 execution_mode: auto
 delivery_strategy: single-pr
-review_budget_lines: 3000
+review_budget_lines: 10000
 strict_tdd: true
 
 context: |
