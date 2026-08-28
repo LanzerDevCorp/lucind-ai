@@ -163,21 +163,11 @@ func openAtPath(ctx context.Context, dbPath string) (*Ledger, error) {
 	}
 
 	dsn := "file:" + dbPath +
-		"?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)"
+		"?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)&_txlock=immediate"
 
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("ledger: open: %w", err)
-	}
-
-	if err := db.PingContext(ctx); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("ledger: ping: %w", err)
-	}
-
-	if err := checkPragmas(ctx, db); err != nil {
-		db.Close()
-		return nil, err
 	}
 
 	// >1 so the concurrency guarantee this package exists to provide is
@@ -186,12 +176,75 @@ func openAtPath(ctx context.Context, dbPath string) (*Ledger, error) {
 	db.SetMaxIdleConns(4)
 	db.SetConnMaxLifetime(0)
 
-	if err := migrate(ctx, db); err != nil {
+	if err := initDB(ctx, db); err != nil {
 		db.Close()
-		return nil, fmt.Errorf("ledger: migrate: %w", err)
+		return nil, err
 	}
 
 	return &Ledger{db: db}, nil
+}
+
+// initDB runs PingContext, pragma verification, and schema migration against
+// db, retrying with backoff if a transient SQLITE_BUSY / SQLITE_LOCKED error
+// occurs during initial connection setup or migration when multiple handles
+// open a brand-new database concurrently.
+func initDB(ctx context.Context, db *sql.DB) error {
+	deadline := time.Now().Add(5 * time.Second)
+	if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
+		deadline = d
+	}
+
+	var backoff = 5 * time.Millisecond
+	for {
+		err := func() error {
+			if err := db.PingContext(ctx); err != nil {
+				return fmt.Errorf("ledger: ping: %w", err)
+			}
+			if err := checkPragmas(ctx, db); err != nil {
+				return err
+			}
+			if err := migrate(ctx, db); err != nil {
+				return fmt.Errorf("ledger: migrate: %w", err)
+			}
+			return nil
+		}()
+
+		if err == nil {
+			return nil
+		}
+
+		if !isBusyError(err) || ctx.Err() != nil || time.Now().After(deadline) {
+			return err
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(backoff):
+		}
+
+		if backoff < 100*time.Millisecond {
+			backoff *= 2
+		}
+	}
+}
+
+func isBusyError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var sqliteErr *sqlite.Error
+	if errors.As(err, &sqliteErr) {
+		code := sqliteErr.Code() & 0xff
+		if code == 5 /* SQLITE_BUSY */ || code == 6 /* SQLITE_LOCKED */ {
+			return true
+		}
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "SQLITE_BUSY") ||
+		strings.Contains(msg, "SQLITE_LOCKED") ||
+		strings.Contains(msg, "database is locked") ||
+		strings.Contains(msg, "database table is locked")
 }
 
 // checkPragmas reads back the pragmas Open requested via the DSN and fails

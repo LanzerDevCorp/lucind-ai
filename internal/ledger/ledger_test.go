@@ -2124,3 +2124,47 @@ func TestLedgerUpdateDefectDispositionRejectsInvalidDisposition(t *testing.T) {
 		t.Fatal("UpdateDefectDisposition with invalid disposition succeeded, want error")
 	}
 }
+
+func TestConcurrentOpenOnFreshDatabase(t *testing.T) {
+	const iterations = 20
+	const concurrency = 8
+	for iter := 0; iter < iterations; iter++ {
+		root := t.TempDir()
+		ctx := context.Background()
+		var wg sync.WaitGroup
+		start := make(chan struct{})
+		errs := make(chan error, concurrency)
+
+		for i := 0; i < concurrency; i++ {
+			wg.Add(1)
+			laneID := fmt.Sprintf("lane-%d", i)
+			go func(lID string) {
+				defer wg.Done()
+				<-start
+				l, err := Open(ctx, root)
+				if err != nil {
+					errs <- fmt.Errorf("open: %w", err)
+					return
+				}
+				defer l.Close()
+				err = l.RegisterLane(ctx, Lane{
+					RunID:            "run-1",
+					LaneID:           lID,
+					PacketID:         "p",
+					Executor:         "agy",
+					RoutingCondition: "cond",
+					Status:           lane.Pending,
+				})
+				if err != nil {
+					errs <- fmt.Errorf("register: %w", err)
+				}
+			}(laneID)
+		}
+		close(start)
+		wg.Wait()
+		close(errs)
+		for err := range errs {
+			t.Fatalf("iteration %d: concurrent Open failed: %v", iter, err)
+		}
+	}
+}
