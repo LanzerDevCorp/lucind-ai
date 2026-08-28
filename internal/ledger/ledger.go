@@ -163,7 +163,7 @@ func openAtPath(ctx context.Context, dbPath string) (*Ledger, error) {
 	}
 
 	dsn := "file:" + dbPath +
-		"?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)&_txlock=immediate"
+		"?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)"
 
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
