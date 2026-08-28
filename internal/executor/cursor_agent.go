@@ -105,6 +105,7 @@ func (c CursorAgent) run(ctx context.Context, req Request, binary, outputFormat 
 
 	cmd := exec.CommandContext(ctx, binary, args...)
 	cmd.Dir = req.WorktreePath
+	cmd.Env = requestEnv(req)
 	cmd.WaitDelay = waitDelay
 
 	var stderr bytes.Buffer

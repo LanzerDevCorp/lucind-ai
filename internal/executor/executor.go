@@ -11,8 +11,32 @@ package executor
 
 import (
 	"context"
+	"encoding/json"
+	"os"
+	"strings"
 	"time"
 )
+
+const readOnlyPathsEnv = "LUCIND_READ_ONLY_PATHS"
+
+// requestEnv carries read-only inputs as JSON assignment context. It never
+// includes write paths, and removing an inherited value prevents a prior
+// dispatch from leaking inputs into a packet that declares none.
+func requestEnv(req Request) []string {
+	prefix := readOnlyPathsEnv + "="
+	base := os.Environ()
+	env := make([]string, 0, len(base)+1)
+	for _, value := range base {
+		if !strings.HasPrefix(value, prefix) {
+			env = append(env, value)
+		}
+	}
+	if len(req.ReadOnlyPaths) > 0 {
+		paths, _ := json.Marshal(req.ReadOnlyPaths)
+		env = append(env, prefix+string(paths))
+	}
+	return env
+}
 
 // ProgressEvent is one timestamped progress message emitted during a dispatch.
 type ProgressEvent struct {
@@ -46,6 +70,9 @@ type Request struct {
 	// omitted when empty (cursor-agent cannot be constrained at the
 	// source, so this is a belt, not the braces).
 	SchemaPath string
+	// ReadOnlyPaths are declared inputs visible to the agent. They never grant
+	// write authority; runtime scope enforcement still uses Packet.AllowedPaths.
+	ReadOnlyPaths []string
 	// Progress optionally receives incremental dispatch progress. Executors
 	// that do not emit progress leave it unused; nil preserves existing behavior.
 	Progress chan<- ProgressEvent

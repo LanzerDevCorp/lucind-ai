@@ -11,24 +11,43 @@ import (
 	"github.com/LanzerDevCorp/lucind-ai/internal/ledgerpath"
 )
 
-func TestSchemaV9AddsImmutableAcceptanceEvidence(t *testing.T) {
+func TestSchemaV10AddsVersionedAuthoringEvidence(t *testing.T) {
 	l := openTestLedger(t)
 	var version int
 	if err := l.db.QueryRow(`SELECT MAX(version) FROM schema_migrations`).Scan(&version); err != nil {
 		t.Fatal(err)
 	}
-	if version != 9 {
-		t.Fatalf("schema version = %d, want 9", version)
+	if version != 10 {
+		t.Fatalf("schema version = %d, want 10", version)
 	}
 	assertTableColumns(t, l.db, "lane_candidates", []string{
 		"run_id", "lane_id", "packet_id", "packet_digest", "primary_root", "worktree_path",
 		"base_commit", "base_tree", "candidate_commit", "candidate_tree", "allowed_paths", "result_path", "result_json", "result_hash", "recorded_at",
+		"authoring_evidence_version", "authoring_evidence_json", "authoring_evidence_hash",
 	})
 	assertTableColumns(t, l.db, "acceptance_receipts", []string{
 		"receipt_id", "binding_hash", "run_id", "lane_id", "packet_id", "packet_digest",
 		"base_commit", "base_tree", "candidate_commit", "candidate_tree", "allowed_paths_hash",
 		"check_policy_hash", "environment_hash", "result_hash", "checks_hash", "cleanup", "created_at",
+		"binding_version", "contract_version", "authoring_evidence_version", "authoring_evidence_hash",
 	})
+}
+
+func createV9SchemaFixture(t *testing.T, ctx context.Context) string {
+	t.Helper()
+	root := createV7SchemaFixture(t, ctx)
+	db, err := sql.Open("sqlite", "file:"+ledgerpath.Resolve(root)+"?_pragma=foreign_keys(1)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.ExecContext(ctx, migrateV7ToV8DDL+migrateV8ToV9DDL+`
+		INSERT INTO schema_migrations(version,applied_at) VALUES(8,'2026-08-27T00:00:00Z'),(9,'2026-08-27T00:00:00Z');
+		INSERT INTO lane_candidates(run_id,lane_id,packet_id,packet_digest,primary_root,worktree_path,base_commit,base_tree,candidate_commit,candidate_tree,allowed_paths,result_path,result_json,result_hash,recorded_at)
+		VALUES('legacy-run','legacy-lane','p','pd','/repo','/worktree','b','bt','c','ct','[]','.lucind/result.json','{}','rh','2026-08-27T00:00:00Z');`); err != nil {
+		t.Fatal(err)
+	}
+	return root
 }
 
 func TestMigrateV5ToV6PreservesRowsAndAddsSchema(t *testing.T) {

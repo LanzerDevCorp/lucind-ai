@@ -60,37 +60,38 @@ Before any worktree is created, the dispatch layer MUST reject a batch whose dec
 
 ### Requirement: Base-SHA Four-Way Diff Union Defines "Actual Diff"
 
-The scope check MUST consume the worktree's recorded birth SHA (`Worktree.BaseSHA`, captured at `worktree.Create` time via `git rev-parse HEAD`), and MUST NOT re-resolve the primary repository's `HEAD` at check time. Changed paths MUST be computed as the four-way union of: (1) every path committed on the lane since that recorded base SHA, regardless of commit count (`git diff --name-status -z --diff-filter=ACDMRT -M <baseSHA> HEAD`); (2) unstaged changes, worktree vs index (`git diff --name-status -z --diff-filter=ACDMRT -M`); (3) staged changes, index vs `HEAD` (`git diff --cached --name-status -z --diff-filter=ACDMRT -M`); (4) untracked files respecting `.gitignore` (`git ls-files -z -o --exclude-standard`). Every git invocation in this union MUST use NUL-delimited (`-z`) output and MUST use `--name-status` (not `--name-only`), with `-M` explicit, so both the source and destination path of a rename or copy are captured and evaluated against `AllowedPaths`. The unmodified `.lucind/` exclusion (".lucind/ Is Always Excluded From Scope Comparison") MUST continue to apply across all four legs. The check MUST NOT use `git diff --name-only HEAD~1` as the definition of "what the lane touched" -- that breaks for a lane with zero commits (nothing to diff) or two-or-more commits (only the last one would be inspected). `enforceAllowedPaths` inside `Execute` is the terminal consumer. (Design: Scope Union and Base SHA; explore.md Gap 2, Items 4-7; `internal/run/run.go:458-520,501-516`; `internal/worktree/worktree.go:56-58,62-82`.)
+Scope enforcement MUST use the recorded worktree birth SHA and MUST NOT re-resolve primary `HEAD`. It MUST inspect the NUL-delimited name-status union of committed changes since base, unstaged changes, staged changes, and non-ignored untracked files. Rename and copy detection MUST preserve and check both source and destination paths. `.lucind/` MUST remain excluded. The union MUST cover zero or multiple commits and MUST NOT use only `HEAD~1`. The terminal scope consumer MUST evaluate every union entry against `AllowedPaths`.
+(Previously: The four-way union enforced write scope but did not establish shared result classifications for frozen candidate correspondence.)
 
 #### Scenario: Zero commits still evaluates correctly
-- GIVEN a lane with zero commits, only untracked in-scope files, and a `done` envelope
-- WHEN `decideStatus` runs the scope check
-- THEN it MUST evaluate those untracked files against `AllowedPaths` and MUST NOT fail because `HEAD~1` does not resolve
+- GIVEN zero commits and only untracked in-scope files
+- WHEN scope enforcement runs
+- THEN it MUST evaluate the untracked files without requiring `HEAD~1`
 
 #### Scenario: Two commits, the whole union is inspected
-- GIVEN a lane with two commits where an earlier commit touched an out-of-scope path and the last commit did not
-- WHEN `decideStatus` runs the scope check
-- THEN the lane MUST become `Deviated`, because the earlier commit is part of the four-way union against the recorded birth SHA -- a check that only inspected the last commit would incorrectly miss this
+- GIVEN an earlier commit touched an out-of-scope path and the latest did not
+- WHEN scope enforcement runs
+- THEN the lane MUST become `Deviated`
 
 #### Scenario: Multiple in-scope commits stay Done
-- GIVEN a lane with two or more commits that together touch only in-scope paths, plus a `done` envelope
-- WHEN `decideStatus` runs the scope check
+- GIVEN multiple commits together touch only in-scope paths and the result is `done`
+- WHEN scope enforcement runs
 - THEN the lane MUST remain `Done`
 
 #### Scenario: Staged-only path included in diff union
-- GIVEN a lane with a file staged in the index (matching the index, uncommitted, not further modified) and a `done` envelope
-- WHEN `decideStatus` runs the scope check
-- THEN the staged file MUST be included in the four-way diff union via the staged (`--cached`) leg and evaluated against `AllowedPaths`
+- GIVEN a staged but uncommitted path
+- WHEN scope enforcement runs
+- THEN that path MUST be evaluated against `AllowedPaths`
 
 #### Scenario: Both rename endpoints checked against allowed paths
-- GIVEN a lane where an out-of-scope file is renamed to an in-scope path (or an in-scope file is renamed to an out-of-scope path) and a `done` envelope
-- WHEN `decideStatus` runs the scope check
-- THEN both the source and destination paths of the rename MUST be evaluated against `AllowedPaths`, and an out-of-scope endpoint MUST cause the lane to become `Deviated`
+- GIVEN a rename has one endpoint outside write scope
+- WHEN scope enforcement runs
+- THEN both endpoints MUST be checked and the lane MUST become `Deviated`
 
-#### Scenario: Path with embedded whitespace or special characters parsed correctly
-- GIVEN a lane whose four-way union includes a path containing embedded whitespace, a newline, or a special character, plus a `done` envelope
-- WHEN `decideStatus` runs the scope check
-- THEN that path MUST be parsed as a single path via NUL-delimited output, and MUST NOT be split on newline or trimmed as significant whitespace
+#### Scenario: Special-character path remains intact
+- GIVEN a changed path contains whitespace, a newline, or special characters
+- WHEN scope enforcement parses the NUL-delimited union
+- THEN it MUST evaluate that exact path without splitting or trimming it
 
 ### Requirement: Post-Execution Scope Check Demotes Done to Deviated
 
@@ -152,3 +153,27 @@ A git-command failure while computing the diff union or retrieving worktree stat
 - GIVEN a lane worktree whose recorded `BaseSHA` is empty or missing, and a `done` envelope
 - WHEN `decideStatus` runs the scope check
 - THEN the lane MUST resolve to `lane.Blocked` with a diagnosis naming the missing base SHA, and MUST NOT fall back to a live `rev-parse` of primary `HEAD`
+
+### Requirement: Canonical Candidate Change and Commit Semantics
+
+For a frozen `done` candidate, runtime, result validation, and Acceptance MUST derive the same canonical base-to-candidate changed-path set and classifications from Git facts, excluding `.lucind/**`. Entries MUST be repository-relative, unique, and deterministically ordered. Added, modified, and deleted paths MUST map to `created`, `modified`, and `deleted`; a rename MUST be represented by a deleted source and created destination so both endpoints remain enforceable. A write result's commit MUST equal the frozen candidate commit. A read-only result MUST omit commit and its canonical change set MUST be empty.
+
+#### Scenario: Deletion correspondence
+- GIVEN the frozen candidate deletes an allowed file
+- WHEN runtime, result validation, and Acceptance classify the candidate
+- THEN each MUST require the same `deleted` path entry
+
+#### Scenario: Rename correspondence
+- GIVEN the frozen candidate renames an allowed source to an allowed destination
+- WHEN canonical changes are compared with `files_changed`
+- THEN the result MUST contain the source as `deleted` and destination as `created`
+
+#### Scenario: Commit mismatch
+- GIVEN a versioned write result names a commit other than the frozen candidate commit
+- WHEN result correspondence is checked
+- THEN the lane MUST not be accepted as `done`
+
+#### Scenario: Read-only candidate reports changes
+- GIVEN a read-only result names a commit or a changed path
+- WHEN canonical correspondence is checked
+- THEN correspondence MUST fail

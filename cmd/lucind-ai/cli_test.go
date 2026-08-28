@@ -3,12 +3,16 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -19,6 +23,8 @@ import (
 	"github.com/LanzerDevCorp/lucind-ai/internal/lane"
 	"github.com/LanzerDevCorp/lucind-ai/internal/ledger"
 	"github.com/LanzerDevCorp/lucind-ai/internal/overlap"
+	"github.com/LanzerDevCorp/lucind-ai/internal/packet"
+	"github.com/LanzerDevCorp/lucind-ai/internal/packetauthor"
 	"github.com/LanzerDevCorp/lucind-ai/internal/reconcile"
 	"github.com/LanzerDevCorp/lucind-ai/internal/result"
 	lucindrun "github.com/LanzerDevCorp/lucind-ai/internal/run"
@@ -1157,9 +1163,9 @@ func TestRunSequentialInvocationsProduceDistinctRunIDs(t *testing.T) {
 		"executor: agy\n" +
 		"routed_by: test\n" +
 		"legacy_main: true\n" +
-		"expected_parent_sha: 1111111111111111111111111111111111111111\n" +
+		"expected_parent_sha: " + currentHead(t, primaryRoot) + "\n" +
 		"---\n" +
-		"Task 1\n"
+		admittedWriteBody
 	if err := os.WriteFile(p1, []byte(p1Content), 0o644); err != nil {
 		t.Fatalf("write packet 1: %v", err)
 	}
@@ -1254,7 +1260,7 @@ func TestRunDispatchRegistersRunRowInLedger(t *testing.T) {
 		"legacy_main: true\n" +
 		"expected_parent_sha: 1111111111111111111111111111111111111111\n" +
 		"---\n" +
-		"Task 1\n"
+		admittedWriteBody
 	if err := os.WriteFile(p1, []byte(p1Content), 0o644); err != nil {
 		t.Fatalf("write packet 1: %v", err)
 	}
@@ -1325,11 +1331,475 @@ func writeAgyPacket(t *testing.T, dir, laneID, executorName string) string {
 		"legacy_main: true\n" +
 		"expected_parent_sha: 1111111111111111111111111111111111111111\n" +
 		"---\n" +
-		"Task\n"
+		admittedWriteBody
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatalf("write packet: %v", err)
 	}
 	return path
+}
+
+const admittedWriteBody = "## Done criteria\n- Complete the requested work.\n\n## Return\nWrite the result envelope to .lucind/result.json in this worktree.\nValidate it against .lucind/result.schema.json before writing.\nCommit the completed work.\n"
+
+func currentHead(t *testing.T, repo string) string {
+	t.Helper()
+	out, err := exec.Command("git", "-C", repo, "rev-parse", "HEAD").Output()
+	if err != nil {
+		t.Fatalf("git rev-parse HEAD: %v", err)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+func TestAdmitDispatchBatchPreservesManualAndCompilesTypedContract(t *testing.T) {
+	repo := initRepo(t)
+	head := currentHead(t, repo)
+	manualBody := strings.ReplaceAll(admittedWriteBody, "\n", "\r\n")
+	contract := &packetauthor.Contract{
+		Version: packetauthor.ContractVersion, RouteIntent: "compiled route", Mode: packetauthor.ModeWrite,
+		WritePaths: []string{"internal/compiled"}, ReadOnlyPaths: []string{"docs/input.md"}, Goal: "Compile safely",
+		DoneCriteria: []string{"compiled criterion"}, HardStops: []string{"stop on ambiguity"},
+		Result: packetauthor.ResultObligations{Path: ".lucind/result.json", Schema: ".lucind/result.schema.json"},
+	}
+	inputs := []dispatchAuthoringInput{
+		{Packet: packet.Packet{ID: "manual", Executor: "agy", RoutedBy: "manual route", LegacyMain: true, ExpectedParentSHA: head, AllowedPaths: []string{"internal/manual"}, Body: manualBody}},
+		{Packet: packet.Packet{ID: "compiled", Executor: "agy", RoutedBy: "compiled route", LegacyMain: true, ExpectedParentSHA: head}, Contract: contract},
+	}
+
+	got, err := admitDispatchBatch(context.Background(), repo, inputs)
+	if err != nil {
+		t.Fatalf("admitDispatchBatch() error = %v", err)
+	}
+	if got[0].Body != manualBody {
+		t.Fatalf("manual body changed:\n got %q\nwant %q", got[0].Body, manualBody)
+	}
+	if got[1].Body == "" || got[1].Authoring == nil || len(got[1].Authoring.ContractJSON) == 0 {
+		t.Fatalf("compiled packet lacks rendered body or frozen authoring input: %+v", got[1])
+	}
+	if !reflect.DeepEqual(got[1].AllowedPaths, []string{"internal/compiled"}) || !reflect.DeepEqual(got[1].ReadOnlyPaths, []string{"docs/input.md"}) {
+		t.Fatalf("compiled scopes = write:%v read:%v", got[1].AllowedPaths, got[1].ReadOnlyPaths)
+	}
+}
+
+func TestAdmitDispatchBatchReturnsDeterministicMixedDiagnostics(t *testing.T) {
+	repo := initRepo(t)
+	head := currentHead(t, repo)
+	missingObligations := "## Done criteria\n- done\n\n## Return\nNo result instructions.\nCommit the work.\n"
+	readOnlyConflict := "## Done criteria\n- inspect\n\n## Return\nWrite the result envelope to .lucind/result.json in this worktree.\nValidate it against .lucind/result.schema.json before writing.\nAfter you commit, report success.\n"
+	inputs := []dispatchAuthoringInput{
+		{Packet: packet.Packet{ID: "first", Executor: "agy", RoutedBy: "first", LegacyMain: true, ExpectedParentSHA: head, Body: missingObligations}},
+		{Packet: packet.Packet{ID: "second", Executor: "agy", RoutedBy: "second", LegacyMain: true, ExpectedParentSHA: head, ReadOnly: true, ReadOnlyPaths: []string{"../secret"}, Body: readOnlyConflict}},
+		{Packet: packet.Packet{ID: "third", Executor: "agy", RoutedBy: "third", Feature: "missing", ParentRef: "refs/heads/missing", BaseSHA: head, ExpectedParentSHA: head, Body: admittedWriteBody}},
+	}
+
+	_, err := admitDispatchBatch(context.Background(), repo, inputs)
+	var diagnostics packetauthor.Diagnostics
+	if !errors.As(err, &diagnostics) {
+		t.Fatalf("error = %T %v, want packetauthor.Diagnostics", err, err)
+	}
+	want := []string{"0:PA_RESULT_PATH_MISSING", "0:PA_RESULT_SCHEMA_MISSING", "1:PA_MODE_COMMIT_CONFLICT", "1:PA_PATH_INVALID", "2:PA_TARGET_INCOMPLETE"}
+	got := make([]string, len(diagnostics))
+	for i, diagnostic := range diagnostics {
+		got[i] = fmt.Sprintf("%d:%s", diagnostic.PacketIndex, diagnostic.Code)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("diagnostics = %v, want %v", got, want)
+	}
+}
+
+// TestWU6TypedAuthoringReachesAcceptanceWithShadowIsolation proves the full
+// typed path without making the specialist authoritative: admission produces
+// the packet consumed by Execute, Execute freezes evidence, Acceptance
+// independently verifies the result and candidate diff, and shadow evidence
+// is persisted beside (never inside) the canonical receipt.
+func TestWU6TypedAuthoringReachesAcceptanceWithShadowIsolation(t *testing.T) {
+	if testing.Short() {
+		t.Skip("uses real Git worktrees and SQLite")
+	}
+
+	ctx := context.Background()
+	repo := initRepo(t)
+	if err := os.WriteFile(filepath.Join(repo, ".gitignore"), []byte(".lucind/\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "lucind-checks.sh"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repo, "add", ".gitignore", "lucind-checks.sh")
+	runGit(t, repo, "commit", "-m", "add test check harness")
+	head := currentHead(t, repo)
+
+	contract := packetauthor.Contract{
+		Version: packetauthor.ContractVersion, RouteIntent: "typed integration proof", Mode: packetauthor.ModeWrite,
+		WritePaths: []string{"internal/typed-proof.txt"}, ReadOnlyPaths: []string{"docs/input.md"},
+		Goal: "Prove typed authoring reaches acceptance.", DoneCriteria: []string{"typed criterion"},
+		HardStops: []string{"stop on unsafe output"}, Result: packetauthor.ResultObligations{
+			Path: ".lucind/result.json", Schema: ".lucind/result.schema.json",
+		},
+	}
+	binding := packetauthor.TargetBinding{LegacyMain: &packetauthor.LegacyMainTarget{ExpectedParentSHA: head, LiveParentSHA: head}}
+	compiled, err := packetauthor.Compile(contract, binding)
+	if err != nil {
+		t.Fatalf("Compile() error = %v", err)
+	}
+
+	admitted, err := admitDispatchBatch(ctx, repo, []dispatchAuthoringInput{{
+		Packet:   packet.Packet{ID: "typed-lane", Executor: "agy", RoutedBy: "source route", LegacyMain: true, ExpectedParentSHA: head},
+		Contract: &contract,
+	}})
+	if err != nil {
+		t.Fatalf("admitDispatchBatch() error = %v", err)
+	}
+	if len(admitted) != 1 || admitted[0].Authoring == nil || admitted[0].Body != string(compiled.Body) || admitted[0].Authoring.Digest != compiled.Digest {
+		t.Fatalf("admitted typed packet = %+v, want deterministic compiled artifact", admitted)
+	}
+	if !reflect.DeepEqual(admitted[0].ReadOnlyPaths, contract.ReadOnlyPaths) || !reflect.DeepEqual(admitted[0].AllowedPaths, contract.WritePaths) {
+		t.Fatalf("admitted scopes = write:%v read:%v", admitted[0].AllowedPaths, admitted[0].ReadOnlyPaths)
+	}
+
+	l, err := ledger.Open(ctx, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	const runID = "wu6-typed-run"
+	if err := l.RegisterRun(ctx, ledger.Run{RunID: runID, Status: string(lane.Running), LaneCount: 1, StartedAt: time.Now().UTC(), PID: os.Getpid()}); err != nil {
+		t.Fatal(err)
+	}
+
+	dispatcher := &typedIntegrationExecutor{t: t, path: "internal/typed-proof.txt", criterion: contract.DoneCriteria[0], stop: contract.HardStops[0]}
+	deps := productionDeps(runID, repo, l, time.Minute, 0)
+	deps.LookupExecutor = func(string) (executor.Executor, error) { return dispatcher, nil }
+	report, err := lucindrun.Execute(ctx, deps, admitted[0])
+	if err != nil || report.Status != lane.Done {
+		t.Fatalf("Execute() = %+v, %v", report, err)
+	}
+	if dispatcher.request.Prompt != string(compiled.Body) || !reflect.DeepEqual(dispatcher.request.ReadOnlyPaths, contract.ReadOnlyPaths) {
+		t.Fatalf("executor request lost typed packet facts: prompt=%q read_only=%v", dispatcher.request.Prompt, dispatcher.request.ReadOnlyPaths)
+	}
+
+	candidate, err := l.GetLaneCandidate(ctx, runID, admitted[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if candidate.AuthoringEvidenceVersion != ledger.AuthoringEvidenceVersion || candidate.AuthoringEvidenceHash == "" || candidate.ResultHash == "" {
+		t.Fatalf("candidate lacks frozen versioned evidence: %+v", candidate)
+	}
+	evidence, err := ledger.DecodeAuthoringEvidence(candidate.AuthoringEvidenceVersion, candidate.AuthoringEvidenceJSON, candidate.AuthoringEvidenceHash)
+	if err != nil {
+		t.Fatalf("DecodeAuthoringEvidence() error = %v", err)
+	}
+	if !reflect.DeepEqual(evidence.DoneCriteria, contract.DoneCriteria) || !reflect.DeepEqual(evidence.HardStops, contract.HardStops) || len(evidence.Changes) != 1 || evidence.Changes[0].Path != "internal/typed-proof.txt" || evidence.ResultHash != candidate.ResultHash {
+		t.Fatalf("frozen correspondence = %+v", evidence)
+	}
+	packetPath := filepath.Join(repo, ".lucind", "packets", "typed-lane.md")
+	if err := os.MkdirAll(filepath.Dir(packetPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(packetPath, compiled.Body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(packetPath, []byte("edited after dispatch\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if contents, err := os.ReadFile(packetPath); err != nil {
+		t.Fatal(err)
+	} else if string(contents) == string(compiled.Body) {
+		t.Fatal("source packet was not mutated after dispatch")
+	}
+	unchanged, err := l.GetLaneCandidate(ctx, runID, admitted[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if unchanged.AuthoringEvidenceJSON != candidate.AuthoringEvidenceJSON || unchanged.AuthoringEvidenceHash != candidate.AuthoringEvidenceHash || unchanged.ResultHash != candidate.ResultHash {
+		t.Fatal("frozen candidate evidence changed after source packet mutation")
+	}
+
+	// A result mutation with a recomputed result hash still cannot replace the
+	// frozen evidence. Use a second immutable candidate row rather than
+	// bypassing the ledger's append-only trigger.
+	const tamperedRun, tamperedLane = "wu6-tampered-run", "tampered-lane"
+	if err := l.RegisterRun(ctx, ledger.Run{RunID: tamperedRun, Status: string(lane.Running), LaneCount: 1, StartedAt: time.Now().UTC(), PID: os.Getpid()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.RegisterLane(ctx, ledger.Lane{RunID: tamperedRun, LaneID: tamperedLane, PacketID: tamperedLane, Executor: "agy", RoutingCondition: "mutation", Status: lane.Running}); err != nil {
+		t.Fatal(err)
+	}
+	tampered := candidate
+	tampered.RunID, tampered.LaneID, tampered.PacketID = tamperedRun, tamperedLane, tamperedLane
+	mutatedResult := strings.Replace(candidate.ResultJSON, "typed-lane", tamperedLane, 1)
+	mutatedResult = strings.Replace(mutatedResult, contract.DoneCriteria[0], "tampered criterion", 1)
+	tampered.ResultJSON, tampered.ResultHash = mutatedResult, integrationHash("result:v1", mutatedResult)
+	tamperedEvidence, err := ledger.DecodeAuthoringEvidence(candidate.AuthoringEvidenceVersion, candidate.AuthoringEvidenceJSON, candidate.AuthoringEvidenceHash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tamperedEvidence.ResultHash = tampered.ResultHash
+	tampered.AuthoringEvidenceJSON, tampered.AuthoringEvidenceHash, err = ledger.FreezeAuthoringEvidence(tamperedEvidence)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := l.SetDoneCandidate(ctx, tampered); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := (accept.NewVerifier(repo, l)).Verify(ctx, accept.AcceptanceRequest{RunID: tamperedRun, LaneID: tamperedLane}); err == nil {
+		t.Fatal("Acceptance accepted a result whose declaration diverges from frozen evidence")
+	}
+
+	receipt, err := (accept.NewVerifier(repo, l)).Verify(ctx, accept.AcceptanceRequest{RunID: runID, LaneID: admitted[0].ID})
+	if err != nil {
+		t.Fatalf("Acceptance.Verify() error = %v", err)
+	}
+	if receipt.Binding.BindingVersion != "binding:v2" || receipt.Binding.AuthoringEvidenceHash != candidate.AuthoringEvidenceHash || receipt.ResultHash != candidate.ResultHash {
+		t.Fatalf("acceptance binding = %+v", receipt.Binding)
+	}
+
+	manual, err := packetauthor.Compile(contract, binding)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := &wu6SpecialistRunner{contract: contract}
+	shadow := packetauthor.Observe(ctx, manual, contract, runner, binding)
+	if !shadow.Valid || !shadow.Equivalent || !shadow.DigestEqual || !shadow.ReplayStable || !shadow.ManualSelected || shadow.Warning != nil {
+		t.Fatalf("shadow comparison = %+v", shadow)
+	}
+	diffJSON, err := json.Marshal(shadow.Differences)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := l.PersistShadowAttempt(ctx, ledger.ShadowAttempt{
+		ID: "wu6-shadow", RunID: runID, LaneID: admitted[0].ID, InputHash: "typed-input", SpecialistIdentity: packetauthor.SpecialistAgentName,
+		FailureClass: string(shadow.FailureClass), Valid: shadow.Valid, Equivalent: shadow.Equivalent, ReplayStable: shadow.ReplayStable,
+		DiffJSON: string(diffJSON), ManualDigest: shadow.ManualDigest, SpecialistDigest: shadow.SpecialistDigest, LatencyMS: shadow.LatencyMS, CreatedAt: time.Now().UTC(),
+	}, &ledger.ShadowReview{AttemptID: "wu6-shadow", Reviewer: "wu6", ReviewMS: 1, CreatedAt: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	var shadowRows, receiptRows int
+	if err := l.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM packet_author_shadow_attempts WHERE id = 'wu6-shadow'`).Scan(&shadowRows); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM acceptance_receipts WHERE receipt_id = ?`, receipt.ReceiptID).Scan(&receiptRows); err != nil {
+		t.Fatal(err)
+	}
+	if shadowRows != 1 || receiptRows != 1 {
+		t.Fatalf("isolated persistence counts = shadow:%d receipt:%d", shadowRows, receiptRows)
+	}
+	if string(manual.Body) != string(compiled.Body) || shadow.ManualDigest != manual.Digest {
+		t.Fatal("shadow observation changed the canonical manual artifact")
+	}
+}
+
+func TestWU6ShadowFallbackAndDisablePreserveManualCanonicality(t *testing.T) {
+	contract := validPacketAuthorSource()
+	binding := packetauthor.TargetBinding{LegacyMain: &packetauthor.LegacyMainTarget{
+		ExpectedParentSHA: strings.Repeat("a", 40), LiveParentSHA: strings.Repeat("a", 40),
+	}}
+	manual, err := packetauthor.Compile(contract, binding)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := append([]byte(nil), manual.Body...)
+	fallback := packetauthor.Observe(context.Background(), manual, contract, specialistRunnerFunc(func(context.Context, packetauthor.SpecialistInvocation) (packetauthor.SpecialistResponse, error) {
+		return packetauthor.SpecialistResponse{Identity: "default", Output: []byte(`{}`)}, nil
+	}), binding)
+	if fallback.FailureClass != packetauthor.ShadowFailureFallbackAgent || !fallback.ManualSelected || string(manual.Body) != string(body) {
+		t.Fatalf("fallback shadow result = %+v; manual body changed", fallback)
+	}
+	disabled := packetauthor.Disabled(manual)
+	if disabled.FailureClass != packetauthor.ShadowFailureDisabled || !disabled.ManualSelected || disabled.ManualDigest != manual.Digest || string(manual.Body) != string(body) {
+		t.Fatalf("disabled shadow result = %+v; manual body changed", disabled)
+	}
+}
+
+func TestWU6AdmissionRejectsInvalidReadOnlyInput(t *testing.T) {
+	repo := initRepo(t)
+	head := currentHead(t, repo)
+	_, err := admitDispatchBatch(context.Background(), repo, []dispatchAuthoringInput{{
+		Packet: packet.Packet{
+			ID: "wu6-invalid-input", Executor: "agy", RoutedBy: "source route",
+			LegacyMain: true, ExpectedParentSHA: head, ReadOnlyPaths: []string{"../secret"},
+			Body: admittedWriteBody,
+		},
+	}})
+	var diagnostics packetauthor.Diagnostics
+	if !errors.As(err, &diagnostics) || len(diagnostics) != 1 || diagnostics[0].Code != packetauthor.CodePathInvalid {
+		t.Fatalf("admission error = %T %v, want one %s diagnostic", err, err, packetauthor.CodePathInvalid)
+	}
+}
+
+type typedIntegrationExecutor struct {
+	t         *testing.T
+	path      string
+	criterion string
+	stop      string
+	request   executor.Request
+}
+
+func (e *typedIntegrationExecutor) Run(_ context.Context, request executor.Request) (executor.Outcome, error) {
+	e.request = request
+	proof := filepath.Join(request.WorktreePath, e.path)
+	if err := os.MkdirAll(filepath.Dir(proof), 0o755); err != nil {
+		return executor.Outcome{}, err
+	}
+	if err := os.WriteFile(proof, []byte("typed proof\n"), 0o644); err != nil {
+		return executor.Outcome{}, err
+	}
+	runGit(e.t, request.WorktreePath, "add", e.path)
+	runGit(e.t, request.WorktreePath, "commit", "-m", "typed authoring proof")
+	candidate := currentHead(e.t, request.WorktreePath)
+	envelope := result.Envelope{
+		PacketID: "typed-lane", Status: "done", Summary: "typed result",
+		HardStops:    []result.HardStop{{HardStop: e.stop, Fired: false}},
+		FilesChanged: []result.FileChange{{Change: "created", Path: e.path}},
+		DoneCriteria: []result.DoneCriterion{{Criterion: e.criterion, Met: true}}, Commit: candidate,
+	}
+	data, err := json.Marshal(envelope)
+	if err != nil {
+		return executor.Outcome{}, err
+	}
+	if err := os.WriteFile(filepath.Join(request.WorktreePath, ".lucind", "result.json"), data, 0o644); err != nil {
+		return executor.Outcome{}, err
+	}
+	return executor.Outcome{ExitCode: 0}, nil
+}
+
+func (*typedIntegrationExecutor) DefaultModel() string  { return "typed-test-model" }
+func (*typedIntegrationExecutor) KnownModels() []string { return []string{"typed-test-model"} }
+
+type wu6SpecialistRunner struct {
+	contract packetauthor.Contract
+}
+
+func (r *wu6SpecialistRunner) Run(context.Context, packetauthor.SpecialistInvocation) (packetauthor.SpecialistResponse, error) {
+	data, err := json.Marshal(struct {
+		Version  string                `json:"version"`
+		Contract packetauthor.Contract `json:"contract"`
+	}{packetauthor.SpecialistOutputV1, r.contract})
+	if err != nil {
+		return packetauthor.SpecialistResponse{}, err
+	}
+	return packetauthor.SpecialistResponse{Identity: packetauthor.SpecialistAgentName, Output: data}, nil
+}
+
+func integrationHash(domain, value string) string {
+	h := sha256.New()
+	var size [8]byte
+	for _, field := range []string{domain, value} {
+		binary.BigEndian.PutUint64(size[:], uint64(len(field)))
+		_, _ = h.Write(size[:])
+		_, _ = h.Write([]byte(field))
+	}
+	return "sha256:" + hex.EncodeToString(h.Sum(nil))
+}
+
+func TestPrintAdmissionErrorOffersExplicitTargetRemediation(t *testing.T) {
+	var stderr bytes.Buffer
+	printAdmissionError(&stderr, packetauthor.Diagnostics{{
+		PacketIndex: 0, ItemIndex: -1, Code: packetauthor.CodeTargetIncomplete,
+		Field: "target", Message: "exactly one typed target is required",
+	}})
+	for _, want := range []string{"complete feature target", "--legacy-main", "--expected-parent-sha"} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Fatalf("stderr = %q, want remediation containing %q", stderr.String(), want)
+		}
+	}
+}
+
+type countingDispatchExecutor struct{ calls *int }
+
+func (e countingDispatchExecutor) Run(context.Context, executor.Request) (executor.Outcome, error) {
+	*e.calls++
+	return executor.Outcome{}, errors.New("executor should not run for a rejected batch")
+}
+func (countingDispatchExecutor) DefaultModel() string  { return "test-model" }
+func (countingDispatchExecutor) KnownModels() []string { return []string{"test-model"} }
+
+func TestRunDispatchRejectsWholeBatchBeforeQuotaAllocationAndExecutor(t *testing.T) {
+	repo := initRepo(t)
+	head := currentHead(t, repo)
+	writePacket := func(name, id, readOnlyPaths, body string) string {
+		t.Helper()
+		path := filepath.Join(repo, name)
+		content := fmt.Sprintf("---\nid: %s\nexecutor: agy\nrouted_by: test\nlegacy_main: true\nexpected_parent_sha: %s\n%s---\n%s", id, head, readOnlyPaths, body)
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	safe := writePacket("safe.md", "safe", "", admittedWriteBody)
+	unsafe := writePacket("unsafe.md", "unsafe", "read_only_paths: [\"../secret\"]\n", "## Done criteria\n- done\n\n## Return\nCommit the work.\n")
+
+	quotaCalls, allocationCalls, executorCalls := 0, 0, 0
+	origGate, origFactory := ensureAgyQuota, depsFactory
+	t.Cleanup(func() { ensureAgyQuota, depsFactory = origGate, origFactory })
+	ensureAgyQuota = func(context.Context, float64) error { quotaCalls++; return nil }
+	depsFactory = func(runID, primaryRoot string, ledg *ledger.Ledger, timeout, approvalTimeout time.Duration) lucindrun.Deps {
+		deps := origFactory(runID, primaryRoot, ledg, timeout, approvalTimeout)
+		deps.CreateWorktree = func(context.Context, string, string, string, string) (worktree.Worktree, error) {
+			allocationCalls++
+			return worktree.Worktree{Path: t.TempDir(), Branch: "lucind/test", BaseSHA: head}, nil
+		}
+		deps.LookupExecutor = func(string) (executor.Executor, error) {
+			return countingDispatchExecutor{calls: &executorCalls}, nil
+		}
+		return deps
+	}
+
+	cwd, _ := os.Getwd()
+	if err := os.Chdir(repo); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(cwd) })
+	var stdout, stderr bytes.Buffer
+	code := run(context.Background(), []string{"run", "--packet", safe, "--packet", unsafe}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("exit = %d, want 1", code)
+	}
+	if quotaCalls != 0 || allocationCalls != 0 || executorCalls != 0 {
+		t.Fatalf("side effects = quota:%d allocation:%d executor:%d, want all zero", quotaCalls, allocationCalls, executorCalls)
+	}
+	if !strings.Contains(stderr.String(), "packet[1] PA_RESULT_PATH_MISSING") || !strings.Contains(stderr.String(), "packet[1] PA_RESULT_SCHEMA_MISSING") {
+		t.Fatalf("stderr = %q, want deterministic packet-indexed diagnostics", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "packet[1] PA_PATH_INVALID read_only_paths[0]") {
+		t.Fatalf("stderr = %q, want indexed malformed input diagnostic", stderr.String())
+	}
+}
+
+func TestRunDispatchRejectsStaleCompiledBodyBeforeAllocation(t *testing.T) {
+	repo := initRepo(t)
+	head := currentHead(t, repo)
+	stale := strings.Repeat("f", 40)
+	if stale == head {
+		stale = strings.Repeat("e", 40)
+	}
+	artifact, err := packetauthor.Compile(packetauthor.Contract{
+		Version: packetauthor.ContractVersion, RouteIntent: "compiled route", Mode: packetauthor.ModeWrite,
+		WritePaths: []string{"internal/compiled"}, Goal: "Compiled goal", DoneCriteria: []string{"done"}, HardStops: []string{"stop"},
+		Result: packetauthor.ResultObligations{Path: ".lucind/result.json", Schema: ".lucind/result.schema.json"},
+	}, packetauthor.TargetBinding{LegacyMain: &packetauthor.LegacyMainTarget{ExpectedParentSHA: head, LiveParentSHA: head}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(repo, "compiled.md")
+	content := fmt.Sprintf("---\nid: compiled\nexecutor: agy\nrouted_by: compiled route\nlegacy_main: true\nexpected_parent_sha: %s\nallowed_paths: [\"internal/compiled\"]\n---\n%s", stale, artifact.Body)
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	allocations := 0
+	origFactory := depsFactory
+	t.Cleanup(func() { depsFactory = origFactory })
+	depsFactory = func(runID, primaryRoot string, ledg *ledger.Ledger, timeout, approvalTimeout time.Duration) lucindrun.Deps {
+		allocations++
+		return origFactory(runID, primaryRoot, ledg, timeout, approvalTimeout)
+	}
+	cwd, _ := os.Getwd()
+	_ = os.Chdir(repo)
+	t.Cleanup(func() { _ = os.Chdir(cwd) })
+	var stdout, stderr bytes.Buffer
+	code := run(context.Background(), []string{"run", "--packet", path, "--min-quota", "0"}, &stdout, &stderr)
+	if code != 1 || allocations != 0 || !strings.Contains(stderr.String(), packetauthor.CodeTargetStale) {
+		t.Fatalf("run = exit:%d allocations:%d stderr:%q, want stale rejection before allocation", code, allocations, stderr.String())
+	}
 }
 
 // TestRunDispatchGatesOnAgyQuotaForAgyExecutorBatch proves runDispatch calls
@@ -1532,7 +2002,7 @@ func TestRunDispatchRecordsFailedStatusWhenLaneDoesNotFinishDone(t *testing.T) {
 		"legacy_main: true\n" +
 		"expected_parent_sha: 1111111111111111111111111111111111111111\n" +
 		"---\n" +
-		"Task 1\n"
+		admittedWriteBody
 	if err := os.WriteFile(p1, []byte(p1Content), 0o644); err != nil {
 		t.Fatalf("write packet 1: %v", err)
 	}
@@ -1596,9 +2066,9 @@ func TestRunDispatchPersistsIntegratedLaneEnvelopeToPrimaryRoot(t *testing.T) {
 		"executor: agy\n" +
 		"routed_by: test\n" +
 		"legacy_main: true\n" +
-		"expected_parent_sha: 1111111111111111111111111111111111111111\n" +
+		"expected_parent_sha: " + currentHead(t, primaryRoot) + "\n" +
 		"---\n" +
-		"Task 1\n"
+		admittedWriteBody
 	if err := os.WriteFile(p1, []byte(p1Content), 0o644); err != nil {
 		t.Fatalf("write packet 1: %v", err)
 	}
@@ -1753,8 +2223,8 @@ func writeApplyDagTwoPacketFixture(t *testing.T) (wave1Path, wave2Path string) {
 	if err := os.MkdirAll(bodiesDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	rootBody := "## Goal\n\nRoot packet work that the leaf depends on.\n"
-	leafBody := "## Goal\n\nLeaf packet work that runs after the root.\n"
+	rootBody := "## Goal\n\nRoot packet work that the leaf depends on.\n\n" + admittedWriteBody
+	leafBody := "## Goal\n\nLeaf packet work that runs after the root.\n\n" + admittedWriteBody
 	if err := os.WriteFile(filepath.Join(bodiesDir, "apply-root.md"), []byte(rootBody), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -1770,7 +2240,7 @@ packets:
     legacy_main: true
     expected_parent_sha: 1111111111111111111111111111111111111111
     allowed_paths:
-      - internal/root/
+      - internal/root
     depends_on: []
     body_path: bodies/apply-root.md
   - id: apply-leaf
@@ -1779,7 +2249,7 @@ packets:
     legacy_main: true
     expected_parent_sha: 1111111111111111111111111111111111111111
     allowed_paths:
-      - internal/leaf/
+      - internal/leaf
     depends_on:
       - apply-root
     body_path: bodies/apply-leaf.md
@@ -1825,6 +2295,11 @@ func packetPathFromWaveLine(t *testing.T, line string) string {
 // Block as a git failure once emitted packets carry allowed_paths.
 func overrideDispatchDeps(t *testing.T, exec executor.Executor) {
 	t.Helper()
+	origResolver := resolveAdmissionRefSHA
+	t.Cleanup(func() { resolveAdmissionRefSHA = origResolver })
+	resolveAdmissionRefSHA = func(context.Context, string, string) (string, error) {
+		return "1111111111111111111111111111111111111111", nil
+	}
 	origFactory := depsFactory
 	t.Cleanup(func() { depsFactory = origFactory })
 	depsFactory = func(runID, primaryRoot string, ledg *ledger.Ledger, timeout, approvalTimeout time.Duration) lucindrun.Deps {
@@ -2382,7 +2857,7 @@ func TestRunLegacyModeDispatch(t *testing.T) {
 			"executor: agy\n" +
 			"routed_by: legacy dispatch\n" +
 			"---\n" +
-			"Legacy task\n"
+			admittedWriteBody
 		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -2423,7 +2898,7 @@ func TestRunLegacyModeDispatch(t *testing.T) {
 			"executor: agy\n" +
 			"routed_by: legacy dispatch\n" +
 			"---\n" +
-			"Legacy task\n"
+			admittedWriteBody
 		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -3742,6 +4217,11 @@ func TestReconcileDeclineCancelRenewCLI(t *testing.T) {
 // feature branch in the fixture repository.
 func featureDispatchDeps(t *testing.T, promoted *[]string) func(string, string, *ledger.Ledger, time.Duration, time.Duration) lucindrun.Deps {
 	t.Helper()
+	origResolver := resolveAdmissionRefSHA
+	t.Cleanup(func() { resolveAdmissionRefSHA = origResolver })
+	resolveAdmissionRefSHA = func(context.Context, string, string) (string, error) {
+		return "1111111111111111111111111111111111111111", nil
+	}
 	origFactory := depsFactory
 	return func(runID, primaryRoot string, ledg *ledger.Ledger, timeout, approvalTimeout time.Duration) lucindrun.Deps {
 		deps := origFactory(runID, primaryRoot, ledg, timeout, approvalTimeout)
@@ -3805,7 +4285,7 @@ func TestRunDispatchFeatureBatchRecordsIntegrationAttempt(t *testing.T) {
 		"base_sha: 1111111111111111111111111111111111111111\n" +
 		"expected_parent_sha: 1111111111111111111111111111111111111111\n" +
 		"---\n" +
-		"Task 1\n"
+		admittedWriteBody
 	if err := os.WriteFile(p1, []byte(p1Content), 0o644); err != nil {
 		t.Fatalf("write packet 1: %v", err)
 	}
@@ -3875,7 +4355,7 @@ func TestRunDispatchRejectsMixedFeatureTargets(t *testing.T) {
 			"base_sha: 1111111111111111111111111111111111111111\n" +
 			"expected_parent_sha: 1111111111111111111111111111111111111111\n" +
 			"---\n" +
-			"Task\n"
+			admittedWriteBody
 		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 			t.Fatalf("write packet %s: %v", name, err)
 		}
@@ -3884,6 +4364,11 @@ func TestRunDispatchRejectsMixedFeatureTargets(t *testing.T) {
 
 	p1 := writePacket("packet-1.md", "lane-a", "feat-alpha")
 	p2 := writePacket("packet-2.md", "lane-b", "feat-beta")
+	origResolver := resolveAdmissionRefSHA
+	t.Cleanup(func() { resolveAdmissionRefSHA = origResolver })
+	resolveAdmissionRefSHA = func(context.Context, string, string) (string, error) {
+		return "1111111111111111111111111111111111111111", nil
+	}
 
 	origFactory := depsFactory
 	t.Cleanup(func() { depsFactory = origFactory })
@@ -3935,7 +4420,7 @@ func TestIntegrateRetryCLI(t *testing.T) {
 		"base_sha: 1111111111111111111111111111111111111111\n" +
 		"expected_parent_sha: 1111111111111111111111111111111111111111\n" +
 		"---\n" +
-		"Task 1\n"
+		admittedWriteBody
 	if err := os.WriteFile(p1, []byte(p1Content), 0o644); err != nil {
 		t.Fatalf("write packet 1: %v", err)
 	}
@@ -3944,6 +4429,11 @@ func TestIntegrateRetryCLI(t *testing.T) {
 		checksPass bool
 		promoted   []string
 	)
+	origResolver := resolveAdmissionRefSHA
+	t.Cleanup(func() { resolveAdmissionRefSHA = origResolver })
+	resolveAdmissionRefSHA = func(context.Context, string, string) (string, error) {
+		return "1111111111111111111111111111111111111111", nil
+	}
 	origFactory := depsFactory
 	t.Cleanup(func() { depsFactory = origFactory })
 	depsFactory = func(runID, primaryRoot string, ledg *ledger.Ledger, timeout, approvalTimeout time.Duration) lucindrun.Deps {

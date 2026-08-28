@@ -142,6 +142,7 @@ func (o Opencode) Run(ctx context.Context, req Request) (Outcome, error) {
 
 	cmd := exec.CommandContext(ctx, binary, args...)
 	cmd.Dir = req.WorktreePath
+	cmd.Env = requestEnv(req)
 	cmd.WaitDelay = waitDelay
 
 	var stderr, stdout bytes.Buffer

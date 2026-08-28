@@ -7,7 +7,7 @@ import (
 )
 
 // schemaVersion is the migration version this schema represents.
-const schemaVersion = 9
+const schemaVersion = 10
 
 const schemaMigrationsDDL = `
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -422,6 +422,28 @@ CREATE TRIGGER acceptance_receipts_no_delete BEFORE DELETE ON acceptance_receipt
 BEGIN SELECT RAISE(ABORT, 'acceptance_receipts are immutable'); END;
 `
 
+const migrateV9ToV10DDL = `
+ALTER TABLE lane_candidates ADD COLUMN authoring_evidence_version TEXT NOT NULL DEFAULT 'legacy/v1';
+ALTER TABLE lane_candidates ADD COLUMN authoring_evidence_json TEXT NOT NULL DEFAULT '';
+ALTER TABLE lane_candidates ADD COLUMN authoring_evidence_hash TEXT NOT NULL DEFAULT '';
+ALTER TABLE acceptance_receipts ADD COLUMN binding_version TEXT NOT NULL DEFAULT 'binding:v1';
+ALTER TABLE acceptance_receipts ADD COLUMN contract_version TEXT NOT NULL DEFAULT 'legacy/v1';
+ALTER TABLE acceptance_receipts ADD COLUMN authoring_evidence_version TEXT NOT NULL DEFAULT 'legacy/v1';
+ALTER TABLE acceptance_receipts ADD COLUMN authoring_evidence_hash TEXT NOT NULL DEFAULT '';
+
+CREATE TABLE packet_author_shadow_attempts (
+  id TEXT PRIMARY KEY, run_id TEXT NOT NULL, lane_id TEXT NOT NULL, input_hash TEXT NOT NULL,
+  specialist_identity TEXT NOT NULL, failure_class TEXT NOT NULL, valid INTEGER NOT NULL CHECK(valid IN (0,1)),
+  equivalent INTEGER NOT NULL CHECK(equivalent IN (0,1)), diff_json TEXT NOT NULL,
+  manual_digest TEXT NOT NULL, specialist_digest TEXT NOT NULL, replay_stable INTEGER NOT NULL CHECK(replay_stable IN (0,1)),
+  latency_ms INTEGER NOT NULL CHECK(latency_ms >= 0), created_at TEXT NOT NULL
+) STRICT;
+CREATE TABLE packet_author_shadow_reviews (
+  attempt_id TEXT NOT NULL, reviewer TEXT NOT NULL, review_ms INTEGER NOT NULL CHECK(review_ms >= 0), created_at TEXT NOT NULL,
+  FOREIGN KEY (attempt_id) REFERENCES packet_author_shadow_attempts(id)
+) STRICT;
+`
+
 // migrate applies the schema inside one transaction and records the
 // migration version. It is idempotent: re-running it against an already
 // migrated database (e.g. a second Open on the same file) is a safe no-op.
@@ -557,6 +579,16 @@ func migrate(ctx context.Context, db *sql.DB) error {
 			return err
 		}
 		currentVersion = 9
+	}
+
+	if currentVersion < 10 {
+		if _, err := tx.ExecContext(ctx, migrateV9ToV10DDL); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)`, 10, time.Now().UTC().Format(time.RFC3339)); err != nil {
+			return err
+		}
+		currentVersion = 10
 	}
 
 	return tx.Commit()

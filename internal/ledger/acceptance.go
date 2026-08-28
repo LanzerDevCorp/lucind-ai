@@ -26,6 +26,9 @@ type LaneCandidate struct {
 	AllowedPaths                          []string
 	ResultPath                            string
 	ResultJSON, ResultHash                string
+	AuthoringEvidenceVersion              string
+	AuthoringEvidenceJSON                 string
+	AuthoringEvidenceHash                 string
 	RecordedAt                            time.Time
 }
 
@@ -36,6 +39,9 @@ type AcceptanceBinding struct {
 	CandidateCommit, CandidateTree        string
 	AllowedPathsHash, CheckPolicyHash     string
 	EnvironmentHash                       string
+	BindingVersion, ContractVersion       string
+	AuthoringEvidenceVersion              string
+	AuthoringEvidenceHash                 string
 }
 
 // AcceptanceReceipt is immutable mechanical evidence for one exact binding.
@@ -48,6 +54,14 @@ type AcceptanceReceipt struct {
 
 // SetDoneCandidate atomically marks a lane done and freezes its candidate identity.
 func (l *Ledger) SetDoneCandidate(ctx context.Context, candidate LaneCandidate) error {
+	if candidate.AuthoringEvidenceVersion == "" {
+		candidate.AuthoringEvidenceVersion = LegacyAuthoringVersion
+	}
+	if candidate.AuthoringEvidenceVersion != LegacyAuthoringVersion {
+		if _, err := DecodeAuthoringEvidence(candidate.AuthoringEvidenceVersion, candidate.AuthoringEvidenceJSON, candidate.AuthoringEvidenceHash); err != nil {
+			return err
+		}
+	}
 	paths, err := json.Marshal(candidate.AllowedPaths)
 	if err != nil {
 		return fmt.Errorf("ledger: encode candidate allowed paths: %w", err)
@@ -67,11 +81,11 @@ func (l *Ledger) SetDoneCandidate(ctx context.Context, candidate LaneCandidate) 
 		return ErrLaneUnknown
 	}
 	insert, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO lane_candidates
-		(run_id,lane_id,packet_id,packet_digest,primary_root,worktree_path,base_commit,base_tree,candidate_commit,candidate_tree,allowed_paths,result_path,result_json,result_hash,recorded_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, candidate.RunID, candidate.LaneID, candidate.PacketID,
+		(run_id,lane_id,packet_id,packet_digest,primary_root,worktree_path,base_commit,base_tree,candidate_commit,candidate_tree,allowed_paths,result_path,result_json,result_hash,authoring_evidence_version,authoring_evidence_json,authoring_evidence_hash,recorded_at)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, candidate.RunID, candidate.LaneID, candidate.PacketID,
 		candidate.PacketDigest, candidate.PrimaryRoot, candidate.WorktreePath, candidate.BaseCommit,
 		candidate.BaseTree, candidate.CandidateCommit, candidate.CandidateTree, string(paths), candidate.ResultPath,
-		candidate.ResultJSON, candidate.ResultHash,
+		candidate.ResultJSON, candidate.ResultHash, candidate.AuthoringEvidenceVersion, candidate.AuthoringEvidenceJSON, candidate.AuthoringEvidenceHash,
 		candidate.RecordedAt.UTC().Format(time.RFC3339Nano))
 	if err != nil {
 		return fmt.Errorf("ledger: insert done candidate: %w", err)
@@ -102,10 +116,10 @@ func getLaneCandidate(ctx context.Context, q rowQueryer, runID, laneID string) (
 	var c LaneCandidate
 	var paths, recorded string
 	err := q.QueryRowContext(ctx, `SELECT run_id,lane_id,packet_id,packet_digest,primary_root,worktree_path,
-		base_commit,base_tree,candidate_commit,candidate_tree,allowed_paths,result_path,result_json,result_hash,recorded_at
+		base_commit,base_tree,candidate_commit,candidate_tree,allowed_paths,result_path,result_json,result_hash,authoring_evidence_version,authoring_evidence_json,authoring_evidence_hash,recorded_at
 		FROM lane_candidates WHERE run_id=? AND lane_id=?`, runID, laneID).Scan(
 		&c.RunID, &c.LaneID, &c.PacketID, &c.PacketDigest, &c.PrimaryRoot, &c.WorktreePath,
-		&c.BaseCommit, &c.BaseTree, &c.CandidateCommit, &c.CandidateTree, &paths, &c.ResultPath, &c.ResultJSON, &c.ResultHash, &recorded)
+		&c.BaseCommit, &c.BaseTree, &c.CandidateCommit, &c.CandidateTree, &paths, &c.ResultPath, &c.ResultJSON, &c.ResultHash, &c.AuthoringEvidenceVersion, &c.AuthoringEvidenceJSON, &c.AuthoringEvidenceHash, &recorded)
 	if errors.Is(err, sql.ErrNoRows) {
 		return LaneCandidate{}, ErrLaneCandidateNotFound
 	}
@@ -128,10 +142,10 @@ func findAcceptanceReceipt(ctx context.Context, q rowQueryer, hash string) (Acce
 	var created string
 	err := q.QueryRowContext(ctx, `SELECT receipt_id,binding_hash,run_id,lane_id,packet_id,packet_digest,
 		base_commit,base_tree,candidate_commit,candidate_tree,allowed_paths_hash,check_policy_hash,
-		environment_hash,result_hash,checks_hash,cleanup,created_at FROM acceptance_receipts WHERE binding_hash=?`, hash).Scan(
+		environment_hash,binding_version,contract_version,authoring_evidence_version,authoring_evidence_hash,result_hash,checks_hash,cleanup,created_at FROM acceptance_receipts WHERE binding_hash=?`, hash).Scan(
 		&r.ReceiptID, &r.BindingHash, &r.Binding.RunID, &r.Binding.LaneID, &r.Binding.PacketID, &r.Binding.PacketDigest,
 		&r.Binding.BaseCommit, &r.Binding.BaseTree, &r.Binding.CandidateCommit, &r.Binding.CandidateTree,
-		&r.Binding.AllowedPathsHash, &r.Binding.CheckPolicyHash, &r.Binding.EnvironmentHash,
+		&r.Binding.AllowedPathsHash, &r.Binding.CheckPolicyHash, &r.Binding.EnvironmentHash, &r.Binding.BindingVersion, &r.Binding.ContractVersion, &r.Binding.AuthoringEvidenceVersion, &r.Binding.AuthoringEvidenceHash,
 		&r.ResultHash, &r.ChecksHash, &r.Cleanup, &created)
 	if errors.Is(err, sql.ErrNoRows) {
 		return AcceptanceReceipt{}, ErrAcceptanceReceiptNotFound
@@ -152,11 +166,11 @@ func (l *Ledger) InsertAcceptanceReceipt(ctx context.Context, receipt Acceptance
 	defer tx.Rollback() //nolint:errcheck
 	_, err = tx.ExecContext(ctx, `INSERT OR IGNORE INTO acceptance_receipts
 		(receipt_id,binding_hash,run_id,lane_id,packet_id,packet_digest,base_commit,base_tree,candidate_commit,candidate_tree,
-		allowed_paths_hash,check_policy_hash,environment_hash,result_hash,checks_hash,cleanup,created_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, receipt.ReceiptID, receipt.BindingHash,
+		allowed_paths_hash,check_policy_hash,environment_hash,binding_version,contract_version,authoring_evidence_version,authoring_evidence_hash,result_hash,checks_hash,cleanup,created_at)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, receipt.ReceiptID, receipt.BindingHash,
 		receipt.Binding.RunID, receipt.Binding.LaneID, receipt.Binding.PacketID, receipt.Binding.PacketDigest,
 		receipt.Binding.BaseCommit, receipt.Binding.BaseTree, receipt.Binding.CandidateCommit, receipt.Binding.CandidateTree,
-		receipt.Binding.AllowedPathsHash, receipt.Binding.CheckPolicyHash, receipt.Binding.EnvironmentHash,
+		receipt.Binding.AllowedPathsHash, receipt.Binding.CheckPolicyHash, receipt.Binding.EnvironmentHash, receipt.Binding.BindingVersion, receipt.Binding.ContractVersion, receipt.Binding.AuthoringEvidenceVersion, receipt.Binding.AuthoringEvidenceHash,
 		receipt.ResultHash, receipt.ChecksHash, receipt.Cleanup, receipt.CreatedAt.UTC().Format(time.RFC3339Nano))
 	if err != nil {
 		return AcceptanceReceipt{}, fmt.Errorf("ledger: insert acceptance receipt: %w", err)

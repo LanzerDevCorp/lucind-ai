@@ -158,6 +158,7 @@ func (c Claude) runFormat(ctx context.Context, req Request, format string, stdou
 
 	cmd := exec.CommandContext(ctx, binary, args...)
 	cmd.Dir = req.WorktreePath
+	cmd.Env = requestEnv(req)
 	cmd.WaitDelay = waitDelay
 
 	var stderr, stdout bytes.Buffer

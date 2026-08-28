@@ -33,14 +33,15 @@ type HardStop struct {
 	Note     string `json:"note,omitempty"`
 }
 
-// FileChange is one path created, modified, or deleted inside the
+// FileChange is one canonical path change inside the
 // worktree, relative to the worktree root. For a path outside the
 // worktree, see ExternalChange — that boundary is why the two types are
 // kept separate rather than one field with an ambiguous path.
 type FileChange struct {
-	Path   string `json:"path"`
-	Change string `json:"change"`
-	Why    string `json:"why,omitempty"`
+	Change     string `json:"change"`
+	SourcePath string `json:"source_path,omitempty"`
+	Path       string `json:"path"`
+	Why        string `json:"why,omitempty"`
 }
 
 // ExternalChange is one path created, modified, or deleted outside the

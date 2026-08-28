@@ -36,3 +36,19 @@ The packet body must explicitly tell the Agent to write `.lucind/result.json` an
 The envelope carries status, summary, done-criterion evidence, hard-stop evaluations, changed paths, commits, and blocker details. Treat it as the Agent's structured claim, not independent proof. Verify cited `file:line`, changed paths, git status, commit, checks, and terminal consumers before Acceptance.
 
 Read-only packets may inspect paths outside their worktree only when those paths are explicitly granted. Ignored packets from the primary checkout are not automatically visible in Lane worktrees.
+
+## Optional shadow authoring
+
+Shadow authoring is observational and opt-in. The specialist receives typed,
+target-free authoring facts and may return typed contract data only. The
+manual artifact remains the only artifact selected and dispatched, regardless
+of validity, semantic equivalence, digest stability, latency, review cost, or
+any operator metric. Shadow timeout, invalid JSON/schema, unavailable route,
+compiler rejection, and fallback-agent detection are warning-only observations.
+
+Each attempt is compared with the same late target binding and records
+field-level normalized differences, validity, semantic equivalence, digest
+equality, replay stability, latency, review cost, and failure class. Persistence
+is isolated per attempt: a failed evidence transaction must not roll back or
+block later attempts. Disabling shadow invocation requires no conversion of
+stored manual packets and never enables automatic cutover.

@@ -402,6 +402,54 @@ func TestParseAllowedPathsFrontmatter(t *testing.T) {
 	}
 }
 
+func TestParseReadOnlyPathsFrontmatter(t *testing.T) {
+	tests := []struct {
+		name string
+		src  string
+		want []string
+	}{
+		{
+			name: "preserves declared input paths",
+			src: "---\n" +
+				"id: inspect-auth\n" +
+				"executor: agy\n" +
+				"routed_by: inspect auth\n" +
+				"read_only_paths: [\"docs/spec.md\", \"internal/auth/config.go\"]\n" +
+				"---\n\n## Goal\nInspect auth.\n",
+			want: []string{"docs/spec.md", "internal/auth/config.go"},
+		},
+		{
+			name: "omitted declaration remains empty",
+			src: "---\n" +
+				"id: inspect-auth\n" +
+				"executor: agy\n" +
+				"routed_by: inspect auth\n" +
+				"---\n\n## Goal\nInspect auth.\n",
+			want: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := packet.Parse(strings.NewReader(tt.src))
+			if err != nil {
+				t.Fatalf("Parse() error = %v", err)
+			}
+			if !slices.Equal(got.ReadOnlyPaths, tt.want) {
+				t.Fatalf("ReadOnlyPaths = %v, want %v", got.ReadOnlyPaths, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseRejectsNonArrayReadOnlyPaths(t *testing.T) {
+	src := "---\nid: inspect-auth\nexecutor: agy\nrouted_by: inspect auth\nread_only_paths: null\n---\nbody\n"
+	_, err := packet.Parse(strings.NewReader(src))
+	if !errors.Is(err, packet.ErrInvalidReadOnlyPaths) {
+		t.Fatalf("Parse() error = %v, want %v", err, packet.ErrInvalidReadOnlyPaths)
+	}
+}
+
 func TestParseRejectsIncompletePackets(t *testing.T) {
 	tests := []struct {
 		name string

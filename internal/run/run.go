@@ -24,6 +24,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/LanzerDevCorp/lucind-ai/internal/candidatechange"
 	"github.com/LanzerDevCorp/lucind-ai/internal/executor"
 	"github.com/LanzerDevCorp/lucind-ai/internal/lane"
 	"github.com/LanzerDevCorp/lucind-ai/internal/ledger"
@@ -193,6 +194,9 @@ type Deps struct {
 	// ResolveCandidateIdentity freezes full commit/tree object IDs for a done lane.
 	// Production defaults to Git; tests inject deterministic identities.
 	ResolveCandidateIdentity func(ctx context.Context, primaryRoot, worktreePath, baseSHA string) (CandidateIdentity, error)
+	// CollectCandidateChanges freezes canonical WU2 change classifications for
+	// compiled authoring evidence. Production defaults to candidatechange.Collect.
+	CollectCandidateChanges func(context.Context, candidatechange.Request) ([]candidatechange.Change, error)
 
 	HasUniqueLaneCommits func(ctx context.Context, worktreePath, baseSHA string) (bool, error)
 	PorcelainEmpty       func(ctx context.Context, worktreePath string) (bool, error)
@@ -437,12 +441,13 @@ func Execute(ctx context.Context, deps Deps, p packet.Packet) (Report, error) {
 	}()
 
 	outcome, err := exec.Run(ctx, executor.Request{
-		Prompt:       p.Body,
-		WorktreePath: wt.Path,
-		Model:        model,
-		Agent:        p.Agent,
-		SchemaPath:   schemaPath,
-		Progress:     progress,
+		Prompt:        p.Body,
+		WorktreePath:  wt.Path,
+		Model:         model,
+		Agent:         p.Agent,
+		ReadOnlyPaths: append([]string(nil), p.ReadOnlyPaths...),
+		SchemaPath:    schemaPath,
+		Progress:      progress,
 	})
 	close(progress)
 	progressErrors := <-progressDone
@@ -614,14 +619,59 @@ func setDoneCandidate(ctx context.Context, deps Deps, p packet.Packet, worktreeP
 	if err != nil {
 		return fmt.Errorf("encode frozen result: %w", err)
 	}
-	return deps.Ledger.SetDoneCandidate(ctx, ledger.LaneCandidate{
-		RunID: deps.RunID, LaneID: p.ID, PacketID: p.ID, PacketDigest: packetDigest(p, paths),
+	resultHash := versionedHash("result:v1", string(resultJSON))
+	digest := packetDigest(p, paths)
+	candidate := ledger.LaneCandidate{
+		RunID: deps.RunID, LaneID: p.ID, PacketID: p.ID, PacketDigest: digest,
 		PrimaryRoot: deps.PrimaryRoot, WorktreePath: worktreePath,
 		BaseCommit: identity.BaseCommit, BaseTree: identity.BaseTree,
 		CandidateCommit: identity.CandidateCommit, CandidateTree: identity.CandidateTree,
 		AllowedPaths: paths, ResultPath: resultEnvelopePath, ResultJSON: string(resultJSON),
-		ResultHash: versionedHash("result:v1", string(resultJSON)), RecordedAt: at,
-	})
+		ResultHash: resultHash, RecordedAt: at,
+	}
+	if p.Authoring != nil {
+		var contract struct {
+			Version       string                        `json:"version"`
+			Mode          string                        `json:"mode"`
+			WritePaths    []string                      `json:"write_paths"`
+			ReadOnlyPaths []string                      `json:"read_only_paths"`
+			DoneCriteria  []string                      `json:"done_criteria"`
+			HardStops     []string                      `json:"hard_stops"`
+			Result        struct{ Path, Schema string } `json:"result"`
+		}
+		if err := json.Unmarshal(p.Authoring.ContractJSON, &contract); err != nil {
+			return fmt.Errorf("decode compiled authoring contract: %w", err)
+		}
+		collect := deps.CollectCandidateChanges
+		if collect == nil {
+			collect = candidatechange.Collect
+		}
+		changes, err := collect(ctx, candidatechange.Request{Root: worktreePath, BaseCommit: identity.BaseCommit, CandidateCommit: identity.CandidateCommit})
+		if err != nil {
+			return fmt.Errorf("collect compiled candidate changes: %w", err)
+		}
+		commit := "required"
+		if contract.Mode == "read-only" {
+			commit = "forbidden"
+		}
+		digest = p.Authoring.Digest
+		encoded, hash, err := ledger.FreezeAuthoringEvidence(ledger.AuthoringEvidence{
+			PacketDigest: digest, AuthoringMode: "versioned", ContractVersion: contract.Version,
+			Contract: append(json.RawMessage(nil), p.Authoring.ContractJSON...), Binding: append(json.RawMessage(nil), p.Authoring.BindingJSON...),
+			Mode: contract.Mode, CommitObligation: commit, WritePaths: contract.WritePaths, ReadOnlyPaths: contract.ReadOnlyPaths,
+			DoneCriteria: contract.DoneCriteria, HardStops: contract.HardStops, ResultPath: contract.Result.Path, ResultSchema: contract.Result.Schema,
+			BaseCommit: identity.BaseCommit, BaseTree: identity.BaseTree, CandidateCommit: identity.CandidateCommit, CandidateTree: identity.CandidateTree,
+			Changes: changes, ResultHash: resultHash,
+		})
+		if err != nil {
+			return fmt.Errorf("freeze compiled authoring evidence: %w", err)
+		}
+		candidate.PacketDigest = digest
+		candidate.AuthoringEvidenceVersion = ledger.AuthoringEvidenceVersion
+		candidate.AuthoringEvidenceJSON = encoded
+		candidate.AuthoringEvidenceHash = hash
+	}
+	return deps.Ledger.SetDoneCandidate(ctx, candidate)
 }
 
 // ResolveCandidateIdentityFromGit reads complete object IDs for terminal identity persistence.
@@ -674,6 +724,7 @@ func packetDigest(p packet.Packet, paths []string) string {
 		fmt.Sprint(p.ReadOnly), p.Feature, p.ParentRef, p.BaseSHA, p.ExpectedParentSHA,
 		fmt.Sprint(p.LegacyMain), p.SDDPhase, p.FanoutGroup, p.Skill, p.Body}
 	parts = append(parts, paths...)
+	parts = append(parts, p.ReadOnlyPaths...)
 	return versionedHash(parts...)
 }
 
@@ -833,68 +884,17 @@ func enforceAllowedPaths(ctx context.Context, deps Deps, worktreePath, baseSHA s
 		return lane.Blocked, "worktree missing recorded base SHA"
 	}
 
-	diffCmd := exec.CommandContext(ctx, "git", "-C", worktreePath, "diff", "--name-status", "-z", "--diff-filter=ACDMRT", "-M", baseSHA, "HEAD")
-	var diffStderr strings.Builder
-	diffCmd.Stderr = &diffStderr
-	diffOut, err := diffCmd.Output()
+	changes, err := candidatechange.Collect(ctx, candidatechange.Request{
+		Root:            worktreePath,
+		BaseCommit:      baseSHA,
+		CandidateCommit: "HEAD",
+		IncludeWorktree: true,
+	})
 	if err != nil {
-		return lane.Blocked, fmt.Sprintf("git diff %s HEAD in worktree failed: %v: %s", baseSHA, err, strings.TrimSpace(diffStderr.String()))
+		return lane.Blocked, fmt.Sprintf("collect actual git diff in worktree failed: %v", err)
 	}
 
-	unstagedCmd := exec.CommandContext(ctx, "git", "-C", worktreePath, "diff", "--name-status", "-z", "--diff-filter=ACDMRT", "-M")
-	var unstagedStderr strings.Builder
-	unstagedCmd.Stderr = &unstagedStderr
-	unstagedOut, err := unstagedCmd.Output()
-	if err != nil {
-		return lane.Blocked, fmt.Sprintf("git diff unstaged in worktree failed: %v: %s", err, strings.TrimSpace(unstagedStderr.String()))
-	}
-
-	stagedCmd := exec.CommandContext(ctx, "git", "-C", worktreePath, "diff", "--cached", "--name-status", "-z", "--diff-filter=ACDMRT", "-M")
-	var stagedStderr strings.Builder
-	stagedCmd.Stderr = &stagedStderr
-	stagedOut, err := stagedCmd.Output()
-	if err != nil {
-		return lane.Blocked, fmt.Sprintf("git diff --cached in worktree failed: %v: %s", err, strings.TrimSpace(stagedStderr.String()))
-	}
-
-	lsCmd := exec.CommandContext(ctx, "git", "-C", worktreePath, "ls-files", "-z", "-o", "--exclude-standard")
-	var lsStderr strings.Builder
-	lsCmd.Stderr = &lsStderr
-	lsOut, err := lsCmd.Output()
-	if err != nil {
-		return lane.Blocked, fmt.Sprintf("git ls-files in worktree failed: %v: %s", err, strings.TrimSpace(lsStderr.String()))
-	}
-
-	seen := make(map[string]bool)
-	var changedPaths []string
-
-	addPaths := func(paths []string) {
-		for _, path := range paths {
-			path = strings.TrimSpace(path)
-			if path == "" {
-				continue
-			}
-			if strings.HasPrefix(path, ".lucind/") || path == ".lucind" {
-				continue
-			}
-			if !seen[path] {
-				seen[path] = true
-				changedPaths = append(changedPaths, path)
-			}
-		}
-	}
-
-	addPaths(parseDiffNameStatusZ(diffOut))
-	addPaths(parseDiffNameStatusZ(unstagedOut))
-	addPaths(parseDiffNameStatusZ(stagedOut))
-	addPaths(parseLSFilesZ(lsOut))
-
-	var offending []string
-	for _, path := range changedPaths {
-		if !packet.PathInScope(path, p.AllowedPaths) {
-			offending = append(offending, path)
-		}
-	}
+	offending := candidatechange.OutOfScope(changes, p.AllowedPaths)
 
 	if len(offending) > 0 {
 		return lane.Deviated, fmt.Sprintf("actual diff touched paths outside declared allowed_paths: %s", strings.Join(offending, ", "))

@@ -3,15 +3,18 @@
 package accept
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"testing/fstest"
@@ -20,9 +23,9 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/LanzerDevCorp/lucind-ai/internal/candidatechange"
 	"github.com/LanzerDevCorp/lucind-ai/internal/integrate"
 	"github.com/LanzerDevCorp/lucind-ai/internal/ledger"
-	"github.com/LanzerDevCorp/lucind-ai/internal/packet"
 	"github.com/LanzerDevCorp/lucind-ai/internal/result"
 )
 
@@ -76,6 +79,19 @@ func (v *Verifier) Verify(ctx context.Context, req AcceptanceRequest) (Acceptanc
 	}
 	if err := v.validateObjects(ctx, root, candidate); err != nil {
 		return AcceptanceReceipt{}, err
+	}
+	if candidate.AuthoringEvidenceVersion == ledger.AuthoringEvidenceVersion {
+		evidence, err := ledger.DecodeAuthoringEvidence(candidate.AuthoringEvidenceVersion, candidate.AuthoringEvidenceJSON, candidate.AuthoringEvidenceHash)
+		if err != nil {
+			return AcceptanceReceipt{}, fmt.Errorf("accept: invalid authoring evidence: %w", err)
+		}
+		metadata, err := v.ledger.GetLaneMetadata(ctx, candidate.RunID, candidate.LaneID)
+		if err != nil {
+			return AcceptanceReceipt{}, fmt.Errorf("accept: load frozen target metadata: %w", err)
+		}
+		if err := validateTypedTargetBinding(evidence.Binding, metadata); err != nil {
+			return AcceptanceReceipt{}, err
+		}
 	}
 	if err := validateResultAndScope(ctx, root, candidate); err != nil {
 		return AcceptanceReceipt{}, err
@@ -140,6 +156,44 @@ func canonicalRoot(path string) (string, error) {
 	return filepath.Clean(resolved), nil
 }
 
+func validateTypedTargetBinding(encoded json.RawMessage, metadata ledger.LaneMetadata) error {
+	var binding struct {
+		Kind              *string `json:"kind"`
+		Feature           *string `json:"feature"`
+		ParentRef         *string `json:"parent_ref"`
+		BaseSHA           *string `json:"base_sha"`
+		ExpectedParentSHA *string `json:"expected_parent_sha"`
+	}
+	decoder := json.NewDecoder(bytes.NewReader(encoded))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&binding); err != nil {
+		return errors.New("accept: authored target binding is invalid")
+	}
+	var extra any
+	if err := decoder.Decode(&extra); err != io.EOF {
+		return errors.New("accept: authored target binding has trailing data")
+	}
+	if binding.Kind == nil || binding.ParentRef == nil || binding.ExpectedParentSHA == nil {
+		return errors.New("accept: authored target binding is incomplete")
+	}
+
+	switch *binding.Kind {
+	case "feature":
+		if binding.Feature == nil || binding.BaseSHA == nil || metadata.Feature == "" || metadata.ParentRef == "" || metadata.BaseSHA == "" || metadata.ExpectedParentSHA == "" ||
+			*binding.Feature != metadata.Feature || *binding.ParentRef != metadata.ParentRef || *binding.BaseSHA != metadata.BaseSHA || *binding.ExpectedParentSHA != metadata.ExpectedParentSHA {
+			return errors.New("accept: feature target binding mismatch")
+		}
+	case "legacy-main":
+		if binding.Feature != nil || binding.BaseSHA != nil || (*binding.ParentRef != "refs/heads/main" && *binding.ParentRef != "main") ||
+			(metadata.ParentRef != "" && metadata.ParentRef != "main" && metadata.ParentRef != "refs/heads/main") || *binding.ExpectedParentSHA != metadata.ExpectedParentSHA {
+			return errors.New("accept: legacy target binding mismatch")
+		}
+	default:
+		return errors.New("accept: authored target binding kind is invalid")
+	}
+	return nil
+}
+
 func (v *Verifier) validateObjects(ctx context.Context, root string, c ledger.LaneCandidate) error {
 	tests := []struct{ rev, want, label string }{
 		{c.BaseCommit + "^{commit}", c.BaseCommit, "base commit"},
@@ -180,24 +234,95 @@ func validateResultAndScope(ctx context.Context, root string, c ledger.LaneCandi
 	if len(envelope.ExternalChanges) != 0 {
 		return errors.New("accept: external changes cannot be mechanically accepted")
 	}
-	actualRaw, err := gitOutputBytes(ctx, root, "diff", "--name-only", "-z", c.BaseCommit, c.CandidateCommit, "--")
+	actual, err := candidatechange.Collect(ctx, candidatechange.Request{Root: root, BaseCommit: c.BaseCommit, CandidateCommit: c.CandidateCommit})
 	if err != nil {
 		return fmt.Errorf("accept: inspect frozen diff: %w", err)
 	}
-	actual := splitNUL(actualRaw)
+	if c.AuthoringEvidenceVersion == ledger.AuthoringEvidenceVersion {
+		return validateVersionedEvidence(c, envelope, actual)
+	}
+	actualPaths := make([]string, 0, len(actual)*2)
+	for _, change := range actual {
+		actualPaths = append(actualPaths, change.SourcePath, change.Path)
+	}
 	declared := make([]string, 0, len(envelope.FilesChanged))
 	for _, change := range envelope.FilesChanged {
-		declared = append(declared, change.Path)
+		declared = append(declared, change.SourcePath, change.Path)
 	}
-	actual = sortedUnique(actual)
+	actualPaths = sortedUnique(actualPaths)
 	declared = sortedUnique(declared)
-	if strings.Join(actual, "\x00") != strings.Join(declared, "\x00") {
-		return fmt.Errorf("accept: result files do not exactly match frozen diff: actual=%v declared=%v", actual, declared)
+	if strings.Join(actualPaths, "\x00") != strings.Join(declared, "\x00") {
+		return fmt.Errorf("accept: result files do not exactly match frozen diff: actual=%v declared=%v", actualPaths, declared)
 	}
-	for _, path := range actual {
-		if !packet.PathInScope(path, c.AllowedPaths) {
-			return fmt.Errorf("accept: out-of-scope change %q", path)
-		}
+	if outside := candidatechange.OutOfScope(actual, c.AllowedPaths); len(outside) > 0 {
+		return fmt.Errorf("accept: out-of-scope changes %v", outside)
+	}
+	return nil
+}
+
+func validateVersionedEvidence(c ledger.LaneCandidate, envelope result.Envelope, actual []candidatechange.Change) error {
+	evidence, err := ledger.DecodeAuthoringEvidence(c.AuthoringEvidenceVersion, c.AuthoringEvidenceJSON, c.AuthoringEvidenceHash)
+	if err != nil {
+		return fmt.Errorf("accept: invalid authoring evidence: %w", err)
+	}
+	if evidence.PacketDigest != c.PacketDigest || evidence.BaseCommit != c.BaseCommit || evidence.BaseTree != c.BaseTree ||
+		evidence.CandidateCommit != c.CandidateCommit || evidence.CandidateTree != c.CandidateTree || evidence.ResultPath != c.ResultPath || evidence.ResultHash != c.ResultHash {
+		return errors.New("accept: authoring evidence identity mismatch")
+	}
+	if evidence.AuthoringMode != "versioned" || evidence.ContractVersion != "packet-author/v1" || evidence.ResultPath != ".lucind/result.json" || evidence.ResultSchema != ".lucind/result.schema.json" {
+		return errors.New("accept: unsupported authoring evidence contract")
+	}
+	var contract struct {
+		Version       string   `json:"version"`
+		Mode          string   `json:"mode"`
+		WritePaths    []string `json:"write_paths"`
+		ReadOnlyPaths []string `json:"read_only_paths"`
+		DoneCriteria  []string `json:"done_criteria"`
+		HardStops     []string `json:"hard_stops"`
+		Result        struct {
+			Path   string `json:"path"`
+			Schema string `json:"schema"`
+		} `json:"result"`
+	}
+	var binding struct {
+		Kind    string `json:"kind"`
+		BaseSHA string `json:"base_sha"`
+	}
+	if json.Unmarshal(evidence.Contract, &contract) != nil || json.Unmarshal(evidence.Binding, &binding) != nil || contract.Version != evidence.ContractVersion ||
+		contract.Mode != evidence.Mode || !reflect.DeepEqual(contract.WritePaths, evidence.WritePaths) || !reflect.DeepEqual(contract.ReadOnlyPaths, evidence.ReadOnlyPaths) ||
+		!reflect.DeepEqual(contract.DoneCriteria, evidence.DoneCriteria) || !reflect.DeepEqual(contract.HardStops, evidence.HardStops) || contract.Result.Path != evidence.ResultPath || contract.Result.Schema != evidence.ResultSchema ||
+		(binding.Kind != "feature" && binding.Kind != "legacy-main") || (binding.Kind == "feature" && binding.BaseSHA != evidence.BaseCommit) {
+		return errors.New("accept: authored contract or binding integrity mismatch")
+	}
+	if !reflect.DeepEqual(actual, evidence.Changes) {
+		return errors.New("accept: canonical changes differ from frozen evidence")
+	}
+	criteria := make([]string, len(envelope.DoneCriteria))
+	for i := range envelope.DoneCriteria {
+		criteria[i] = envelope.DoneCriteria[i].Criterion
+	}
+	stops := make([]string, len(envelope.HardStops))
+	for i := range envelope.HardStops {
+		stops[i] = envelope.HardStops[i].HardStop
+	}
+	declared := make([]candidatechange.Change, len(envelope.FilesChanged))
+	for i, change := range envelope.FilesChanged {
+		declared[i] = candidatechange.Change{Change: candidatechange.Kind(change.Change), SourcePath: change.SourcePath, Path: change.Path}
+	}
+	if !reflect.DeepEqual(criteria, evidence.DoneCriteria) || !reflect.DeepEqual(stops, evidence.HardStops) || !reflect.DeepEqual(declared, actual) {
+		return errors.New("accept: result does not exactly correspond to authored evidence")
+	}
+	if evidence.Mode == "write" && (evidence.CommitObligation != "required" || envelope.Commit != c.CandidateCommit) {
+		return errors.New("accept: write commit mismatch")
+	}
+	if evidence.Mode == "read-only" && (evidence.CommitObligation != "forbidden" || envelope.Commit != "" || len(actual) != 0) {
+		return errors.New("accept: read-only result reports commit or changes")
+	}
+	if evidence.Mode != "write" && evidence.Mode != "read-only" {
+		return errors.New("accept: invalid authored mode")
+	}
+	if outside := candidatechange.OutOfScope(actual, c.AllowedPaths); len(outside) > 0 {
+		return fmt.Errorf("accept: out-of-scope changes %v", outside)
 	}
 	return nil
 }
@@ -211,18 +336,32 @@ func (v *Verifier) binding(c ledger.LaneCandidate) (Binding, error) {
 	if err != nil {
 		return Binding{}, errors.New("accept: candidate has no root lucind-checks.sh")
 	}
+	bindingVersion, contractVersion, evidenceVersion := "binding:v1", ledger.LegacyAuthoringVersion, c.AuthoringEvidenceVersion
+	if evidenceVersion == "" {
+		evidenceVersion = ledger.LegacyAuthoringVersion
+	}
+	if evidenceVersion == ledger.AuthoringEvidenceVersion {
+		evidence, decodeErr := ledger.DecodeAuthoringEvidence(evidenceVersion, c.AuthoringEvidenceJSON, c.AuthoringEvidenceHash)
+		if decodeErr != nil {
+			return Binding{}, decodeErr
+		}
+		bindingVersion, contractVersion = "binding:v2", evidence.ContractVersion
+	}
 	return Binding{
 		RunID: c.RunID, LaneID: c.LaneID, PacketID: c.PacketID, PacketDigest: c.PacketDigest,
 		BaseCommit: c.BaseCommit, BaseTree: c.BaseTree, CandidateCommit: c.CandidateCommit, CandidateTree: c.CandidateTree,
 		AllowedPathsHash: hashValues(append([]string{"allowed-paths:v1"}, c.AllowedPaths...)...),
 		CheckPolicyHash:  hashValues("check-policy:v1", version, timeout.String(), string(script)),
 		EnvironmentHash:  hashValues(append([]string{"environment:v1"}, env...)...),
+		BindingVersion:   bindingVersion, ContractVersion: contractVersion,
+		AuthoringEvidenceVersion: evidenceVersion, AuthoringEvidenceHash: c.AuthoringEvidenceHash,
 	}, nil
 }
 
 func bindingHash(b Binding) string {
-	return hashValues("binding:v1", b.RunID, b.LaneID, b.PacketID, b.PacketDigest, b.BaseCommit, b.BaseTree,
-		b.CandidateCommit, b.CandidateTree, b.AllowedPathsHash, b.CheckPolicyHash, b.EnvironmentHash)
+	return hashValues(b.BindingVersion, b.RunID, b.LaneID, b.PacketID, b.PacketDigest, b.BaseCommit, b.BaseTree,
+		b.CandidateCommit, b.CandidateTree, b.AllowedPathsHash, b.CheckPolicyHash, b.EnvironmentHash,
+		b.ContractVersion, b.AuthoringEvidenceVersion, b.AuthoringEvidenceHash)
 }
 
 func hashValues(values ...string) string {

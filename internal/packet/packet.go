@@ -19,15 +19,25 @@ const delimiter = "---"
 // is an instruction the binary would have to invent, which is exactly what
 // dispatch must never do.
 var (
-	ErrNoFrontmatter       = errors.New("packet: document has no closed --- frontmatter block")
-	ErrMissingID           = errors.New("packet: frontmatter is missing a non-empty id")
-	ErrMissingExecutor     = errors.New("packet: frontmatter is missing a non-empty executor")
-	ErrMissingRoutedBy     = errors.New("packet: frontmatter is missing a non-empty routed_by")
-	ErrEmptyBody           = errors.New("packet: body is empty, there is no prompt to dispatch")
-	ErrInvalidReadOnly     = errors.New("packet: frontmatter read_only must be a boolean (true or false)")
-	ErrInvalidLegacyMain   = errors.New("packet: frontmatter legacy_main must be a boolean (true or false)")
-	ErrInvalidAllowedPaths = errors.New("packet: frontmatter allowed_paths must be a JSON array of strings")
+	ErrNoFrontmatter        = errors.New("packet: document has no closed --- frontmatter block")
+	ErrMissingID            = errors.New("packet: frontmatter is missing a non-empty id")
+	ErrMissingExecutor      = errors.New("packet: frontmatter is missing a non-empty executor")
+	ErrMissingRoutedBy      = errors.New("packet: frontmatter is missing a non-empty routed_by")
+	ErrEmptyBody            = errors.New("packet: body is empty, there is no prompt to dispatch")
+	ErrInvalidReadOnly      = errors.New("packet: frontmatter read_only must be a boolean (true or false)")
+	ErrInvalidLegacyMain    = errors.New("packet: frontmatter legacy_main must be a boolean (true or false)")
+	ErrInvalidAllowedPaths  = errors.New("packet: frontmatter allowed_paths must be a JSON array of strings")
+	ErrInvalidReadOnlyPaths = errors.New("packet: frontmatter read_only_paths must be a JSON array of strings")
 )
+
+// Authoring is immutable typed input retained for candidate evidence. It is
+// nil for manually authored packets, which remain on the legacy evidence path.
+type Authoring struct {
+	ContractVersion string
+	Digest          string
+	ContractJSON    []byte
+	BindingJSON     []byte
+}
 
 // Packet is one unit of delegated work.
 type Packet struct {
@@ -60,6 +70,11 @@ type Packet struct {
 	// permitted to touch. When omitted or empty, the packet is undeclared
 	// and path checks are skipped.
 	AllowedPaths []string
+	// ReadOnlyPaths declares executor-visible inputs without granting write
+	// authority. AllowedPaths remains the sole write scope.
+	ReadOnlyPaths []string
+	// Authoring carries a compiled contract when one was admitted in-process.
+	Authoring *Authoring
 	// Feature identifies the target feature for parent integration.
 	Feature string
 	// ParentRef is the target parent git reference (e.g. refs/heads/feature/foo).
@@ -154,6 +169,13 @@ func Parse(r io.Reader) (Packet, error) {
 				return Packet{}, ErrInvalidAllowedPaths
 			}
 			p.AllowedPaths = paths
+		case "read_only_paths":
+			trimmed := strings.TrimSpace(value)
+			var paths []string
+			if len(trimmed) == 0 || trimmed[0] != '[' || json.Unmarshal([]byte(trimmed), &paths) != nil {
+				return Packet{}, ErrInvalidReadOnlyPaths
+			}
+			p.ReadOnlyPaths = paths
 		}
 	}
 

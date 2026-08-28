@@ -1047,6 +1047,8 @@ func TestExecuteBatchOutOfScopeUntrackedFileDeviatedExcludedFromIntegrate(t *tes
 
 	p1 := batchPacket("lane-a")
 	p1.AllowedPaths = []string{"internal/ledger/"}
+	// Declaring the changed file as an input must not turn it into write scope.
+	p1.ReadOnlyPaths = []string{"internal/serve/server.go"}
 
 	p2 := batchPacket("lane-b")
 	p2.AllowedPaths = []string{"internal/serve/"}

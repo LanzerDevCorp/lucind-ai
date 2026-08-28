@@ -192,6 +192,7 @@ func (a Agy) runFormat(ctx context.Context, req Request, format string, stdoutTa
 
 	cmd := exec.CommandContext(ctx, binary, args...)
 	cmd.Dir = req.WorktreePath
+	cmd.Env = requestEnv(req)
 	cmd.WaitDelay = waitDelay
 
 	var stderr, stdout bytes.Buffer

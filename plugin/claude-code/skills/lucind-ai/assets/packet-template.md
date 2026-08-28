@@ -78,6 +78,14 @@ how.
 
 Name the adjacent work you must NOT do, especially anything the conversation has not decided.
 
+## Optional shadow authoring
+
+If shadow comparison is enabled, this manual packet remains canonical and is
+the only artifact dispatched. Shadow output is typed, target-free evidence
+only; timeout, invalid output, unavailable routing, compiler rejection, and
+fallback-agent detection are warning-only. No comparison metric or operator
+action cuts over to specialist output.
+
 ## Hard stops
 
 Stop and return `status: blocked` — do not guess. **Declare every one of these in the

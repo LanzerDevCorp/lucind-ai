@@ -289,6 +289,31 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 		return 1
 	}
 
+	primaryRoot, err := resolvePrimaryRoot(ctx)
+	if err != nil {
+		fmt.Fprintf(stderr, "lucind-ai: resolve primary repository root: %v\n", err)
+		return 1
+	}
+
+	inputs := make([]dispatchAuthoringInput, len(ps))
+	for i := range ps {
+		inputs[i].Packet = ps[i]
+	}
+	ps, err = admitDispatchBatch(ctx, primaryRoot, inputs)
+	if err != nil {
+		printAdmissionError(stderr, err)
+		return 1
+	}
+
+	// One batch produces one combined tree and promotes it once. This target
+	// agreement check is still admission and therefore precedes quota and all
+	// allocation side effects.
+	attemptTarget, featureTargeted, err := lucindrun.FeatureTarget(ps)
+	if err != nil {
+		fmt.Fprintf(stderr, "lucind-ai: %v\n", err)
+		return 1
+	}
+
 	// Wave-level agy quota gate: one runDispatch invocation is one wave (the
 	// orchestrator invokes "run" once per wave, with one --packet per lane in
 	// it), and this fires exactly once per invocation -- never once per lane
@@ -312,23 +337,6 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 				return 1
 			}
 		}
-	}
-
-	// One batch produces one combined tree and promotes it once, so the
-	// packets must agree on where it lands. Derived here, next to the other
-	// packet-level pre-flight checks, so a batch that names two features
-	// fails before worktree.Create burns a lane's quota on work with
-	// nowhere coherent to go.
-	attemptTarget, featureTargeted, err := lucindrun.FeatureTarget(ps)
-	if err != nil {
-		fmt.Fprintf(stderr, "lucind-ai: %v\n", err)
-		return 1
-	}
-
-	primaryRoot, err := resolvePrimaryRoot(ctx)
-	if err != nil {
-		fmt.Fprintf(stderr, "lucind-ai: resolve primary repository root: %v\n", err)
-		return 1
 	}
 
 	// A lane's own worktree is not a place to dispatch from: it would

@@ -15,10 +15,12 @@ import (
 	"testing/fstest"
 	"time"
 
+	"github.com/LanzerDevCorp/lucind-ai/internal/candidatechange"
 	"github.com/LanzerDevCorp/lucind-ai/internal/executor"
 	"github.com/LanzerDevCorp/lucind-ai/internal/lane"
 	"github.com/LanzerDevCorp/lucind-ai/internal/ledger"
 	"github.com/LanzerDevCorp/lucind-ai/internal/packet"
+	"github.com/LanzerDevCorp/lucind-ai/internal/packetauthor"
 	"github.com/LanzerDevCorp/lucind-ai/internal/result"
 	"github.com/LanzerDevCorp/lucind-ai/internal/run"
 	"github.com/LanzerDevCorp/lucind-ai/internal/worktree"
@@ -138,6 +140,31 @@ func TestExecuteUpdatesLaneMetadataAfterRegisterLane(t *testing.T) {
 	}
 }
 
+func TestExecuteExposesReadOnlyInputsWithoutChangingWriteScopeOrPrompt(t *testing.T) {
+	wtPath := t.TempDir()
+	exec := &fakeExecutor{}
+	deps := newTestDeps(t, wtPath, func(string) fs.FS {
+		return fstest.MapFS{resultEnvelopePathForTest(): {Data: []byte(doneEnvelopeJSON)}}
+	}, exec)
+	p := testPacket()
+	p.Body = "manual body bytes stay exact\r\nincluding line endings\r\n"
+	p.AllowedPaths = []string{"internal/write"}
+	p.ReadOnlyPaths = []string{"docs/spec.md", "internal/input"}
+
+	if _, err := run.Execute(context.Background(), deps, p); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if exec.gotReq.Prompt != p.Body {
+		t.Fatalf("Prompt bytes = %q, want unchanged %q", exec.gotReq.Prompt, p.Body)
+	}
+	if !reflect.DeepEqual(exec.gotReq.ReadOnlyPaths, p.ReadOnlyPaths) {
+		t.Fatalf("Request.ReadOnlyPaths = %v, want %v", exec.gotReq.ReadOnlyPaths, p.ReadOnlyPaths)
+	}
+	if !reflect.DeepEqual(p.AllowedPaths, []string{"internal/write"}) {
+		t.Fatalf("AllowedPaths = %v, want write scope unchanged", p.AllowedPaths)
+	}
+}
+
 func TestExecuteDoneAtomicallyFreezesAcceptanceCandidate(t *testing.T) {
 	wtPath := t.TempDir()
 	runGit(t, wtPath, "init", "-b", "main")
@@ -183,6 +210,45 @@ func TestExecuteDoneAtomicallyFreezesAcceptanceCandidate(t *testing.T) {
 	}
 	if got.PacketDigest == "" || !reflect.DeepEqual(got.AllowedPaths, []string{"cmd/lucind-ai", "internal/run"}) {
 		t.Fatalf("candidate packet identity = digest:%q paths:%v", got.PacketDigest, got.AllowedPaths)
+	}
+}
+
+func TestExecuteDoneFreezesCompiledAuthoringEvidence(t *testing.T) {
+	wtPath := t.TempDir()
+	deps := newTestDeps(t, wtPath, func(string) fs.FS {
+		return fstest.MapFS{resultEnvelopePathForTest(): {Data: []byte(doneEnvelopeJSON)}}
+	}, &fakeExecutor{})
+	deps.ResolveCandidateIdentity = func(context.Context, string, string, string) (run.CandidateIdentity, error) {
+		return run.CandidateIdentity{BaseCommit: "base", BaseTree: "base-tree", CandidateCommit: "candidate", CandidateTree: "candidate-tree"}, nil
+	}
+	deps.CollectCandidateChanges = func(context.Context, candidatechange.Request) ([]candidatechange.Change, error) {
+		return []candidatechange.Change{{Change: candidatechange.Modified, Path: "internal/write/file.go"}}, nil
+	}
+	p := testPacket()
+	p.ReadOnlyPaths = []string{"docs/input.md"}
+	p.Authoring = &packet.Authoring{
+		ContractVersion: packetauthor.ContractVersion,
+		Digest:          "compiled-digest",
+		ContractJSON:    []byte(`{"version":"packet-author/v1","route_intent":"route","mode":"write","write_paths":["internal/write"],"read_only_paths":["docs/input.md"],"goal":"goal","done_criteria":["criterion"],"hard_stops":["stop"],"result":{"path":".lucind/result.json","schema":".lucind/result.schema.json"}}` + "\n"),
+		BindingJSON:     []byte(`{"kind":"feature","feature":"feat-lane-a","parent_ref":"refs/heads/main","base_sha":"base","expected_parent_sha":"candidate"}`),
+	}
+
+	if _, err := run.Execute(context.Background(), deps, p); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	candidate, err := deps.Ledger.GetLaneCandidate(context.Background(), deps.RunID, p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	evidence, err := ledger.DecodeAuthoringEvidence(candidate.AuthoringEvidenceVersion, candidate.AuthoringEvidenceJSON, candidate.AuthoringEvidenceHash)
+	if err != nil {
+		t.Fatalf("DecodeAuthoringEvidence() error = %v", err)
+	}
+	if candidate.PacketDigest != "compiled-digest" || evidence.PacketDigest != "compiled-digest" {
+		t.Fatalf("packet digest candidate=%q evidence=%q", candidate.PacketDigest, evidence.PacketDigest)
+	}
+	if !reflect.DeepEqual(evidence.ReadOnlyPaths, p.ReadOnlyPaths) || len(evidence.Changes) != 1 || evidence.Changes[0].Path != "internal/write/file.go" {
+		t.Fatalf("evidence read paths/changes = %v / %v", evidence.ReadOnlyPaths, evidence.Changes)
 	}
 }
 
@@ -2712,71 +2778,6 @@ func TestExecuteScopeCheckEmptyAllowedPathsArraySkipsGitAndStaysDone(t *testing.
 			}
 		})
 	}
-}
-
-func TestParseDiffNameStatusZ_EmbeddedNewlineAndRenamePair(t *testing.T) {
-	tests := []struct {
-		name  string
-		input []byte
-		want  []string
-	}{
-		{
-			name:  "rename pair R100",
-			input: []byte("R100\x00old path\x00new path\x00"),
-			want:  []string{"old path", "new path"},
-		},
-		{
-			name:  "ordinary modified M",
-			input: []byte("M\x00dir/file.go\x00"),
-			want:  []string{"dir/file.go"},
-		},
-		{
-			name:  "path with embedded newline",
-			input: []byte("M\x00dir/\nweird.go\x00"),
-			want:  []string{"dir/\nweird.go"},
-		},
-		{
-			name:  "copy pair C100",
-			input: []byte("C100\x00src\x00dst\x00"),
-			want:  []string{"src", "dst"},
-		},
-		{
-			name:  "multiple mixed entries",
-			input: []byte("M\x00a.go\x00R100\x00old.go\x00new.go\x00A\x00added.go\x00"),
-			want:  []string{"a.go", "old.go", "new.go", "added.go"},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := run.ParseDiffNameStatusZ(tt.input)
-			if !slicesEqual(got, tt.want) {
-				t.Errorf("ParseDiffNameStatusZ() = %q, want %q", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestParseLSFilesZ(t *testing.T) {
-	input := []byte("a.go\x00file with spaces.txt\x00dir/\nweird.go\x00")
-	want := []string{"a.go", "file with spaces.txt", "dir/\nweird.go"}
-
-	got := run.ParseLSFilesZ(input)
-	if !slicesEqual(got, want) {
-		t.Errorf("ParseLSFilesZ() = %q, want %q", got, want)
-	}
-}
-
-func slicesEqual(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
 }
 
 func TestExecuteApprovalWaitBlocksUntilDecideApprovePersistsDone(t *testing.T) {

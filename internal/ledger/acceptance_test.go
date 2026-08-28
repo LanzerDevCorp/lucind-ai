@@ -26,7 +26,8 @@ func testAcceptanceReceipt() AcceptanceReceipt {
 			RunID: "run-1", LaneID: "lane-1", PacketID: "packet-1", PacketDigest: "packet-digest",
 			BaseCommit: "base-commit", BaseTree: "base-tree", CandidateCommit: "candidate-commit",
 			CandidateTree: "candidate-tree", AllowedPathsHash: "paths-hash",
-			CheckPolicyHash: "policy-hash", EnvironmentHash: "environment-hash",
+			CheckPolicyHash: "policy-hash", EnvironmentHash: "environment-hash", BindingVersion: "binding:v2",
+			ContractVersion: "packet-author/v1", AuthoringEvidenceVersion: AuthoringEvidenceVersion, AuthoringEvidenceHash: "evidence-hash",
 		},
 	}
 }
