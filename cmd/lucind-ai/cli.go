@@ -28,6 +28,7 @@ import (
 	"github.com/LanzerDevCorp/lucind-ai/internal/lane"
 	"github.com/LanzerDevCorp/lucind-ai/internal/ledger"
 	"github.com/LanzerDevCorp/lucind-ai/internal/packet"
+	"github.com/LanzerDevCorp/lucind-ai/internal/phasespec"
 	"github.com/LanzerDevCorp/lucind-ai/internal/reconcile"
 	"github.com/LanzerDevCorp/lucind-ai/internal/result"
 	lucindrun "github.com/LanzerDevCorp/lucind-ai/internal/run"
@@ -55,11 +56,16 @@ const attemptOwner = "lucind-ai run"
 // error, so a person driving the binary from a terminal always sees the one
 // invocation that works rather than a stack trace. --packet is repeatable:
 // each occurrence adds one more lane to the batch.
-const usage = "usage: lucind-ai run --packet <path> [--packet <path> ...] [--timeout <duration>] [--approval-timeout <duration>] [--legacy-main --expected-parent-sha <sha>] [--min-quota <fraction>]\n       lucind-ai split --dag <path> --out <dir>\n       lucind-ai check [--out <path>]\n       lucind-ai accept --run <run-id> --lane <lane-id>\n       lucind-ai feature create --id <id> --parent <ref> --base-sha <sha> [--expected-parent-sha <sha>]\n       lucind-ai feature status [--id <id>]\n       lucind-ai feature recover --attempt <id>\n       lucind-ai feature renew --id <id> --owner <owner> --fence <fence> [--ttl <duration>]\n       lucind-ai feature lease release --id <id> [--owner <owner>] [--fence <fence>] [--pid <pid>] [--force]\n       lucind-ai feature lease status --id <id>\n       lucind-ai feature disable --id <id>\n       lucind-ai reconcile approve --request <id> --source <feature> --target <feature> [--actor <name>]\n       lucind-ai reconcile decline --request <id> [--actor <name>] [--reason <reason>]\n       lucind-ai reconcile cancel --request <id> [--actor <name>] [--reason <reason>]\n       lucind-ai reconcile renew --request <id> [--base-sha <sha>] [--source-sha <sha>] [--target-sha <sha>] [--wait-stable <duration>]\n       lucind-ai reconcile resolve --candidate <id> --sha <sha> [--actor <name>] [--wait-stable <duration>]\n       lucind-ai defect record --id <id> --feature <id> --signature <sig> [--evidence <ev>] [--disposition <disp>] [--run <run-id>] [--lane <lane-id>]\n       lucind-ai defect list --feature <id>\n       lucind-ai defect resolve --id <id>\n       lucind-ai defect decline --id <id>\n       lucind-ai defect defer --id <id>\n       lucind-ai worktree cleanup --lane <id> [--force]\n       lucind-ai integrate retry --run <run-id> [--lane <id> ...] [--timeout <duration>] [--approval-timeout <duration>]\n       lucind-ai --version"
+const usage = "usage: lucind-ai run --packet <path> [--packet <path> ...] [--timeout <duration>] [--approval-timeout <duration>] [--legacy-main --expected-parent-sha <sha>] [--min-quota <fraction>]\n       lucind-ai split --dag <path> --out <dir>\n       lucind-ai check [--out <path>]\n       lucind-ai accept --run <run-id> --lane <lane-id>\n       lucind-ai feature create --id <id> --parent <ref> --base-sha <sha> [--expected-parent-sha <sha>]\n       lucind-ai feature status [--id <id>]\n       lucind-ai feature recover --attempt <id>\n       lucind-ai feature renew --id <id> --owner <owner> --fence <fence> [--ttl <duration>]\n       lucind-ai feature lease release --id <id> [--owner <owner>] [--fence <fence>] [--pid <pid>] [--force]\n       lucind-ai feature lease status --id <id>\n       lucind-ai feature disable --id <id>\n       lucind-ai reconcile approve --request <id> --source <feature> --target <feature> [--actor <name>]\n       lucind-ai reconcile decline --request <id> [--actor <name>] [--reason <reason>]\n       lucind-ai reconcile cancel --request <id> [--actor <name>] [--reason <reason>]\n       lucind-ai reconcile renew --request <id> [--base-sha <sha>] [--source-sha <sha>] [--target-sha <sha>] [--wait-stable <duration>]\n       lucind-ai reconcile resolve --candidate <id> --sha <sha> [--actor <name>] [--wait-stable <duration>]\n       lucind-ai defect record --id <id> --feature <id> --signature <sig> [--evidence <ev>] [--disposition <disp>] [--run <run-id>] [--lane <lane-id>]\n       lucind-ai defect list --feature <id>\n       lucind-ai defect resolve --id <id>\n       lucind-ai defect decline --id <id>\n       lucind-ai defect defer --id <id>\n       lucind-ai worktree cleanup --lane <id> [--force]\n       lucind-ai integrate retry --run <run-id> [--lane <id> ...] [--timeout <duration>] [--approval-timeout <duration>]\n       lucind-ai phase <name> [--change <name>] [--force]\n       lucind-ai --version"
 
 // depsFactory constructs run.Deps for runDispatch. In production it is
 // productionDeps; tests may override it to inject test doubles or observe dependency calls.
 var depsFactory = productionDeps
+
+// defaultStatusQuerier constructs a StatusQuerier for phaseDispatch.
+var defaultStatusQuerier = func(workDir string) phasespec.StatusQuerier {
+	return &phasespec.CLIStatusQuerier{WorkDir: workDir}
+}
 
 // defaultMinQuota is --min-quota's default: the minimum fraction of the
 // active agy-pool account's remaining 5-hour Gemini quota required before a
@@ -158,6 +164,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return worktreeDispatch(ctx, args[1:], stdout, stderr)
 	case "integrate":
 		return integrateDispatch(ctx, args[1:], stdout, stderr)
+	case "phase":
+		return phaseDispatch(ctx, args[1:], stdout, stderr)
 	case "--version", "-v":
 		fmt.Fprintf(stdout, "lucind-ai %s (%s, %s/%s)\n", version, runtime.Version(), runtime.GOOS, runtime.GOARCH)
 		return 0
@@ -2375,5 +2383,90 @@ func runDefectTransition(ctx context.Context, verb string, args []string, stdout
 	}
 
 	fmt.Fprintf(stdout, "%s defect %s\n", transition.Confirmation, *id)
+	return 0
+}
+
+// phaseDispatch implements the "phase" subcommand: runs the phase specialist for the named SDD phase.
+func phaseDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	if len(args) == 0 {
+		fmt.Fprintln(stderr, "lucind-ai: phase name is required")
+		fmt.Fprintln(stderr, "usage: lucind-ai phase <name> [--change <name>] [--force]")
+		return 1
+	}
+
+	fs := flag.NewFlagSet("phase", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	fs.Usage = func() {
+		fmt.Fprintln(stderr, "usage: lucind-ai phase <name> [--change <name>] [--force]")
+		fs.PrintDefaults()
+	}
+	change := fs.String("change", "", "target change name (default: active change from sdd-status)")
+	force := fs.Bool("force", false, "force synthesis even if phase is complete")
+
+	var nonFlags []string
+	for i := 0; i < len(args); i++ {
+		if strings.HasPrefix(args[i], "-") {
+			if err := fs.Parse(args[i:]); err != nil {
+				return 1
+			}
+			nonFlags = append(nonFlags, fs.Args()...)
+			break
+		} else {
+			nonFlags = append(nonFlags, args[i])
+		}
+	}
+
+	if len(nonFlags) == 0 {
+		fmt.Fprintln(stderr, "lucind-ai: phase name is required")
+		fs.Usage()
+		return 1
+	}
+	phaseName := nonFlags[0]
+
+	primaryRoot, err := resolvePrimaryRoot(ctx)
+	if err != nil {
+		fmt.Fprintf(stderr, "lucind-ai: resolve primary repository root: %v\n", err)
+		return 1
+	}
+
+	toplevel, err := gitShowToplevel(ctx)
+	if err == nil && worktree.IsLinkedWorktree(toplevel) {
+		fmt.Fprintf(stderr, "lucind-ai: refusing to run from inside a linked worktree (%s); run from the primary repository instead\n", toplevel)
+		return 1
+	}
+
+	querier := defaultStatusQuerier(primaryRoot)
+	adapter := phasespec.NewAdapter(querier, primaryRoot)
+
+	changeName := strings.TrimSpace(*change)
+	if changeName == "" {
+		raw, err := querier.QueryStatus(ctx, "")
+		if err != nil {
+			fmt.Fprintf(stderr, "lucind-ai: query sdd status: %v\n", err)
+			return 1
+		}
+		st, err := phasespec.ParseStatus(raw)
+		if err != nil {
+			fmt.Fprintf(stderr, "lucind-ai: parse sdd status: %v\n", err)
+			return 1
+		}
+		changeName = st.ChangeName
+	}
+
+	res, err := adapter.Synthesize(ctx, phasespec.SynthesizeRequest{
+		ChangeName: changeName,
+		Phase:      phaseName,
+		Force:      *force,
+	})
+	if err != nil {
+		fmt.Fprintf(stderr, "lucind-ai: phase synthesis: %v\n", err)
+		return 1
+	}
+
+	if res.Written {
+		fmt.Fprintf(stdout, "phase %s synthesized: %s\n", res.Phase, res.ArtifactPath)
+	} else {
+		fmt.Fprintf(stdout, "phase %s is already complete: %s\n", res.Phase, res.ArtifactPath)
+	}
 	return 0
 }
