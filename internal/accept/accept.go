@@ -27,6 +27,7 @@ import (
 	"github.com/LanzerDevCorp/lucind-ai/internal/integrate"
 	"github.com/LanzerDevCorp/lucind-ai/internal/ledger"
 	"github.com/LanzerDevCorp/lucind-ai/internal/result"
+	"github.com/LanzerDevCorp/lucind-ai/internal/skillset"
 )
 
 const ownerMarkerName = ".lucind-accept-owner.json"
@@ -275,6 +276,7 @@ func validateVersionedEvidence(c ledger.LaneCandidate, envelope result.Envelope,
 	var contract struct {
 		Version        string   `json:"version"`
 		Mode           string   `json:"mode"`
+		LaneRole       string   `json:"lane_role"`
 		RequiredSkills []string `json:"required_skills"`
 		WritePaths     []string `json:"write_paths"`
 		ReadOnlyPaths  []string `json:"read_only_paths"`
@@ -290,7 +292,7 @@ func validateVersionedEvidence(c ledger.LaneCandidate, envelope result.Envelope,
 		BaseSHA string `json:"base_sha"`
 	}
 	if json.Unmarshal(evidence.Contract, &contract) != nil || json.Unmarshal(evidence.Binding, &binding) != nil || contract.Version != evidence.ContractVersion ||
-		contract.Mode != evidence.Mode || !reflect.DeepEqual(contract.WritePaths, evidence.WritePaths) || !reflect.DeepEqual(contract.ReadOnlyPaths, evidence.ReadOnlyPaths) ||
+		contract.Mode != evidence.Mode || (contract.LaneRole != "" && !skillset.IsValidLaneRole(contract.LaneRole)) || !reflect.DeepEqual(contract.WritePaths, evidence.WritePaths) || !reflect.DeepEqual(contract.ReadOnlyPaths, evidence.ReadOnlyPaths) ||
 		!reflect.DeepEqual(contract.DoneCriteria, evidence.DoneCriteria) || !reflect.DeepEqual(contract.HardStops, evidence.HardStops) || contract.Result.Path != evidence.ResultPath || contract.Result.Schema != evidence.ResultSchema ||
 		(binding.Kind != "feature" && binding.Kind != "legacy-main") || (binding.Kind == "feature" && binding.BaseSHA != evidence.BaseCommit) {
 		return errors.New("accept: authored contract or binding integrity mismatch")
