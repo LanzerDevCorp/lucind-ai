@@ -43,16 +43,19 @@ type ResultObligations struct {
 // Contract is target-free authoring input. TargetClaims exists only to reject
 // untrusted typed input that attempts to seize live target authority.
 type Contract struct {
-	Version       string            `json:"version"`
-	RouteIntent   string            `json:"route_intent"`
-	Mode          Mode              `json:"mode"`
-	WritePaths    []string          `json:"write_paths"`
-	ReadOnlyPaths []string          `json:"read_only_paths"`
-	Goal          string            `json:"goal"`
-	DoneCriteria  []string          `json:"done_criteria"`
-	HardStops     []string          `json:"hard_stops"`
-	Result        ResultObligations `json:"result"`
-	TargetClaims  map[string]string `json:"-"`
+	Version        string            `json:"version"`
+	RouteIntent    string            `json:"route_intent"`
+	Mode           Mode              `json:"mode"`
+	LaneRole       string            `json:"lane_role,omitempty"`
+	AdhocSkills    []string          `json:"adhoc_skills,omitempty"`
+	RequiredSkills []string          `json:"required_skills,omitempty"`
+	WritePaths     []string          `json:"write_paths"`
+	ReadOnlyPaths  []string          `json:"read_only_paths"`
+	Goal           string            `json:"goal"`
+	DoneCriteria   []string          `json:"done_criteria"`
+	HardStops      []string          `json:"hard_stops"`
+	Result         ResultObligations `json:"result"`
+	TargetClaims   map[string]string `json:"-"`
 }
 type FeatureTarget struct {
 	Feature           string
