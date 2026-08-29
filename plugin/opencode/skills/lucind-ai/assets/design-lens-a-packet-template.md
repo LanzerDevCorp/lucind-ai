@@ -31,7 +31,7 @@ The proposal and specs for `<change-id>` are accepted and frozen. Lens B and len
 
 Read these before writing a single line. This lens is scoped to structure, not to signatures or tests:
 
-1. `~/.claude/skills/sdd-design/SKILL.md` — the real `gentle-ai` design skill. It is the phase
+1. The real `gentle-ai` design skill (delivered under `## Required skills`). It is the phase
    contract this draft feeds; read it rather than trusting this packet's paraphrase of it.
 2. `openspec/changes/<change-id>/proposal.md` and `openspec/changes/<change-id>/specs/`.
 3. The entry points and module structure of the packages the change lands in.
@@ -95,8 +95,8 @@ Do not write a rollback decision here even though it is shaped like a decision. 
 
 ## Allowed paths outside the repository
 
-**Read-only**: `~/.claude/skills/sdd-design/` — the real `gentle-ai` design skill and its
-`references/`. Read the contract as written, not as this packet paraphrases it.
+**Read-only**: The real `gentle-ai` design skill and its `references/` (delivered under
+`## Required skills`). Read the contract as written, not as this packet paraphrases it.
 
 Precedence between the two is **not symmetric**, so read this carefully.
 
@@ -192,6 +192,10 @@ Stop and return `status: blocked` — do not guess. Declare every one of these i
 <Ground-truth facts with file:line references: the packages involved, the
 relevant existing types, the accepted proposal summary, and any decision the
 human has already made in conversation and does not want re-litigated.>
+
+## Required skills
+
+- <sdd-design>
 
 ## Return
 

@@ -35,7 +35,7 @@ Verification for `<change-id>` reached a terminal verdict and the orchestrator a
 
 ## Required reading
 
-1. `~/.claude/skills/sdd-archive/SKILL.md` — the real `gentle-ai` archive skill. It is the phase
+1. The real `gentle-ai` archive skill (delivered under `## Required skills`). It is the phase
    contract this lane executes; read it rather than trusting this packet's paraphrase of it. Its
    **Mechanical Copy Contract**, **Task Completion Gate**, and **Final-State Authority** sections
    are the parts this packet leans on hardest.
@@ -208,8 +208,8 @@ changes are open at once.
 
 ## Allowed paths outside the repository
 
-**Read-only**: `~/.claude/skills/sdd-archive/` — the real `gentle-ai` archive skill and its
-`references/`.
+**Read-only**: The real `gentle-ai` archive skill and its `references/` (delivered under
+`## Required skills`).
 
 **Read-only**: `<primary-root>/.lucind/packets/` and `<primary-root>/.lucind/results/`, named in
 `## Context`. This is the only source for the dispatch record in step 2, and it is read, never
@@ -258,6 +258,10 @@ Stop and return `status: blocked` — do not guess. Declare every one of these i
 capability ids under `openspec/changes/<change-id>/specs/`, and any decision the human has already
 made in conversation — including an explicit partial-archive or checkbox-reconciliation
 authorization, if one was given.>
+
+## Required skills
+
+- <sdd-archive>
 
 ## Return
 

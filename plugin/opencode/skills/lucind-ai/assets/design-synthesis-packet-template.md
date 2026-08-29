@@ -130,7 +130,7 @@ that is the case.>
 
 ## Allowed paths outside the repository
 
-**Read-only**: `~/.claude/skills/sdd-design/` — the real `gentle-ai` design skill. Check the
+**Read-only**: The real `gentle-ai` design skill (delivered under `## Required skills`). Check the
 canonical document against the contract as written: its required sections, the choice /
 alternatives / rationale shape of a decision, and the threat-matrix applicability rule. On those,
 the skill wins over this packet's paraphrase, and the drift goes in `## Coverage Gaps`.
@@ -237,6 +237,10 @@ Stop and return `status: blocked` — do not guess. Declare every one of these i
 <The change title, the accepted proposal summary, the spec ids in
 `openspec/changes/<change-id>/specs/`, and any decision the human has already
 made in conversation and does not want re-litigated.>
+
+## Required skills
+
+- <sdd-design>
 
 ## Return
 

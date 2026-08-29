@@ -30,7 +30,7 @@ The exploration for `<change-id>` is initiating. Lens B and lens C run in parall
 
 Read these before writing a single line. This lens is scoped to problem space and candidates, not to scenarios or risk matrices:
 
-1. `~/.claude/skills/sdd-explore/SKILL.md` — the real `gentle-ai` explore skill. It is the phase
+1. The real `gentle-ai` explore skill (delivered under `## Required skills`). It is the phase
    contract this draft feeds; read it rather than trusting this packet's paraphrase of it.
 2. The entry points and module structure of the packages relevant to the problem space.
 3. The existing patterns and conventions those packages already follow — how comparable problems were already solved in this repository.
@@ -90,8 +90,8 @@ Do not write a risks matrix or detailed user scenarios here. They belong to lens
 
 ## Allowed paths outside the repository
 
-**Read-only**: `~/.claude/skills/sdd-explore/` — the real `gentle-ai` explore skill and its
-`references/`. Read the contract as written, not as this packet paraphrases it.
+**Read-only**: The real `gentle-ai` explore skill and its `references/` (delivered under
+`## Required skills`). Read the contract as written, not as this packet paraphrases it.
 
 Precedence between the two is **not symmetric**, so read this carefully.
 
@@ -187,6 +187,10 @@ Stop and return `status: blocked` — do not guess. Declare every one of these i
 <Ground-truth facts with file:line references: the packages involved, the
 relevant existing types, the problem statement, and any decision the
 human has already made in conversation and does not want re-litigated.>
+
+## Required skills
+
+- <sdd-explore>
 
 ## Return
 

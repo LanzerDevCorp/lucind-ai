@@ -146,7 +146,7 @@ converged" if that is the case.>
 
 ## Allowed paths outside the repository
 
-**Read-only**: `~/.claude/skills/sdd-tasks/` — the real `gentle-ai` tasks skill. Check the canonical
+**Read-only**: The real `gentle-ai` tasks skill (delivered under `## Required skills`). Check the canonical
 checklist against the contract as written: the Review Workload Forecast fields, the Suggested Work
 Units columns, the specific / actionable / verifiable / small rule, and the threat-matrix RED-test
 rule. On those, the skill wins over this packet's paraphrase, and the drift goes in
@@ -258,6 +258,10 @@ Stop and return `status: blocked` — do not guess. Declare every one of these i
 requirement ids in `openspec/changes/<change-id>/specs/`, the delivery strategy
 the human chose, and any decision already made in conversation that should not be
 re-litigated.>
+
+## Required skills
+
+- <sdd-tasks>
 
 ## Return
 
