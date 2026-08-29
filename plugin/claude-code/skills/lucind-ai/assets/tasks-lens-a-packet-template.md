@@ -30,7 +30,7 @@ The spec and design for `<change-id>` are accepted and frozen. Lens B and lens C
 
 Read these before writing a single line. This lens is scoped to *what work exists and in what order* — not to how it is dispatched and not to how it is proven:
 
-1. `~/.claude/skills/sdd-tasks/SKILL.md` — the real `gentle-ai` tasks skill. It is the phase
+1. The real `gentle-ai` tasks skill (delivered under `## Required skills`). It is the phase
    contract this draft feeds; read it rather than trusting this packet's paraphrase of it.
 2. `openspec/changes/<change-id>/design.md`, and its file-changes table in particular — every file
    created, modified, or deleted, and the terminal consumer of each.
@@ -114,8 +114,8 @@ Do not estimate changed lines and do not name PR boundaries — that is lens C's
 
 ## Allowed paths outside the repository
 
-**Read-only**: `~/.claude/skills/sdd-tasks/` — the real `gentle-ai` tasks skill and its
-`references/`. Read the contract as written, not as this packet paraphrases it.
+**Read-only**: The real `gentle-ai` tasks skill and its `references/` (delivered under
+`## Required skills`). Read the contract as written, not as this packet paraphrases it.
 
 Precedence between the two is **not symmetric**, so read this carefully.
 
@@ -214,6 +214,10 @@ Stop and return `status: blocked` — do not guess. Declare every one of these i
 the requirement ids in `openspec/changes/<change-id>/specs/`, the packages in
 scope, and any decision the human has already made in conversation and does not
 want re-litigated.>
+
+## Required skills
+
+- <sdd-tasks>
 
 ## Return
 

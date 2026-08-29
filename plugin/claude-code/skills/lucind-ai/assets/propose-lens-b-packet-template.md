@@ -30,7 +30,7 @@ The proposal phase for `<change-id>` is initiating. Lens A and lens C run in par
 
 Read these before writing a single line. This lens is scoped to capability impact and delta specs:
 
-1. `~/.claude/skills/sdd-propose/SKILL.md` — the real `gentle-ai` propose skill. It is the phase
+1. The real `gentle-ai` propose skill (delivered under `## Required skills`). It is the phase
    contract this draft feeds; read it rather than trusting this packet's paraphrase of it.
 2. Existing delta and base specifications in `openspec/specs/`.
 3. The interface declarations, CLI commands, and format definitions touched by this change.
@@ -86,8 +86,8 @@ Do not write architecture rationale or rollback mechanisms here. They belong to 
 
 ## Allowed paths outside the repository
 
-**Read-only**: `~/.claude/skills/sdd-propose/` — the real `gentle-ai` propose skill and its
-`references/`. Read the contract as written, not as this packet paraphrases it.
+**Read-only**: The real `gentle-ai` propose skill and its `references/` (delivered under
+`## Required skills`). Read the contract as written, not as this packet paraphrases it.
 
 Precedence between the two is **not symmetric**, so read this carefully.
 
@@ -182,6 +182,10 @@ Stop and return `status: blocked` — do not guess. Declare every one of these i
 <Ground-truth facts with file:line references: existing specs,
 interface declarations, capabilities, and any decision the human has already
 made in conversation and does not want re-litigated.>
+
+## Required skills
+
+- <sdd-propose>
 
 ## Return
 

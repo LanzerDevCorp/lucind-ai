@@ -34,7 +34,7 @@ A partition that looks parallel and is not costs a whole wave. Two failure modes
 
 Read these before writing a single line. This lens is scoped to *how the work is dispatched* — not to what the work is and not to how it is proven:
 
-1. `~/.claude/skills/sdd-tasks/SKILL.md` — the real `gentle-ai` tasks skill, and its **Suggested
+1. The real `gentle-ai` tasks skill (delivered under `## Required skills`), and its **Suggested
    Work Units** table in particular. It is the phase contract this draft feeds; read it rather than
    trusting this packet's paraphrase of it.
 2. `openspec/changes/<change-id>/design.md` — the file-changes table is the partition's input.
@@ -120,8 +120,8 @@ Do not write the task checklist. You partition units, not tasks. Do not estimate
 
 ## Allowed paths outside the repository
 
-**Read-only**: `~/.claude/skills/sdd-tasks/` — the real `gentle-ai` tasks skill and its
-`references/`. Read the contract as written, not as this packet paraphrases it.
+**Read-only**: The real `gentle-ai` tasks skill and its `references/` (delivered under
+`## Required skills`). Read the contract as written, not as this packet paraphrases it.
 
 Precedence between the two is **not symmetric**, so read this carefully.
 
@@ -222,6 +222,10 @@ Stop and return `status: blocked` — do not guess. Declare every one of these i
 the current `internal/dag` node fields, the archived sidecar precedent, and any
 decision the human has already made in conversation and does not want
 re-litigated.>
+
+## Required skills
+
+- <sdd-tasks>
 
 ## Return
 

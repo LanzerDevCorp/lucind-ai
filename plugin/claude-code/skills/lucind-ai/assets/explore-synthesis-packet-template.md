@@ -128,7 +128,7 @@ that is the case.>
 
 ## Allowed paths outside the repository
 
-**Read-only**: `~/.claude/skills/sdd-explore/` — the real `gentle-ai` explore skill. Check the
+**Read-only**: The real `gentle-ai` explore skill (delivered under `## Required skills`). Check the
 canonical document against the contract as written.
 
 This packet sets the 1800-word budget along with the synthesis procedure, the notes file, and the done criteria.
@@ -228,6 +228,10 @@ Stop and return `status: blocked` — do not guess. Declare every one of these i
 
 <The change title, problem summary, and any decision the human has already
 made in conversation and does not want re-litigated.>
+
+## Required skills
+
+- <sdd-explore>
 
 ## Return
 

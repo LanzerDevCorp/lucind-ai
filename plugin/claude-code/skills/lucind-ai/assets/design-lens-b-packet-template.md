@@ -33,7 +33,7 @@ Lens A owns the architecture decision and is running concurrently, so you do not
 
 Read these before writing a single line. This lens is scoped to surfaces and formats, not to rationale or tests:
 
-1. `~/.claude/skills/sdd-design/SKILL.md` — the real `gentle-ai` design skill. It is the phase
+1. The real `gentle-ai` design skill (delivered under `## Required skills`). It is the phase
    contract this draft feeds; read it rather than trusting this packet's paraphrase of it.
 2. `openspec/changes/<change-id>/proposal.md` and `openspec/changes/<change-id>/specs/`.
 3. The exact type, struct, and interface declarations the change touches — read the declarations, not summaries of them.
@@ -108,8 +108,8 @@ Do not assess whether the change is additively revertible. You supply the format
 
 ## Allowed paths outside the repository
 
-**Read-only**: `~/.claude/skills/sdd-design/` — the real `gentle-ai` design skill and its
-`references/`. Read the contract as written, not as this packet paraphrases it.
+**Read-only**: The real `gentle-ai` design skill and its `references/` (delivered under
+`## Required skills`). Read the contract as written, not as this packet paraphrases it.
 
 Precedence between the two is **not symmetric**, so read this carefully.
 
@@ -207,6 +207,10 @@ Stop and return `status: blocked` — do not guess. Declare every one of these i
 the schema files, the persisted formats and their current versions, and any
 decision the human has already made in conversation and does not want
 re-litigated.>
+
+## Required skills
+
+- <sdd-design>
 
 ## Return
 

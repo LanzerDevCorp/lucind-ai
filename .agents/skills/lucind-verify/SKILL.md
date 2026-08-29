@@ -1,7 +1,7 @@
 ---
 name: lucind-verify
 description: >-
-  Protocol for qualitative verification lanes (verify-*-agy).
+  Protocol for qualitative verification lanes.
   Use when conducting read-only qualitative audits of candidate implementations.
 ---
 

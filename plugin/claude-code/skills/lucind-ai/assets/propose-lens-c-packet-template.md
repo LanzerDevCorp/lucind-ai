@@ -30,7 +30,7 @@ The proposal phase for `<change-id>` is initiating. Lens A and lens B run in par
 
 Read these before writing a single line. This lens is scoped to risks, rollback, and test impact:
 
-1. `~/.claude/skills/sdd-propose/SKILL.md` — the real `gentle-ai` propose skill. It is the phase
+1. The real `gentle-ai` propose skill (delivered under `## Required skills`). It is the phase
    contract this draft feeds; read it rather than trusting this packet's paraphrase of it.
 2. Existing test suites, failure modes, error paths, and regression test patterns.
 3. Wire and persisted formats, database/ledger schemas, result envelopes.
@@ -88,8 +88,8 @@ Rollback and test impact are yours. Conceptual design and delta spec requirement
 
 ## Allowed paths outside the repository
 
-**Read-only**: `~/.claude/skills/sdd-propose/` — the real `gentle-ai` propose skill and its
-`references/`. Read the contract as written, not as this packet paraphrases it.
+**Read-only**: The real `gentle-ai` propose skill and its `references/` (delivered under
+`## Required skills`). Read the contract as written, not as this packet paraphrases it.
 
 Precedence between the two is **not symmetric**, so read this carefully.
 
@@ -185,6 +185,10 @@ Stop and return `status: blocked` — do not guess. Declare every one of these i
 <Ground-truth facts with file:line references: the test files,
 persisted format schemas, rollback mechanisms, and any decision the human
 has already made in conversation and does not want re-litigated.>
+
+## Required skills
+
+- <sdd-propose>
 
 ## Return
 
