@@ -158,7 +158,9 @@ func contractDifferences(manualJSON, specialistJSON []byte) []FieldDifference {
 		specialist any
 	}{
 		{"version", manual.Version, specialist.Version}, {"route_intent", manual.RouteIntent, specialist.RouteIntent},
-		{"mode", manual.Mode, specialist.Mode}, {"write_paths", manual.WritePaths, specialist.WritePaths},
+		{"mode", manual.Mode, specialist.Mode}, {"lane_role", manual.LaneRole, specialist.LaneRole},
+		{"adhoc_skills", manual.AdhocSkills, specialist.AdhocSkills}, {"required_skills", manual.RequiredSkills, specialist.RequiredSkills},
+		{"write_paths", manual.WritePaths, specialist.WritePaths},
 		{"read_only_paths", manual.ReadOnlyPaths, specialist.ReadOnlyPaths}, {"goal", manual.Goal, specialist.Goal},
 		{"done_criteria", manual.DoneCriteria, specialist.DoneCriteria}, {"hard_stops", manual.HardStops, specialist.HardStops},
 		{"result", manual.Result, specialist.Result},

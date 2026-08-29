@@ -2,6 +2,7 @@ package packetauthor_test
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 
 	"github.com/LanzerDevCorp/lucind-ai/internal/packetauthor"
@@ -69,10 +70,127 @@ func TestCompileRejectsDuplicateDeclarations(t *testing.T) {
 	assertDiagnosticCode(t, err, packetauthor.CodeContractInvalid)
 }
 
+func TestCompileDigestExcludesResolvedPaths(t *testing.T) {
+	contractA := validContract()
+	contractA.LaneRole = "apply"
+	contractA.RequiredSkills = []string{
+		"/var/tmp/root-a/lucind-executor/SKILL.md",
+		"/var/tmp/root-a/lucind-apply/SKILL.md",
+	}
+
+	contractB := validContract()
+	contractB.LaneRole = "apply"
+	contractB.RequiredSkills = []string{
+		"/home/user/root-b/lucind-executor/SKILL.md",
+		"/home/user/root-b/lucind-apply/SKILL.md",
+	}
+
+	contractC := validContract()
+	contractC.LaneRole = "apply"
+	contractC.RequiredSkills = []string{
+		"~/skills/lucind-executor/SKILL.md",
+		"~/skills/lucind-apply/SKILL.md",
+	}
+
+	artA, err := packetauthor.Compile(contractA, validFeatureBinding())
+	if err != nil {
+		t.Fatalf("Compile(contractA) error = %v", err)
+	}
+	artB, err := packetauthor.Compile(contractB, validFeatureBinding())
+	if err != nil {
+		t.Fatalf("Compile(contractB) error = %v", err)
+	}
+	artC, err := packetauthor.Compile(contractC, validFeatureBinding())
+	if err != nil {
+		t.Fatalf("Compile(contractC) error = %v", err)
+	}
+
+	// Digests and normalized contract JSON must be identical across root prefixes.
+	if artA.Digest == "" || artA.Digest != artB.Digest || artA.Digest != artC.Digest {
+		t.Fatalf("digests differ across root prefixes: A=%q B=%q C=%q", artA.Digest, artB.Digest, artC.Digest)
+	}
+	if !bytes.Equal(artA.ContractJSON, artB.ContractJSON) || !bytes.Equal(artA.ContractJSON, artC.ContractJSON) {
+		t.Fatalf("contractJSON differs across root prefixes: A=%s B=%s", artA.ContractJSON, artB.ContractJSON)
+	}
+
+	// Rendered bodies must differ because they carry the resolved filesystem paths.
+	if bytes.Equal(artA.Body, artB.Body) {
+		t.Fatal("rendered bodies should differ with differing resolved paths")
+	}
+
+	// Verify ## Required skills is rendered between ## Hard stops and ## Return.
+	bodyA := string(artA.Body)
+	if !strings.Contains(bodyA, "## Required skills\n- /var/tmp/root-a/lucind-executor/SKILL.md\n- /var/tmp/root-a/lucind-apply/SKILL.md") {
+		t.Errorf("artA.Body missing expected ## Required skills section: %s", bodyA)
+	}
+	hardStopsIdx := strings.Index(bodyA, "## Hard stops")
+	reqSkillsIdx := strings.Index(bodyA, "## Required skills")
+	returnIdx := strings.Index(bodyA, "## Return")
+	if hardStopsIdx < 0 || reqSkillsIdx < 0 || returnIdx < 0 || !(hardStopsIdx < reqSkillsIdx && reqSkillsIdx < returnIdx) {
+		t.Errorf("section ordering incorrect in body: hardStops=%d, reqSkills=%d, return=%d", hardStopsIdx, reqSkillsIdx, returnIdx)
+	}
+
+	// Empty RequiredSkills omits ## Required skills section.
+	contractEmpty := validContract()
+	contractEmpty.RequiredSkills = nil
+	artEmpty, err := packetauthor.Compile(contractEmpty, validFeatureBinding())
+	if err != nil {
+		t.Fatalf("Compile(contractEmpty) error = %v", err)
+	}
+	if strings.Contains(string(artEmpty.Body), "## Required skills") {
+		t.Errorf("artEmpty.Body should omit ## Required skills: %s", string(artEmpty.Body))
+	}
+}
+
+func TestCompileDigestChangesOnLaneRoleAndSkills(t *testing.T) {
+	base, err := packetauthor.Compile(validContract(), validFeatureBinding())
+	if err != nil {
+		t.Fatalf("Compile(base) error = %v", err)
+	}
+
+	tests := []struct {
+		name     string
+		contract packetauthor.Contract
+	}{
+		{
+			name: "lane_role changed",
+			contract: mutateContract(func(c *packetauthor.Contract) {
+				c.LaneRole = "verify"
+			}),
+		},
+		{
+			name: "adhoc_skills added",
+			contract: mutateContract(func(c *packetauthor.Contract) {
+				c.AdhocSkills = []string{"custom-lint"}
+			}),
+		},
+		{
+			name: "required_skills changed canonical name",
+			contract: mutateContract(func(c *packetauthor.Contract) {
+				c.RequiredSkills = []string{"/root/custom-different-skill/SKILL.md"}
+			}),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := packetauthor.Compile(tt.contract, validFeatureBinding())
+			if err != nil {
+				t.Fatalf("Compile() error = %v", err)
+			}
+			if got.Digest == base.Digest || bytes.Equal(got.ContractJSON, base.ContractJSON) {
+				t.Fatalf("%s did not change contractJSON and digest", tt.name)
+			}
+		})
+	}
+}
+
 func mutateContract(change func(*packetauthor.Contract)) packetauthor.Contract {
 	c := validContract()
 	c.WritePaths = append([]string(nil), c.WritePaths...)
 	c.ReadOnlyPaths = append([]string(nil), c.ReadOnlyPaths...)
+	c.AdhocSkills = append([]string(nil), c.AdhocSkills...)
+	c.RequiredSkills = append([]string(nil), c.RequiredSkills...)
 	c.DoneCriteria = append([]string(nil), c.DoneCriteria...)
 	c.HardStops = append([]string(nil), c.HardStops...)
 	change(&c)

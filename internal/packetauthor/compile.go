@@ -10,18 +10,23 @@ import (
 	"path"
 	"sort"
 	"strings"
+
+	"github.com/LanzerDevCorp/lucind-ai/internal/skillset"
 )
 
 type normalizedContract struct {
-	Version       string            `json:"version"`
-	RouteIntent   string            `json:"route_intent"`
-	Mode          Mode              `json:"mode"`
-	WritePaths    []string          `json:"write_paths"`
-	ReadOnlyPaths []string          `json:"read_only_paths"`
-	Goal          string            `json:"goal"`
-	DoneCriteria  []string          `json:"done_criteria"`
-	HardStops     []string          `json:"hard_stops"`
-	Result        ResultObligations `json:"result"`
+	Version        string            `json:"version"`
+	RouteIntent    string            `json:"route_intent"`
+	Mode           Mode              `json:"mode"`
+	LaneRole       string            `json:"lane_role,omitempty"`
+	AdhocSkills    []string          `json:"adhoc_skills,omitempty"`
+	RequiredSkills []string          `json:"required_skills,omitempty"`
+	WritePaths     []string          `json:"write_paths"`
+	ReadOnlyPaths  []string          `json:"read_only_paths"`
+	Goal           string            `json:"goal"`
+	DoneCriteria   []string          `json:"done_criteria"`
+	HardStops      []string          `json:"hard_stops"`
+	Result         ResultObligations `json:"result"`
 }
 type manifest struct {
 	Version      string      `json:"version"`
@@ -39,10 +44,10 @@ func Compile(contract Contract, binding TargetBinding) (Artifact, error) {
 	contractJSON := encodeJSON(normalized)
 	contractHash := digest("lucind:packet-author/v1", contractJSON)
 	manifestJSON := encodeJSON(manifest{Version: ManifestVersion, ContractHash: contractHash, Binding: bound})
-	body := renderBody(normalized)
+	body := renderBody(normalized, contract.RequiredSkills)
 	return Artifact{
 		Version: ContractVersion, Body: body, ContractJSON: contractJSON,
-		ManifestJSON: manifestJSON, Digest: digest("lucind:packet-artifact/v1", contractJSON, manifestJSON, body), Binding: bound,
+		ManifestJSON: manifestJSON, Digest: digest("lucind:packet-artifact/v1", contractJSON, manifestJSON, []byte(skillset.DigestBody(string(body)))), Binding: bound,
 	}, nil
 }
 
@@ -62,6 +67,9 @@ func validateContract(contract Contract) (normalizedContract, Diagnostics) {
 	}
 	if strings.TrimSpace(contract.RouteIntent) == "" {
 		diagnostics = append(diagnostics, diagnostic(40, "route_intent", CodeRouteInvalid, "route intent is required"))
+	}
+	if contract.LaneRole != "" && !skillset.IsValidLaneRole(contract.LaneRole) {
+		diagnostics = append(diagnostics, diagnostic(45, "lane_role", CodeContractInvalid, "lane role is invalid"))
 	}
 	if contract.Mode != ModeWrite && contract.Mode != ModeReadOnly {
 		diagnostics = append(diagnostics, diagnostic(50, "mode", CodeModeCommitConflict, "mode must be write or read-only"))
@@ -83,11 +91,52 @@ func validateContract(contract Contract) (normalizedContract, Diagnostics) {
 	diagnostics = append(diagnostics, pathDiagnostics...)
 	readOnlyPaths, pathDiagnostics := normalizePaths("read_only_paths", contract.ReadOnlyPaths)
 	diagnostics = append(diagnostics, pathDiagnostics...)
+
+	var adhocSkills []string
+	if len(contract.AdhocSkills) > 0 {
+		adhocSkills = append([]string(nil), contract.AdhocSkills...)
+		sort.Strings(adhocSkills)
+	}
+
+	var requiredSkills []string
+	if len(contract.RequiredSkills) > 0 {
+		seen := make(map[string]bool)
+		for _, s := range contract.RequiredSkills {
+			name := canonicalSkillName(s)
+			if name != "" && !seen[name] {
+				seen[name] = true
+				requiredSkills = append(requiredSkills, name)
+			}
+		}
+		sort.Strings(requiredSkills)
+	} else if contract.LaneRole != "" || contract.RouteIntent != "" || len(contract.AdhocSkills) > 0 {
+		if derived, err := skillset.Derive(contract.RouteIntent, contract.LaneRole, nil, contract.AdhocSkills); err == nil && len(derived) > 0 {
+			requiredSkills = derived
+		}
+	}
+
 	return normalizedContract{
 		Version: ContractVersion, RouteIntent: contract.RouteIntent, Mode: contract.Mode,
+		LaneRole: contract.LaneRole, AdhocSkills: adhocSkills, RequiredSkills: requiredSkills,
 		WritePaths: writePaths, ReadOnlyPaths: readOnlyPaths, Goal: contract.Goal,
 		DoneCriteria: append([]string(nil), contract.DoneCriteria...), HardStops: append([]string(nil), contract.HardStops...), Result: contract.Result,
 	}, diagnostics
+}
+
+func canonicalSkillName(raw string) string {
+	s := strings.TrimSpace(raw)
+	s = strings.ReplaceAll(s, "\\", "/")
+	if strings.HasSuffix(s, "/SKILL.md") {
+		s = strings.TrimSuffix(s, "/SKILL.md")
+		if idx := strings.LastIndex(s, "/"); idx >= 0 {
+			return s[idx+1:]
+		}
+		return s
+	}
+	if idx := strings.LastIndex(s, "/"); idx >= 0 {
+		return s[idx+1:]
+	}
+	return s
 }
 
 func validateBinding(binding TargetBinding) (BoundTarget, Diagnostics) {
@@ -168,7 +217,7 @@ func encodeJSON(value any) []byte {
 	return out.Bytes()
 }
 
-func renderBody(contract normalizedContract) []byte {
+func renderBody(contract normalizedContract, skillPaths []string) []byte {
 	var out strings.Builder
 	fmt.Fprintf(&out, "# Goal\n%s\n\n## Done criteria\n", contract.Goal)
 	for _, criterion := range contract.DoneCriteria {
@@ -177,6 +226,12 @@ func renderBody(contract normalizedContract) []byte {
 	out.WriteString("\n## Hard stops\n")
 	for _, stop := range contract.HardStops {
 		fmt.Fprintf(&out, "- %s\n", stop)
+	}
+	if len(skillPaths) > 0 {
+		out.WriteString("\n## Required skills\n")
+		for _, sp := range skillPaths {
+			fmt.Fprintf(&out, "- %s\n", sp)
+		}
 	}
 	fmt.Fprintf(&out, "\n## Return\n```lucind-result-contract\nversion: 1\npath: %s\nschema: %s\nmode: %s\ncommit: %s\n```\n", contract.Result.Path, contract.Result.Schema, contract.Mode, commitForMode(contract.Mode))
 	return []byte(out.String())

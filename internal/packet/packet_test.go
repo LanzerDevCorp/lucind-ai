@@ -137,15 +137,21 @@ func TestParseObservabilityFrontmatter(t *testing.T) {
 		wantSDDPhase    string
 		wantFanoutGroup string
 		wantSkill       string
+		wantLaneRole    string
+		wantAdhocSkills []string
 	}{
 		{
-			name: "all three keys present",
-			extra: "sdd_phase: apply\n" +
+			name: "all observability keys present with lane role and adhoc skills",
+			extra: "lane_role: apply\n" +
+				"sdd_phase: apply\n" +
 				"fanout_group: ledger\n" +
-				"skill: lucind-apply\n",
+				"skill: lucind-apply\n" +
+				"adhoc_skills: [\"custom-1\", \"custom-2\"]\n",
 			wantSDDPhase:    "apply",
 			wantFanoutGroup: "ledger",
 			wantSkill:       "lucind-apply",
+			wantLaneRole:    "apply",
+			wantAdhocSkills: []string{"custom-1", "custom-2"},
 		},
 		{
 			name:            "omitted keys default to empty",
@@ -153,6 +159,8 @@ func TestParseObservabilityFrontmatter(t *testing.T) {
 			wantSDDPhase:    "",
 			wantFanoutGroup: "",
 			wantSkill:       "",
+			wantLaneRole:    "",
+			wantAdhocSkills: nil,
 		},
 		{
 			name: "explicit empty keys are empty strings",
@@ -162,6 +170,8 @@ func TestParseObservabilityFrontmatter(t *testing.T) {
 			wantSDDPhase:    "",
 			wantFanoutGroup: "",
 			wantSkill:       "",
+			wantLaneRole:    "",
+			wantAdhocSkills: nil,
 		},
 	}
 
@@ -187,10 +197,188 @@ func TestParseObservabilityFrontmatter(t *testing.T) {
 			if p.Skill != tt.wantSkill {
 				t.Errorf("Skill = %q, want %q", p.Skill, tt.wantSkill)
 			}
+			if p.LaneRole != tt.wantLaneRole {
+				t.Errorf("LaneRole = %q, want %q", p.LaneRole, tt.wantLaneRole)
+			}
+			if !slices.Equal(p.AdhocSkills, tt.wantAdhocSkills) && !(len(p.AdhocSkills) == 0 && len(tt.wantAdhocSkills) == 0) {
+				t.Errorf("AdhocSkills = %v, want %v", p.AdhocSkills, tt.wantAdhocSkills)
+			}
 			if p.Path != "" {
 				t.Errorf("Path = %q, want empty (Parse does not invent a filesystem path)", p.Path)
 			}
 		})
+	}
+}
+
+func TestParseLaneRoleAndPhaseValidation(t *testing.T) {
+	validRoles := []string{"lens", "synthesis", "apply", "verify", "archive", "ultrafixer", "human"}
+	validPhases := []string{"explore", "propose", "spec", "design", "tasks", "apply", "verify", "remediate", "archive"}
+
+	for _, role := range validRoles {
+		t.Run("valid role "+role, func(t *testing.T) {
+			src := "---\n" +
+				"id: test-role\n" +
+				"executor: agy\n" +
+				"routed_by: test\n" +
+				"lane_role: " + role + "\n" +
+				"---\n\n## Goal\nTest\n"
+			p, err := packet.Parse(strings.NewReader(src))
+			if err != nil {
+				t.Fatalf("Parse() error = %v, want nil", err)
+			}
+			if p.LaneRole != role {
+				t.Errorf("LaneRole = %q, want %q", p.LaneRole, role)
+			}
+		})
+	}
+
+	for _, phase := range validPhases {
+		t.Run("valid role with valid phase "+phase, func(t *testing.T) {
+			src := "---\n" +
+				"id: test-role-phase\n" +
+				"executor: agy\n" +
+				"routed_by: test\n" +
+				"lane_role: lens\n" +
+				"sdd_phase: " + phase + "\n" +
+				"---\n\n## Goal\nTest\n"
+			p, err := packet.Parse(strings.NewReader(src))
+			if err != nil {
+				t.Fatalf("Parse() error = %v, want nil", err)
+			}
+			if p.LaneRole != "lens" || p.SDDPhase != phase {
+				t.Errorf("LaneRole=%q SDDPhase=%q, want lens/%s", p.LaneRole, p.SDDPhase, phase)
+			}
+		})
+	}
+
+	t.Run("invalid lane_role rejected", func(t *testing.T) {
+		src := "---\n" +
+			"id: test-role\n" +
+			"executor: agy\n" +
+			"routed_by: test\n" +
+			"lane_role: invalid_role\n" +
+			"---\n\n## Goal\nTest\n"
+		_, err := packet.Parse(strings.NewReader(src))
+		if !errors.Is(err, packet.ErrInvalidLaneRole) {
+			t.Fatalf("Parse() error = %v, want %v", err, packet.ErrInvalidLaneRole)
+		}
+	})
+
+	t.Run("invalid sdd_phase rejected when lane_role present", func(t *testing.T) {
+		src := "---\n" +
+			"id: test-role\n" +
+			"executor: agy\n" +
+			"routed_by: test\n" +
+			"lane_role: apply\n" +
+			"sdd_phase: bogus_phase\n" +
+			"---\n\n## Goal\nTest\n"
+		_, err := packet.Parse(strings.NewReader(src))
+		if !errors.Is(err, packet.ErrInvalidSDDPhase) {
+			t.Fatalf("Parse() error = %v, want %v", err, packet.ErrInvalidSDDPhase)
+		}
+	})
+
+	t.Run("legacy omission: arbitrary sdd_phase permitted when lane_role omitted", func(t *testing.T) {
+		src := "---\n" +
+			"id: test-legacy\n" +
+			"executor: agy\n" +
+			"routed_by: test\n" +
+			"sdd_phase: unvalidated_custom_phase\n" +
+			"---\n\n## Goal\nTest\n"
+		p, err := packet.Parse(strings.NewReader(src))
+		if err != nil {
+			t.Fatalf("Parse() error = %v, want nil", err)
+		}
+		if p.LaneRole != "" {
+			t.Errorf("LaneRole = %q, want empty", p.LaneRole)
+		}
+		if p.SDDPhase != "unvalidated_custom_phase" {
+			t.Errorf("SDDPhase = %q, want unvalidated_custom_phase", p.SDDPhase)
+		}
+	})
+}
+
+func TestParseAdhocSkills(t *testing.T) {
+	tests := []struct {
+		name       string
+		src        string
+		wantSkills []string
+		wantErr    error
+	}{
+		{
+			name: "valid adhoc skills array",
+			src: "---\n" +
+				"id: test-adhoc\n" +
+				"executor: agy\n" +
+				"routed_by: test\n" +
+				"adhoc_skills: [\"skill-a\", \"skill-b\"]\n" +
+				"---\n\n## Goal\nTest\n",
+			wantSkills: []string{"skill-a", "skill-b"},
+		},
+		{
+			name: "valid empty array",
+			src: "---\n" +
+				"id: test-adhoc\n" +
+				"executor: agy\n" +
+				"routed_by: test\n" +
+				"adhoc_skills: []\n" +
+				"---\n\n## Goal\nTest\n",
+			wantSkills: []string{},
+		},
+		{
+			name: "invalid non-array string",
+			src: "---\n" +
+				"id: test-adhoc\n" +
+				"executor: agy\n" +
+				"routed_by: test\n" +
+				"adhoc_skills: bare-string\n" +
+				"---\n\n## Goal\nTest\n",
+			wantErr: packet.ErrInvalidAdhocSkills,
+		},
+		{
+			name: "invalid number array",
+			src: "---\n" +
+				"id: test-adhoc\n" +
+				"executor: agy\n" +
+				"routed_by: test\n" +
+				"adhoc_skills: [1, 2, 3]\n" +
+				"---\n\n## Goal\nTest\n",
+			wantErr: packet.ErrInvalidAdhocSkills,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p, err := packet.Parse(strings.NewReader(tt.src))
+			if tt.wantErr != nil {
+				if !errors.Is(err, tt.wantErr) {
+					t.Fatalf("Parse() error = %v, want %v", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Parse() error = %v, want nil", err)
+			}
+			if !slices.Equal(p.AdhocSkills, tt.wantSkills) && !(len(p.AdhocSkills) == 0 && len(tt.wantSkills) == 0) {
+				t.Errorf("AdhocSkills = %v, want %v", p.AdhocSkills, tt.wantSkills)
+			}
+		})
+	}
+}
+
+func TestParseIgnoresRequiredSkillsFrontmatter(t *testing.T) {
+	src := "---\n" +
+		"id: test-ignore-required\n" +
+		"executor: agy\n" +
+		"routed_by: test\n" +
+		"required_skills: [\"malicious-skill\", \"authored-path\"]\n" +
+		"---\n\n## Goal\nTest\n"
+	p, err := packet.Parse(strings.NewReader(src))
+	if err != nil {
+		t.Fatalf("Parse() error = %v, want nil", err)
+	}
+	if len(p.RequiredSkills) != 0 {
+		t.Errorf("RequiredSkills = %v, want empty/nil (required_skills must never be parsed from frontmatter)", p.RequiredSkills)
 	}
 }
 

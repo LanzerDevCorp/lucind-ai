@@ -140,6 +140,8 @@ func contractDiagnostics(contract Contract) Diagnostics {
 }
 
 func cloneContract(contract Contract) Contract {
+	contract.AdhocSkills = append([]string(nil), contract.AdhocSkills...)
+	contract.RequiredSkills = append([]string(nil), contract.RequiredSkills...)
 	contract.WritePaths = append([]string(nil), contract.WritePaths...)
 	contract.ReadOnlyPaths = append([]string(nil), contract.ReadOnlyPaths...)
 	contract.DoneCriteria = append([]string(nil), contract.DoneCriteria...)
