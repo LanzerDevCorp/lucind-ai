@@ -54,11 +54,11 @@ func TestValidateTypedTargetBindingRequiresCompleteIdentity(t *testing.T) {
 }
 
 func TestValidateVersionedResultRequiresExactFrozenCorrespondence(t *testing.T) {
-	resultJSON := `{"packet_id":"lane-1","status":"done","summary":"done","hard_stops":[{"hard_stop":"stop","fired":false}],"files_changed":[{"change":"copied","source_path":"seed.txt","path":"copy.txt"}],"done_criteria":[{"criterion":"criterion","met":true}],"commit":"CANDIDATE"}`
+	resultJSON := `{"packet_id":"lane-1","status":"done","summary":"done","hard_stops":[{"hard_stop":"stop","fired":false}],"files_changed":[{"change":"copied","source_path":"seed.txt","path":"copy.txt"}],"done_criteria":[{"criterion":"criterion","met":true}],"skills_loaded":["lucind-executor","lucind-apply"],"commit":"CANDIDATE"}`
 	f := newVerifierFixture(t, resultJSON, "", map[string]string{"copy.txt": "seed\n"}, []string{"seed.txt", "copy.txt"})
 	resultJSON = strings.Replace(resultJSON, "CANDIDATE", f.candidate, 1)
 	f.candidateRow.ResultJSON, f.candidateRow.ResultHash = resultJSON, hashValues("result:v1", resultJSON)
-	contract := `{"version":"packet-author/v1","mode":"write","write_paths":["copy.txt","seed.txt"],"read_only_paths":null,"done_criteria":["criterion"],"hard_stops":["stop"],"result":{"path":".lucind/result.json","schema":".lucind/result.schema.json"}}`
+	contract := `{"version":"packet-author/v1","mode":"write","required_skills":["lucind-executor","lucind-apply"],"write_paths":["copy.txt","seed.txt"],"read_only_paths":null,"done_criteria":["criterion"],"hard_stops":["stop"],"result":{"path":".lucind/result.json","schema":".lucind/result.schema.json"}}`
 	e := ledger.AuthoringEvidence{PacketDigest: f.candidateRow.PacketDigest, AuthoringMode: "versioned", ContractVersion: "packet-author/v1", Contract: json.RawMessage(contract), Binding: json.RawMessage(`{"kind":"feature","base_sha":"` + f.base + `"}`),
 		Mode: "write", CommitObligation: "required", WritePaths: []string{"copy.txt", "seed.txt"}, DoneCriteria: []string{"criterion"}, HardStops: []string{"stop"}, ResultPath: ".lucind/result.json", ResultSchema: ".lucind/result.schema.json",
 		BaseCommit: f.base, BaseTree: f.candidateRow.BaseTree, CandidateCommit: f.candidate, CandidateTree: f.candidateRow.CandidateTree, Changes: []candidatechange.Change{{Change: candidatechange.Copied, SourcePath: "seed.txt", Path: "copy.txt"}}, ResultHash: f.candidateRow.ResultHash}
@@ -93,6 +93,14 @@ func TestValidateVersionedResultRequiresExactFrozenCorrespondence(t *testing.T) 
 		}},
 		{"copy classification", func(c *ledger.LaneCandidate) {
 			c.ResultJSON = strings.Replace(c.ResultJSON, `"change":"copied","source_path":"seed.txt",`, `"change":"created",`, 1)
+			c.ResultHash = hashValues("result:v1", c.ResultJSON)
+		}},
+		{"missing required skill", func(c *ledger.LaneCandidate) {
+			c.ResultJSON = strings.Replace(c.ResultJSON, `"skills_loaded":["lucind-executor","lucind-apply"]`, `"skills_loaded":["lucind-executor"]`, 1)
+			c.ResultHash = hashValues("result:v1", c.ResultJSON)
+		}},
+		{"omitted skills_loaded", func(c *ledger.LaneCandidate) {
+			c.ResultJSON = strings.Replace(c.ResultJSON, `,"skills_loaded":["lucind-executor","lucind-apply"]`, "", 1)
 			c.ResultHash = hashValues("result:v1", c.ResultJSON)
 		}},
 		{"evidence hash", func(c *ledger.LaneCandidate) { c.AuthoringEvidenceHash = "sha256:tampered" }},

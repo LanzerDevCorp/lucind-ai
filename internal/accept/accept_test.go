@@ -2,6 +2,7 @@ package accept
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"os/exec"
@@ -10,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/LanzerDevCorp/lucind-ai/internal/candidatechange"
 	"github.com/LanzerDevCorp/lucind-ai/internal/lane"
 	"github.com/LanzerDevCorp/lucind-ai/internal/ledger"
 )
@@ -160,6 +162,114 @@ func TestVerifierUsesFrozenDetachedCandidateDespitePrimaryState(t *testing.T) {
 				t.Fatalf("Verify() observed primary state: %v", err)
 			}
 		})
+	}
+}
+
+func TestAcceptDirtyPrimaryWithSkillsMatch(t *testing.T) {
+	resultJSON := `{"packet_id":"lane-skills-match","status":"done","summary":"done","hard_stops":[{"hard_stop":"stop","fired":false}],"files_changed":[{"path":"allowed.txt","change":"created"}],"done_criteria":[{"criterion":"implemented","met":true}],"skills_loaded":["lucind-executor","lucind-apply"],"commit":"CANDIDATE"}`
+	f := newVerifierFixture(t, validResult("allowed.txt"), "#!/bin/sh\ntest ! -e primary-only.txt\n", map[string]string{"allowed.txt": "candidate\n"}, []string{"allowed.txt"})
+	resultJSON = strings.Replace(resultJSON, "CANDIDATE", f.candidate, 1)
+
+	contract := `{"version":"packet-author/v1","mode":"write","required_skills":["lucind-executor","lucind-apply"],"write_paths":["allowed.txt"],"read_only_paths":null,"done_criteria":["implemented"],"hard_stops":["stop"],"result":{"path":".lucind/result.json","schema":".lucind/result.schema.json"}}`
+	bindingJSON := `{"kind":"feature","feature":"feat-test","parent_ref":"refs/heads/feature-1","base_sha":"` + f.base + `","expected_parent_sha":"` + f.base + `"}`
+	e := ledger.AuthoringEvidence{
+		PacketDigest:     "packet-digest-skills",
+		AuthoringMode:    "versioned",
+		ContractVersion:  "packet-author/v1",
+		Contract:         json.RawMessage(contract),
+		Binding:          json.RawMessage(bindingJSON),
+		Mode:             "write",
+		CommitObligation: "required",
+		WritePaths:       []string{"allowed.txt"},
+		DoneCriteria:     []string{"implemented"},
+		HardStops:        []string{"stop"},
+		ResultPath:       ".lucind/result.json",
+		ResultSchema:     ".lucind/result.schema.json",
+		BaseCommit:       f.base,
+		BaseTree:         f.candidateRow.BaseTree,
+		CandidateCommit:  f.candidate,
+		CandidateTree:    f.candidateRow.CandidateTree,
+		Changes:          []candidatechange.Change{{Change: candidatechange.Created, Path: "allowed.txt"}},
+		ResultHash:       hashValues("result:v1", resultJSON),
+	}
+	encoded, hash, err := ledger.FreezeAuthoringEvidence(e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	matchRow := ledger.LaneCandidate{
+		RunID:                    "run-1",
+		LaneID:                   "lane-skills-match",
+		PacketID:                 "lane-skills-match",
+		PacketDigest:             "packet-digest-skills",
+		PrimaryRoot:              f.root,
+		WorktreePath:             filepath.Join(f.root+"-worktrees", "lane-skills-match"),
+		BaseCommit:               f.base,
+		BaseTree:                 f.candidateRow.BaseTree,
+		CandidateCommit:          f.candidate,
+		CandidateTree:            f.candidateRow.CandidateTree,
+		AllowedPaths:             []string{"allowed.txt"},
+		ResultPath:               ".lucind/result.json",
+		ResultJSON:               resultJSON,
+		ResultHash:               hashValues("result:v1", resultJSON),
+		AuthoringEvidenceVersion: ledger.AuthoringEvidenceVersion,
+		AuthoringEvidenceJSON:    encoded,
+		AuthoringEvidenceHash:    hash,
+		RecordedAt:               time.Now().UTC(),
+	}
+	if err := f.ledger.RegisterLane(context.Background(), ledger.Lane{RunID: "run-1", LaneID: "lane-skills-match", PacketID: "lane-skills-match", Executor: "agy", RoutingCondition: "test", Status: lane.Running}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.ledger.UpdateLaneMetadata(context.Background(), ledger.LaneMetadata{RunID: "run-1", LaneID: "lane-skills-match", Feature: "feat-test", ParentRef: "refs/heads/feature-1", BaseSHA: f.base, ExpectedParentSHA: f.base}, time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.ledger.SetDoneCandidate(context.Background(), matchRow); err != nil {
+		t.Fatal(err)
+	}
+
+	// Make primary repository dirty (staged uncommitted change on primary)
+	writeFile(t, f.root, "primary-only.txt", "dirty on primary\n", 0o644)
+	git(t, f.root, "add", "primary-only.txt")
+
+	// Case 1: Matching skills on dirty primary succeeds
+	receipt, err := f.verifier.Verify(context.Background(), AcceptanceRequest{"run-1", "lane-skills-match"})
+	if err != nil {
+		t.Fatalf("Verify() on dirty primary with matching skills failed: %v", err)
+	}
+	if receipt.ReceiptID == "" {
+		t.Fatalf("expected receipt, got empty")
+	}
+
+	// Case 2: Skills mismatch (shortfall) rejects candidate and creates no receipt
+	mismatchResultJSON := strings.Replace(resultJSON, `"packet_id":"lane-skills-match"`, `"packet_id":"lane-mismatch"`, 1)
+	mismatchResultJSON = strings.Replace(mismatchResultJSON, `"skills_loaded":["lucind-executor","lucind-apply"]`, `"skills_loaded":["lucind-executor"]`, 1)
+	mismatchRow := matchRow
+	mismatchRow.LaneID = "lane-mismatch"
+	mismatchRow.PacketID = "lane-mismatch"
+	mismatchRow.ResultJSON = mismatchResultJSON
+	mismatchRow.ResultHash = hashValues("result:v1", mismatchResultJSON)
+	mismatchEvidence := e
+	mismatchEvidence.ResultHash = mismatchRow.ResultHash
+	mismatchEncoded, mismatchHash, err := ledger.FreezeAuthoringEvidence(mismatchEvidence)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mismatchRow.AuthoringEvidenceJSON = mismatchEncoded
+	mismatchRow.AuthoringEvidenceHash = mismatchHash
+	if err := f.ledger.RegisterLane(context.Background(), ledger.Lane{RunID: "run-1", LaneID: "lane-mismatch", PacketID: "lane-mismatch", Executor: "agy", RoutingCondition: "test", Status: lane.Running}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.ledger.UpdateLaneMetadata(context.Background(), ledger.LaneMetadata{RunID: "run-1", LaneID: "lane-mismatch", Feature: "feat-test", ParentRef: "refs/heads/feature-1", BaseSHA: f.base, ExpectedParentSHA: f.base}, time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.ledger.SetDoneCandidate(context.Background(), mismatchRow); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := f.verifier.Verify(context.Background(), AcceptanceRequest{"run-1", "lane-mismatch"}); err == nil {
+		t.Fatal("Verify() with skills mismatch unexpectedly succeeded")
+	}
+	if _, err := f.ledger.FindAcceptanceReceipt(context.Background(), bindingHashForCandidate(t, verifierFixture{verifier: f.verifier, candidateRow: mismatchRow})); !errors.Is(err, ledger.ErrAcceptanceReceiptNotFound) {
+		t.Fatalf("receipt persisted for rejected candidate: %v", err)
 	}
 }
 

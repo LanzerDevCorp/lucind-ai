@@ -273,13 +273,14 @@ func validateVersionedEvidence(c ledger.LaneCandidate, envelope result.Envelope,
 		return errors.New("accept: unsupported authoring evidence contract")
 	}
 	var contract struct {
-		Version       string   `json:"version"`
-		Mode          string   `json:"mode"`
-		WritePaths    []string `json:"write_paths"`
-		ReadOnlyPaths []string `json:"read_only_paths"`
-		DoneCriteria  []string `json:"done_criteria"`
-		HardStops     []string `json:"hard_stops"`
-		Result        struct {
+		Version        string   `json:"version"`
+		Mode           string   `json:"mode"`
+		RequiredSkills []string `json:"required_skills"`
+		WritePaths     []string `json:"write_paths"`
+		ReadOnlyPaths  []string `json:"read_only_paths"`
+		DoneCriteria   []string `json:"done_criteria"`
+		HardStops      []string `json:"hard_stops"`
+		Result         struct {
 			Path   string `json:"path"`
 			Schema string `json:"schema"`
 		} `json:"result"`
@@ -311,6 +312,19 @@ func validateVersionedEvidence(c ledger.LaneCandidate, envelope result.Envelope,
 	}
 	if !reflect.DeepEqual(criteria, evidence.DoneCriteria) || !reflect.DeepEqual(stops, evidence.HardStops) || !reflect.DeepEqual(declared, actual) {
 		return errors.New("accept: result does not exactly correspond to authored evidence")
+	}
+	if len(contract.RequiredSkills) > 0 {
+		loaded := make(map[string]bool, len(envelope.SkillsLoaded))
+		for _, s := range envelope.SkillsLoaded {
+			loaded[strings.TrimSpace(s)] = true
+			loaded[canonicalSkillName(s)] = true
+		}
+		for _, req := range contract.RequiredSkills {
+			reqName := strings.TrimSpace(req)
+			if !loaded[reqName] && !loaded[canonicalSkillName(reqName)] {
+				return errors.New("accept: result does not declare required skills")
+			}
+		}
 	}
 	if evidence.Mode == "write" && (evidence.CommitObligation != "required" || envelope.Commit != c.CandidateCommit) {
 		return errors.New("accept: write commit mismatch")
@@ -469,4 +483,20 @@ func sortedUnique(values []string) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+func canonicalSkillName(raw string) string {
+	s := strings.TrimSpace(raw)
+	s = strings.ReplaceAll(s, "\\", "/")
+	if strings.HasSuffix(s, "/SKILL.md") {
+		s = strings.TrimSuffix(s, "/SKILL.md")
+		if idx := strings.LastIndex(s, "/"); idx >= 0 {
+			return s[idx+1:]
+		}
+		return s
+	}
+	if idx := strings.LastIndex(s, "/"); idx >= 0 {
+		return s[idx+1:]
+	}
+	return s
 }

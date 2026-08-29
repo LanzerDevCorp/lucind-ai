@@ -21,6 +21,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -31,6 +32,7 @@ import (
 	"github.com/LanzerDevCorp/lucind-ai/internal/overlap"
 	"github.com/LanzerDevCorp/lucind-ai/internal/packet"
 	"github.com/LanzerDevCorp/lucind-ai/internal/result"
+	"github.com/LanzerDevCorp/lucind-ai/internal/skillset"
 	"github.com/LanzerDevCorp/lucind-ai/internal/worktree"
 )
 
@@ -491,6 +493,10 @@ func Execute(ctx context.Context, deps Deps, p packet.Packet) (Report, error) {
 	}
 
 	if status == lane.Done {
+		status, reason = enforceRequiredSkills(p, envelope)
+	}
+
+	if status == lane.Done {
 		status, reason = enforceCompletionMode(ctx, deps, wt.Path, wt.BaseSHA, p)
 	}
 
@@ -722,9 +728,21 @@ func normalizeAllowedPaths(paths []string) ([]string, error) {
 func packetDigest(p packet.Packet, paths []string) string {
 	parts := []string{"packet:v1", p.ID, p.Executor, p.RoutedBy, p.Model, p.Agent,
 		fmt.Sprint(p.ReadOnly), p.Feature, p.ParentRef, p.BaseSHA, p.ExpectedParentSHA,
-		fmt.Sprint(p.LegacyMain), p.SDDPhase, p.FanoutGroup, p.Skill, p.Body}
+		fmt.Sprint(p.LegacyMain), p.SDDPhase, p.FanoutGroup, p.Skill, skillset.DigestBody(p.Body)}
 	parts = append(parts, paths...)
 	parts = append(parts, p.ReadOnlyPaths...)
+	parts = append(parts, p.LaneRole)
+
+	requiredSkills := append([]string(nil), p.RequiredSkills...)
+	sort.Strings(requiredSkills)
+	parts = append(parts, strconv.Itoa(len(requiredSkills)))
+	parts = append(parts, requiredSkills...)
+
+	adhocSkills := append([]string(nil), p.AdhocSkills...)
+	sort.Strings(adhocSkills)
+	parts = append(parts, strconv.Itoa(len(adhocSkills)))
+	parts = append(parts, adhocSkills...)
+
 	return versionedHash(parts...)
 }
 
@@ -901,6 +919,50 @@ func enforceAllowedPaths(ctx context.Context, deps Deps, worktreePath, baseSHA s
 	}
 
 	return lane.Done, ""
+}
+
+// enforceRequiredSkills verifies that all skills declared in p.RequiredSkills
+// are present in the result envelope's SkillsLoaded. If any required skill is
+// omitted, the lane is demoted to lane.Deviated with an explanatory reason.
+func enforceRequiredSkills(p packet.Packet, envelope *result.Envelope) (lane.Status, string) {
+	if len(p.RequiredSkills) == 0 {
+		return lane.Done, ""
+	}
+	if envelope == nil {
+		return lane.Deviated, "result envelope is missing required skills declaration"
+	}
+	loaded := make(map[string]bool, len(envelope.SkillsLoaded))
+	for _, s := range envelope.SkillsLoaded {
+		loaded[strings.TrimSpace(s)] = true
+		loaded[canonicalSkillName(s)] = true
+	}
+	var missing []string
+	for _, req := range p.RequiredSkills {
+		reqName := strings.TrimSpace(req)
+		if !loaded[reqName] && !loaded[canonicalSkillName(reqName)] {
+			missing = append(missing, req)
+		}
+	}
+	if len(missing) > 0 {
+		return lane.Deviated, fmt.Sprintf("result envelope skills_loaded omitted required skills: %s", strings.Join(missing, ", "))
+	}
+	return lane.Done, ""
+}
+
+func canonicalSkillName(raw string) string {
+	s := strings.TrimSpace(raw)
+	s = strings.ReplaceAll(s, "\\", "/")
+	if strings.HasSuffix(s, "/SKILL.md") {
+		s = strings.TrimSuffix(s, "/SKILL.md")
+		if idx := strings.LastIndex(s, "/"); idx >= 0 {
+			return s[idx+1:]
+		}
+		return s
+	}
+	if idx := strings.LastIndex(s, "/"); idx >= 0 {
+		return s[idx+1:]
+	}
+	return s
 }
 
 // enforceCompletionMode verifies real git state after decideStatus mapped
