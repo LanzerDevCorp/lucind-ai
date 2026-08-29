@@ -112,6 +112,7 @@ type Envelope struct {
 	Questions       []Question       `json:"questions,omitempty"`
 	Deviations      []Deviation      `json:"deviations,omitempty"`
 	Findings        []Finding        `json:"findings,omitempty"`
+	SkillsLoaded    []string         `json:"skills_loaded,omitempty"`
 	SessionID       string           `json:"session_id,omitempty"`
 }
 
