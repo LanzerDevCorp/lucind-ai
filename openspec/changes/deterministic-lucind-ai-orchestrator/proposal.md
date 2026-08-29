@@ -20,12 +20,12 @@ Make SDD execution reproducible across Claude Code and OpenCode. The canonical s
 
 ### New Capabilities
 - `deterministic-orchestrator-contract`: Cross-runtime preflight, sequencing, evidence, recovery, and terminal-report contract.
+- `packet-authoring-contract`: Target-free authoring with deterministic schema, admission, and late binding. No live spec exists on this Change's `main` base (`openspec/specs/`, verified by directory listing at `base_sha` `705cf49`); the capability name mirrors a same-named spec that exists only on the unrelated, still in-flight `skill-provisioning-and-phase-specialist` branch and must not be conflated with it.
+- `acceptance-verifier`: Frozen evidence precedence and terminal receipt/report bindings. No live spec exists on this Change's `main` base for the same reason.
 
 ### Modified Capabilities
-- `packet-authoring-contract`: Preserve target-free authoring while enforcing deterministic schema, admission, and late binding.
 - `sdd-apply`: Make phase/wave barriers, DAG target handling, and consumer-test ownership explicit.
 - `parent-feature-integration`: Preserve immutable target identity, CAS, no-redispatch retry, and isolated recovery.
-- `acceptance-verifier`: Define frozen evidence precedence and terminal receipt/report bindings.
 
 ## Approach
 
