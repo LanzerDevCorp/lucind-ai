@@ -58,7 +58,7 @@ func TestValidateVersionedResultRequiresExactFrozenCorrespondence(t *testing.T) 
 	f := newVerifierFixture(t, resultJSON, "", map[string]string{"copy.txt": "seed\n"}, []string{"seed.txt", "copy.txt"})
 	resultJSON = strings.Replace(resultJSON, "CANDIDATE", f.candidate, 1)
 	f.candidateRow.ResultJSON, f.candidateRow.ResultHash = resultJSON, hashValues("result:v1", resultJSON)
-	contract := `{"version":"packet-author/v1","mode":"write","required_skills":["lucind-executor","lucind-apply"],"write_paths":["copy.txt","seed.txt"],"read_only_paths":null,"done_criteria":["criterion"],"hard_stops":["stop"],"result":{"path":".lucind/result.json","schema":".lucind/result.schema.json"}}`
+	contract := `{"version":"packet-author/v1","mode":"write","lane_role":"apply","required_skills":["lucind-executor","lucind-apply"],"write_paths":["copy.txt","seed.txt"],"read_only_paths":null,"done_criteria":["criterion"],"hard_stops":["stop"],"result":{"path":".lucind/result.json","schema":".lucind/result.schema.json"}}`
 	e := ledger.AuthoringEvidence{PacketDigest: f.candidateRow.PacketDigest, AuthoringMode: "versioned", ContractVersion: "packet-author/v1", Contract: json.RawMessage(contract), Binding: json.RawMessage(`{"kind":"feature","base_sha":"` + f.base + `"}`),
 		Mode: "write", CommitObligation: "required", WritePaths: []string{"copy.txt", "seed.txt"}, DoneCriteria: []string{"criterion"}, HardStops: []string{"stop"}, ResultPath: ".lucind/result.json", ResultSchema: ".lucind/result.schema.json",
 		BaseCommit: f.base, BaseTree: f.candidateRow.BaseTree, CandidateCommit: f.candidate, CandidateTree: f.candidateRow.CandidateTree, Changes: []candidatechange.Change{{Change: candidatechange.Copied, SourcePath: "seed.txt", Path: "copy.txt"}}, ResultHash: f.candidateRow.ResultHash}
@@ -132,6 +132,17 @@ func TestValidateVersionedResultRequiresExactFrozenCorrespondence(t *testing.T) 
 	if err := validateResultAndScope(context.Background(), f.root, c); err == nil {
 		t.Fatal("contradictory normalized contract accepted")
 	}
+
+	tamperedLaneRole := e
+	tamperedLaneRole.Contract = json.RawMessage(strings.Replace(string(e.Contract), `"lane_role":"apply"`, `"lane_role":"invalid-role"`, 1))
+	cLaneRole := f.candidateRow
+	cLaneRole.AuthoringEvidenceJSON, cLaneRole.AuthoringEvidenceHash, err = ledger.FreezeAuthoringEvidence(tamperedLaneRole)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := validateResultAndScope(context.Background(), f.root, cLaneRole); err == nil {
+		t.Fatal("invalid lane role accepted")
+	}
 }
 
 func TestValidateVersionedReadOnlyForbidsCommitAndChanges(t *testing.T) {
@@ -157,5 +168,59 @@ func TestValidateVersionedReadOnlyForbidsCommitAndChanges(t *testing.T) {
 	f.candidateRow.AuthoringEvidenceJSON, f.candidateRow.AuthoringEvidenceHash, _ = ledger.FreezeAuthoringEvidence(e)
 	if err := validateResultAndScope(context.Background(), f.root, f.candidateRow); err == nil {
 		t.Fatal("read-only commit accepted")
+	}
+}
+
+func TestValidateVersionedContractLaneRoleValidation(t *testing.T) {
+	resultJSON := `{"packet_id":"lane-1","status":"done","summary":"done","hard_stops":[{"hard_stop":"stop","fired":false}],"files_changed":[{"change":"copied","source_path":"seed.txt","path":"copy.txt"}],"done_criteria":[{"criterion":"criterion","met":true}],"skills_loaded":["lucind-executor","lucind-apply"],"commit":"CANDIDATE"}`
+	f := newVerifierFixture(t, resultJSON, "", map[string]string{"copy.txt": "seed\n"}, []string{"seed.txt", "copy.txt"})
+	resultJSON = strings.Replace(resultJSON, "CANDIDATE", f.candidate, 1)
+	f.candidateRow.ResultJSON, f.candidateRow.ResultHash = resultJSON, hashValues("result:v1", resultJSON)
+
+	roles := []struct {
+		role  string
+		valid bool
+	}{
+		{"apply", true},
+		{"verify", true},
+		{"lens", true},
+		{"synthesis", true},
+		{"archive", true},
+		{"ultrafixer", true},
+		{"human", true},
+		{"", true},
+		{"invalid-role", false},
+		{"executor", false},
+		{"unknown", false},
+	}
+
+	for _, tt := range roles {
+		t.Run("role_"+tt.role, func(t *testing.T) {
+			contract := `{"version":"packet-author/v1","mode":"write","lane_role":"` + tt.role + `","required_skills":["lucind-executor","lucind-apply"],"write_paths":["copy.txt","seed.txt"],"read_only_paths":null,"done_criteria":["criterion"],"hard_stops":["stop"],"result":{"path":".lucind/result.json","schema":".lucind/result.schema.json"}}`
+			if tt.role == "" {
+				contract = `{"version":"packet-author/v1","mode":"write","required_skills":["lucind-executor","lucind-apply"],"write_paths":["copy.txt","seed.txt"],"read_only_paths":null,"done_criteria":["criterion"],"hard_stops":["stop"],"result":{"path":".lucind/result.json","schema":".lucind/result.schema.json"}}`
+			}
+			e := ledger.AuthoringEvidence{
+				PacketDigest: f.candidateRow.PacketDigest, AuthoringMode: "versioned", ContractVersion: "packet-author/v1",
+				Contract: json.RawMessage(contract), Binding: json.RawMessage(`{"kind":"feature","base_sha":"` + f.base + `"}`),
+				Mode: "write", CommitObligation: "required", WritePaths: []string{"copy.txt", "seed.txt"}, DoneCriteria: []string{"criterion"}, HardStops: []string{"stop"},
+				ResultPath: ".lucind/result.json", ResultSchema: ".lucind/result.schema.json",
+				BaseCommit: f.base, BaseTree: f.candidateRow.BaseTree, CandidateCommit: f.candidate, CandidateTree: f.candidateRow.CandidateTree,
+				Changes: []candidatechange.Change{{Change: candidatechange.Copied, SourcePath: "seed.txt", Path: "copy.txt"}}, ResultHash: f.candidateRow.ResultHash,
+			}
+			encoded, hash, err := ledger.FreezeAuthoringEvidence(e)
+			if err != nil {
+				t.Fatal(err)
+			}
+			c := f.candidateRow
+			c.AuthoringEvidenceVersion, c.AuthoringEvidenceJSON, c.AuthoringEvidenceHash = ledger.AuthoringEvidenceVersion, encoded, hash
+			err = validateResultAndScope(context.Background(), f.root, c)
+			if tt.valid && err != nil {
+				t.Fatalf("valid lane role %q rejected: %v", tt.role, err)
+			}
+			if !tt.valid && err == nil {
+				t.Fatalf("invalid lane role %q accepted", tt.role)
+			}
+		})
 	}
 }
