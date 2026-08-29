@@ -1,0 +1,8 @@
+# Tracked repository configuration for lucind-ai.
+# Defines repository-wide skill budget and role stack skills.
+skill_budget: 3
+skills:
+  apply: []
+  verify: []
+  lens: []
+  synthesis: []
