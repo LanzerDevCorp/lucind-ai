@@ -72,25 +72,93 @@ type RemediationState struct {
 	Reason                 string `json:"reason"`
 }
 
+// LensesField represents a map of lens ID to LensState that unmarshals flexibly from a JSON object or array.
+type LensesField map[string]LensState
+
+// UnmarshalJSON unmarshals a JSON object or array into a LensesField map.
+func (lf *LensesField) UnmarshalJSON(data []byte) error {
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return nil
+	}
+	if trimmed[0] == '{' {
+		var m map[string]LensState
+		if err := json.Unmarshal(trimmed, &m); err != nil {
+			return err
+		}
+		for k, v := range m {
+			if v.ID == "" {
+				v.ID = k
+				m[k] = v
+			}
+		}
+		*lf = m
+		return nil
+	}
+	if trimmed[0] == '[' {
+		var list []LensState
+		if err := json.Unmarshal(trimmed, &list); err != nil {
+			return err
+		}
+		m := make(map[string]LensState, len(list))
+		for _, item := range list {
+			m[item.ID] = item
+		}
+		*lf = m
+		return nil
+	}
+	return fmt.Errorf("invalid lenses format")
+}
+
 // Status represents the parsed gentle-ai sdd-status JSON payload.
 type Status struct {
-	SchemaName       string              `json:"schemaName"`
-	SchemaVersion    int                 `json:"schemaVersion"`
-	ChangeName       string              `json:"changeName"`
-	ArtifactStore    string              `json:"artifactStore,omitempty"`
-	PlanningHome     PlanningHome        `json:"planningHome,omitempty"`
-	ChangeRoot       string              `json:"changeRoot,omitempty"`
-	ArtifactPaths    map[string][]string `json:"artifactPaths,omitempty"`
-	ContextFiles     map[string][]string `json:"contextFiles,omitempty"`
-	Artifacts        map[string]string   `json:"artifacts,omitempty"`
-	TaskProgress     TaskProgress        `json:"taskProgress,omitempty"`
-	Dependencies     map[string]string   `json:"dependencies,omitempty"`
-	ApplyState       string              `json:"applyState,omitempty"`
-	ActionContext    ActionContext       `json:"actionContext,omitempty"`
-	Relationships    Relationships       `json:"relationships,omitempty"`
-	RemediationState RemediationState    `json:"remediationState,omitempty"`
-	NextRecommended  string              `json:"nextRecommended,omitempty"`
-	BlockedReasons   []string            `json:"blockedReasons,omitempty"`
+	SchemaName       string                 `json:"schemaName"`
+	SchemaVersion    int                    `json:"schemaVersion"`
+	ChangeName       string                 `json:"changeName"`
+	ArtifactStore    string                 `json:"artifactStore,omitempty"`
+	PlanningHome     PlanningHome           `json:"planningHome,omitempty"`
+	ChangeRoot       string                 `json:"changeRoot,omitempty"`
+	ArtifactPaths    map[string][]string    `json:"artifactPaths,omitempty"`
+	ContextFiles     map[string][]string    `json:"contextFiles,omitempty"`
+	Artifacts        map[string]string      `json:"artifacts,omitempty"`
+	TaskProgress     TaskProgress           `json:"taskProgress,omitempty"`
+	Dependencies     map[string]string      `json:"dependencies,omitempty"`
+	ApplyState       string                 `json:"applyState,omitempty"`
+	ActionContext    ActionContext          `json:"actionContext,omitempty"`
+	Relationships    Relationships          `json:"relationships,omitempty"`
+	RemediationState RemediationState       `json:"remediationState,omitempty"`
+	NextRecommended  string                 `json:"nextRecommended,omitempty"`
+	BlockedReasons   []string               `json:"blockedReasons,omitempty"`
+	Lenses           LensesField            `json:"lenses,omitempty"`
+	LensStates       LensesField            `json:"lensStates,omitempty"`
+	PhaseLenses      map[string]LensesField `json:"phaseLenses,omitempty"`
+}
+
+// GetLensStates returns the map of lens states for the given phase (or top-level lenses).
+func (st *Status) GetLensStates(phase ...string) map[string]LensState {
+	if st == nil {
+		return nil
+	}
+	result := make(map[string]LensState)
+	if len(st.Lenses) > 0 {
+		for k, v := range st.Lenses {
+			result[k] = v
+		}
+	}
+	if len(st.LensStates) > 0 {
+		for k, v := range st.LensStates {
+			result[k] = v
+		}
+	}
+	if len(phase) > 0 && len(st.PhaseLenses) > 0 {
+		normPhase := strings.ToLower(strings.TrimSpace(phase[0]))
+		if pLenses, ok := st.PhaseLenses[normPhase]; ok {
+			for k, v := range pLenses {
+				result[k] = v
+			}
+		}
+	}
+	return result
 }
 
 // ParseStatus decodes and validates sdd-status JSON.
@@ -164,7 +232,7 @@ func CanonicalArtifactFilename(phase string) (string, error) {
 	case "explore":
 		return "explore.md", nil
 	case "propose", "proposal":
-		return "proposal.md", nil
+		return "propose.md", nil
 	case "spec", "specs":
 		return "spec.md", nil
 	case "design":
@@ -172,11 +240,13 @@ func CanonicalArtifactFilename(phase string) (string, error) {
 	case "tasks":
 		return "tasks.md", nil
 	case "apply":
-		return "apply-progress.md", nil
+		return "apply.md", nil
 	case "verify":
-		return "verify-report.md", nil
+		return "verify.md", nil
+	case "remediate":
+		return "remediate.md", nil
 	case "archive":
-		return "archive-report.md", nil
+		return "archive.md", nil
 	default:
 		return "", fmt.Errorf("%w: %q", ErrInvalidPhase, phase)
 	}
@@ -262,10 +332,14 @@ func (q *CLIStatusQuerier) QueryStatus(ctx context.Context, changeName string) (
 	return out, nil
 }
 
+// DispatchFunc is a function type for triggering synthesis lane dispatch.
+type DispatchFunc func(ctx context.Context, changeName, phase string) error
+
 // Adapter coordinates SDD status inspection, lens gating, and canonical artifact generation.
 type Adapter struct {
 	Querier       StatusQuerier
 	WorkspaceRoot string
+	Dispatcher    DispatchFunc
 }
 
 // NewAdapter creates a new phasespec Adapter.
@@ -282,7 +356,7 @@ type SynthesizeRequest struct {
 	Phase          string               `json:"phase"`
 	RequiredLenses []string             `json:"requiredLenses,omitempty"`
 	LensStates     map[string]LensState `json:"lensStates,omitempty"`
-	Content        []byte               `json:"content"`
+	Content        []byte               `json:"content,omitempty"`
 	Force          bool                 `json:"force,omitempty"`
 }
 
@@ -292,10 +366,11 @@ type SynthesizeResult struct {
 	Phase        string  `json:"phase"`
 	ArtifactPath string  `json:"artifactPath"`
 	Written      bool    `json:"written"`
+	Dispatched   bool    `json:"dispatched,omitempty"`
 	Status       *Status `json:"status,omitempty"`
 }
 
-// Synthesize executes the synthesis sequencing checks and writes the canonical phase artifact when permitted.
+// Synthesize executes the synthesis sequencing checks and writes the canonical phase artifact or dispatches synthesis lane when permitted.
 func (a *Adapter) Synthesize(ctx context.Context, req SynthesizeRequest) (*SynthesizeResult, error) {
 	if strings.TrimSpace(req.ChangeName) == "" || strings.Contains(req.ChangeName, "..") || strings.ContainsAny(req.ChangeName, "/\\") {
 		return nil, fmt.Errorf("%w: %q", ErrInvalidChange, req.ChangeName)
@@ -316,65 +391,111 @@ func (a *Adapter) Synthesize(ctx context.Context, req SynthesizeRequest) (*Synth
 		}
 		status = st
 
-		// Check if phase is already complete
-		if !req.Force && isPhaseComplete(st, req.Phase) {
+		// Check if phase is already complete (status done + artifact exists on disk)
+		if !req.Force && isPhaseComplete(a.WorkspaceRoot, req.ChangeName, st, req.Phase) {
 			relPath, _ := CanonicalArtifactPath(req.ChangeName, req.Phase)
 			return &SynthesizeResult{
 				ChangeName:   req.ChangeName,
 				Phase:        req.Phase,
 				ArtifactPath: relPath,
 				Written:      false,
+				Dispatched:   false,
 				Status:       st,
 			}, nil
 		}
 	}
 
+	lensStates := req.LensStates
+	if len(lensStates) == 0 && status != nil {
+		lensStates = status.GetLensStates(req.Phase)
+	}
+
 	// Verify lenses eligibility
-	if err := CheckSynthesisEligibility(req.Phase, req.RequiredLenses, req.LensStates); err != nil {
+	if err := CheckSynthesisEligibility(req.Phase, req.RequiredLenses, lensStates); err != nil {
 		return nil, err
 	}
 
-	// Write canonical artifact
-	relPath, err := WriteCanonicalArtifact(a.WorkspaceRoot, req.ChangeName, req.Phase, req.Content)
+	relPath, err := CanonicalArtifactPath(req.ChangeName, req.Phase)
 	if err != nil {
 		return nil, err
+	}
+
+	// If content is provided, write the canonical artifact directly
+	if len(req.Content) > 0 {
+		writtenPath, err := WriteCanonicalArtifact(a.WorkspaceRoot, req.ChangeName, req.Phase, req.Content)
+		if err != nil {
+			return nil, err
+		}
+
+		return &SynthesizeResult{
+			ChangeName:   req.ChangeName,
+			Phase:        req.Phase,
+			ArtifactPath: writtenPath,
+			Written:      true,
+			Dispatched:   false,
+			Status:       status,
+		}, nil
+	}
+
+	// When content is not provided, trigger synthesis lane dispatch if a dispatcher is configured
+	dispatched := false
+	if a.Dispatcher != nil {
+		if err := a.Dispatcher(ctx, req.ChangeName, req.Phase); err != nil {
+			return nil, fmt.Errorf("phasespec: dispatch synthesis lane: %w", err)
+		}
+		dispatched = true
 	}
 
 	return &SynthesizeResult{
 		ChangeName:   req.ChangeName,
 		Phase:        req.Phase,
 		ArtifactPath: relPath,
-		Written:      true,
+		Written:      false,
+		Dispatched:   dispatched,
 		Status:       status,
 	}, nil
 }
 
-func isPhaseComplete(st *Status, phase string) bool {
+func isPhaseComplete(workspaceRoot, change string, st *Status, phase string) bool {
 	if st == nil {
 		return false
 	}
 	normPhase := strings.ToLower(strings.TrimSpace(phase))
+	statusDone := false
 	switch normPhase {
 	case "propose", "proposal":
-		if st.Artifacts["proposal"] == "done" || st.Dependencies["proposal"] == "all_done" {
-			return true
+		if st.Artifacts["proposal"] == "done" || st.Artifacts["propose"] == "done" || st.Dependencies["proposal"] == "all_done" || st.Dependencies["propose"] == "all_done" {
+			statusDone = true
 		}
 	case "spec", "specs":
-		if st.Artifacts["specs"] == "done" || st.Dependencies["specs"] == "all_done" {
-			return true
+		if st.Artifacts["specs"] == "done" || st.Artifacts["spec"] == "done" || st.Dependencies["specs"] == "all_done" || st.Dependencies["spec"] == "all_done" {
+			statusDone = true
 		}
 	case "design":
 		if st.Artifacts["design"] == "done" || st.Dependencies["design"] == "all_done" {
-			return true
+			statusDone = true
 		}
 	case "tasks":
 		if st.Artifacts["tasks"] == "done" || st.Dependencies["tasks"] == "all_done" {
-			return true
+			statusDone = true
 		}
 	default:
-		if st.Artifacts[normPhase] == "done" {
-			return true
+		if st.Artifacts[normPhase] == "done" || st.Dependencies[normPhase] == "all_done" {
+			statusDone = true
 		}
 	}
-	return false
+	if !statusDone {
+		return false
+	}
+
+	relPath, err := CanonicalArtifactPath(change, phase)
+	if err != nil {
+		return false
+	}
+	fullPath := filepath.Join(workspaceRoot, relPath)
+	info, err := os.Stat(fullPath)
+	if err != nil || info.IsDir() {
+		return false
+	}
+	return true
 }

@@ -2397,11 +2397,12 @@ func phaseDispatch(ctx context.Context, args []string, stdout, stderr io.Writer)
 	fs := flag.NewFlagSet("phase", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
-		fmt.Fprintln(stderr, "usage: lucind-ai phase <name> [--change <name>] [--force]")
+		fmt.Fprintln(stderr, "usage: lucind-ai phase <name> [--change <name>] [--force] [--packet <path>]")
 		fs.PrintDefaults()
 	}
 	change := fs.String("change", "", "target change name (default: active change from sdd-status)")
 	force := fs.Bool("force", false, "force synthesis even if phase is complete")
+	packetFlag := fs.String("packet", "", "path to synthesis packet (default: generated synthesis packet or .lucind/packets/<phase>-<change>-synthesis.md)")
 
 	var nonFlags []string
 	for i := 0; i < len(args); i++ {
@@ -2438,6 +2439,75 @@ func phaseDispatch(ctx context.Context, args []string, stdout, stderr io.Writer)
 	querier := defaultStatusQuerier(primaryRoot)
 	adapter := phasespec.NewAdapter(querier, primaryRoot)
 
+	adapter.Dispatcher = func(ctx context.Context, changeName, phase string) error {
+		normPhase := strings.ToLower(strings.TrimSpace(phase))
+		packetPath := strings.TrimSpace(*packetFlag)
+		if packetPath == "" {
+			cand1 := filepath.Join(primaryRoot, ".lucind", "packets", fmt.Sprintf("%s-%s-synthesis.md", normPhase, changeName))
+			cand2 := filepath.Join(primaryRoot, "openspec", "changes", changeName, "packets", fmt.Sprintf("%s-%s-synthesis.md", normPhase, changeName))
+			cand3 := filepath.Join(primaryRoot, "openspec", "changes", changeName, fmt.Sprintf("%s-synthesis.md", normPhase))
+			if _, err := os.Stat(cand1); err == nil {
+				packetPath = cand1
+			} else if _, err := os.Stat(cand2); err == nil {
+				packetPath = cand2
+			} else if _, err := os.Stat(cand3); err == nil {
+				packetPath = cand3
+			} else {
+				headSHA, _ := resolveAdmissionRefSHA(ctx, primaryRoot, "HEAD")
+				canonicalFilename, err := phasespec.CanonicalArtifactFilename(normPhase)
+				if err != nil {
+					return err
+				}
+				packetDir := filepath.Join(primaryRoot, ".lucind", "packets")
+				if err := os.MkdirAll(packetDir, 0755); err != nil {
+					return fmt.Errorf("create packets dir: %w", err)
+				}
+				packetPath = cand1
+				packetContent := fmt.Sprintf(`---
+id: %s-%s-synthesis
+executor: agy
+model: gemini-3.7-flash-high
+routed_by: synthesis
+lane_role: synthesis
+sdd_phase: %s
+legacy_main: true
+expected_parent_sha: %s
+allowed_paths: ["openspec/changes/%s/%s", "openspec/changes/%s/%s-synthesis-notes.md"]
+---
+
+# Packet %s-%s-synthesis
+
+## Goal
+Synthesize canonical %s artifact for change %s.
+
+## Preconditions
+- All required lenses are merged.
+
+## Done criteria
+- [ ] Canonical artifact openspec/changes/%s/%s is written and committed.
+
+## Hard stops
+- Required lenses are missing or unmerged.
+
+## Return
+Write the result envelope to .lucind/result.json in this worktree.
+Validate it against .lucind/result.schema.json before writing.
+After you commit, report success.
+`, normPhase, changeName, normPhase, headSHA, changeName, canonicalFilename, changeName, normPhase,
+					normPhase, changeName, normPhase, changeName, changeName, canonicalFilename)
+				if err := os.WriteFile(packetPath, []byte(packetContent), 0644); err != nil {
+					return fmt.Errorf("write synthesis packet: %w", err)
+				}
+			}
+		}
+
+		code := runDispatch(ctx, []string{"--packet", packetPath}, stdout, stderr)
+		if code != 0 {
+			return fmt.Errorf("dispatch exit code %d", code)
+		}
+		return nil
+	}
+
 	changeName := strings.TrimSpace(*change)
 	if changeName == "" {
 		raw, err := querier.QueryStatus(ctx, "")
@@ -2465,6 +2535,8 @@ func phaseDispatch(ctx context.Context, args []string, stdout, stderr io.Writer)
 
 	if res.Written {
 		fmt.Fprintf(stdout, "phase %s synthesized: %s\n", res.Phase, res.ArtifactPath)
+	} else if res.Dispatched {
+		fmt.Fprintf(stdout, "phase %s synthesis dispatched: %s\n", res.Phase, res.ArtifactPath)
 	} else {
 		fmt.Fprintf(stdout, "phase %s is already complete: %s\n", res.Phase, res.ArtifactPath)
 	}

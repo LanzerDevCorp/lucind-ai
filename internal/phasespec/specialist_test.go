@@ -25,7 +25,7 @@ func TestPhaseSpecialist(t *testing.T) {
   },
   "changeRoot": "/workspace/openspec/changes/` + change + `",
   "artifactPaths": {
-    "proposal": ["/workspace/openspec/changes/` + change + `/proposal.md"],
+    "proposal": ["/workspace/openspec/changes/` + change + `/propose.md"],
     "design": [],
     "tasks": []
   },
@@ -88,7 +88,7 @@ func TestPhaseSpecialist(t *testing.T) {
 		t.Fatal("expected res.Written = true")
 	}
 
-	expectedRel := filepath.Join("openspec", "changes", change, "proposal.md")
+	expectedRel := filepath.Join("openspec", "changes", change, "propose.md")
 	if res.ArtifactPath != expectedRel {
 		t.Fatalf("res.ArtifactPath = %q, want %q", res.ArtifactPath, expectedRel)
 	}

@@ -343,3 +343,52 @@ func TestAdmitDispatchBatch_PopulatesRequiredSkillsOnContractAndManual(t *testin
 		t.Fatalf("typed packet body lacks ## Required skills section: %s", admitted[1].Body)
 	}
 }
+
+func TestAdmitDispatchBatch_LegacyPhaseOmission(t *testing.T) {
+	tempDir := t.TempDir()
+	skillsDir := filepath.Join(tempDir, "skills")
+	helperCreateSkill(t, skillsDir, "lucind-executor")
+
+	lucindDir := filepath.Join(tempDir, ".lucind")
+	if err := os.MkdirAll(lucindDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	rootsContent := "roots:\n  - " + skillsDir + "\n"
+	if err := os.WriteFile(filepath.Join(lucindDir, "skill-roots.yaml"), []byte(rootsContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	origResolve := resolveAdmissionRefSHA
+	defer func() { resolveAdmissionRefSHA = origResolve }()
+	resolveAdmissionRefSHA = func(context.Context, string, string) (string, error) {
+		return strings.Repeat("a", 40), nil
+	}
+
+	manualBody := "## Done criteria\n- criterion 1\n\n## Return\nWrite the result envelope to .lucind/result.json in this worktree.\nValidate it against .lucind/result.schema.json before writing.\nAfter you commit, report success.\n"
+	inputs := []dispatchAuthoringInput{
+		{
+			Packet: packet.Packet{
+				ID:                "legacy-manual",
+				Executor:          "agy",
+				RoutedBy:          "legacy",
+				SDDPhase:          "unvalidated_custom_phase",
+				LaneRole:          "",
+				LegacyMain:        true,
+				ExpectedParentSHA: strings.Repeat("a", 40),
+				Body:              manualBody,
+			},
+		},
+	}
+
+	admitted, err := admitDispatchBatch(context.Background(), tempDir, inputs)
+	if err != nil {
+		t.Fatalf("unexpected admission error for legacy packet: %v", err)
+	}
+	if len(admitted) != 1 {
+		t.Fatalf("expected 1 admitted packet, got %d", len(admitted))
+	}
+	wantSkills := []string{"lucind-executor"}
+	if !reflect.DeepEqual(admitted[0].RequiredSkills, wantSkills) {
+		t.Fatalf("admitted RequiredSkills = %v, want %v", admitted[0].RequiredSkills, wantSkills)
+	}
+}
