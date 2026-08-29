@@ -1,36 +1,36 @@
 # Verify: Skill Provisioning and the SDD Phase Specialist
 
-## Result: BLOCKED
+## Result: BLOCKED (second pass)
+
+## History
+
+- **First pass** (commit `07b359c`): BLOCKED. Dual `agy`+`cursor-agent` judgment disagreed; `cursor-agent` cited 8 findings, 3 independently confirmed by direct code read. Remediated in commits `465ffdc`..`8dfff15`, `2b08d27`.
+- **Second pass** (commit `a266179`, this document): BLOCKED again. All 7 first-pass findings are now genuinely fixed and confirmed by both judges independently. But `cursor-agent` surfaced 3 new residual findings while re-tracing the production paths; 2 of the 3 are independently confirmed real by direct code inspection below. `agy` again reported an unconditional pass and again missed what `cursor-agent` caught — the same asymmetry as the first pass.
 
 ## Stage 1: Mechanical check
 
-`lucind-ai check` at commit `07b359c6e9ace392613a9d2e5b8d24af28fdb95b` — PASSED (exit 0, full `go build ./...` + `go test ./... -race -count=1` green). See `verify-mechanical.log`. An earlier run at the same commit failed only on `TestRunLegacyModeDispatch`, an unrelated pre-existing test that shells out to a live `agy` OAuth session; reproduced twice at the identical commit with different outcomes, confirming it is environmental, not a regression.
+`lucind-ai check` at commit `a2661795bd7e5ea07a27295e2bd891a572cf95ec` — PASSED (exit 0, full `go build ./...` + `go test ./... -race -count=1` green). Two earlier runs at the same commit failed on different, unrelated tests (`TestRunSequentialInvocationsProduceDistinctRunIDs` — `agy` OAuth timeout in a subprocess test; `TestLeaseAcquisitionAndMonotonicFence`/`TestConcurrentLeaseAcquisition` — a documented known timing/concurrency flake under `internal/feature`, listed in `references/operations/troubleshooting.md`). Neither touches any file this change modifies; confirmed environmental by reproducing different failures on the identical commit.
 
-## Stage 2: Dual qualitative judgment
+## Stage 2: Dual qualitative judgment (re-verify)
 
-Dispatched `agy` (gemini-3.7-flash-high) and `cursor-agent` (cursor-grok-4.6-high), both read-only, against the frozen mechanical evidence.
+Both `agy` and `cursor-agent` confirmed all 7 first-pass findings FIXED, with converging file:line citations (e.g. both independently cite `internal/run/run.go:445-454`/`:451` for finding 1, `internal/phasespec/phasespec.go:229-253` for finding 3). This corroboration across two independently-dispatched judges is strong evidence the 7 original findings are genuinely resolved.
 
-- `agy`: reported unconditional pass across all 8 delta specs. Its "terminal consumer" citations traced only the *read* side of each seam (e.g. that `enforceRequiredSkills` reads `Envelope.SkillsLoaded`), never the *write* side (whether the field is actually populated on the real dispatch path). This verdict is not reliable evidence on its own.
-- `cursor-agent`: reported 8 findings with `file:line` citations, several disputing that production code paths actually do what the passing tests assume.
+`cursor-agent` additionally reported 3 residual findings not present in the first pass (finding numbering continues from the first pass's 1-8):
+
+9. Canonical artifact filename mismatch against this repo's own live convention: `CanonicalArtifactFilename("propose")` returns `propose.md`, but this repo's own `gentle-ai sdd-status` — confirmed directly in this very SDD session's own dispatcher output — uses `proposal.md`. `plugin/claude-code/skills/lucind-ai/references/strategies/fan-out.md:12` and packet templates also say `proposal.md`. `isPhaseComplete`'s `os.Stat` only checks the canonical path, so a change using this repo's real `proposal.md` convention will never be seen as complete by the specialist.
+10. The specialist-generated synthesis packet (`cmd/lucind-ai/cli.go`, the manual `packetContent` string built in the dynamic-dispatch branch) has no `## Required skills` section in its body — only `LUCIND_REQUIRED_SKILLS` env delivery applies on this path. The compiled-contract path (`internal/packetauthor/compile.go`'s `renderBody`) still emits the section correctly; this gap is specific to the specialist's own hand-built packet string.
+11. Lens eligibility depends on status-JSON keys (`lenses`/`lensStates`/`phaseLenses`) that have no checked-in live `gentle-ai sdd-status` contract proving they exist; tests only fabricate them. Lower confidence — flagged as schema-coupling risk, not confirmed broken.
 
 ## Stage 3: Evidence cross-checking
 
-Independently verified against the candidate (not just re-reading the envelopes):
+Independently verified against the candidate:
 
-1. **CONFIRMED** — `internal/run/run.go:445-453` builds `executor.Request{...}` and copies `ReadOnlyPaths` but never copies `RequiredSkills`/`AdhocSkills`. `LUCIND_REQUIRED_SKILLS` is therefore never injected on the real `run.Execute` path; it only appears in `internal/executor` unit tests because those tests set `Request.RequiredSkills` directly.
-2. **CONFIRMED** — `cmd/lucind-ai/cli.go:2452-2460` (`phaseDispatch`) calls `adapter.Synthesize(ctx, phasespec.SynthesizeRequest{ChangeName, Phase, Force})` with no `LensStates` and no `Content`. The specialist never calls `admitDispatchBatch`/`runDispatch`, so `lucind-ai phase <name>` cannot actually dispatch a synthesis lane in production — only the already-complete no-op path is reachable from the CLI.
-3. **CONFIRMED** — `plugin/opencode/skills/lucind-ai/assets/*.md` still contain hardcoded `~/.claude/skills/...` paths (verified via `git grep`); only the `plugin/claude-code` sibling tree was updated. Task 4.2 named only `plugin/claude-code/skills/lucind-ai/assets/*.md`; design.md's File Changes list did not scope out the OpenCode sibling.
-
-Not independently re-verified line-by-line but corroborated by consistent, specific citations from the same lane whose first three claims all checked out on inspection:
-
-4. Lens accepted/merged state from `gentle-ai sdd-status` is never passed into `Synthesize` (`phasespec.Status` carries no lens fields; only test code constructs `LensStates` directly) — same root cause as finding 2.
-5. Canonical artifact filenames (`proposal.md`, `apply-progress.md`, `verify-report.md`, `archive-report.md`) diverge from the spec's named files (`propose.md` etc., `phase-specialist-dispatch/spec.md:7,13`).
-6. `admitDispatchBatch` → `skillset.Derive` fail-closes on any `sdd_phase` outside the closed set, even for legacy packets that omit `lane_role` (which `packet.Parse` otherwise still accepts per the backward-compatibility scenario) — a regression against `read-only-packet-schema`'s own "omitted lane_role preserves backward compatibility" scenario.
-7. Design Decision 8 required `LaneRole` in the accept decode struct in lockstep with `packetDigest`; only `RequiredSkills` was added (`internal/accept/accept.go:275-287` has no `LaneRole` field), so `packetDigest`'s inclusion of `LaneRole` is never cross-checked at acceptance.
-8. `phasespec.isPhaseComplete` treats a `done` status-JSON token as sufficient without checking that the canonical artifact file actually exists on disk, contrary to the unchanged-phase scenario's stated precondition.
+- **CONFIRMED** — Finding 9: `internal/phasespec/phasespec.go:229-253` (`CanonicalArtifactFilename`) returns `"propose.md"` for phase `"propose"`. This exact SDD session's own `gentle-ai sdd-continue skill-provisioning-and-phase-specialist` output (captured earlier in this session, before any code was touched) shows `artifactPaths.proposal: ["...proposal.md"]` — i.e., the actual, live artifact for this very change is named `proposal.md`, not `propose.md`. `fan-out.md:12` independently confirms `proposal.md` is the documented convention. This is not a hypothetical edge case; it reproduces against this change's own on-disk artifact.
+- **CONFIRMED** — Finding 10: read `cmd/lucind-ai/cli.go` around the dynamic synthesis-packet construction (the `packetContent := fmt.Sprintf(...)` block). Its body has `## Goal`, `## Preconditions`, `## Done criteria`, `## Hard stops`, `## Return` — no `## Required skills` section, unlike `compile.go`'s `renderBody`.
+- Not independently re-verified (lower confidence, treated as a flagged risk rather than a confirmed defect): finding 11.
 
 ## Disposition
 
-Per this repo's SDD strategy (dual-dispatch verify, evidence cross-checking): **confirmed violations produce BLOCKED and remediation tasks**, not PASSED. The mechanical gate and 21/21 `tasks.md` checkboxes are necessary but were not sufficient — three of the eight qualitative findings are independently confirmed real production-wiring gaps, not disputed by any contrary evidence, and the remaining five are corroborated by concrete citations from the same source.
+Two of three new residual findings are confirmed real defects reachable on the production phase-specialist path — finding 9 in particular is not a corner case, it breaks this change's own live artifact. Per this repo's SDD strategy, confirmed violations produce BLOCKED and remediation tasks. Findings 1-8 do not need further work; the remediation scope for this round is narrow (fixes 9 and 10 only; 11 is a flagged risk to note in design.md/tasks.md, not a required fix — no live `sdd-status` contract sample exists in this repo to validate against, and the current mock-based test strategy is what `design.md` itself specifies as the intended seam).
 
-`tasks.md` items 2.2/2.3 (dual delivery), 3.2/3.3 (phase specialist dispatch + canonical artifacts + backward-compat regression), 2.4 (accept lockstep), and 4.2 (OpenCode assets) are reopened — see amended checkboxes and the "Remediation" subsection appended to `tasks.md`. Re-run this verify sequence after remediation lands.
+See `tasks.md` for the reopened items (6.1, 6.2) and the risk note (6.3).

@@ -79,18 +79,25 @@ Wave mapping onto the checklist: 1 → 1.1–1.3, 1.6; 2 → 1.4–1.5, 2.1–2.
 ## Phase 4: Skills, Templates & Documentation
 
 - [x] 4.1 Modify `.agents/skills/lucind-*` to drop executor-named skills; do not author stub `lucind-archive` or `lucind-ultrafixer` (`design.md:55-60,108`).
-- [ ] 4.2 Modify `plugin/claude-code/skills/lucind-ai/assets/*.md` to drop hardcoded dispatched-skill `~/.claude/skills/...` paths and align templates with `## Required skills` (`design.md:108`). Do not edit `.opencode/agent/lucind-packet-author.md` (absent from File Changes; `:14-32` has no hardcoded skill paths). **Reopened by verify.md finding 7**: the `plugin/opencode/skills/lucind-ai/assets/*.md` sibling tree still has hardcoded `~/.claude/skills/...` paths; only `plugin/claude-code` was updated.
+- [x] 4.2 Modify `plugin/claude-code/skills/lucind-ai/assets/*.md` to drop hardcoded dispatched-skill `~/.claude/skills/...` paths and align templates with `## Required skills` (`design.md:108`). Do not edit `.opencode/agent/lucind-packet-author.md` (absent from File Changes; `:14-32` has no hardcoded skill paths). Fixed in both `plugin/claude-code` (first pass) and `plugin/opencode` (5.6); confirmed by re-verify, no remaining `~/.claude/skills/` matches in either tree.
 
-## Remediation (post-verify, see verify.md)
+## Remediation (post-verify round 1, see verify.md — all fixed, confirmed by dual re-verify judgment)
 
-- [ ] 5.1 `run.go`'s `executor.Request{...}` construction must copy `p.RequiredSkills`/`p.AdhocSkills` (or whatever the resolved required-skills field is named) so `requestEnv` actually injects `LUCIND_REQUIRED_SKILLS` on real dispatches, not just in `internal/executor` unit tests that set the field directly.
-- [ ] 5.2 `phaseDispatch` must populate `SynthesizeRequest.LensStates`/`Content` from parsed `sdd-status` JSON (or `phasespec.Status` must gain lens fields consumed by `Synthesize`), and `Synthesize` must actually call `admitDispatchBatch`/`runDispatch` for an incomplete phase — not only report success on the already-complete path.
-- [ ] 5.3 Reconcile canonical artifact filenames between `phasespec.go` (`proposal.md`, `apply-progress.md`, `verify-report.md`, `archive-report.md`) and the spec's named files (`propose.md` etc., `phase-specialist-dispatch/spec.md:7,13`) — pick one and update the other.
-- [ ] 5.4 Fix the `admitDispatchBatch` → `skillset.Derive` regression that fail-closes any legacy packet with a non-closed `sdd_phase` when `lane_role` is omitted, restoring the backward-compatibility scenario in `read-only-packet-schema`.
-- [ ] 5.5 Add `LaneRole` to the `accept.go` decode struct alongside `RequiredSkills`, per Design Decision 8's field-list lockstep with `packetDigest`.
-- [ ] 5.6 Drop hardcoded `~/.claude/skills/...` paths from `plugin/opencode/skills/lucind-ai/assets/*.md`, matching the `plugin/claude-code` sibling.
-- [ ] 5.7 `phasespec.isPhaseComplete` must check that the canonical artifact file exists on disk, not just that the status-JSON token is `done`.
-- [ ] 5.8 Re-run the verify sequence (`lucind-ai check` + dual `agy`/`cursor-agent` dispatch) once 5.1–5.7 land, and confirm the specific `file:line` citations above no longer reproduce.
+- [x] 5.1 `run.go`'s `executor.Request{...}` construction must copy `p.RequiredSkills`/`p.AdhocSkills` (or whatever the resolved required-skills field is named) so `requestEnv` actually injects `LUCIND_REQUIRED_SKILLS` on real dispatches, not just in `internal/executor` unit tests that set the field directly.
+- [x] 5.2 `phaseDispatch` must populate `SynthesizeRequest.LensStates`/`Content` from parsed `sdd-status` JSON (or `phasespec.Status` must gain lens fields consumed by `Synthesize`), and `Synthesize` must actually call `admitDispatchBatch`/`runDispatch` for an incomplete phase — not only report success on the already-complete path.
+- [x] 5.3 Reconcile canonical artifact filenames between `phasespec.go` (`proposal.md`, `apply-progress.md`, `verify-report.md`, `archive-report.md`) and the spec's named files (`propose.md` etc., `phase-specialist-dispatch/spec.md:7,13`) — pick one and update the other. Fixed against the delta spec's own naming; **but see 6.1 — this reopened a different, pre-existing mismatch against this repo's own live artifact convention.**
+- [x] 5.4 Fix the `admitDispatchBatch` → `skillset.Derive` regression that fail-closes any legacy packet with a non-closed `sdd_phase` when `lane_role` is omitted, restoring the backward-compatibility scenario in `read-only-packet-schema`.
+- [x] 5.5 Add `LaneRole` to the `accept.go` decode struct alongside `RequiredSkills`, per Design Decision 8's field-list lockstep with `packetDigest`.
+- [x] 5.6 Drop hardcoded `~/.claude/skills/...` paths from `plugin/opencode/skills/lucind-ai/assets/*.md`, matching the `plugin/claude-code` sibling.
+- [x] 5.7 `phasespec.isPhaseComplete` must check that the canonical artifact file exists on disk, not just that the status-JSON token is `done`.
+- [x] 5.8 Re-run the verify sequence (`lucind-ai check` + dual `agy`/`cursor-agent` dispatch) once 5.1–5.7 land, and confirm the specific `file:line` citations above no longer reproduce. Done: both judges confirmed all 7 fixed with converging citations.
+
+## Remediation round 2 (post-re-verify, see verify.md second-pass BLOCKED)
+
+- [ ] 6.1 `CanonicalArtifactFilename("propose")` returns `propose.md`, but this repo's own live `gentle-ai sdd-status` uses `proposal.md` (confirmed directly against this change's own `artifactPaths.proposal` in `sdd-status` output, and against `plugin/claude-code/skills/lucind-ai/references/strategies/fan-out.md:12` and existing packet templates' `allowed_paths`). `isPhaseComplete`'s disk check will never find this repo's real `proposal.md`. Fix `CanonicalArtifactFilename`/`CanonicalArtifactPath` to emit `proposal.md` for the propose phase (matching this repo's actual convention over the delta spec's literal scenario text), or reconcile the delta spec itself if `propose.md` was intentional — do not leave the mismatch.
+- [ ] 6.2 The specialist's dynamically-generated synthesis packet body (the `packetContent := fmt.Sprintf(...)` string in `cmd/lucind-ai/cli.go`'s dispatch branch) has no `## Required skills` section — dual delivery is env-only on this specific path, unlike the compiled-contract path (`internal/packetauthor/compile.go`'s `renderBody`, which is correct). Add the equivalent section to the specialist's hand-built packet body.
+- [ ] 6.3 (Risk note, not required for this change) Lens eligibility on the production CLI path depends on status-JSON keys (`lenses`/`lensStates`/`phaseLenses`) with no checked-in live `gentle-ai sdd-status` contract sample proving they exist; only tests fabricate them. `design.md`'s own Testing Strategy names mock `sdd-status` as the intended E2E seam, so this is accepted residual schema-coupling risk — flag it in a follow-up change if a live contract sample becomes available, do not block this change on it.
+- [ ] 6.4 Re-run the verify sequence once 6.1–6.2 land, and confirm neither reproduces.
 
 ## Dependency order
 
