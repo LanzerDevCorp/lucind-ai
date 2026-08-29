@@ -157,6 +157,11 @@
         }
       }
     },
+    "skills_loaded": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Skills loaded by the executor during lane execution."
+    },
     "session_id": {
       "type": "string",
       "description": "Conversation or session id needed to resume this packet."
