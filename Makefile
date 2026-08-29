@@ -1,4 +1,4 @@
-.PHONY: install verify-plugin-content bump-plugin-version
+.PHONY: install verify-plugin-content verify-opencode-plugin install-opencode-plugin bump-plugin-version
 
 # install builds lucind-ai with a real, traceable version string and
 # installs it to $GOPATH/bin (already on PATH), so `lucind-ai -v` always
@@ -16,6 +16,12 @@ install:
 # ordinary commit (see internal/skillcontent's package doc for why).
 verify-plugin-content:
 	go run ./cmd/plugincontent verify
+
+verify-opencode-plugin:
+	go run ./cmd/plugincontent verify-opencode
+
+install-opencode-plugin:
+	./plugin/opencode/install.sh
 
 # bump-plugin-version is the ONLY place a plugin version bump should
 # originate from: it bumps plugin.json and marketplace.json to VERSION

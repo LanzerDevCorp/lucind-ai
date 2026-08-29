@@ -207,3 +207,26 @@ func TestHashDirIsOrderAndPathSensitive(t *testing.T) {
 		t.Errorf("HashDir(dirA) not deterministic across runs: %q vs %q", sumA, sumAAgain)
 	}
 }
+
+func TestVerifySkillCopyDetectsByteDrift(t *testing.T) {
+	repoRoot := t.TempDir()
+	canonical := filepath.Join(repoRoot, SkillDirRelPath)
+	copy := filepath.Join(repoRoot, OpenCodeSkillDirRelPath)
+	for _, tree := range []string{canonical, copy} {
+		if err := os.MkdirAll(tree, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(tree, "SKILL.md"), []byte("same\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := VerifySkillCopy(repoRoot); err != nil {
+		t.Fatalf("VerifySkillCopy identical trees: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(copy, "SKILL.md"), []byte("drift\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := VerifySkillCopy(repoRoot); err == nil || !strings.Contains(err.Error(), "drifted") {
+		t.Fatalf("VerifySkillCopy drift error = %v", err)
+	}
+}

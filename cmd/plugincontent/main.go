@@ -27,6 +27,7 @@ func main() {
 
 const usage = `usage:
   plugincontent verify
+  plugincontent verify-opencode
   plugincontent bump-version <new-version>`
 
 func run(args []string, stdout, stderr io.Writer) int {
@@ -52,6 +53,18 @@ func run(args []string, stdout, stderr io.Writer) int {
 			return 1
 		}
 		fmt.Fprintln(stdout, "plugincontent: plugin.json version and recorded skill-content hash match the current tree")
+		return 0
+
+	case "verify-opencode":
+		if len(args) != 1 {
+			fmt.Fprintln(stderr, usage)
+			return 2
+		}
+		if err := skillcontent.VerifySkillCopy(repoRoot); err != nil {
+			fmt.Fprintf(stderr, "plugincontent: %v\n", err)
+			return 1
+		}
+		fmt.Fprintln(stdout, "plugincontent: OpenCode skill tree is byte-for-byte identical to the Claude Code source")
 		return 0
 
 	case "bump-version":
