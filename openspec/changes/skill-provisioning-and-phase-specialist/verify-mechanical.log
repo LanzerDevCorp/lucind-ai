@@ -1,0 +1,35 @@
+=== lucind-ai mechanical check ===
+Git Commit SHA: c47a933adf54886ec7e15d5e420e74b5c7ca7e63
+Command: lucind-checks.sh
+Duration: 1m56.729403596s
+Exit Code: 0
+==================================
+ok  	github.com/LanzerDevCorp/lucind-ai/cmd/lucind-ai	115.519s
+?   	github.com/LanzerDevCorp/lucind-ai/cmd/plugincontent	[no test files]
+ok  	github.com/LanzerDevCorp/lucind-ai/internal/accept	12.612s
+ok  	github.com/LanzerDevCorp/lucind-ai/internal/barrier	1.024s
+ok  	github.com/LanzerDevCorp/lucind-ai/internal/buildcheck	1.925s
+ok  	github.com/LanzerDevCorp/lucind-ai/internal/candidatechange	1.162s
+ok  	github.com/LanzerDevCorp/lucind-ai/internal/conflicttriage	3.866s
+ok  	github.com/LanzerDevCorp/lucind-ai/internal/conflicttriage/fixture	4.353s
+ok  	github.com/LanzerDevCorp/lucind-ai/internal/dag	1.061s
+ok  	github.com/LanzerDevCorp/lucind-ai/internal/executor	16.781s
+ok  	github.com/LanzerDevCorp/lucind-ai/internal/feature	8.018s
+ok  	github.com/LanzerDevCorp/lucind-ai/internal/integrate	9.618s
+ok  	github.com/LanzerDevCorp/lucind-ai/internal/lane	1.013s
+ok  	github.com/LanzerDevCorp/lucind-ai/internal/lanecheck	1.130s
+ok  	github.com/LanzerDevCorp/lucind-ai/internal/ledger	58.104s
+ok  	github.com/LanzerDevCorp/lucind-ai/internal/ledgerpath	1.016s
+ok  	github.com/LanzerDevCorp/lucind-ai/internal/lucindconfig	1.020s
+ok  	github.com/LanzerDevCorp/lucind-ai/internal/overlap	1.522s
+ok  	github.com/LanzerDevCorp/lucind-ai/internal/packet	1.038s
+ok  	github.com/LanzerDevCorp/lucind-ai/internal/packetauthor	1.027s
+ok  	github.com/LanzerDevCorp/lucind-ai/internal/phasespec	1.039s
+ok  	github.com/LanzerDevCorp/lucind-ai/internal/reconcile	11.943s
+ok  	github.com/LanzerDevCorp/lucind-ai/internal/resolve	1.782s
+ok  	github.com/LanzerDevCorp/lucind-ai/internal/result	1.051s
+ok  	github.com/LanzerDevCorp/lucind-ai/internal/run	78.687s
+ok  	github.com/LanzerDevCorp/lucind-ai/internal/skillcontent	1.028s
+ok  	github.com/LanzerDevCorp/lucind-ai/internal/skillroots	1.020s
+ok  	github.com/LanzerDevCorp/lucind-ai/internal/skillset	1.017s
+ok  	github.com/LanzerDevCorp/lucind-ai/internal/worktree	1.741s
