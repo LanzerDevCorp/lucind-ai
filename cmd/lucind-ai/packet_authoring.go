@@ -87,12 +87,17 @@ func admitDispatchBatch(ctx context.Context, primaryRoot string, inputs []dispat
 			}
 		}
 
+		effectivePhase := sddPhase
+		if laneRole == "" && !skillset.IsValidSDDPhase(sddPhase) {
+			effectivePhase = ""
+		}
+
 		stackSkills := cfg.StackSkills(laneRole)
 		var derived []string
 		var resolvedPaths []string
 		if sddPhase != "" || laneRole != "" || len(adhocSkills) > 0 || len(stackSkills) > 0 {
 			var err error
-			derived, err = skillset.Derive(sddPhase, laneRole, stackSkills, adhocSkills)
+			derived, err = skillset.Derive(effectivePhase, laneRole, stackSkills, adhocSkills)
 			if err != nil {
 				return nil, fmt.Errorf("derive skills for packet[%d]: %w", i, err)
 			}

@@ -277,7 +277,7 @@ func TestSynthesisGatedUntilLensesAcceptedAndMerged(t *testing.T) {
 				if !res.Written {
 					t.Fatal("expected artifact to be written")
 				}
-				expectedFile := filepath.Join(tempDir, "openspec", "changes", "test-change", "proposal.md")
+				expectedFile := filepath.Join(tempDir, "openspec", "changes", "test-change", "propose.md")
 				content, readErr := os.ReadFile(expectedFile)
 				if readErr != nil {
 					t.Fatalf("failed to read written file: %v", readErr)
@@ -307,15 +307,15 @@ func TestConsumesStatusAndWritesCanonicalArtifact(t *testing.T) {
 		expectedFilename string
 	}{
 		{"explore", "explore.md"},
-		{"propose", "proposal.md"},
-		{"proposal", "proposal.md"},
+		{"propose", "propose.md"},
+		{"proposal", "propose.md"},
 		{"spec", "spec.md"},
 		{"specs", "spec.md"},
 		{"design", "design.md"},
 		{"tasks", "tasks.md"},
-		{"apply", "apply-progress.md"},
-		{"verify", "verify-report.md"},
-		{"archive", "archive-report.md"},
+		{"apply", "apply.md"},
+		{"verify", "verify.md"},
+		{"archive", "archive.md"},
 	}
 
 	for _, pc := range phaseCases {
@@ -382,7 +382,7 @@ func TestPhaseAlreadyCompleteNoRedundantDispatch(t *testing.T) {
   },
   "changeRoot": "/workspace/openspec/changes/` + change + `",
   "artifactPaths": {
-    "proposal": ["/workspace/openspec/changes/` + change + `/proposal.md"]
+    "proposal": ["/workspace/openspec/changes/` + change + `/propose.md"]
   },
   "artifacts": {
     "proposal": "done",
@@ -401,7 +401,28 @@ func TestPhaseAlreadyCompleteNoRedundantDispatch(t *testing.T) {
 	querier := &mockStatusQuerier{output: completeStatusJSON}
 	adapter := phasespec.NewAdapter(querier, tempDir)
 
+	// Case 1: Status says done, but canonical artifact is NOT on disk yet -> must NOT treat as complete
 	req := phasespec.SynthesizeRequest{
+		ChangeName: change,
+		Phase:      "proposal",
+		LensStates: map[string]phasespec.LensState{
+			"lens-a": {ID: "lens-a", Accepted: true, Merged: true},
+			"lens-b": {ID: "lens-b", Accepted: true, Merged: true},
+			"lens-c": {ID: "lens-c", Accepted: true, Merged: true},
+		},
+		Content: []byte("# Canonical Proposal\n"),
+	}
+
+	res, err := adapter.Synthesize(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Synthesize failed when artifact missing from disk: %v", err)
+	}
+	if !res.Written {
+		t.Fatal("expected Written=true when canonical artifact missing from disk")
+	}
+
+	// Case 2: Status says done AND canonical artifact IS on disk -> must treat as complete (Written=false)
+	req2 := phasespec.SynthesizeRequest{
 		ChangeName: change,
 		Phase:      "proposal",
 		LensStates: map[string]phasespec.LensState{
@@ -412,17 +433,107 @@ func TestPhaseAlreadyCompleteNoRedundantDispatch(t *testing.T) {
 		Content: []byte("# New Redundant Proposal\n"),
 	}
 
-	res, err := adapter.Synthesize(context.Background(), req)
+	res2, err := adapter.Synthesize(context.Background(), req2)
 	if err != nil {
-		t.Fatalf("Synthesize failed on already complete phase: %v", err)
+		t.Fatalf("Synthesize failed on already complete phase with file on disk: %v", err)
 	}
-	if res.Written {
-		t.Fatal("expected Written=false on already complete phase, got true")
+	if res2.Written {
+		t.Fatal("expected Written=false on already complete phase with file on disk, got true")
+	}
+}
+
+func TestStatusLensesParsing(t *testing.T) {
+	t.Run("map format", func(t *testing.T) {
+		statusJSON := []byte(`{
+  "schemaName": "gentle-ai.sdd-status",
+  "schemaVersion": 1,
+  "changeName": "map-change",
+  "lenses": {
+    "lens-a": {"id": "lens-a", "accepted": true, "merged": true},
+    "lens-b": {"id": "lens-b", "accepted": true, "merged": false}
+  }
+}`)
+		st, err := phasespec.ParseStatus(statusJSON)
+		if err != nil {
+			t.Fatalf("ParseStatus error = %v", err)
+		}
+		lensStates := st.GetLensStates("propose")
+		if len(lensStates) != 2 {
+			t.Fatalf("expected 2 lens states, got %d", len(lensStates))
+		}
+		if !lensStates["lens-a"].Accepted || !lensStates["lens-a"].Merged {
+			t.Errorf("lens-a state = %+v", lensStates["lens-a"])
+		}
+		if !lensStates["lens-b"].Accepted || lensStates["lens-b"].Merged {
+			t.Errorf("lens-b state = %+v", lensStates["lens-b"])
+		}
+	})
+
+	t.Run("array format", func(t *testing.T) {
+		statusJSON := []byte(`{
+  "schemaName": "gentle-ai.sdd-status",
+  "schemaVersion": 1,
+  "changeName": "array-change",
+  "lenses": [
+    {"id": "lens-a", "accepted": true, "merged": true},
+    {"id": "lens-b", "accepted": true, "merged": true},
+    {"id": "lens-c", "accepted": true, "merged": true}
+  ]
+}`)
+		st, err := phasespec.ParseStatus(statusJSON)
+		if err != nil {
+			t.Fatalf("ParseStatus error = %v", err)
+		}
+		lensStates := st.GetLensStates()
+		if len(lensStates) != 3 {
+			t.Fatalf("expected 3 lens states, got %d", len(lensStates))
+		}
+		if !lensStates["lens-c"].Accepted || !lensStates["lens-c"].Merged {
+			t.Errorf("lens-c state = %+v", lensStates["lens-c"])
+		}
+	})
+}
+
+func TestSynthesizeTriggersDispatcher(t *testing.T) {
+	tempDir := t.TempDir()
+	change := "dispatch-change"
+
+	statusJSON := []byte(`{
+  "schemaName": "gentle-ai.sdd-status",
+  "schemaVersion": 1,
+  "changeName": "` + change + `",
+  "lenses": {
+    "lens-a": {"id": "lens-a", "accepted": true, "merged": true},
+    "lens-b": {"id": "lens-b", "accepted": true, "merged": true},
+    "lens-c": {"id": "lens-c", "accepted": true, "merged": true}
+  }
+}`)
+
+	querier := &mockStatusQuerier{output: statusJSON}
+	adapter := phasespec.NewAdapter(querier, tempDir)
+
+	dispatchedChange := ""
+	dispatchedPhase := ""
+	adapter.Dispatcher = func(_ context.Context, c, p string) error {
+		dispatchedChange = c
+		dispatchedPhase = p
+		return nil
 	}
 
-	// Verify no files were created
-	if files := countFilesInDir(t, tempDir); files != 0 {
-		t.Fatalf("expected 0 files created, got %d", files)
+	req := phasespec.SynthesizeRequest{
+		ChangeName: change,
+		Phase:      "propose",
+	}
+
+	res, err := adapter.Synthesize(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Synthesize failed: %v", err)
+	}
+	if !res.Dispatched {
+		t.Fatal("expected res.Dispatched = true")
+	}
+	if dispatchedChange != change || dispatchedPhase != "propose" {
+		t.Fatalf("dispatcher received change=%q phase=%q, want change=%q phase=%q", dispatchedChange, dispatchedPhase, change, "propose")
 	}
 }
 

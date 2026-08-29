@@ -2190,7 +2190,16 @@ type testDoneExecutor struct {
 func (e testDoneExecutor) Run(ctx context.Context, req executor.Request) (executor.Outcome, error) {
 	envelope := e.envelope
 	if envelope == "" {
-		envelope = `{"packet_id": "lane-1", "status": "done", "summary": "done", "hard_stops": []}`
+		skills := req.RequiredSkills
+		if skills == nil {
+			skills = []string{}
+		}
+		skillsJSON, _ := json.Marshal(skills)
+		pid := filepath.Base(req.WorktreePath)
+		if pid == "" || pid == "." {
+			pid = "lane-1"
+		}
+		envelope = fmt.Sprintf(`{"packet_id": %q, "status": "done", "summary": "done", "hard_stops": [], "skills_loaded": %s}`, pid, string(skillsJSON))
 	}
 	envelopePath := filepath.Join(req.WorktreePath, ".lucind", "result.json")
 	_ = os.MkdirAll(filepath.Dir(envelopePath), 0o755)
@@ -5637,7 +5646,7 @@ func TestPhaseSubcommandGatesPrematureSynthesis(t *testing.T) {
 	}
 
 	// Verify no artifact was created
-	artifactPath := filepath.Join(primaryRoot, "openspec", "changes", change, "proposal.md")
+	artifactPath := filepath.Join(primaryRoot, "openspec", "changes", change, "propose.md")
 	if _, err := os.Stat(artifactPath); err == nil {
 		t.Fatalf("expected artifact %s to NOT exist, but it was created", artifactPath)
 	}
@@ -5700,6 +5709,16 @@ func TestPhaseSubcommandPhaseAlreadyComplete(t *testing.T) {
 		return &mockCLIStatusQuerier{output: statusJSON}
 	}
 
+	// Create canonical artifact on disk
+	artifactDir := filepath.Join(primaryRoot, "openspec", "changes", change)
+	if err := os.MkdirAll(artifactDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	artifactPath := filepath.Join(artifactDir, "propose.md")
+	if err := os.WriteFile(artifactPath, []byte("# Propose\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
 	ctx := context.Background()
 	var stdout, stderr bytes.Buffer
 	code := run(ctx, []string{"phase", "propose", "--change", change}, &stdout, &stderr)
@@ -5708,6 +5727,101 @@ func TestPhaseSubcommandPhaseAlreadyComplete(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "already complete") {
 		t.Fatalf("expected stdout to report already complete, got %q", stdout.String())
+	}
+}
+
+func TestPhaseSubcommandPhaseNotCompleteIfFileMissingOnDisk(t *testing.T) {
+	primaryRoot := initRepo(t)
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(primaryRoot); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(cwd)
+
+	change := "test-change"
+	// Status says proposal: done, but we do NOT create propose.md on disk, and lenses are unmerged -> must gate synthesis and fail
+	statusJSON := []byte(`{
+  "schemaName": "gentle-ai.sdd-status",
+  "schemaVersion": 1,
+  "changeName": "` + change + `",
+  "artifacts": {
+    "proposal": "done"
+  },
+  "dependencies": {
+    "proposal": "all_done"
+  },
+  "nextRecommended": "spec"
+}`)
+
+	origQuerier := defaultStatusQuerier
+	defer func() { defaultStatusQuerier = origQuerier }()
+	defaultStatusQuerier = func(string) phasespec.StatusQuerier {
+		return &mockCLIStatusQuerier{output: statusJSON}
+	}
+
+	ctx := context.Background()
+	var stdout, stderr bytes.Buffer
+	code := run(ctx, []string{"phase", "propose", "--change", change}, &stdout, &stderr)
+	// Because file is missing from disk, it treats phase as incomplete; and because lenses are unmerged, it returns 1 (cannot start synthesis)
+	if code == 0 {
+		t.Fatalf("expected run(phase propose) to fail when artifact missing from disk and lenses unmerged, got 0; stdout=%s", stdout.String())
+	}
+	if strings.Contains(stdout.String(), "already complete") {
+		t.Fatalf("expected stdout to NOT say already complete, got %q", stdout.String())
+	}
+}
+
+func TestPhaseSubcommandDispatchesSynthesisWhenLensesMerged(t *testing.T) {
+	primaryRoot := initRepo(t)
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(primaryRoot); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(cwd)
+
+	change := "test-change"
+	statusJSON := []byte(`{
+  "schemaName": "gentle-ai.sdd-status",
+  "schemaVersion": 1,
+  "changeName": "` + change + `",
+  "lenses": {
+    "lens-a": {"id": "lens-a", "accepted": true, "merged": true},
+    "lens-b": {"id": "lens-b", "accepted": true, "merged": true},
+    "lens-c": {"id": "lens-c", "accepted": true, "merged": true}
+  },
+  "artifacts": {
+    "proposal": "missing"
+  },
+  "dependencies": {
+    "proposal": "ready"
+  },
+  "nextRecommended": "propose"
+}`)
+
+	origQuerier := defaultStatusQuerier
+	defer func() { defaultStatusQuerier = origQuerier }()
+	defaultStatusQuerier = func(string) phasespec.StatusQuerier {
+		return &mockCLIStatusQuerier{output: statusJSON}
+	}
+
+	overrideDispatchDeps(t, testDoneExecutor{
+		envelope: fmt.Sprintf(`{"packet_id": "propose-%s-synthesis", "status": "done", "summary": "done", "hard_stops": [], "skills_loaded": ["lucind-executor", "lucind-fan-out-lens", "sdd-propose"]}`, change),
+	})
+
+	ctx := context.Background()
+	var stdout, stderr bytes.Buffer
+	code := run(ctx, []string{"phase", "propose", "--change", change}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("expected run(phase propose) to exit 0, got %d; stderr=%s, stdout=%s", code, stderr.String(), stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "synthesis dispatched") {
+		t.Fatalf("expected stdout to report synthesis dispatched, got %q", stdout.String())
 	}
 }
 
