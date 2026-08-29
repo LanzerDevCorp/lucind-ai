@@ -30,7 +30,7 @@ The proposal phase for `<change-id>` is initiating. Lens B and lens C run in par
 
 Read these before writing a single line. This lens is scoped to candidate selection and approach, not to spec delta authoring or test matrices:
 
-1. `~/.claude/skills/sdd-propose/SKILL.md` — the real `gentle-ai` propose skill. It is the phase
+1. The real `gentle-ai` propose skill (delivered under `## Required skills`). It is the phase
    contract this draft feeds; read it rather than trusting this packet's paraphrase of it.
 2. `openspec/changes/<change-id>/explore.md` (if present).
 3. The entry points and module structure of the packages relevant to the proposal.
@@ -82,8 +82,8 @@ Do not write delta spec requirements or a rollback plan here. They belong to len
 
 ## Allowed paths outside the repository
 
-**Read-only**: `~/.claude/skills/sdd-propose/` — the real `gentle-ai` propose skill and its
-`references/`. Read the contract as written, not as this packet paraphrases it.
+**Read-only**: The real `gentle-ai` propose skill and its `references/` (delivered under
+`## Required skills`). Read the contract as written, not as this packet paraphrases it.
 
 Precedence between the two is **not symmetric**, so read this carefully.
 
@@ -180,6 +180,10 @@ Stop and return `status: blocked` — do not guess. Declare every one of these i
 <Ground-truth facts with file:line references: the packages involved, the
 relevant existing types, the change goals, and any decision the
 human has already made in conversation and does not want re-litigated.>
+
+## Required skills
+
+- <sdd-propose>
 
 ## Return
 

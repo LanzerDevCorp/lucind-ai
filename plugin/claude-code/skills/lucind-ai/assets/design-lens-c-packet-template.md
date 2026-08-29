@@ -34,14 +34,15 @@ Lens A owns the architecture decision and is running concurrently, so you do not
 
 Read these before writing a single line. This lens is scoped to failure, proof, and reversal — not to rationale or signatures:
 
-1. `~/.claude/skills/sdd-design/SKILL.md` — the real `gentle-ai` design skill. It is the phase
+1. The real `gentle-ai` design skill (delivered under `## Required skills`). It is the phase
    contract this draft feeds; read it rather than trusting this packet's paraphrase of it.
 2. `openspec/changes/<change-id>/proposal.md` and `openspec/changes/<change-id>/specs/`.
 3. The existing test files for the packages in scope. Read how this repository actually tests: what it asserts on, what it fakes, what it refuses to mock.
 4. The injection seams that already exist — runner interfaces, `Deps`-style structs, function fields, existing fakes and stubs. Name them by `file:line`.
-5. The threat-matrix table in `## Context` of this packet, and
-   `~/.claude/skills/sdd-design/references/threat-matrix.md` behind it. The embedded copy is the
-   frozen evidence; the reference is the authority. Report any drift between them.
+5. The threat-matrix table in `## Context` of this packet, and the
+   `references/threat-matrix.md` reference behind it (from the `sdd-design` skill delivered
+   under `## Required skills`). The embedded copy is the frozen evidence; the reference is the
+   authority. Report any drift between them.
 
 Never guess at a test seam. A seam you cannot cite does not exist yet, and saying so is the useful answer.
 
@@ -121,8 +122,8 @@ Rollback is yours even though it is shaped like an architecture decision. Everyt
 
 ## Allowed paths outside the repository
 
-**Read-only**: `~/.claude/skills/sdd-design/` — the real `gentle-ai` design skill and its
-`references/`. Read the contract as written, not as this packet paraphrases it.
+**Read-only**: The real `gentle-ai` design skill and its `references/` (delivered under
+`## Required skills`). Read the contract as written, not as this packet paraphrases it.
 
 Precedence between the two is **not symmetric**, so read this carefully.
 
@@ -230,6 +231,10 @@ read it only from the skill reference above.>
 <Facts with file:line references: the test files and seams in scope, the current
 schema/ledger/envelope versions, and any decision the human has already made in
 conversation and does not want re-litigated.>
+
+## Required skills
+
+- <sdd-design>
 
 ## Return
 

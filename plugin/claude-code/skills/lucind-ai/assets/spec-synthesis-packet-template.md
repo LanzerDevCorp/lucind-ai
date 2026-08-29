@@ -144,7 +144,7 @@ if that is the case.>
 
 ## Allowed paths outside the repository
 
-**Read-only**: `~/.claude/skills/sdd-spec/` — the real `gentle-ai` spec skill. Check the delta tree
+**Read-only**: The real `gentle-ai` spec skill (delivered under `## Required skills`). Check the delta tree
 against the contract as written: the ADDED / MODIFIED / REMOVED / RENAMED format, the RFC 2119
 rule, the one-scenario-minimum rule, and the MODIFIED copy-full-then-edit workflow. On those, the
 skill wins over this packet's paraphrase, and the drift goes in `## Coverage Gaps`.
@@ -255,6 +255,10 @@ Stop and return `status: blocked` — do not guess. Declare every one of these i
 <The change title, the accepted proposal's Capabilities section, the live spec
 paths for every modified capability, and any decision the human has already made
 in conversation and does not want re-litigated.>
+
+## Required skills
+
+- <sdd-spec>
 
 ## Return
 

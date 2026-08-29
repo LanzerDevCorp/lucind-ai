@@ -31,7 +31,7 @@ Archive replaces a live requirement with whatever the MODIFIED block says. A par
 
 Read these before writing a single line. This lens is scoped to *what already exists and what breaks* — not to new requirement text and not to scenarios:
 
-1. `~/.claude/skills/sdd-spec/SKILL.md` — the real `gentle-ai` spec skill, and the **MODIFIED
+1. The real `gentle-ai` spec skill (delivered under `## Required skills`), and the **MODIFIED
    Requirements Workflow** section in particular. It is the phase contract this draft feeds; read
    it rather than trusting this packet's paraphrase of it.
 2. `openspec/specs/<capability>/spec.md` **in full**, for every capability the proposal lists under
@@ -118,8 +118,8 @@ Do NOT create or write any file under `openspec/changes/<change-id>/specs/`. Tha
 
 ## Allowed paths outside the repository
 
-**Read-only**: `~/.claude/skills/sdd-spec/` — the real `gentle-ai` spec skill and its
-`references/`. Read the contract as written, not as this packet paraphrases it.
+**Read-only**: The real `gentle-ai` spec skill and its `references/` (delivered under
+`## Required skills`). Read the contract as written, not as this packet paraphrases it.
 
 Precedence between the two is **not symmetric**, so read this carefully.
 
@@ -219,6 +219,10 @@ Stop and return `status: blocked` — do not guess. Declare every one of these i
 modified capability, the accepted proposal's Capabilities section verbatim, and
 any decision the human has already made in conversation and does not want
 re-litigated.>
+
+## Required skills
+
+- <sdd-spec>
 
 ## Return
 

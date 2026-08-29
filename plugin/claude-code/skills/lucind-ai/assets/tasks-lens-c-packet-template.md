@@ -33,7 +33,7 @@ Lens A owns the task decomposition and is running concurrently, so you do not ha
 
 Read these before writing a single line. This lens is scoped to *proof and cost* — not to what the work is and not to how it is dispatched:
 
-1. `~/.claude/skills/sdd-tasks/SKILL.md` — the real `gentle-ai` tasks skill, and its **Review
+1. The real `gentle-ai` tasks skill (delivered under `## Required skills`), and its **Review
    Workload Forecast** table and threat-matrix rule in particular. It is the phase contract this
    draft feeds; read it rather than trusting this packet's paraphrase of it.
 2. `openspec/changes/<change-id>/design.md` — the threat matrix and the testing strategy. Every row
@@ -124,8 +124,8 @@ Do not write the task checklist and do not partition units into waves. You attac
 
 ## Allowed paths outside the repository
 
-**Read-only**: `~/.claude/skills/sdd-tasks/` — the real `gentle-ai` tasks skill and its
-`references/`. Read the contract as written, not as this packet paraphrases it.
+**Read-only**: The real `gentle-ai` tasks skill and its `references/` (delivered under
+`## Required skills`). Read the contract as written, not as this packet paraphrases it.
 
 Precedence between the two is **not symmetric**, so read this carefully.
 
@@ -227,6 +227,10 @@ Stop and return `status: blocked` — do not guess. Declare every one of these i
 testing strategy verbatim, the test files and seams in scope, the delivery
 strategy the human chose, and any decision already made in conversation that
 should not be re-litigated.>
+
+## Required skills
+
+- <sdd-tasks>
 
 ## Return
 

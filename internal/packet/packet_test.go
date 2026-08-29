@@ -1385,7 +1385,7 @@ func TestExplorePacketTemplatesContract(t *testing.T) {
 			wantPaths:    []string{"openspec/changes/<change-id>/explore-lens-a.md"},
 			wantStrings: []string{
 				"problem and candidates",
-				"~/.claude/skills/sdd-explore/SKILL.md",
+				"<sdd-explore>",
 				"Explore Lens A — Problem & Candidates",
 				"Lens B owns",
 				"Lens C owns",
@@ -1399,7 +1399,7 @@ func TestExplorePacketTemplatesContract(t *testing.T) {
 			wantPaths:    []string{"openspec/changes/<change-id>/explore-lens-b.md"},
 			wantStrings: []string{
 				"capabilities and scenarios",
-				"~/.claude/skills/sdd-explore/SKILL.md",
+				"<sdd-explore>",
 				"Explore Lens B — Capabilities & Scenarios",
 				"Lens A owns",
 				"Lens C owns",
@@ -1413,7 +1413,7 @@ func TestExplorePacketTemplatesContract(t *testing.T) {
 			wantPaths:    []string{"openspec/changes/<change-id>/explore-lens-c.md"},
 			wantStrings: []string{
 				"risks, trade-offs",
-				"~/.claude/skills/sdd-explore/SKILL.md",
+				"<sdd-explore>",
 				"Explore Lens C — Risks, Trade-offs & Spikes",
 				"Lens A owns",
 				"Lens B owns",
@@ -1530,7 +1530,7 @@ func TestProposePacketTemplatesContract(t *testing.T) {
 			wantPaths:    []string{"openspec/changes/<change-id>/propose-lens-a.md"},
 			wantStrings: []string{
 				"candidate and approach",
-				"~/.claude/skills/sdd-propose/SKILL.md",
+				"<sdd-propose>",
 				"Proposal Lens A — Candidate & Approach",
 				"Lens B owns",
 				"Lens C owns",
@@ -1544,7 +1544,7 @@ func TestProposePacketTemplatesContract(t *testing.T) {
 			wantPaths:    []string{"openspec/changes/<change-id>/propose-lens-b.md"},
 			wantStrings: []string{
 				"capability impact and delta specs",
-				"~/.claude/skills/sdd-propose/SKILL.md",
+				"<sdd-propose>",
 				"Proposal Lens B — Capability Impact & Specs",
 				"Lens A owns",
 				"Lens C owns",
@@ -1558,7 +1558,7 @@ func TestProposePacketTemplatesContract(t *testing.T) {
 			wantPaths:    []string{"openspec/changes/<change-id>/propose-lens-c.md"},
 			wantStrings: []string{
 				"risks, rollback, and test impact",
-				"~/.claude/skills/sdd-propose/SKILL.md",
+				"<sdd-propose>",
 				"Proposal Lens C — Risks, Rollback & Test Impact",
 				"Lens A owns",
 				"Lens B owns",
@@ -1674,7 +1674,7 @@ func TestDesignPacketTemplatesContract(t *testing.T) {
 			wantPaths:    []string{"openspec/changes/<change-id>/design-lens-a.md"},
 			wantStrings: []string{
 				"decisions lens",
-				"~/.claude/skills/sdd-design/SKILL.md",
+				"<sdd-design>",
 				"Design Lens A — Decisions",
 				"Lens B owns",
 				"Lens C owns",
@@ -1688,7 +1688,7 @@ func TestDesignPacketTemplatesContract(t *testing.T) {
 			wantPaths:    []string{"openspec/changes/<change-id>/design-lens-b.md"},
 			wantStrings: []string{
 				"surface-and-flow lens",
-				"~/.claude/skills/sdd-design/SKILL.md",
+				"<sdd-design>",
 				"Design Lens B — Surface & Flow",
 				"Lens A owns",
 				"Lens C owns",
@@ -1702,7 +1702,7 @@ func TestDesignPacketTemplatesContract(t *testing.T) {
 			wantPaths:    []string{"openspec/changes/<change-id>/design-lens-c.md"},
 			wantStrings: []string{
 				"failure-test-rollback lens",
-				"~/.claude/skills/sdd-design/SKILL.md",
+				"<sdd-design>",
 				"Design Lens C — Failure, Test & Rollback",
 				"Lens A owns",
 				"Lens B owns",
@@ -1814,7 +1814,7 @@ func TestSpecPacketTemplatesContract(t *testing.T) {
 			wantPaths:    []string{"openspec/changes/<change-id>/spec-lens-a.md"},
 			wantStrings: []string{
 				"capabilities and requirements",
-				"~/.claude/skills/sdd-spec/SKILL.md",
+				"<sdd-spec>",
 				"Spec Lens A — Capabilities & Requirements",
 				"Lens B owns",
 				"Lens C owns",
@@ -1828,7 +1828,7 @@ func TestSpecPacketTemplatesContract(t *testing.T) {
 			wantPaths:    []string{"openspec/changes/<change-id>/spec-lens-b.md"},
 			wantStrings: []string{
 				"scenarios and coverage",
-				"~/.claude/skills/sdd-spec/SKILL.md",
+				"<sdd-spec>",
 				"Spec Lens B — Scenarios & Coverage",
 				"Lens A owns",
 				"Lens C owns",
@@ -1842,7 +1842,7 @@ func TestSpecPacketTemplatesContract(t *testing.T) {
 			wantPaths:    []string{"openspec/changes/<change-id>/spec-lens-c.md"},
 			wantStrings: []string{
 				"live-spec conflict and migration",
-				"~/.claude/skills/sdd-spec/SKILL.md",
+				"<sdd-spec>",
 				"Spec Lens C — Live-Spec Conflicts & Migration",
 				"Lens A owns",
 				"Lens B owns",
@@ -1962,7 +1962,7 @@ func TestTasksPacketTemplatesContract(t *testing.T) {
 			wantPaths:    []string{"openspec/changes/<change-id>/tasks-lens-a.md"},
 			wantStrings: []string{
 				"decomposition and ordering",
-				"~/.claude/skills/sdd-tasks/SKILL.md",
+				"<sdd-tasks>",
 				"Tasks Lens A — Decomposition & Ordering",
 				"Lens B owns",
 				"Lens C owns",
@@ -1976,7 +1976,7 @@ func TestTasksPacketTemplatesContract(t *testing.T) {
 			wantPaths:    []string{"openspec/changes/<change-id>/tasks-lens-b.md"},
 			wantStrings: []string{
 				"partition and dispatch-shape",
-				"~/.claude/skills/sdd-tasks/SKILL.md",
+				"<sdd-tasks>",
 				"Tasks Lens B — Partition & Dispatch Shape",
 				"Lens A owns",
 				"Lens C owns",
@@ -1996,7 +1996,7 @@ func TestTasksPacketTemplatesContract(t *testing.T) {
 			wantPaths:    []string{"openspec/changes/<change-id>/tasks-lens-c.md"},
 			wantStrings: []string{
 				"proof and review-burden",
-				"~/.claude/skills/sdd-tasks/SKILL.md",
+				"<sdd-tasks>",
 				"Tasks Lens C — Proof & Review Burden",
 				"Lens A owns",
 				"Lens B owns",
@@ -2146,7 +2146,7 @@ func TestArchivePacketTemplateContract(t *testing.T) {
 	}
 
 	wantStrings := []string{
-		"~/.claude/skills/sdd-archive/SKILL.md",
+		"<sdd-archive>",
 		// The copy rule and its only acceptable evidence.
 		"cp -R",
 		"git mv",

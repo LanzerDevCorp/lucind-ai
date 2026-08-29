@@ -1,20 +1,20 @@
 ---
 name: lucind-executor
 description: >-
-  Core operational manual for executing lucind-ai lanes as an agy agent.
+  Core operational manual for executing lucind-ai lanes as an agent.
   Use when dispatched to run a lucind-ai packet across any lifecycle phase.
 ---
 
 # Lucind-AI Executor Manual
 
 ## Overview
-As an `agy` executor, you operate within an isolated git worktree (`../lucind-ai-worktrees/<lane-id>`). Your entry point is the packet file (`.lucind/packets/<packet-id>.md`).
+As an executor, you operate within an isolated git worktree (`../lucind-ai-worktrees/<lane-id>`). Your entry point is the packet file (`.lucind/packets/<packet-id>.md`).
 
 ## Packet Schema Reference
 - `id`: Unique lane identifier (determines branch `lucind/<id>`).
-- `executor`: Executor assigned to this lane (`agy` or `cursor-agent`).
+- `executor`: Executor assigned to this lane.
 - `routed_by`: Condition justifying routing.
-- `model`: Target LLM model (default: `gemini-3.7-flash-high` for `agy`).
+- `model`: Target LLM model.
 - `read_only`: If `true`, lane makes no commits.
 - `allowed_paths`: Whitelist of editable paths.
 
