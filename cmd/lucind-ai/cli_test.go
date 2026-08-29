@@ -25,6 +25,7 @@ import (
 	"github.com/LanzerDevCorp/lucind-ai/internal/overlap"
 	"github.com/LanzerDevCorp/lucind-ai/internal/packet"
 	"github.com/LanzerDevCorp/lucind-ai/internal/packetauthor"
+	"github.com/LanzerDevCorp/lucind-ai/internal/phasespec"
 	"github.com/LanzerDevCorp/lucind-ai/internal/reconcile"
 	"github.com/LanzerDevCorp/lucind-ai/internal/result"
 	lucindrun "github.com/LanzerDevCorp/lucind-ai/internal/run"
@@ -827,10 +828,38 @@ func initRepo(t *testing.T) string {
 	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("seed\n"), 0o644); err != nil {
 		t.Fatalf("WriteFile(README.md) error = %v", err)
 	}
+	setupTestSkills(t, root)
 	runGit(t, root, "add", "README.md")
 	runGit(t, root, "commit", "-m", "seed commit")
 
 	return root
+}
+
+func setupTestSkills(t *testing.T, root string) {
+	t.Helper()
+	skillsDir := filepath.Join(root, ".agents", "skills")
+	skills := []string{
+		"lucind-executor", "lucind-apply", "lucind-verify", "lucind-fan-out-lens",
+		"sdd-explore", "sdd-propose", "sdd-spec", "sdd-design", "sdd-tasks",
+		"sdd-apply", "sdd-verify", "sdd-archive",
+	}
+	for _, s := range skills {
+		sDir := filepath.Join(skillsDir, s)
+		if err := os.MkdirAll(sDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(sDir, "SKILL.md"), []byte("# "+s+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	lucindDir := filepath.Join(root, ".lucind")
+	if err := os.MkdirAll(lucindDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	rootsYaml := "roots:\n  - " + skillsDir + "\n"
+	if err := os.WriteFile(filepath.Join(lucindDir, "skill-roots.yaml"), []byte(rootsYaml), 0o644); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func runGit(t *testing.T, dir string, args ...string) {
@@ -5540,5 +5569,179 @@ func TestDefectResolveCLINotFound(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	if code := run(ctx, []string{"defect", "resolve", "--id", "nonexistent-id"}, &stdout, &stderr); code == 0 {
 		t.Fatalf("defect resolve on unknown id code = %d, want non-zero", code)
+	}
+}
+
+type mockCLIStatusQuerier struct {
+	output []byte
+	err    error
+}
+
+func (m *mockCLIStatusQuerier) QueryStatus(_ context.Context, _ string) ([]byte, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	return m.output, nil
+}
+
+func TestPhaseSubcommandRequiresPhaseName(t *testing.T) {
+	ctx := context.Background()
+	var stdout, stderr bytes.Buffer
+	code := run(ctx, []string{"phase"}, &stdout, &stderr)
+	if code == 0 {
+		t.Fatalf("run(phase) = %d, want non-zero", code)
+	}
+	if !strings.Contains(stderr.String(), "phase name is required") {
+		t.Fatalf("expected stderr to say 'phase name is required', got %q", stderr.String())
+	}
+}
+
+func TestPhaseSubcommandGatesPrematureSynthesis(t *testing.T) {
+	primaryRoot := initRepo(t)
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(primaryRoot); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(cwd)
+
+	change := "test-change"
+	statusJSON := []byte(`{
+  "schemaName": "gentle-ai.sdd-status",
+  "schemaVersion": 1,
+  "changeName": "` + change + `",
+  "artifactPaths": {},
+  "artifacts": {
+    "proposal": "missing"
+  },
+  "dependencies": {
+    "proposal": "ready"
+  },
+  "nextRecommended": "propose"
+}`)
+
+	origQuerier := defaultStatusQuerier
+	defer func() { defaultStatusQuerier = origQuerier }()
+	defaultStatusQuerier = func(string) phasespec.StatusQuerier {
+		return &mockCLIStatusQuerier{output: statusJSON}
+	}
+
+	ctx := context.Background()
+	var stdout, stderr bytes.Buffer
+	// propose synthesis requires lens-a, lens-b, lens-c merged; with mock querier (no merged lenses), it must fail
+	code := run(ctx, []string{"phase", "propose", "--change", change}, &stdout, &stderr)
+	if code == 0 {
+		t.Fatalf("expected run(phase propose) to fail when lenses unmerged, got code 0; stdout=%q, stderr=%q", stdout.String(), stderr.String())
+	}
+
+	// Verify no artifact was created
+	artifactPath := filepath.Join(primaryRoot, "openspec", "changes", change, "proposal.md")
+	if _, err := os.Stat(artifactPath); err == nil {
+		t.Fatalf("expected artifact %s to NOT exist, but it was created", artifactPath)
+	}
+}
+
+func TestPhaseSubcommandFailsClosedOnMalformedStatusJSON(t *testing.T) {
+	primaryRoot := initRepo(t)
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(primaryRoot); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(cwd)
+
+	origQuerier := defaultStatusQuerier
+	defer func() { defaultStatusQuerier = origQuerier }()
+	defaultStatusQuerier = func(string) phasespec.StatusQuerier {
+		return &mockCLIStatusQuerier{output: []byte(`{ invalid json `)}
+	}
+
+	ctx := context.Background()
+	var stdout, stderr bytes.Buffer
+	code := run(ctx, []string{"phase", "propose"}, &stdout, &stderr)
+	if code == 0 {
+		t.Fatalf("expected run(phase) on malformed status to fail, got 0")
+	}
+}
+
+func TestPhaseSubcommandPhaseAlreadyComplete(t *testing.T) {
+	primaryRoot := initRepo(t)
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(primaryRoot); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(cwd)
+
+	change := "test-change"
+	statusJSON := []byte(`{
+  "schemaName": "gentle-ai.sdd-status",
+  "schemaVersion": 1,
+  "changeName": "` + change + `",
+  "artifactPaths": {},
+  "artifacts": {
+    "proposal": "done"
+  },
+  "dependencies": {
+    "proposal": "all_done"
+  },
+  "nextRecommended": "spec"
+}`)
+
+	origQuerier := defaultStatusQuerier
+	defer func() { defaultStatusQuerier = origQuerier }()
+	defaultStatusQuerier = func(string) phasespec.StatusQuerier {
+		return &mockCLIStatusQuerier{output: statusJSON}
+	}
+
+	ctx := context.Background()
+	var stdout, stderr bytes.Buffer
+	code := run(ctx, []string{"phase", "propose", "--change", change}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("expected run(phase propose) on complete phase to exit 0, got %d; stderr=%s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "already complete") {
+		t.Fatalf("expected stdout to report already complete, got %q", stdout.String())
+	}
+}
+
+func TestPhaseSubcommandUnknownPhase(t *testing.T) {
+	primaryRoot := initRepo(t)
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(primaryRoot); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(cwd)
+
+	change := "test-change"
+	statusJSON := []byte(`{
+  "schemaName": "gentle-ai.sdd-status",
+  "schemaVersion": 1,
+  "changeName": "` + change + `",
+  "artifactPaths": {},
+  "artifacts": {},
+  "dependencies": {}
+}`)
+
+	origQuerier := defaultStatusQuerier
+	defer func() { defaultStatusQuerier = origQuerier }()
+	defaultStatusQuerier = func(string) phasespec.StatusQuerier {
+		return &mockCLIStatusQuerier{output: statusJSON}
+	}
+
+	ctx := context.Background()
+	var stdout, stderr bytes.Buffer
+	code := run(ctx, []string{"phase", "unrecognized-phase", "--change", change}, &stdout, &stderr)
+	if code == 0 {
+		t.Fatalf("expected run(phase unrecognized) to return non-zero, got 0")
 	}
 }
