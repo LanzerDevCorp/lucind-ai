@@ -31,7 +31,7 @@ The proposal for `<change-id>` is accepted and frozen. Lens B and lens C run in 
 
 Read these before writing a single line. This lens is scoped to *which* requirements exist and *what they say* — not to scenarios and not to migration:
 
-1. `~/.claude/skills/sdd-spec/SKILL.md` — the real `gentle-ai` spec skill. It is the phase
+1. The real `gentle-ai` spec skill (delivered under `## Required skills`). It is the phase
    contract this draft feeds; read it rather than trusting this packet's paraphrase of it.
 2. `openspec/changes/<change-id>/proposal.md`, and its **Capabilities section** in particular.
    That section is the primary contract: each entry under *New Capabilities* becomes a full spec
@@ -131,8 +131,8 @@ Do NOT create or write any file under `openspec/changes/<change-id>/specs/`. Tha
 
 ## Allowed paths outside the repository
 
-**Read-only**: `~/.claude/skills/sdd-spec/` — the real `gentle-ai` spec skill and its
-`references/`. Read the contract as written, not as this packet paraphrases it.
+**Read-only**: The real `gentle-ai` spec skill and its `references/` (delivered under
+`## Required skills`). Read the contract as written, not as this packet paraphrases it.
 
 Precedence between the two is **not symmetric**, so read this carefully.
 
@@ -234,6 +234,10 @@ Stop and return `status: blocked` — do not guess. Declare every one of these i
 <Ground-truth facts with file:line references: the accepted proposal's Capabilities
 section verbatim, the live spec paths for every modified capability, and any
 decision the human has already made in conversation and does not want re-litigated.>
+
+## Required skills
+
+- <sdd-spec>
 
 ## Return
 
