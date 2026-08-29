@@ -1,0 +1,17 @@
+{
+  "name": "@lanzerdevcorp/lucind-ai-opencode",
+  "version": "2.0.11",
+  "private": true,
+  "description": "Native OpenCode integration for lucind-ai.",
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "@opencode-ai/plugin": "^1.18.25"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.0.0"
+  }
+}

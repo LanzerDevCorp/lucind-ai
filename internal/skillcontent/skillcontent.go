@@ -47,6 +47,7 @@ const (
 	PluginManifestRelPath      = "plugin/claude-code/.claude-plugin/plugin.json"
 	MarketplaceManifestRelPath = ".claude-plugin/marketplace.json"
 	SkillDirRelPath            = "plugin/claude-code/skills/lucind-ai"
+	OpenCodeSkillDirRelPath    = "plugin/opencode/skills/lucind-ai"
 	HashRecordRelPath          = "internal/packet/testdata/skill_content_hash.txt"
 	MarketplacePluginName      = "lucind-ai"
 )
@@ -54,6 +55,26 @@ const (
 // PluginManifest mirrors the fields read from plugin.json.
 type PluginManifest struct {
 	Version string `json:"version"`
+}
+
+// VerifySkillCopy checks that the OpenCode distribution is an exact copy of
+// the canonical Claude Code skill tree. HashDir includes relative paths, so it
+// detects additions, removals, renames, and byte changes.
+func VerifySkillCopy(repoRoot string) error {
+	canonical := filepath.Join(repoRoot, SkillDirRelPath)
+	copy := filepath.Join(repoRoot, OpenCodeSkillDirRelPath)
+	canonicalSum, err := HashDir(canonical)
+	if err != nil {
+		return fmt.Errorf("hash canonical skill tree: %w", err)
+	}
+	copySum, err := HashDir(copy)
+	if err != nil {
+		return fmt.Errorf("hash OpenCode skill tree: %w", err)
+	}
+	if canonicalSum != copySum {
+		return fmt.Errorf("OpenCode skill copy drifted from %s (canonical %s, copy %s)", SkillDirRelPath, canonicalSum, copySum)
+	}
+	return nil
 }
 
 // MarketplaceManifest mirrors the fields read from marketplace.json.
