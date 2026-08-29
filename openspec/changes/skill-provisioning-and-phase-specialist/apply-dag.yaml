@@ -5,8 +5,8 @@ packets:
     routed_by: Strict-TDD foundation work for the optional skills-loaded result contract and schema reflection pin.
     feature: skill-provisioning-and-phase-specialist
     parent_ref: refs/heads/feature/skill-provisioning-and-phase-specialist
-    base_sha: 5a034c431381250e9675dfd8061bacb61352ca74
-    expected_parent_sha: 5a034c431381250e9675dfd8061bacb61352ca74
+    base_sha: 8d0a3d13ed712c2fcbd01ca179763baa6c296727
+    expected_parent_sha: 8d0a3d13ed712c2fcbd01ca179763baa6c296727
     allowed_paths:
       - internal/result/result.go
       - internal/result/result.schema.json
@@ -18,8 +18,8 @@ packets:
     routed_by: Strict-TDD foundation work for deterministic skill derivation, budget constant, and root-independent body digesting.
     feature: skill-provisioning-and-phase-specialist
     parent_ref: refs/heads/feature/skill-provisioning-and-phase-specialist
-    base_sha: 5a034c431381250e9675dfd8061bacb61352ca74
-    expected_parent_sha: 5a034c431381250e9675dfd8061bacb61352ca74
+    base_sha: 8d0a3d13ed712c2fcbd01ca179763baa6c296727
+    expected_parent_sha: 8d0a3d13ed712c2fcbd01ca179763baa6c296727
     allowed_paths:
       - internal/skillset
     depends_on: []
@@ -29,8 +29,8 @@ packets:
     routed_by: Strict-TDD foundation work for ordered machine-local skill-root resolution and fail-closed diagnostics.
     feature: skill-provisioning-and-phase-specialist
     parent_ref: refs/heads/feature/skill-provisioning-and-phase-specialist
-    base_sha: 5a034c431381250e9675dfd8061bacb61352ca74
-    expected_parent_sha: 5a034c431381250e9675dfd8061bacb61352ca74
+    base_sha: 8d0a3d13ed712c2fcbd01ca179763baa6c296727
+    expected_parent_sha: 8d0a3d13ed712c2fcbd01ca179763baa6c296727
     allowed_paths:
       - internal/skillroots
     depends_on: []
@@ -40,8 +40,8 @@ packets:
     routed_by: Strict-TDD foundation work for tracked lucind.yaml role stacks and closed YAML configuration loading.
     feature: skill-provisioning-and-phase-specialist
     parent_ref: refs/heads/feature/skill-provisioning-and-phase-specialist
-    base_sha: 5a034c431381250e9675dfd8061bacb61352ca74
-    expected_parent_sha: 5a034c431381250e9675dfd8061bacb61352ca74
+    base_sha: 8d0a3d13ed712c2fcbd01ca179763baa6c296727
+    expected_parent_sha: 8d0a3d13ed712c2fcbd01ca179763baa6c296727
     allowed_paths:
       - internal/lucindconfig
       - lucind.yaml
@@ -52,8 +52,8 @@ packets:
     routed_by: Strict-TDD contract plumbing after the skill derivation foundation is green.
     feature: skill-provisioning-and-phase-specialist
     parent_ref: refs/heads/feature/skill-provisioning-and-phase-specialist
-    base_sha: 5a034c431381250e9675dfd8061bacb61352ca74
-    expected_parent_sha: 5a034c431381250e9675dfd8061bacb61352ca74
+    base_sha: 8d0a3d13ed712c2fcbd01ca179763baa6c296727
+    expected_parent_sha: 8d0a3d13ed712c2fcbd01ca179763baa6c296727
     allowed_paths:
       - internal/packet
       - internal/packetauthor
@@ -67,8 +67,8 @@ packets:
     routed_by: Strict-TDD executor plumbing for isolated required-skill environment delivery.
     feature: skill-provisioning-and-phase-specialist
     parent_ref: refs/heads/feature/skill-provisioning-and-phase-specialist
-    base_sha: 5a034c431381250e9675dfd8061bacb61352ca74
-    expected_parent_sha: 5a034c431381250e9675dfd8061bacb61352ca74
+    base_sha: 8d0a3d13ed712c2fcbd01ca179763baa6c296727
+    expected_parent_sha: 8d0a3d13ed712c2fcbd01ca179763baa6c296727
     allowed_paths:
       - internal/executor
     read_only_paths:
@@ -83,8 +83,8 @@ packets:
     routed_by: Strict-TDD phase-specialist adapter work after the configuration foundation is available.
     feature: skill-provisioning-and-phase-specialist
     parent_ref: refs/heads/feature/skill-provisioning-and-phase-specialist
-    base_sha: 5a034c431381250e9675dfd8061bacb61352ca74
-    expected_parent_sha: 5a034c431381250e9675dfd8061bacb61352ca74
+    base_sha: 8d0a3d13ed712c2fcbd01ca179763baa6c296727
+    expected_parent_sha: 8d0a3d13ed712c2fcbd01ca179763baa6c296727
     allowed_paths:
       - internal/phasespec
     read_only_paths:
@@ -97,8 +97,8 @@ packets:
     routed_by: Strict-TDD runtime and acceptance correspondence work after contract and envelope fields are present.
     feature: skill-provisioning-and-phase-specialist
     parent_ref: refs/heads/feature/skill-provisioning-and-phase-specialist
-    base_sha: 5a034c431381250e9675dfd8061bacb61352ca74
-    expected_parent_sha: 5a034c431381250e9675dfd8061bacb61352ca74
+    base_sha: 8d0a3d13ed712c2fcbd01ca179763baa6c296727
+    expected_parent_sha: 8d0a3d13ed712c2fcbd01ca179763baa6c296727
     allowed_paths:
       - internal/run
       - internal/accept
@@ -119,8 +119,8 @@ packets:
     routed_by: Template and executor-skill naming cleanup after the required-skills rendering contract is defined.
     feature: skill-provisioning-and-phase-specialist
     parent_ref: refs/heads/feature/skill-provisioning-and-phase-specialist
-    base_sha: 5a034c431381250e9675dfd8061bacb61352ca74
-    expected_parent_sha: 5a034c431381250e9675dfd8061bacb61352ca74
+    base_sha: 8d0a3d13ed712c2fcbd01ca179763baa6c296727
+    expected_parent_sha: 8d0a3d13ed712c2fcbd01ca179763baa6c296727
     allowed_paths:
       - .agents/skills
       - plugin/claude-code/skills/lucind-ai/assets
@@ -135,8 +135,8 @@ packets:
     routed_by: Terminal CLI wiring after specialist, contract, roots, and configuration subsystems are green.
     feature: skill-provisioning-and-phase-specialist
     parent_ref: refs/heads/feature/skill-provisioning-and-phase-specialist
-    base_sha: 5a034c431381250e9675dfd8061bacb61352ca74
-    expected_parent_sha: 5a034c431381250e9675dfd8061bacb61352ca74
+    base_sha: 8d0a3d13ed712c2fcbd01ca179763baa6c296727
+    expected_parent_sha: 8d0a3d13ed712c2fcbd01ca179763baa6c296727
     allowed_paths:
       - cmd/lucind-ai
     read_only_paths:
