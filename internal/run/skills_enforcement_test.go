@@ -3,6 +3,7 @@ package run_test
 import (
 	"context"
 	"io/fs"
+	"reflect"
 	"testing"
 	"testing/fstest"
 
@@ -144,6 +145,59 @@ func TestEnforceRequiredSkills(t *testing.T) {
 			}
 			if len(lanes) != 1 || lanes[0].Status != tt.wantStatus {
 				t.Fatalf("persisted status = %v, want %v", lanes[0].Status, tt.wantStatus)
+			}
+		})
+	}
+}
+
+func TestExecutePassesRequiredSkillsToExecutorRequest(t *testing.T) {
+	tests := []struct {
+		name       string
+		skills     []string
+		wantSkills []string
+	}{
+		{
+			name:       "non-empty required skills",
+			skills:     []string{"lucind-apply", "lucind-executor"},
+			wantSkills: []string{"lucind-apply", "lucind-executor"},
+		},
+		{
+			name:       "nil required skills",
+			skills:     nil,
+			wantSkills: nil,
+		},
+		{
+			name:       "empty required skills slice",
+			skills:     []string{},
+			wantSkills: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			wtPath := t.TempDir()
+			exec := &fakeExecutor{}
+			deps := newTestDeps(t, wtPath, func(string) fs.FS {
+				return fstest.MapFS{resultEnvelopePathForTest(): {Data: []byte(doneEnvelopeJSON)}}
+			}, exec)
+
+			p := testPacket()
+			p.RequiredSkills = tt.skills
+
+			if _, err := run.Execute(context.Background(), deps, p); err != nil {
+				t.Fatalf("Execute() error = %v, want nil", err)
+			}
+
+			if !reflect.DeepEqual(exec.gotReq.RequiredSkills, tt.wantSkills) {
+				t.Fatalf("Request.RequiredSkills = %v, want %v", exec.gotReq.RequiredSkills, tt.wantSkills)
+			}
+
+			if len(tt.skills) > 0 {
+				// Verify defensive copy / slice isolation.
+				p.RequiredSkills[0] = "mutated"
+				if exec.gotReq.RequiredSkills[0] == "mutated" {
+					t.Fatalf("Request.RequiredSkills was not copied defensively: saw mutation %v", exec.gotReq.RequiredSkills)
+				}
 			}
 		})
 	}

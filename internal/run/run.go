@@ -443,13 +443,14 @@ func Execute(ctx context.Context, deps Deps, p packet.Packet) (Report, error) {
 	}()
 
 	outcome, err := exec.Run(ctx, executor.Request{
-		Prompt:        p.Body,
-		WorktreePath:  wt.Path,
-		Model:         model,
-		Agent:         p.Agent,
-		ReadOnlyPaths: append([]string(nil), p.ReadOnlyPaths...),
-		SchemaPath:    schemaPath,
-		Progress:      progress,
+		Prompt:         p.Body,
+		WorktreePath:   wt.Path,
+		Model:          model,
+		Agent:          p.Agent,
+		ReadOnlyPaths:  append([]string(nil), p.ReadOnlyPaths...),
+		RequiredSkills: append([]string(nil), p.RequiredSkills...),
+		SchemaPath:     schemaPath,
+		Progress:       progress,
 	})
 	close(progress)
 	progressErrors := <-progressDone
