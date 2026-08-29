@@ -1,0 +1,155 @@
+change: skill-provisioning-and-phase-specialist
+packets:
+  - id: result-envelope
+    executor: agy
+    routed_by: Strict-TDD foundation work for the optional skills-loaded result contract and schema reflection pin.
+    feature: skill-provisioning-and-phase-specialist
+    parent_ref: refs/heads/feature/skill-provisioning-and-phase-specialist
+    base_sha: 30b8c19da2334179d75ced834771177567602130
+    expected_parent_sha: 30b8c19da2334179d75ced834771177567602130
+    allowed_paths:
+      - internal/result/result.go
+      - internal/result/result.schema.json
+      - internal/result/schema_test.go
+    depends_on: []
+    body_path: ../../../.lucind/packet-bodies/result-envelope.md
+  - id: skillset-engine
+    executor: agy
+    routed_by: Strict-TDD foundation work for deterministic skill derivation, budget constant, and root-independent body digesting.
+    feature: skill-provisioning-and-phase-specialist
+    parent_ref: refs/heads/feature/skill-provisioning-and-phase-specialist
+    base_sha: 30b8c19da2334179d75ced834771177567602130
+    expected_parent_sha: 30b8c19da2334179d75ced834771177567602130
+    allowed_paths:
+      - internal/skillset/
+    depends_on: []
+    body_path: ../../../.lucind/packet-bodies/skillset-engine.md
+  - id: skillroots-resolution
+    executor: agy
+    routed_by: Strict-TDD foundation work for ordered machine-local skill-root resolution and fail-closed diagnostics.
+    feature: skill-provisioning-and-phase-specialist
+    parent_ref: refs/heads/feature/skill-provisioning-and-phase-specialist
+    base_sha: 30b8c19da2334179d75ced834771177567602130
+    expected_parent_sha: 30b8c19da2334179d75ced834771177567602130
+    allowed_paths:
+      - internal/skillroots/
+    depends_on: []
+    body_path: ../../../.lucind/packet-bodies/skillroots-resolution.md
+  - id: lucindconfig-loader
+    executor: agy
+    routed_by: Strict-TDD foundation work for tracked lucind.yaml role stacks and closed YAML configuration loading.
+    feature: skill-provisioning-and-phase-specialist
+    parent_ref: refs/heads/feature/skill-provisioning-and-phase-specialist
+    base_sha: 30b8c19da2334179d75ced834771177567602130
+    expected_parent_sha: 30b8c19da2334179d75ced834771177567602130
+    allowed_paths:
+      - internal/lucindconfig/
+      - lucind.yaml
+    depends_on: []
+    body_path: ../../../.lucind/packet-bodies/lucindconfig-loader.md
+  - id: packet-contract
+    executor: agy
+    routed_by: Strict-TDD contract plumbing after the skill derivation foundation is green.
+    feature: skill-provisioning-and-phase-specialist
+    parent_ref: refs/heads/feature/skill-provisioning-and-phase-specialist
+    base_sha: 30b8c19da2334179d75ced834771177567602130
+    expected_parent_sha: 30b8c19da2334179d75ced834771177567602130
+    allowed_paths:
+      - internal/packet/
+      - internal/packetauthor/
+    read_only_paths:
+      - internal/skillset/
+    depends_on:
+      - skillset-engine
+    body_path: ../../../.lucind/packet-bodies/packet-contract.md
+  - id: executor-env
+    executor: agy
+    routed_by: Strict-TDD executor plumbing for isolated required-skill environment delivery.
+    feature: skill-provisioning-and-phase-specialist
+    parent_ref: refs/heads/feature/skill-provisioning-and-phase-specialist
+    base_sha: 30b8c19da2334179d75ced834771177567602130
+    expected_parent_sha: 30b8c19da2334179d75ced834771177567602130
+    allowed_paths:
+      - internal/executor/
+    read_only_paths:
+      - internal/result/result.go
+      - internal/result/result.schema.json
+      - internal/result/schema_test.go
+    depends_on:
+      - result-envelope
+    body_path: ../../../.lucind/packet-bodies/executor-env.md
+  - id: phasespec-adapter
+    executor: agy
+    routed_by: Strict-TDD phase-specialist adapter work after the configuration foundation is available.
+    feature: skill-provisioning-and-phase-specialist
+    parent_ref: refs/heads/feature/skill-provisioning-and-phase-specialist
+    base_sha: 30b8c19da2334179d75ced834771177567602130
+    expected_parent_sha: 30b8c19da2334179d75ced834771177567602130
+    allowed_paths:
+      - internal/phasespec/
+    read_only_paths:
+      - internal/lucindconfig/
+    depends_on:
+      - lucindconfig-loader
+    body_path: ../../../.lucind/packet-bodies/phasespec-adapter.md
+  - id: runtime-enforcement-accept
+    executor: agy
+    routed_by: Strict-TDD runtime and acceptance correspondence work after contract and envelope fields are present.
+    feature: skill-provisioning-and-phase-specialist
+    parent_ref: refs/heads/feature/skill-provisioning-and-phase-specialist
+    base_sha: 30b8c19da2334179d75ced834771177567602130
+    expected_parent_sha: 30b8c19da2334179d75ced834771177567602130
+    allowed_paths:
+      - internal/run/
+      - internal/accept/
+    read_only_paths:
+      - internal/result/result.go
+      - internal/result/result.schema.json
+      - internal/result/schema_test.go
+      - internal/skillset/
+      - internal/packet/
+      - internal/packetauthor/
+    depends_on:
+      - result-envelope
+      - skillset-engine
+      - packet-contract
+    body_path: ../../../.lucind/packet-bodies/runtime-enforcement-accept.md
+  - id: agent-prompts-assets
+    executor: agy
+    routed_by: Template and executor-skill naming cleanup after the required-skills rendering contract is defined.
+    feature: skill-provisioning-and-phase-specialist
+    parent_ref: refs/heads/feature/skill-provisioning-and-phase-specialist
+    base_sha: 30b8c19da2334179d75ced834771177567602130
+    expected_parent_sha: 30b8c19da2334179d75ced834771177567602130
+    allowed_paths:
+      - .agents/skills/
+      - plugin/claude-code/skills/lucind-ai/assets/
+    read_only_paths:
+      - internal/packet/
+      - internal/packetauthor/
+    depends_on:
+      - packet-contract
+    body_path: ../../../.lucind/packet-bodies/agent-prompts-assets.md
+  - id: cli-packet-authoring
+    executor: agy
+    routed_by: Terminal CLI wiring after specialist, contract, roots, and configuration subsystems are green.
+    feature: skill-provisioning-and-phase-specialist
+    parent_ref: refs/heads/feature/skill-provisioning-and-phase-specialist
+    base_sha: 30b8c19da2334179d75ced834771177567602130
+    expected_parent_sha: 30b8c19da2334179d75ced834771177567602130
+    allowed_paths:
+      - cmd/lucind-ai/
+    read_only_paths:
+      - internal/packet/
+      - internal/packetauthor/
+      - internal/skillset/
+      - internal/skillroots/
+      - internal/lucindconfig/
+      - internal/phasespec/
+    depends_on:
+      - packet-contract
+      - skillroots-resolution
+      - lucindconfig-loader
+      - phasespec-adapter
+      - runtime-enforcement-accept
+    body_path: ../../../.lucind/packet-bodies/cli-packet-authoring.md
