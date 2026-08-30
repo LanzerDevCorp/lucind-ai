@@ -1,6 +1,6 @@
 {
   "name": "lucind-ai",
-  "version": "2.0.11",
+  "version": "2.0.12",
   "description": "Multi-agent orchestration across execution, audit and human lanes, with a task ledger and a verifiable result envelope.",
   "author": {
     "name": "LanzerDevCorp"
