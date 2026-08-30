@@ -28,7 +28,7 @@ Standardize SDD execution across Claude Code and OpenCode with a two-layer contr
 
 **Choice**: Acceptance stays in `internal/run` + `internal/result`, not a new package. `result.Read` validates `.lucind/result.json` against the embedded schema (`result.go:141-162`). `enforceAllowedPaths` demotes undeclared diffs (`run.go:582-654`). `enforceCompletionMode` requires unique commits + clean porcelain for write packets and the inverse for `read_only` (`run.go:663-690`). Extend `decideStatus` (`run.go:549-573`): after a schema-valid envelope, if any `HardStop.Fired` is true, demote to `lane.Blocked` regardless of `envelope.Status` (today `LaneStatus` maps status 1:1 at `result.go:122-135`; schema prose at `internal/result/result.schema.json:35` is not an `if`/`then`). Frozen identity is `Worktree.BaseSHA` and `Attempt.CandidateSHA`.
 **Alternatives considered**: Trust executor exit codes or `done_criteria`; a new `internal/accept` package; qualitative approval overriding fired stops.
-**Rationale**: Agents have claimed `done` with fired stops or extra paths. Path and porcelain checks already exist; hard-stop demotion is the missing machine check the spec requires (`specs/acceptance-verifier/spec.md:21-25`).
+**Rationale**: Agents have claimed `done` with fired stops or extra paths. Path and porcelain checks already exist; hard-stop demotion is the missing machine check the spec requires (`specs/acceptance-verifier/spec.md:35-39`). The live `acceptance-verifier` capability (merged from `skill-provisioning-and-phase-specialist` after this design was drafted) already states this requirement in prose under "Fail-Closed Mechanical Criteria"; this MODIFIED delta makes the demotion mechanism explicit and machine-verifiable rather than adding new prose.
 
 ### Decision 5 — Wave N+1 only after wave N exits 0
 
@@ -69,9 +69,9 @@ Standardize SDD execution across Claude Code and OpenCode with a two-layer contr
 |------|--------|-------------------|
 | `plugin/claude-code/skills/lucind-ai/` (SKILL + references) | Modify | Orchestrators; `specs/deterministic-orchestrator-contract/spec.md:5-26` |
 | `plugin/opencode/skills/lucind-ai/` | Create (byte copy of Claude tree) | OpenCode orchestrator; same spec |
-| `internal/packet/packet.go` | Modify | `Execute` admission (`run.go:292-296`); `specs/packet-authoring-contract/spec.md:5-26` |
+| `internal/packet/packet.go` | Modify | `Execute` admission (`run.go:292-296`); `specs/packet-authoring-contract/spec.md:5-29` |
 | `internal/dag/split.go` | Modify | `runSplit` (`cli.go:402`); `specs/sdd-apply/spec.md:5-18` |
-| `internal/run/run.go` | Modify | `decideStatus` / path / completion / hard-stop demotion; `specs/acceptance-verifier/spec.md:5-26` |
+| `internal/run/run.go` | Modify | `decideStatus` / path / completion / hard-stop demotion; `specs/acceptance-verifier/spec.md:5-39` |
 | `internal/run/batch.go` | Modify | `runDispatch` (`cli.go:132,361-370`) |
 | `internal/run/attempt.go` | Modify | `IntegrateFeature` / `feature recover` (`cli.go:741-742`; `specs/parent-feature-integration/spec.md:5-24`) |
 | `internal/run/integrate_feature.go` | Modify | `runDispatch` (`cli.go:322-326,345-354`) |

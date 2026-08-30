@@ -20,12 +20,12 @@ Make SDD execution reproducible across Claude Code and OpenCode. The canonical s
 
 ### New Capabilities
 - `deterministic-orchestrator-contract`: Cross-runtime preflight, sequencing, evidence, recovery, and terminal-report contract.
-- `packet-authoring-contract`: Target-free authoring with deterministic schema, admission, and late binding. No live spec exists on this Change's `main` base (`openspec/specs/`, verified by directory listing at `base_sha` `705cf49`); the capability name mirrors a same-named spec that exists only on the unrelated, still in-flight `skill-provisioning-and-phase-specialist` branch and must not be conflated with it.
-- `acceptance-verifier`: Frozen evidence precedence and terminal receipt/report bindings. No live spec exists on this Change's `main` base for the same reason.
 
 ### Modified Capabilities
 - `sdd-apply`: Make phase/wave barriers, DAG target handling, and consumer-test ownership explicit.
 - `parent-feature-integration`: Preserve immutable target identity, CAS, no-redispatch retry, and isolated recovery.
+- `packet-authoring-contract`: Was classified New against this Change's original `main` base (`705cf49`), where no live spec existed. `feature/skill-provisioning-and-phase-specialist` (merged into this branch at `61aa0cc` on the human's explicit direction, after having been an intentionally isolated sibling Change for most of this Change's planning) delivered a comprehensive live spec first. Reclassified Modified: this Change now adds one narrow scenario — `allowed_paths` omitted defaults to open scope and skips diff-boundary/overlap checks — that the live spec did not already state.
+- `acceptance-verifier`: Same history as above. Reclassified Modified: this Change now extends "Fail-Closed Mechanical Criteria" to make explicit that a fired hard stop demotes the lane to blocked regardless of the envelope's claimed status — a mechanism the live spec's prose already implies but the runtime does not yet enforce (`internal/run/run.go` `decideStatus` has no loop over `HardStop.Fired`).
 
 ## Approach
 
