@@ -32,10 +32,10 @@ Same-wave disjointness does not apply (single packet). If a DAG is authored late
 
 ## Phase 1: Operational Contracts & Skill Tree Synchronization
 
-- [ ] 1.1 Replace the Hard Rule at `plugin/claude-code/skills/lucind-ai/SKILL.md:19` and `plugin/opencode/skills/lucind-ai/SKILL.md:19` with Decision 3 New: text (`design.md:39-47`): a named `sdd-*` Specialist may Accept its own phase’s Lanes; Promotion stays forbidden to every Agent.
-- [ ] 1.2 In both trees’ `references/strategies/fan-out.md:47-48`, move synthesis-note review and contradiction arbitration from Orchestrator to Specialist.
-- [ ] 1.3 In both trees’ `references/contracts/acceptance-promotion.md:18-30,31-36`, add the Decision 2 `sdd_phase` caveat to checklist steps 1 and 8, and upgrade subagent delegation to decision-bearing Specialist Acceptance. Dual-Judge (`:38-43`) stays.
-- [ ] 1.4 After 1.1–1.3, confirm `TestSkillTreesByteIdentical` (`packet_test.go:943-967`) and glossary lockstep in `TestSkillAssetContract` (`packet_test.go:778,924-941`). Edit both mirrors in the same unit.
+- [x] 1.1 Replace the Hard Rule at `plugin/claude-code/skills/lucind-ai/SKILL.md:19` and `plugin/opencode/skills/lucind-ai/SKILL.md:19` with Decision 3 New: text (`design.md:39-47`): a named `sdd-*` Specialist may Accept its own phase’s Lanes; Promotion stays forbidden to every Agent.
+- [x] 1.2 In both trees’ `references/strategies/fan-out.md:47-48`, move synthesis-note review and contradiction arbitration from Orchestrator to Specialist.
+- [x] 1.3 In both trees’ `references/contracts/acceptance-promotion.md:18-30,31-36`, add the Decision 2 `sdd_phase` caveat to checklist steps 1 and 8, and upgrade subagent delegation to decision-bearing Specialist Acceptance. Dual-Judge (`:38-43`) stays.
+- [x] 1.4 After 1.1–1.3, confirm `TestSkillTreesByteIdentical` (`packet_test.go:943-967`) and glossary lockstep in `TestSkillAssetContract` (`packet_test.go:778,924-941`). Edit both mirrors in the same unit.
 
 ## Phase 2: Acceptance Verifier SDD-Phase Gating
 

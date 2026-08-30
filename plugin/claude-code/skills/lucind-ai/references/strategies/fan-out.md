@@ -44,7 +44,7 @@ The real phase skill governs required document content. The packet governs topol
 
 Each Lens stays under 1000 words and the canonical artifact under 1800 words. The canonical budget stays below the sum of the lens budgets; this compression gap forces arbitration. Copied live scenarios inside a MODIFIED requirement are excluded from specs evidence budgets because archive must preserve the complete live block.
 
-The Orchestrator reads synthesis notes: unresolved contradictions, coverage gaps, dropped citations, and phase divergence. A populated contradiction section requires human judgment. Verify every canonical citation; synthesis is the single point where hallucinated evidence can otherwise pass.
+The Specialist reads synthesis notes: unresolved contradictions, coverage gaps, dropped citations, and phase divergence. It arbitrates persistent contradictions, resolving with `needs-revision` and exactly one bounded correction rather than a full re-fan-out. Verify every canonical citation; synthesis is the single point where hallucinated evidence can otherwise pass.
 
 ## Coverage and archive gate
 
