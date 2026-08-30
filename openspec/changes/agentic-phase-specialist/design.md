@@ -36,6 +36,16 @@ For `ExecuteAttempt`, resolve `SDDPhase` from combined lanes’ `LaneMetadata` v
 **Alternatives considered**: Authorize all agents (rejected: workers lack cross-lane context). Delegate Promotion (rejected: `CONTEXT.md:91-93`, `acceptance-promotion.md:44-50`). Edit only Claude Code (rejected: `TestSkillTreesByteIdentical` — `internal/packet/packet_test.go:943-967`).
 **Rationale**: ADR:16-18.
 
+**Hard Rule replacement** (copy verbatim into both skill trees at line 19):
+
+```
+Old:
+Keep one Orchestrator authoritative for the Change. Agents own Lanes, not scope, priorities, Dependencies, Acceptance, or Promotion.
+
+New:
+Keep one Orchestrator authoritative for the Change. Agents own Lanes, not scope, priorities, or Dependencies; a named `sdd-*` phase-Specialist may independently Accept its own phase's Lanes; Promotion remains forbidden to every Agent, Specialist included.
+```
+
 ### Decision 4 — Adapter coexistence; no Bash/Agent tools this Change
 
 **Choice**: Keep `Adapter`, `CLIStatusQuerier` (`phasespec.go:308-333`), and `phaseDispatch`. The Specialist authors packets and owns the Acceptance judgment; the Orchestrator dispatches `lucind-ai run` (and the Specialist-directed `lucind-ai accept`) until a later Change adds a tool bridge.
@@ -83,13 +93,17 @@ Unresolved Divergence: <text or empty>
 |---|---|---|---|
 | `plugin/*/skills/lucind-ai/SKILL.md` | Modify | Hard Rule carve-out at line 19 | `sdd-*` runtimes; `TestSkillTreesByteIdentical` (`packet_test.go:943-967`) |
 | `plugin/*/skills/lucind-ai/references/strategies/fan-out.md` | Modify | Lines 47–48: Specialist reads synthesis notes | Specialist conversation |
-| `plugin/*/skills/lucind-ai/references/contracts/acceptance-promotion.md` | Modify | Lines 31–36: decision-bearing Specialist Acceptance | Specialist checklist (`:18-30`); `runAccept` (`cli.go:658-715`) |
+| `plugin/*/skills/lucind-ai/references/contracts/acceptance-promotion.md` | Modify | Lines 31–36: decision-bearing Specialist Acceptance. Lines 18–30 (checklist steps 1 and 8): add the same `sdd_phase`-conditional caveat as Decision 2 — checks run only when the lane's `sdd_phase` is `"apply"`, empty/missing, or carries an explicit exception; otherwise skip steps 1 and 8 rather than asserting unconditional full-suite execution. | Specialist checklist (`:18-30`); `runAccept` (`cli.go:658-715`) |
 | `internal/accept/accept.go` | Modify | Unconditional metadata load; gate `v.check` | `lucind-ai accept` |
 | `internal/accept/accept_test.go` | Modify | Skip vs run for apply/empty/exception/missing; fixture `newVerifierFixture` (`:26-67`) | `go test ./internal/accept` |
 | `internal/run/attempt.go` | Modify | Gate `checkFunc` in CHECKING | `ExecuteAttempt` (`:217-328`) |
 | `internal/run/attempt_test.go` | Modify | Spy `checkCalls` via `attemptSpies` (`:24-44,83-92`) | `go test ./internal/run` |
 
-**Out-of-repository (not Lane-writable):** `~/.claude/skills/sdd-*/SKILL.md` must stop doing the phase’s work and instead drive fan-out+synthesis and Acceptance. Lanes cannot write outside the repository (`fan-out.md:43`). This Change documents the required text; a human applies it outside any Lane after in-repo docs land.
+**Out-of-repository (not Lane-writable):** `~/.claude/skills/sdd-*/SKILL.md` must stop doing the phase’s work and instead drive fan-out+synthesis and Acceptance. Lanes cannot write outside the repository (`fan-out.md:43`). `design.md` itself (this section) is the in-repo carrier of the required text. A human (or a future in-repo authoring mechanism) pastes the following into each `~/.claude/skills/sdd-*/SKILL.md` after in-repo docs land:
+
+```
+Stop doing this phase's work directly. Author and dispatch this phase's fan-out and synthesis packets via lucind-ai, read the synthesis notes, independently judge Acceptance of this phase's Lanes, and return only a Phase Verdict to the Orchestrator.
+```
 
 No DDL. Reuse `LaneMetadata.SDDPhase`. `domain.md` stays in lockstep with `CONTEXT.md` (`packet_test.go:924-941`, `TestSkillAssetContract`).
 
@@ -135,3 +149,7 @@ No DDL. Reuse `LaneMetadata.SDDPhase`. `domain.md` stays in lockstep with `CONTE
 - Multi-repository coordination (`CONTEXT.md:23-26`).
 - Gating on `.go` in `files_changed` (rejected, Decision 2).
 - Lane writes to `~/.claude/skills/sdd-*` (human-applied; see File Changes).
+
+## Citation Manifest (Remediation)
+
+No new citations added.
