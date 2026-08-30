@@ -1785,6 +1785,79 @@ func TestExecuteReadOnlyDoneWithDirtyWorktreeFails(t *testing.T) {
 	}
 }
 
+func TestExecuteWriteDoneWithStagedLeftoverFails(t *testing.T) {
+	if testing.Short() {
+		t.Skip("shells out to real git")
+	}
+	wtPath := t.TempDir()
+	runGit(t, wtPath, "init", "-b", "main")
+	runGit(t, wtPath, "config", "user.name", "completion-test")
+	runGit(t, wtPath, "config", "user.email", "completion-test@example.com")
+	if err := os.WriteFile(filepath.Join(wtPath, "seed.txt"), []byte("seed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, wtPath, "add", "seed.txt")
+	runGit(t, wtPath, "commit", "-m", "seed")
+	if err := os.WriteFile(filepath.Join(wtPath, "staged.txt"), []byte("staged leftover\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, wtPath, "add", "staged.txt")
+
+	fe := &fakeExecutor{outcome: executor.Outcome{ExitCode: 0}}
+	deps := newTestDeps(t, wtPath, func(string) fs.FS {
+		return fstest.MapFS{resultEnvelopePathForTest(): {Data: []byte(doneEnvelopeJSON)}}
+	}, fe)
+	deps.PorcelainEmpty = worktree.PorcelainEmpty
+
+	report, err := run.Execute(context.Background(), deps, testPacket())
+	if err != nil {
+		t.Fatalf("Execute() error = %v, want nil", err)
+	}
+	if report.Status != lane.Failed {
+		t.Fatalf("report.Status = %v, want %v (staged leftover must fail porcelain)", report.Status, lane.Failed)
+	}
+	details := laneNoteDetails(t, deps.Ledger, "run-1")
+	if !anyContains(details, "uncommitted") && !anyContains(details, "dirty") {
+		t.Errorf("ledger notes = %+v, want a note naming uncommitted/dirty changes", details)
+	}
+}
+
+func TestExecuteWriteDoneWithUntrackedLeftoverFails(t *testing.T) {
+	if testing.Short() {
+		t.Skip("shells out to real git")
+	}
+	wtPath := t.TempDir()
+	runGit(t, wtPath, "init", "-b", "main")
+	runGit(t, wtPath, "config", "user.name", "completion-test")
+	runGit(t, wtPath, "config", "user.email", "completion-test@example.com")
+	if err := os.WriteFile(filepath.Join(wtPath, "seed.txt"), []byte("seed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, wtPath, "add", "seed.txt")
+	runGit(t, wtPath, "commit", "-m", "seed")
+	if err := os.WriteFile(filepath.Join(wtPath, "untracked.txt"), []byte("untracked leftover\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	fe := &fakeExecutor{outcome: executor.Outcome{ExitCode: 0}}
+	deps := newTestDeps(t, wtPath, func(string) fs.FS {
+		return fstest.MapFS{resultEnvelopePathForTest(): {Data: []byte(doneEnvelopeJSON)}}
+	}, fe)
+	deps.PorcelainEmpty = worktree.PorcelainEmpty
+
+	report, err := run.Execute(context.Background(), deps, testPacket())
+	if err != nil {
+		t.Fatalf("Execute() error = %v, want nil", err)
+	}
+	if report.Status != lane.Failed {
+		t.Fatalf("report.Status = %v, want %v (untracked leftover must fail porcelain)", report.Status, lane.Failed)
+	}
+	details := laneNoteDetails(t, deps.Ledger, "run-1")
+	if !anyContains(details, "uncommitted") && !anyContains(details, "dirty") {
+		t.Errorf("ledger notes = %+v, want a note naming uncommitted/dirty changes", details)
+	}
+}
+
 func TestExecuteNonDoneStatusBypassesGitInspection(t *testing.T) {
 	deviatedJSON := `{
 		"packet_id": "lane-a",

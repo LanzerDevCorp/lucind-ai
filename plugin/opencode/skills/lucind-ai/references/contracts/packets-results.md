@@ -16,7 +16,7 @@ Every packet starts with YAML frontmatter and a non-empty prompt body.
 | `read_only` | Optional strict boolean; omitted means write. |
 | `allowed_paths` | Optional single-line JSON array; YAML lists are invalid. Empty currently disables overlap and post-run scope enforcement for the packet. |
 | `read_only_paths` | Apply-DAG JSON array owned by transitive dependencies and forbidden for this node to write. It must not overlap the node's `allowed_paths`. |
-| `feature`, `parent_ref`, `base_sha`, `expected_parent_sha` | Required together for a feature-targeted batch. |
+| `feature`, `parent_ref`, `base_sha`, `expected_parent_sha` | Omit from reusable templates (no live target SHAs or feature names). At wave dispatch the orchestrator writes all four onto the packet copies it passes to `lucind-ai run`. Required together on a dispatched feature-targeted batch; admission stays fail-closed on unbound or mixed targets. |
 | `legacy_main` | Runtime boolean mapping for Exclusive Mode. Dispatching with `--legacy-main` **requires** an expected parent SHA from one of exactly two sources: the batch-wide `--expected-parent-sha <sha>` flag, or this key in every packet's frontmatter. It is an optimistic-concurrency guard on the parent ref, so the binary will not derive it for you — deriving it from `HEAD` would assert the check against itself. Omitting both is refused in pre-dispatch validation (`cmd/lucind-ai/cli.go:211-214`) before any worktree or quota is consumed; the error names only the first packet, but the flag satisfies the whole batch. |
 
 ## Body structure

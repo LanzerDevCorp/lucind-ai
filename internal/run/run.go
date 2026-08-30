@@ -888,6 +888,11 @@ func decideStatus(deps Deps, worktreePath string, outcome executor.Outcome) (lan
 			// anyway rather than ever returning an empty lane.Status.
 			return lane.Blocked, nil, ErrEnvelopeUnreadable.Error()
 		}
+		for _, hs := range envelope.HardStops {
+			if hs.Fired {
+				return lane.Blocked, &envelope, "hard stop fired: " + hs.HardStop
+			}
+		}
 		return st, &envelope, ""
 	}
 }

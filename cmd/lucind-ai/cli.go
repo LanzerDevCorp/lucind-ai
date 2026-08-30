@@ -360,6 +360,11 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 		return 1
 	}
 
+	if err := preflightOrchestratorContract(primaryRoot); err != nil {
+		fmt.Fprintf(stderr, "lucind-ai: %v\n", err)
+		return 1
+	}
+
 	runID := uuid.NewString()
 	fmt.Fprintf(stdout, "run id: %s\n", runID)
 
@@ -826,6 +831,102 @@ func resolvePrimaryRoot(ctx context.Context) (string, error) {
 	return primaryRoot, nil
 }
 
+// orchestratorSkillTrees returns the canonical Claude skill tree and its
+// OpenCode replica, relative to primaryRoot. Tests may override this to
+// inject fixture roots without relying on a full plugin checkout.
+var orchestratorSkillTrees = func(primaryRoot string) (canonical, replica string) {
+	return filepath.Join(primaryRoot, "plugin", "claude-code", "skills", "lucind-ai"),
+		filepath.Join(primaryRoot, "plugin", "opencode", "skills", "lucind-ai")
+}
+
+// onDiskResultSchemaPath is the source-of-truth schema file the binary's
+// embedded copy must match. Tests may override this.
+var onDiskResultSchemaPath = func(primaryRoot string) string {
+	return filepath.Join(primaryRoot, "internal", "result", "result.schema.json")
+}
+
+// embeddedResultSchema returns the schema bytes compiled into this binary.
+var embeddedResultSchema = result.SchemaJSON
+
+// preflightOrchestratorContract fails closed if the Claude and OpenCode
+// skill trees are not byte-identical or the embedded result schema does not
+// match the on-disk file. It must run before any worktree allocation.
+func preflightOrchestratorContract(primaryRoot string) error {
+	canonical, replica := orchestratorSkillTrees(primaryRoot)
+	if err := skillTreesByteIdentical(canonical, replica); err != nil {
+		return err
+	}
+	path := onDiskResultSchemaPath(primaryRoot)
+	onDisk, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("embedded schema freshness: read %s: %w", path, err)
+	}
+	if !bytes.Equal(onDisk, embeddedResultSchema()) {
+		return fmt.Errorf("embedded result schema is stale: does not match %s", path)
+	}
+	return nil
+}
+
+func skillTreesByteIdentical(canonical, replica string) error {
+	canFiles, err := readSkillTree(canonical)
+	if err != nil {
+		return fmt.Errorf("skill parity: read canonical %s: %w", canonical, err)
+	}
+	repFiles, err := readSkillTree(replica)
+	if err != nil {
+		return fmt.Errorf("skill parity: read replica %s: %w", replica, err)
+	}
+	if _, ok := canFiles["SKILL.md"]; !ok {
+		return fmt.Errorf("skill parity: canonical tree %s missing SKILL.md", canonical)
+	}
+	if len(canFiles) != len(repFiles) {
+		return fmt.Errorf("skill parity: Claude and OpenCode trees differ (canonical %d files, replica %d files)", len(canFiles), len(repFiles))
+	}
+	for rel, want := range canFiles {
+		got, ok := repFiles[rel]
+		if !ok {
+			return fmt.Errorf("skill parity: OpenCode tree missing %s", rel)
+		}
+		if !bytes.Equal(want, got) {
+			return fmt.Errorf("skill parity: %s differs between Claude and OpenCode trees", rel)
+		}
+	}
+	return nil
+}
+
+func readSkillTree(root string) (map[string][]byte, error) {
+	info, err := os.Stat(root)
+	if err != nil {
+		return nil, err
+	}
+	if !info.IsDir() {
+		return nil, fmt.Errorf("not a directory")
+	}
+	files := make(map[string][]byte)
+	err = filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		files[filepath.ToSlash(rel)] = data
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return files, nil
+}
+
 // productionDeps constructs the production run.Deps wiring real-world
 // dependencies (git, ledger, worktree, executors, clock).
 func productionDeps(runID, primaryRoot string, ledg *ledger.Ledger, timeout, approvalTimeout time.Duration) lucindrun.Deps {
@@ -1003,6 +1104,11 @@ func runFeatureCreate(ctx context.Context, args []string, stdout, stderr io.Writ
 	toplevel, err := gitShowToplevel(ctx)
 	if err == nil && worktree.IsLinkedWorktree(toplevel) {
 		fmt.Fprintf(stderr, "lucind-ai: refusing to run from inside a linked worktree (%s); run from the primary repository instead\n", toplevel)
+		return 1
+	}
+
+	if err := preflightOrchestratorContract(primaryRoot); err != nil {
+		fmt.Fprintf(stderr, "lucind-ai: %v\n", err)
 		return 1
 	}
 

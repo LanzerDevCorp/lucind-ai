@@ -16,7 +16,7 @@ Load this module for an approved structured development flow, apply DAG, qualita
 
 Keep `tasks.md` as the human checklist; it is not the DAG parser input. `lucind-ai split --dag ... --out .lucind/packets` emits packet files and prints one run command per wave. It does not write `waves.json`, schedule waves, or expose a JSON wave channel.
 
-Run emitted waves sequentially. Advance only after exit 0 and after every expected Lane appears in `integrated_ids` with none in `reverted_ids`. Halt on any other result. A Strict-TDD RED-only wave cannot survive the integration check gate; RED and GREEN for one unit belong in one Lane unless every wave is independently green.
+Run emitted waves sequentially. Advance to wave N+1 only after wave N's `lucind-ai run` exits 0 and every expected Lane appears in `integrated_ids` with none in `reverted_ids`. Halt remaining waves on a non-zero exit, a blocked/failed/deviated lane, a name in `reverted_ids`, or unordered overlapping paths; do not skip failed nodes. The binary does not schedule waves. A Strict-TDD RED-only wave cannot survive the integration check gate; RED and GREEN for one unit belong in one Lane unless every wave is independently green.
 
 ## Verify dispatch
 
