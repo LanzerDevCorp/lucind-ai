@@ -1,0 +1,59 @@
+{
+  "packet_id": "result-envelope-retry",
+  "status": "done",
+  "summary": "Added optional skills_loaded support to the result envelope and JSON schema, with an Envelope-to-schema reflection pin test and full test suite verification.",
+  "hard_stops": [
+    {
+      "hard_stop": "Stop blocked if a schema version or ledger migration is required.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Stop blocked if a change outside allowed paths is needed or any criterion is impossible.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Stop blocked if two reasonable implementations are not resolved by design.md.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "change": "modified",
+      "path": "internal/result/result.go",
+      "why": "Add SkillsLoaded field to Envelope struct"
+    },
+    {
+      "change": "modified",
+      "path": "internal/result/result.schema.json",
+      "why": "Add skills_loaded array property to envelope JSON schema"
+    },
+    {
+      "change": "modified",
+      "path": "internal/result/schema_test.go",
+      "why": "Add Envelope-to-schema reflection pin and skills_loaded validation tests"
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Strict TDD: add failing schema/reflection assertions, implement the minimal additive field, then run go test ./internal/result -race -count=1.",
+      "met": true,
+      "evidence": "schema_test.go:35-149 added TestEnvelopeAndSchemaReflectionPin and TestReadEnvelopeWithSkillsLoaded; failed initially with 'missing from result.schema.json properties' and 'additional properties skills_loaded not allowed'; go test ./internal/result -race -count=1 passed in 1.116s."
+    },
+    {
+      "criterion": "skills_loaded is optional, a string array, and reflected by Envelope.SkillsLoaded; existing schema tests and go test ./... -race -count=1 pass.",
+      "met": true,
+      "evidence": "result.go:115 defines SkillsLoaded []string `json:\"skills_loaded,omitempty\"`; result.schema.json:160-164 defines skills_loaded array; go test ./... -race -count=1 passed cleanly across all packages."
+    },
+    {
+      "criterion": "Every indirection introduced is demonstrably consumed by result.Read/runtime envelope consumers; cite file:line and command output.",
+      "met": true,
+      "evidence": "result.schema.json:160-164 is consumed by compiledSchema.Validate in internal/result/result.go:153; Envelope.SkillsLoaded at internal/result/result.go:115 is populated by json.Unmarshal in internal/result/result.go:158 and consumed by enforceRequiredSkills in internal/run/run.go:876-904 and validateVersionedEvidence in internal/accept/accept.go:263-328."
+    },
+    {
+      "criterion": "Commit conventionally with no AI attribution; git status --porcelain is empty and git log --oneline -1 is recorded.",
+      "met": true,
+      "evidence": "Commit 7115cbb ('feat(result): add optional skills_loaded to envelope and schema') recorded; git status --porcelain is empty; git show -s --format=\"%b\" HEAD is empty."
+    }
+  ],
+  "commit": "7115cbb9e5715bc4c3c5802065778282bfc37e3c"
+}

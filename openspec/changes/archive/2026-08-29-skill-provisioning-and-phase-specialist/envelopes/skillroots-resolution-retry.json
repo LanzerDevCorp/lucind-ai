@@ -1,0 +1,50 @@
+{
+  "packet_id": "skillroots-resolution-retry",
+  "status": "done",
+  "summary": "Implemented internal/skillroots providing ordered skill-root resolution, tilde path expansion, data-only loading, and fail-closed diagnostics for unresolvable skills. Verified full unit test coverage and passed full repository checks with race detection.",
+  "hard_stops": [
+    {
+      "hard_stop": "Stop blocked if implementation executes documentation-like files or requires unordered resolution.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Stop blocked for out-of-scope edits, impossible criteria, unresolved alternatives, or contradictory instructions.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "change": "created",
+      "path": "internal/skillroots/skillroots.go",
+      "why": "Core implementation of ordered skill root resolution, tilde expansion, and fail-closed diagnostics"
+    },
+    {
+      "change": "created",
+      "path": "internal/skillroots/skillroots_test.go",
+      "why": "TDD test suite for ordered resolution, tilde expansion, diagnostics, and data-only loading"
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "RED then GREEN tests prove ordered first-match lookup, tilde expansion, missing diagnostics, and loading YAML/Markdown strictly as data.",
+      "met": true,
+      "evidence": "go test ./internal/skillroots/... -count=1 -v outputs PASS across TestResolveRoots, TestResolveRoots_TildeExpansion, TestResolveRoots_MissingSkillDiagnostics, and TestResolveRootsLoadsSkillMarkdownAsData"
+    },
+    {
+      "criterion": "Run focused package tests and go test ./... -race -count=1 successfully.",
+      "met": true,
+      "evidence": "./lucind-checks.sh and go test ./... -race -count=1 exited 0 with all packages passing"
+    },
+    {
+      "criterion": "The resolver is consumed by the later admission unit; cite terminal consumer and evidence.",
+      "met": true,
+      "evidence": "cmd/lucind-ai/packet_authoring.go:32-54 (admitDispatchBatch) cited in design.md:73-74,104,107 and tasks.md:73"
+    },
+    {
+      "criterion": "Commit conventionally, no AI attribution, clean status, and latest commit evidence recorded.",
+      "met": true,
+      "evidence": "commit 9e7f2a94efa7bb75939ceb98e056c065fadc19d0: feat(skillroots): implement ordered skill-root resolution with tilde expansion; git status clean"
+    }
+  ],
+  "commit": "9e7f2a94efa7bb75939ceb98e056c065fadc19d0"
+}

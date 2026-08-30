@@ -119,3 +119,20 @@ Before executor work can become a lane candidate, lane execution MUST freeze the
 - GIVEN an admitted unversioned manual packet
 - WHEN candidate evidence is frozen
 - THEN it MUST be marked legacy and MUST NOT be mistaken for a versioned contract
+
+### Requirement: Frozen Authored Candidate Evidence and Required Skills Delivery
+
+The system MUST record declared required skills inside frozen authoring evidence, MUST deliver required skills to the execution environment via `LUCIND_REQUIRED_SKILLS` and rendered body sections, and MUST demote any result envelope whose declared `skills_loaded` has a shortfall against authoring evidence to `lane.Deviated`.
+
+#### Scenario: Envelope shortfall demoted to deviated
+
+- GIVEN authoring evidence requiring `["lucind-executor", "lucind-fan-out-lens", "sdd-propose"]`
+- WHEN an envelope declaring `skills_loaded: ["lucind-executor"]` is returned with status `done`
+- THEN the system MUST demote lane status to `lane.Deviated` before candidate integration.
+
+#### Scenario: Complete skills loaded preserved as done
+
+- GIVEN authoring evidence requiring skills and an envelope declaring matching `skills_loaded` with status `done`
+- WHEN completion status is evaluated
+- THEN lane status MUST remain `lane.Done`.
+

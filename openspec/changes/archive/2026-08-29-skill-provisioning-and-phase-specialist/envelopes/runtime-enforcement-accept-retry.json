@@ -1,0 +1,74 @@
+{
+  "packet_id": "runtime-enforcement-accept-retry",
+  "status": "done",
+  "summary": "Enforced required skills declarations across run dispatch and acceptance verification. Updated packetDigest to use DigestBody and hash lane role plus sorted skill counts, and aligned the acceptance contract decode struct in lockstep.",
+  "hard_stops": [
+    {
+      "hard_stop": "Stop `blocked` if accept demotes instead of rejects, frozen evidence/version or ledger schema changes, or correspondence cannot be kept lockstep.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Stop `blocked` for out-of-scope edits, impossible criteria, unresolved alternatives, or conflicting instructions.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "change": "modified",
+      "path": "internal/run/run.go",
+      "why": "Added enforceRequiredSkills and updated packetDigest with DigestBody, lane role, and sorted skill groups."
+    },
+    {
+      "change": "modified",
+      "path": "internal/run/export_test.go",
+      "why": "Exported PacketDigest for test assertion."
+    },
+    {
+      "change": "created",
+      "path": "internal/run/skills_enforcement_test.go",
+      "why": "Added tests for packet digest root stability and runtime shortfall demotion."
+    },
+    {
+      "change": "modified",
+      "path": "internal/accept/accept.go",
+      "why": "Added required_skills to contract decode struct and enforced correspondence in validateVersionedEvidence."
+    },
+    {
+      "change": "modified",
+      "path": "internal/accept/accept_test.go",
+      "why": "Added TestAcceptDirtyPrimaryWithSkillsMatch asserting acceptance on dirty primary and rejection on mismatch."
+    },
+    {
+      "change": "modified",
+      "path": "internal/accept/authoring_evidence_test.go",
+      "why": "Added required_skills mutation tests in TestValidateVersionedResultRequiresExactFrozenCorrespondence."
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "RED then GREEN tests prove digest stability, missing loaded skills demote run status, matching skills allow dirty-primary acceptance, and mismatch rejects without receipt.",
+      "met": true,
+      "evidence": "Tests TestPacketDigestExcludesResolvedPaths, TestEnforceRequiredSkills in internal/run/skills_enforcement_test.go:13,54 and TestAcceptDirtyPrimaryWithSkillsMatch, TestValidateVersionedResultRequiresExactFrozenCorrespondence in internal/accept/accept_test.go:168 and internal/accept/authoring_evidence_test.go:56 demonstrated RED failure on missing enforcement and GREEN pass on implementation."
+    },
+    {
+      "criterion": "`packetDigest` and accept decode enumerate the same fields; run focused run/accept tests and `go test ./... -race -count=1`.",
+      "met": true,
+      "evidence": "Field lockstep maintained between packetDigest (internal/run/run.go:728-747) and accept decode struct (internal/accept/accept.go:275-286). ./lucind-checks.sh passed with exit code 0 covering all packages with -race -count=1."
+    },
+    {
+      "criterion": "Every enforcement path is consumed by run/accept terminal decisions; cite `file:line` and outputs.",
+      "met": true,
+      "evidence": "enforceRequiredSkills consumed in internal/run/run.go:496 to demote to lane.Deviated on shortfall; validateVersionedEvidence consumed in internal/accept/accept.go:316 to reject candidate acceptance on skills mismatch."
+    },
+    {
+      "criterion": "Commit conventionally with no AI attribution; clean status and latest commit evidence are recorded.",
+      "met": true,
+      "evidence": "Commit 3ef82424dbc0ab9135fa4c8f2cf9b1f4630abbc6 ('feat(run): enforce required skills during execution and acceptance') with clean working tree verified by git status --porcelain."
+    }
+  ],
+  "commit": "3ef82424dbc0ab9135fa4c8f2cf9b1f4630abbc6",
+  "skills_loaded": [
+    "lucind-executor",
+    "lucind-apply"
+  ]
+}

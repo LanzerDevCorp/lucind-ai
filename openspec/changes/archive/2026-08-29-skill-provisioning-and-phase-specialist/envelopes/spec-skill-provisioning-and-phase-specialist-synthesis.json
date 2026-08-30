@@ -1,0 +1,142 @@
+{
+  "packet_id": "spec-skill-provisioning-and-phase-specialist-synthesis",
+  "status": "done",
+  "summary": "Synthesized eight delta specs from three verified lens drafts into openspec/changes/skill-provisioning-and-phase-specialist/specs/, then recorded arbitration in spec-synthesis-notes.md. Two conventional commits, no AI attribution. Authored tree 1311 words; four MODIFIED blocks copied complete from live specs.",
+  "hard_stops": [
+    {
+      "hard_stop": "The three ## Assumed requirements blocks are mutually irreconcilable and the proposal does not choose between them. Write the notes file, leave specs/ uncreated, and block.",
+      "fired": false,
+      "note": "A split the proposal's six names across eight capability-scoped requirements; B and C assumed the six. Reconcilable by joining on A's set."
+    },
+    {
+      "hard_stop": "Lens A's requirement set is refuted by a live spec you verified. Do not substitute your own.",
+      "fired": false,
+      "note": "A's four MODIFIED names exist in the live specs at the cited headings. A's four ADDED capabilities do not exist under openspec/specs/."
+    },
+    {
+      "hard_stop": "A MODIFIED requirement's live block cannot be recovered from lens C or from openspec/specs/, so the block would have to be partial. Never write a partial block.",
+      "fired": false
+    },
+    {
+      "hard_stop": "One or more lens drafts is missing from this worktree.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying the spine honestly would require exceeding the authored budget. Report which requirement forces it rather than silently overrunning or silently cutting.",
+      "fired": false,
+      "note": "Authored content 1311 words excluding verbatim copied live scenarios; budget 1800."
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false,
+      "note": "sdd-spec full-spec-for-new-domains vs packet delta format: packet wins on execution; drift recorded under Coverage Gaps."
+    }
+  ],
+  "files_changed": [
+    {
+      "change": "created",
+      "path": "openspec/changes/skill-provisioning-and-phase-specialist/specs/skill-derivation/spec.md",
+      "why": "ADDED delta for new skill-derivation capability"
+    },
+    {
+      "change": "created",
+      "path": "openspec/changes/skill-provisioning-and-phase-specialist/specs/skill-root-resolution/spec.md",
+      "why": "ADDED delta for new skill-root-resolution capability"
+    },
+    {
+      "change": "created",
+      "path": "openspec/changes/skill-provisioning-and-phase-specialist/specs/skill-load-correspondence/spec.md",
+      "why": "ADDED delta for new skill-load-correspondence capability"
+    },
+    {
+      "change": "created",
+      "path": "openspec/changes/skill-provisioning-and-phase-specialist/specs/phase-specialist-dispatch/spec.md",
+      "why": "ADDED delta for new phase-specialist-dispatch capability"
+    },
+    {
+      "change": "created",
+      "path": "openspec/changes/skill-provisioning-and-phase-specialist/specs/packet-authoring-contract/spec.md",
+      "why": "MODIFIED complete live block for Versioned Contract and Late Target Binding"
+    },
+    {
+      "change": "created",
+      "path": "openspec/changes/skill-provisioning-and-phase-specialist/specs/lane-execution/spec.md",
+      "why": "MODIFIED complete live block for Frozen Authored Candidate Evidence"
+    },
+    {
+      "change": "created",
+      "path": "openspec/changes/skill-provisioning-and-phase-specialist/specs/acceptance-verifier/spec.md",
+      "why": "MODIFIED complete live block for Fail-Closed Mechanical Criteria"
+    },
+    {
+      "change": "created",
+      "path": "openspec/changes/skill-provisioning-and-phase-specialist/specs/read-only-packet-schema/spec.md",
+      "why": "MODIFIED complete live block for Extended packet frontmatter parsing"
+    },
+    {
+      "change": "created",
+      "path": "openspec/changes/skill-provisioning-and-phase-specialist/spec-synthesis-notes.md",
+      "why": "Arbitration notes for the orchestrator"
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "The delta spec tree was committed as its own commit before spec-synthesis-notes.md was started.",
+      "met": true,
+      "evidence": "git rev-parse HEAD^ → 5581af856f8ddd65708ebe10319b464f07510280 docs(openspec): add canonical skill-provisioning spec delta (8 spec.md files). Notes commit is HEAD 32461d95b13f5c935a99b9534e222d2eebf0247a. Notes file was not in the first commit."
+    },
+    {
+      "criterion": "Every file:line citation surviving into the delta tree was opened and confirmed in this worktree, and every dropped claim is listed under ## Dropped Citations.",
+      "met": true,
+      "evidence": "120 unique manifest ranges opened. 118 verified, 2 retargeted (result.schema.json:1→:4; read-only-packet-schema/spec.md:28→:42), 0 dropped. spec-synthesis-notes.md Dropped Citations."
+    },
+    {
+      "criterion": "Every MODIFIED block matches the live requirement scenario for scenario, with only the intended edits applied — verified by opening the live spec, not by trusting lens C.",
+      "met": true,
+      "evidence": "Compared delta scenarios to openspec/specs/{packet-authoring-contract,lane-execution,acceptance-verifier,read-only-packet-schema}/spec.md. Four complete live scenario sets copied verbatim; requirement text edited; new scenarios appended. Four MODIFIED blocks confirmed complete."
+    },
+    {
+      "criterion": "Every requirement carries an RFC 2119 keyword and at least one GIVEN/WHEN/THEN scenario.",
+      "met": true,
+      "evidence": "Eight spec.md files; each requirement uses MUST and has ≥1 GIVEN/WHEN/THEN scenario (happy plus edge on each)."
+    },
+    {
+      "criterion": "The delta tree's authored content is under 1800 words excluding verbatim copied blocks, and every spine item is satisfied or reported under ## Coverage Gaps.",
+      "met": true,
+      "evidence": "Authored word count 1311 excluding 14 verbatim live scenarios. Spine gaps listed in spec-synthesis-notes.md ## Coverage Gaps."
+    },
+    {
+      "criterion": "spec-synthesis-notes.md exists with exactly the four required sections, each either populated or explicitly \"None\".",
+      "met": true,
+      "evidence": "openspec/changes/skill-provisioning-and-phase-specialist/spec-synthesis-notes.md headings: Unresolved Contradictions (None), Coverage Gaps, Dropped Citations, Requirement Divergence."
+    },
+    {
+      "criterion": "The work is committed with two conventional commits and no AI attribution (git status --porcelain empty and git log --oneline -1).",
+      "met": true,
+      "evidence": "git status --porcelain empty. git log --oneline -2 → 32461d9 docs(openspec): record skill-provisioning spec synthesis notes; 5581af8 docs(openspec): add canonical skill-provisioning spec delta. git log -1 --format=%B has no Co-authored-by."
+    }
+  ],
+  "commit": "32461d95b13f5c935a99b9534e222d2eebf0247a",
+  "findings": [
+    {
+      "finding": "Citation pass: 120 unique manifest ranges opened; 118 verified; 2 retargeted; 0 claims dropped from the delta.",
+      "evidence": "openspec/changes/skill-provisioning-and-phase-specialist/spec-synthesis-notes.md ## Dropped Citations",
+      "affects": "spec-synthesis-notes"
+    },
+    {
+      "finding": "MODIFIED blocks confirmed complete: 4 (Versioned Contract 3 scenarios, Frozen Authored Candidate Evidence 3, Fail-Closed Mechanical Criteria 5, Extended packet frontmatter parsing 3).",
+      "evidence": "openspec/specs/packet-authoring-contract/spec.md:9; openspec/specs/lane-execution/spec.md:104; openspec/specs/acceptance-verifier/spec.md:30; openspec/specs/read-only-packet-schema/spec.md:84",
+      "affects": "delta specs"
+    },
+    {
+      "finding": "Contradictions escalated: 0.",
+      "evidence": "spec-synthesis-notes.md ## Unresolved Contradictions is None",
+      "affects": "none"
+    },
+    {
+      "finding": "Coverage gaps: dual-delivery env channel not in A's statements; no unexpected-property envelope scenario; four live enumerations C flagged remain unmodified; leftover open questions; sdd-spec vs packet format drift.",
+      "evidence": "spec-synthesis-notes.md ## Coverage Gaps",
+      "affects": "design/tasks"
+    }
+  ]
+}

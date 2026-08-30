@@ -1,0 +1,55 @@
+{
+  "packet_id": "phasespec-adapter",
+  "status": "done",
+  "summary": "Implemented fail-closed gentle-ai sdd-status --json adapter in internal/phasespec with lens-before-synthesis gating and canonical artifact generation. Verified with RED/GREEN unit and E2E test suites with zero mutation on failures.",
+  "hard_stops": [
+    {
+      "hard_stop": "Stop blocked on malformed/error status, premature synthesis, filesystem mutation before admission, or any out-of-scope edit.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Stop blocked for impossible criteria, unresolved alternatives, or conflicting instructions.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "change": "created",
+      "path": "internal/phasespec/phasespec.go",
+      "why": "Implement fail-closed sdd-status parser, lens-before-synthesis gating, and canonical artifact generation."
+    },
+    {
+      "change": "created",
+      "path": "internal/phasespec/phasespec_test.go",
+      "why": "Unit tests for status parsing, fail-closed CLI errors, lens gating, and artifact writing."
+    },
+    {
+      "change": "created",
+      "path": "internal/phasespec/specialist_test.go",
+      "why": "E2E phase specialist lifecycle test."
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "RED then GREEN tests prove malformed status JSON and CLI errors fail closed with no filesystem mutation.",
+      "met": true,
+      "evidence": "TestSpecialistFailsClosedOnMalformedStatusJSON and TestSpecialistFailsClosedOnCLIError in internal/phasespec/phasespec_test.go pass (0.01s)."
+    },
+    {
+      "criterion": "Tests prove synthesis cannot start before all required lenses are accepted and merged, then run focused tests and go test ./... -race -count=1.",
+      "met": true,
+      "evidence": "TestSynthesisGatedUntilLensesAcceptedAndMerged and TestPhaseSpecialist pass; go test -v ./internal/phasespec/... -race -count=1 exited 0 in 1.051s."
+    },
+    {
+      "criterion": "The adapter consumes status data and writes only the specified openspec/changes/\u003cchange\u003e/\u003cphase\u003e.md artifact when permitted; cite evidence.",
+      "met": true,
+      "evidence": "TestConsumesStatusAndWritesCanonicalArtifact in internal/phasespec/phasespec_test.go proves canonical artifact writing to openspec/changes/\u003cchange\u003e/\u003cphase\u003e.md with exact path and content."
+    },
+    {
+      "criterion": "Commit conventionally with no AI attribution; clean status and latest commit evidence are recorded.",
+      "met": true,
+      "evidence": "commit f7bea06c6bbf59bc5f21c1efe5f79fece0ab42ce with message feat(phasespec): implement fail-closed sdd-status adapter and lens sequencing and clean git status."
+    }
+  ],
+  "commit": "f7bea06c6bbf59bc5f21c1efe5f79fece0ab42ce"
+}

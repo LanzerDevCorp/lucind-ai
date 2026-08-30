@@ -1,0 +1,60 @@
+{
+  "packet_id": "remediate-cosmetic-followups",
+  "status": "done",
+  "summary": "Remediated cosmetic follow-ups 7.1, 7.2, and 7.3: updated the premature synthesis negative assertion in cli_test.go to check canonical proposal.md, updated phase-specialist-dispatch spec.md requirement prose to enumerate canonical per-phase filenames, and added a comment in cli.go on stale packet reuse.",
+  "hard_stops": [
+    {
+      "hard_stop": "Stop blocked if any of these three items would require a behavior change beyond test assertions, spec prose, or a comment — that would mean the item was miscategorized as cosmetic and needs re-scoping, not guessed at.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "change": "modified",
+      "path": "cmd/lucind-ai/cli_test.go",
+      "why": "Update negative assertion in TestPhaseSubcommandGatesPrematureSynthesis from propose.md to proposal.md"
+    },
+    {
+      "change": "modified",
+      "path": "openspec/changes/skill-provisioning-and-phase-specialist/specs/phase-specialist-dispatch/spec.md",
+      "why": "Enumerate canonical per-phase filenames in requirement prose"
+    },
+    {
+      "change": "modified",
+      "path": "cmd/lucind-ai/cli.go",
+      "why": "Add code comment documenting stale synthesis packet reuse without ## Required skills"
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "TestPhaseSubcommandGatesPrematureSynthesis now asserts proposal.md (not propose.md) was not created.",
+      "met": true,
+      "evidence": "cmd/lucind-ai/cli_test.go:5654: artifactPath := filepath.Join(primaryRoot, \"openspec\", \"changes\", change, \"proposal.md\"); TestPhaseSubcommandGatesPrematureSynthesis passed with go test ./cmd/lucind-ai"
+    },
+    {
+      "criterion": "phase-specialist-dispatch/spec.md's requirement prose names the actual per-phase filename convention instead of the generic \u003cphase\u003e.md placeholder.",
+      "met": true,
+      "evidence": "openspec/changes/skill-provisioning-and-phase-specialist/specs/phase-specialist-dispatch/spec.md:7: The phase specialist MUST ingest `gentle-ai sdd-status` JSON, dispatch child lanes through lucind-ai, MUST NOT start synthesis until all required planning lenses are accepted and merged, and MUST land canonical phase artifacts at `openspec/changes/\u003cchange\u003e/` under the canonical per-phase filename (`proposal.md`, `spec.md`, `design.md`, `tasks.md`, `apply.md`, `verify.md`, `remediate.md`, `archive.md`)."
+    },
+    {
+      "criterion": "A one-line comment exists at the existing-packet-reuse branch in cli.go noting the stale-packet caveat from 7.3's description above. No functional change.",
+      "met": true,
+      "evidence": "cmd/lucind-ai/cli.go:2452: // Existing synthesis packets already on disk are reused as-is without retroactively gaining ## Required skills (known cosmetic gap on stale local caches; env-var delivery still applies)."
+    },
+    {
+      "criterion": "go build ./... and go test ./... -race -count=1 remain green.",
+      "met": true,
+      "evidence": "Ran ./lucind-checks.sh with CGO_ENABLED=0 go build ./..., go test ./... -race -count=1, go vet ./..., and gofmt: all checks passed cleanly."
+    },
+    {
+      "criterion": "Commit conventionally with no AI attribution; clean status and latest commit evidence are recorded.",
+      "met": true,
+      "evidence": "commit 80f9f4acf029f41273874ad5eb74d96d58e773ea: fix(cli): remediate non-blocking cosmetic followups from phase specialist verify pass"
+    }
+  ],
+  "commit": "80f9f4acf029f41273874ad5eb74d96d58e773ea",
+  "skills_loaded": [
+    "lucind-executor",
+    "lucind-apply"
+  ]
+}

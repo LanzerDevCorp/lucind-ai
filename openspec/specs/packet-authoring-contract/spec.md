@@ -71,3 +71,26 @@ For a versioned artifact, the system MUST freeze the normalized contract and req
 - GIVEN a versioned result omits, duplicates, alters, or adds a criterion or hard stop
 - WHEN correspondence is checked
 - THEN correspondence MUST fail and no acceptance receipt may be created
+
+### Requirement: Packet Contract Extension and Rendered Delivery
+
+Compiled packet contracts MUST include derived and configured required skills in the contract representation, MUST render resolved skill filesystem paths under `## Required skills` in the markdown body between `## Hard stops` and `## Return`, and MUST preserve legacy authoring evidence hash stability under `lane-authoring-evidence/v1`.
+
+#### Scenario: Stale skill binding rejected at admission
+
+- GIVEN a compiled contract where a required skill cannot be resolved at dispatch time
+- WHEN dispatch admission validates the binding
+- THEN admission MUST fail before worktree or quota allocation
+
+#### Scenario: Required skills rendered in packet body
+
+- GIVEN a compiled contract with a resolved required skill
+- WHEN the packet body is rendered
+- THEN the body MUST contain a Required skills section listing resolved filesystem paths.
+
+#### Scenario: Legacy authoring evidence hash stability
+
+- GIVEN frozen authoring evidence under `lane-authoring-evidence/v1` without `required_skills`
+- WHEN that evidence is decoded
+- THEN hash verification MUST succeed without schema migration.
+

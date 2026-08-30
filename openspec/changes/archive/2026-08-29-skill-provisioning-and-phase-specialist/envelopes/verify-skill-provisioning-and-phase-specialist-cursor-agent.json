@@ -1,0 +1,89 @@
+{
+  "packet_id": "verify-skill-provisioning-and-phase-specialist-cursor-agent",
+  "status": "done",
+  "summary": "Third-pass qualitative verify at d896047: both round-2 residual defects are fixed on the production CLI path (lucind-ai phase → Adapter.Synthesize → Dispatcher → runDispatch), not only in unit constructors. Finding 9: CanonicalArtifactFilename(\"propose\") now returns proposal.md and isPhaseComplete stats that path. Finding 10: the specialist's fmt.Sprintf packet body now interpolates a ## Required skills section of resolved SKILL.md paths before writing the packet that runDispatch admits. Finding 11 remains an accepted schema-coupling risk. No new production-path spec violation found.",
+  "hard_stops": [
+    {
+      "hard_stop": "Executing mechanical test/build commands when mechanical results are already provided.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Any credential value would need to be chosen, generated, or written.",
+      "fired": false
+    },
+    {
+      "hard_stop": "A done-criterion turns out to be impossible, or already true for a reason the packet did not anticipate.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Two reasonable interpretations exist for a spec requirement and the specification does not say which.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "change": "created",
+      "path": ".lucind/result.json",
+      "why": "Read-only verify envelope required by the packet Return section."
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every indirection introduced is demonstrably consumed by a terminal consumer. Verification citations trace to concrete symbols, spec requirements, or tests.",
+      "met": true,
+      "evidence": "CanonicalArtifactFilename is consumed by CanonicalArtifactPath (phasespec.go:255-265) → isPhaseComplete os.Stat (phasespec.go:491-500) and by phaseDispatch packet allowed_paths/done-criteria (cli.go:2460-2512, 2501). resolveSynthesisSkillPaths is consumed by the Dispatcher closure (cli.go:2464-2512) which writes the packet then runDispatch (cli.go:2519) → loadPacket → admitDispatchBatch (cli.go:313) → Execute Request.Prompt=p.Body and Request.RequiredSkills (run.go:445-451) → requestEnv LUCIND_REQUIRED_SKILLS (executor.go:29-44). Packet.RequiredSkills copied at run.go:451; enforceRequiredSkills (run.go:496-497,928-950) reads Envelope.SkillsLoaded; accept decode includes LaneRole+RequiredSkills (accept.go:276-329). Derived names: skillset.Derive at admitDispatchBatch (packet_authoring.go:95-113) and resolveSynthesisSkillPaths (cli.go:2584-2595). Terminal consumers: os.Stat of proposal.md; child agent process env/prompt; accept receipt gate."
+    },
+    {
+      "criterion": "The worktree carries no unique commits and no working-tree changes relative to the lane's birth point (`git status --porcelain` empty AND `HEAD` equals `git merge-base HEAD \u003cprimary HEAD\u003e`).",
+      "met": true,
+      "evidence": "git status --porcelain empty (working tree clean; .lucind/ gitignored). git rev-parse HEAD = d89604753adb3a5a52e8473b64b79685c29c141d. git merge-base HEAD d89604753adb3a5a52e8473b64b79685c29c141d = d89604753adb3a5a52e8473b64b79685c29c141d (worktree birth / candidate SHA; reflog HEAD@{1} at same SHA). Commits unique vs origin/main (merge-base d495232) are the candidate under review, not this verify lane."
+    },
+    {
+      "criterion": "Qualitative evaluation completed (`.lucind/result.json` populated with `status`, `summary`, and structured `findings`).",
+      "met": true,
+      "evidence": "This envelope: status=done; summary covers both residual findings and remaining risks; findings array populated with file:line citations for round-2 remediations, remaining risks, and test-quality notes."
+    }
+  ],
+  "findings": [
+    {
+      "finding": "FIXED (round-2 finding 9): CanonicalArtifactFilename(\"propose\") and CanonicalArtifactFilename(\"proposal\") now return proposal.md. Production consumption: phaseDispatch calls CanonicalArtifactFilename(normPhase) to fill the synthesis packet allowed_paths and done-criterion path (cli.go:2460-2512); Adapter.Synthesize uses CanonicalArtifactPath for ArtifactPath and isPhaseComplete stats workspaceRoot/openspec/changes/\u003cchange\u003e/proposal.md (phasespec.go:394-395,418,459-500). This change's own on-disk artifact is openspec/changes/skill-provisioning-and-phase-specialist/proposal.md; fan-out.md:12 names proposal.md. Spec scenario updated in c226b6d to proposal.md. TestProposePhaseCompletenessRecognizesProposalMD and TestPhaseSubcommandPhaseAlreadyComplete exercise the CLI/complete path with proposal.md on disk.",
+      "evidence": "internal/phasespec/phasespec.go:229-236,255-265,459-500; cmd/lucind-ai/cli.go:2460-2512,5685-5735; plugin/claude-code/skills/lucind-ai/references/strategies/fan-out.md:12; git show c226b6d phasespec.go switch case propose,proposal",
+      "affects": "phase-specialist-dispatch scenario 'Fan-out lenses merged before synthesis dispatch' and isPhaseComplete completeness for this repo's live propose convention"
+    },
+    {
+      "finding": "FIXED (round-2 finding 10): the specialist dynamically-generated packet now includes ## Required skills with resolved filesystem paths, not env-only delivery. On the production Dispatcher else-branch (no pre-existing packet), phaseDispatch calls resolveSynthesisSkillPaths (Derive(phase,'synthesis') + skillroots.ResolvePaths) and interpolates skillsSection between ## Hard stops and ## Return (cli.go:2464-2512,2561-2595). The written file is the packet runDispatch admits (cli.go:2519→313). TestPhaseSubcommandSpecialistPacketHasRequiredSkills drives run(ctx, ['phase','propose',...]) — the real CLI entry — then reads .lucind/packets/propose-\u003cchange\u003e-synthesis.md and asserts heading, resolved SKILL.md lines, and Hard stops \u003c Required skills \u003c Return order (cli_test.go:5833-5914). Dual delivery remains: body paths are human-facing; admitDispatchBatch still sets Packet.RequiredSkills to derived names (packet_authoring.go:144) which Execute copies into executor.Request (run.go:451) and requestEnv injects as LUCIND_REQUIRED_SKILLS (executor.go:29-44). Compiled-contract renderBody (compile.go:220-237) still emits the same section.",
+      "evidence": "cmd/lucind-ai/cli.go:2445-2519,2561-2595; cmd/lucind-ai/cli_test.go:5833-5914; cmd/lucind-ai/packet_authoring.go:90-144; internal/run/run.go:445-451; internal/executor/executor.go:29-44; internal/packetauthor/compile.go:220-237",
+      "affects": "packet-authoring-contract 'Required skills rendered in packet body' on the specialist manual-packet path; design.md dual-delivery invariant"
+    },
+    {
+      "finding": "STILL TRUE (round-2 finding 11, flagged risk, not blocking): lens eligibility on the production CLI path still depends on status-JSON keys lenses / lensStates / phaseLenses. phaseDispatch passes empty SynthesizeRequest.LensStates; Synthesize falls back to status.GetLensStates(req.Phase) (phasespec.go:408-410,137-161). Tests and TestPhaseSubcommandDispatchesSynthesisWhenLensesMerged fabricate a `lenses` object. No checked-in live gentle-ai sdd-status contract sample exists. design.md Testing Strategy names mock sdd-status as the intended seam. Fail-closed if keys are absent (CheckSynthesisEligibility returns ErrPrematureSynthesis).",
+      "evidence": "internal/phasespec/phasespec.go:132-161,408-416; cmd/lucind-ai/cli.go:2541-2545; cmd/lucind-ai/cli_test.go:5794-5810; openspec/changes/skill-provisioning-and-phase-specialist/design.md:123; glob found no live sdd-status JSON fixture",
+      "affects": "phase-specialist-dispatch lens-gating if live sdd-status uses a key other than lenses/lensStates/phaseLenses; accepted residual per verify.md disposition and tasks.md 6.3"
+    },
+    {
+      "finding": "Test-quality leftover: TestPhaseSubcommandGatesPrematureSynthesis still negatively asserts that openspec/changes/\u003cchange\u003e/propose.md was not created (cli_test.go:5653-5657). After c226b6d the specialist would write proposal.md, so this assertion would not catch an accidental write of the real canonical file. Completeness coverage is elsewhere (TestPhaseSubcommandPhaseAlreadyComplete uses proposal.md).",
+      "evidence": "cmd/lucind-ai/cli_test.go:5653-5657 vs 5717-5725 and internal/phasespec/phasespec_test.go:604-675",
+      "affects": "negative-path test fidelity for phase-specialist-dispatch; does not reproduce a production defect"
+    },
+    {
+      "finding": "Spec requirement sentence still says canonical artifacts land at openspec/changes/\u003cchange\u003e/\u003cphase\u003e.md (which for propose would be propose.md) while the matching scenario, CanonicalArtifactFilename, and this repo's live file all use proposal.md. tasks.md 6.1 explicitly chose live convention over the delta spec's literal text and the scenario was updated in c226b6d; this is leftover requirement-template wording, not an unresolved fork. tasks.md 6.1/6.2 checkboxes remain unchecked despite the code fix.",
+      "evidence": "openspec/changes/skill-provisioning-and-phase-specialist/specs/phase-specialist-dispatch/spec.md:7 vs :13; tasks.md:95-100; git show c226b6d spec.md hunk",
+      "affects": "phase-specialist-dispatch requirement prose vs scenario; tasks.md checklist hygiene"
+    },
+    {
+      "finding": "The ## Required skills section is only generated on the no-existing-packet else branch. If cand1/cand2/cand3 already exists (cli.go:2449-2457), that file is reused as-is and resolveSynthesisSkillPaths is skipped. After this change a first dispatch generates the section; a stale pre-fix packet in gitignored .lucind/packets/ would not be regenerated. Admission still derives skills from frontmatter, so env delivery would still apply; the body section could remain missing on that reuse path.",
+      "evidence": "cmd/lucind-ai/cli.go:2447-2458 vs 2458-2515",
+      "affects": "specialist packet-body dual delivery when an older synthesis packet is already on disk; not the fmt.Sprintf construction finding 10 asked to fix"
+    }
+  ],
+  "skills_loaded": [
+    "lucind-executor",
+    "lucind-verify",
+    "go-testing"
+  ],
+  "session_id": "verify-skill-provisioning-and-phase-specialist-cursor-agent"
+}
