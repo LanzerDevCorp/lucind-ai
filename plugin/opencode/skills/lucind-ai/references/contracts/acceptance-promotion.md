@@ -8,7 +8,7 @@ Load this module when judging Lane completion, batch integration, or final Chang
 - The barrier releases only after every Lane reaches a terminal state.
 - Exit 0 requires every Lane to reach `done` and no ID in `reverted_ids`.
 - `integrated_ids` and `reverted_ids` are stdout summary lines, not a separate report format.
-- A `done` status does not prove Acceptance: post-execution checks may bisect or revert it.
+- A `done` status does not prove Acceptance: post-execution checks may bisect or revert it. After schema validation, any hard stop with `fired: true` demotes the lane to blocked regardless of the envelope's claimed top-level status.
 - Completed, blocked, failed, deviated, and reverted worktrees can be preserved for evidence and recovery. Cleanup may leave the `lucind/<id>` branch.
 
 ## Acceptance protocol & checklist

@@ -32,30 +32,30 @@ Same-wave disjointness does not apply (single packet). If a DAG is authored late
 
 ## Phase 1: Orchestrator Skill Parity
 
-- [ ] 1.1 Update `plugin/claude-code/skills/lucind-ai/SKILL.md:14-28` and `references/` for cross-runtime preflight, late target bind, and wave-N+1-only-after-exit-0. Do not add `LUCIND_REQUIRED_SKILLS`, `required_skills`, `integrate retry`, or `defect *` (`design.md:119`).
-- [ ] 1.2 After 1.1, overwrite `plugin/opencode/skills/lucind-ai/` with a byte-identical copy of the Claude tree (directory already exists and currently matches; this is re-sync, not create).
+- [x] 1.1 Update `plugin/claude-code/skills/lucind-ai/SKILL.md:14-28` and `references/` for cross-runtime preflight, late target bind, and wave-N+1-only-after-exit-0. Do not add `LUCIND_REQUIRED_SKILLS`, `required_skills`, `integrate retry`, or `defect *` (`design.md:119`).
+- [x] 1.2 After 1.1, overwrite `plugin/opencode/skills/lucind-ai/` with a byte-identical copy of the Claude tree (directory already exists and currently matches; this is re-sync, not create).
 
 ## Phase 2: Packet Authoring & DAG Splitting
 
-- [ ] 2.1 Keep `packet.Parse` (`internal/packet/packet.go:118-238`) free of required target fields (`:84-90`) and keep omitted `allowed_paths` empty (`:74-77,187-194`). Pin `TestParseAllowedPathsFrontmatter` omitted case (`packet_test.go:490-498`) and undeclared skip (`disjoint.go:24-48`, `disjoint_test.go:146-157`). Do not loosen `validatePacketAdmission`.
-- [ ] 2.2 Keep `dag.Split` printing `lucind-ai run` lines in Kahn order with no plan file (`internal/dag/split.go:18-51`). Pin `TestSplit_TwoWaveDAGSuccess` (`split_test.go:13-57`) and `TestWaves_OrderingAndYAMLOrderPreserved` (`waves_test.go:43-60`). Skill (1.1) owns halt-on-nonzero; Split does not schedule.
+- [x] 2.1 Keep `packet.Parse` (`internal/packet/packet.go:118-238`) free of required target fields (`:84-90`) and keep omitted `allowed_paths` empty (`:74-77,187-194`). Pin `TestParseAllowedPathsFrontmatter` omitted case (`packet_test.go:490-498`) and undeclared skip (`disjoint.go:24-48`, `disjoint_test.go:146-157`). Do not loosen `validatePacketAdmission`.
+- [x] 2.2 Keep `dag.Split` printing `lucind-ai run` lines in Kahn order with no plan file (`internal/dag/split.go:18-51`). Pin `TestSplit_TwoWaveDAGSuccess` (`split_test.go:13-57`) and `TestWaves_OrderingAndYAMLOrderPreserved` (`waves_test.go:43-60`). Skill (1.1) owns halt-on-nonzero; Split does not schedule.
 
 ## Phase 3: Runtime Acceptance
 
-- [ ] 3.0-RED Write `TestDecideStatus_FiredHardStopDemotes`: schema-valid `status=done` with `HardStop.Fired=true` must yield `lane.Blocked`. Must fail today: `decideStatus` returns `envelope.LaneStatus()` 1:1 (`internal/run/run.go:868-893`).
-- [ ] 3.0b-RED Pin commit-state (threat matrix Applicable) via existing `TestExecuteWriteDoneWithoutUniqueCommitsFails`, `TestExecuteWriteDoneWithDirtyWorktreeFails`, `TestExecuteReadOnlyDoneWithUniqueCommitsFails` (`run.go:969-980`). Add git-level staged leftover vs untracked leftover if the dirty stub does not distinguish them. No RED for Documentation-like paths, Push state, or PR commands (`design.md:101-109`).
-- [ ] 3.1 GREEN: after schema-valid `result.Read`, if any `HardStop.Fired` is true, demote to `lane.Blocked` regardless of `envelope.Status`. Do not change `enforceRequiredSkills` (`run.go:496-498`).
-- [ ] 3.2 Keep `ExecuteBatch` non-cancelling WaitGroup join (`internal/run/batch.go:29-89`) so a hard-stop-blocked lane is not integrated. Pin `TestExecuteBatchAllDoneReleasesAndIntegratesAll` (`batch_test.go:219-250`).
+- [x] 3.0-RED Write `TestDecideStatus_FiredHardStopDemotes`: schema-valid `status=done` with `HardStop.Fired=true` must yield `lane.Blocked`. Must fail today: `decideStatus` returns `envelope.LaneStatus()` 1:1 (`internal/run/run.go:868-893`).
+- [x] 3.0b-RED Pin commit-state (threat matrix Applicable) via existing `TestExecuteWriteDoneWithoutUniqueCommitsFails`, `TestExecuteWriteDoneWithDirtyWorktreeFails`, `TestExecuteReadOnlyDoneWithUniqueCommitsFails` (`run.go:969-980`). Add git-level staged leftover vs untracked leftover if the dirty stub does not distinguish them. No RED for Documentation-like paths, Push state, or PR commands (`design.md:101-109`).
+- [x] 3.1 GREEN: after schema-valid `result.Read`, if any `HardStop.Fired` is true, demote to `lane.Blocked` regardless of `envelope.Status`. Do not change `enforceRequiredSkills` (`run.go:496-498`).
+- [x] 3.2 Keep `ExecuteBatch` non-cancelling WaitGroup join (`internal/run/batch.go:29-89`) so a hard-stop-blocked lane is not integrated. Pin `TestExecuteBatchAllDoneReleasesAndIntegratesAll` (`batch_test.go:219-250`).
 
 ## Phase 4: Feature Integration & Idempotent Attempts
 
-- [ ] 4.1 Keep `ExecuteAttempt` terminal replay without redispatch (`internal/run/attempt.go:217-256`) and `RecoverAttempt` fail-closed on parent SHA mismatch while preserving worktrees (`:592-701`). Pin `TestAttemptReplayTerminalReturnsStoredResultWithoutSpies` (`attempt_test.go:128-150`) and `TestAttemptInterruptionAndRecoveryRefMismatchFailsClosed` (`:626-650`). No `integrate retry` work.
-- [ ] 4.2 Keep `FeatureTarget` homogeneous bound targets (`internal/run/integrate_feature.go:26-78`) and `IntegrateFeature` revert-on-failed-promotion (`:100-140`). Pin `TestFeatureTargetHomogeneousBatchNamesTheFeature` (`integrate_feature_test.go:55-80`) and `TestFeatureTargetRejectsPacketWithNoDeclaredTarget` (`:142-152`).
+- [x] 4.1 Keep `ExecuteAttempt` terminal replay without redispatch (`internal/run/attempt.go:217-256`) and `RecoverAttempt` fail-closed on parent SHA mismatch while preserving worktrees (`:592-701`). Pin `TestAttemptReplayTerminalReturnsStoredResultWithoutSpies` (`attempt_test.go:128-150`) and `TestAttemptInterruptionAndRecoveryRefMismatchFailsClosed` (`:626-650`). No `integrate retry` work.
+- [x] 4.2 Keep `FeatureTarget` homogeneous bound targets (`internal/run/integrate_feature.go:26-78`) and `IntegrateFeature` revert-on-failed-promotion (`:100-140`). Pin `TestFeatureTargetHomogeneousBatchNamesTheFeature` (`integrate_feature_test.go:55-80`) and `TestFeatureTargetRejectsPacketWithNoDeclaredTarget` (`:142-152`).
 
 ## Phase 5: CLI Preflight
 
-- [ ] 5.0-RED Write failing tests: skill-tree mismatch or stale embedded schema halts before `worktree.Create`; sibling worktree rejected; relative cwd resolves via `resolvePrimaryRoot` (`cmd/lucind-ai/cli.go:802-827`). Pin linked-worktree refusal already in `runDispatch` (`:353-361`) and `runFeatureCreate` (`:958-1007`). Pattern: `cli_test.go:45-88`; `worktree.IsLinkedWorktree` (`internal/worktree/worktree.go:292-313`).
-- [ ] 5.1 GREEN: add skill-parity and embedded-schema freshness at those same barriers (Decision 2), before allocation. Do not add a preflight subcommand. Keep `printIntegrateReport` `integrated_ids`/`reverted_ids` (`cli.go:752-782`); do not retask that printer or `integrate retry`.
+- [x] 5.0-RED Write failing tests: skill-tree mismatch or stale embedded schema halts before `worktree.Create`; sibling worktree rejected; relative cwd resolves via `resolvePrimaryRoot` (`cmd/lucind-ai/cli.go:802-827`). Pin linked-worktree refusal already in `runDispatch` (`:353-361`) and `runFeatureCreate` (`:958-1007`). Pattern: `cli_test.go:45-88`; `worktree.IsLinkedWorktree` (`internal/worktree/worktree.go:292-313`).
+- [x] 5.1 GREEN: add skill-parity and embedded-schema freshness at those same barriers (Decision 2), before allocation. Do not add a preflight subcommand. Keep `printIntegrateReport` `integrated_ids`/`reverted_ids` (`cli.go:752-782`); do not retask that printer or `integrate retry`.
 
 ## Dependency Order
 

@@ -1,6 +1,7 @@
 package packet_test
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"os"
@@ -879,6 +880,21 @@ func TestSkillAssetContract(t *testing.T) {
 		t.Errorf("SKILL.md missing strict compression ceiling relation")
 	}
 
+	// Deterministic orchestrator contract: cross-runtime preflight, late
+	// target bind, and wave-N+1-only-after-exit-0.
+	if !strings.Contains(content, "byte-identical") {
+		t.Errorf("skill package missing Claude/OpenCode skill-tree byte-identity preflight")
+	}
+	if !strings.Contains(content, "embedded result schema") && !strings.Contains(content, "embedded-schema freshness") {
+		t.Errorf("skill package missing embedded-schema freshness preflight")
+	}
+	if !strings.Contains(content, "reusable packet templates") && !strings.Contains(content, "reusable templates omit") {
+		t.Errorf("skill package missing late target bind / target-free template rule")
+	}
+	if !strings.Contains(content, "wave N+1") || !strings.Contains(content, "exits 0") {
+		t.Errorf("skill package missing wave-N+1-only-after-exit-0 rule")
+	}
+
 	// Feature-branch ownership (2.3-RED).
 	if !strings.Contains(content, "feature create") {
 		t.Errorf("SKILL.md missing feature create orchestration guidance")
@@ -918,6 +934,61 @@ func TestSkillAssetContract(t *testing.T) {
 	if !strings.Contains(string(domainData), strings.TrimSpace(parts[1])) {
 		t.Errorf("references/core/domain.md canonical projection drifted from CONTEXT.md")
 	}
+}
+
+func TestSkillTreesByteIdentical(t *testing.T) {
+	claude := filepath.Join("..", "..", "plugin", "claude-code", "skills", "lucind-ai")
+	opencode := filepath.Join("..", "..", "plugin", "opencode", "skills", "lucind-ai")
+	claudeFiles := skillTreeFiles(t, claude)
+	opencodeFiles := skillTreeFiles(t, opencode)
+	if len(claudeFiles) != len(opencodeFiles) {
+		t.Fatalf("skill tree file counts differ: claude=%d opencode=%d", len(claudeFiles), len(opencodeFiles))
+	}
+	for rel, want := range claudeFiles {
+		got, ok := opencodeFiles[rel]
+		if !ok {
+			t.Errorf("OpenCode tree missing %s (present in Claude tree)", rel)
+			continue
+		}
+		if !bytes.Equal(want, got) {
+			t.Errorf("skill file %s differs between Claude and OpenCode trees", rel)
+		}
+	}
+	for rel := range opencodeFiles {
+		if _, ok := claudeFiles[rel]; !ok {
+			t.Errorf("OpenCode tree has extra file %s (absent from Claude tree)", rel)
+		}
+	}
+}
+
+func skillTreeFiles(t *testing.T, root string) map[string][]byte {
+	t.Helper()
+	files := make(map[string][]byte)
+	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		files[filepath.ToSlash(rel)] = data
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk %s: %v", root, err)
+	}
+	if len(files) == 0 {
+		t.Fatalf("skill tree %s is empty", root)
+	}
+	return files
 }
 
 // pluginManifest mirrors the fields this test reads from

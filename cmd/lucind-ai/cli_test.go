@@ -860,6 +860,9 @@ func setupTestSkills(t *testing.T, root string) {
 	if err := os.WriteFile(filepath.Join(lucindDir, "skill-roots.yaml"), []byte(rootsYaml), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	plantOrchestratorSkillFile(t, root, "claude-code", "SKILL.md", "canonical orchestrator skill\n")
+	plantOrchestratorSkillFile(t, root, "opencode", "SKILL.md", "canonical orchestrator skill\n")
+	plantResultSchema(t, root, result.SchemaJSON())
 }
 
 func runGit(t *testing.T, dir string, args ...string) {
@@ -5236,6 +5239,7 @@ func TestFeatureLeaseReleaseCLI(t *testing.T) {
 	}
 	runGit(t, primaryRoot, "add", "README.md")
 	runGit(t, primaryRoot, "commit", "-m", "initial commit")
+	setupTestSkills(t, primaryRoot)
 
 	cmd := exec.Command("git", "rev-parse", "HEAD")
 	cmd.Dir = primaryRoot
@@ -5947,4 +5951,272 @@ func TestPhaseSubcommandUnknownPhase(t *testing.T) {
 	if code == 0 {
 		t.Fatalf("expected run(phase unrecognized) to return non-zero, got 0")
 	}
+}
+
+func TestRunPreflight_SkillParity(t *testing.T) {
+	if testing.Short() {
+		t.Skip("shells out to real git")
+	}
+
+	t.Run("skill tree mismatch halts before CreateWorktree", func(t *testing.T) {
+		primaryRoot := initRepo(t)
+		plantOrchestratorSkillFile(t, primaryRoot, "claude-code", "SKILL.md", "canonical\n")
+		plantOrchestratorSkillFile(t, primaryRoot, "opencode", "SKILL.md", "replica drifted\n")
+		plantResultSchema(t, primaryRoot, result.SchemaJSON())
+		packetPath := writeLegacyDispatchPacket(t, primaryRoot)
+
+		createCalled := spyCreateWorktree(t)
+		cwd := chdirRepo(t, primaryRoot)
+		defer os.Chdir(cwd)
+
+		var stdout, stderr bytes.Buffer
+		code := run(context.Background(), []string{"run", "--min-quota", "0", "--packet", packetPath}, &stdout, &stderr)
+		if code == 0 {
+			t.Fatalf("run with mismatched skill trees exit code = 0, want non-zero; stderr = %q", stderr.String())
+		}
+		if *createCalled {
+			t.Fatal("CreateWorktree was called, want skill-parity preflight to halt before worktree allocation")
+		}
+	})
+
+	t.Run("stale embedded schema halts before CreateWorktree", func(t *testing.T) {
+		primaryRoot := initRepo(t)
+		plantOrchestratorSkillFile(t, primaryRoot, "claude-code", "SKILL.md", "same\n")
+		plantOrchestratorSkillFile(t, primaryRoot, "opencode", "SKILL.md", "same\n")
+		plantResultSchema(t, primaryRoot, []byte(`{"stale":true}`))
+		packetPath := writeLegacyDispatchPacket(t, primaryRoot)
+
+		createCalled := spyCreateWorktree(t)
+		cwd := chdirRepo(t, primaryRoot)
+		defer os.Chdir(cwd)
+
+		var stdout, stderr bytes.Buffer
+		code := run(context.Background(), []string{"run", "--min-quota", "0", "--packet", packetPath}, &stdout, &stderr)
+		if code == 0 {
+			t.Fatalf("run with stale embedded schema exit code = 0, want non-zero; stderr = %q", stderr.String())
+		}
+		if *createCalled {
+			t.Fatal("CreateWorktree was called, want schema-freshness preflight to halt before worktree allocation")
+		}
+	})
+
+	t.Run("feature create skill mismatch halts before ledger write", func(t *testing.T) {
+		primaryRoot := initRepo(t)
+		plantOrchestratorSkillFile(t, primaryRoot, "claude-code", "SKILL.md", "canonical\n")
+		plantOrchestratorSkillFile(t, primaryRoot, "opencode", "SKILL.md", "replica drifted\n")
+		plantResultSchema(t, primaryRoot, result.SchemaJSON())
+
+		cwd := chdirRepo(t, primaryRoot)
+		defer os.Chdir(cwd)
+
+		var stdout, stderr bytes.Buffer
+		code := run(context.Background(), []string{
+			"feature", "create",
+			"--id", "feat-preflight",
+			"--parent", "refs/heads/feature-preflight",
+			"--base-sha", strings.Repeat("a", 40),
+		}, &stdout, &stderr)
+		if code == 0 {
+			t.Fatalf("feature create with mismatched skill trees exit code = 0, want non-zero; stderr = %q", stderr.String())
+		}
+		ledg, err := ledger.Open(context.Background(), primaryRoot)
+		if err != nil {
+			t.Fatalf("ledger.Open: %v", err)
+		}
+		defer ledg.Close()
+		if _, err := feature.NewService(ledg).Get(context.Background(), "feat-preflight"); err == nil {
+			t.Fatal("feature create wrote a ledger row, want skill-parity preflight to halt first")
+		}
+	})
+}
+
+func TestRunDispatch_RejectsLinkedWorktree(t *testing.T) {
+	if testing.Short() {
+		t.Skip("shells out to real git")
+	}
+	primaryRoot := initRepo(t)
+	packetPath := writeLegacyDispatchPacket(t, primaryRoot)
+	createCalled := spyCreateWorktree(t)
+
+	cwd := chdirRepo(t, primaryRoot)
+	defer os.Chdir(cwd)
+
+	ctx := context.Background()
+	wt, err := worktree.Create(ctx, primaryRoot, "lane-linked-preflight")
+	if err != nil {
+		t.Fatalf("worktree.Create: %v", err)
+	}
+	defer worktree.Remove(ctx, primaryRoot, wt.Path, true)
+	if !worktree.IsLinkedWorktree(wt.Path) {
+		t.Fatalf("IsLinkedWorktree(%q) = false, want true", wt.Path)
+	}
+	if err := os.Chdir(wt.Path); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := run(ctx, []string{"run", "--min-quota", "0", "--packet", packetPath}, &stdout, &stderr)
+	if code == 0 {
+		t.Fatalf("run from linked worktree exit code = 0, want non-zero; stderr = %q", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "linked worktree") {
+		t.Fatalf("stderr = %q, want it to refuse linked-worktree dispatch", stderr.String())
+	}
+	if *createCalled {
+		t.Fatal("CreateWorktree was called, want linked-worktree refusal before allocation")
+	}
+}
+
+func TestRunDispatch_SiblingWorktreeRejected(t *testing.T) {
+	if testing.Short() {
+		t.Skip("shells out to real git")
+	}
+	primaryRoot := initRepo(t)
+	packetPath := writeLegacyDispatchPacket(t, primaryRoot)
+	createCalled := spyCreateWorktree(t)
+
+	cwd := chdirRepo(t, primaryRoot)
+	defer os.Chdir(cwd)
+
+	ctx := context.Background()
+	first, err := worktree.Create(ctx, primaryRoot, "lane-sibling-a")
+	if err != nil {
+		t.Fatalf("worktree.Create first: %v", err)
+	}
+	defer worktree.Remove(ctx, primaryRoot, first.Path, true)
+	sibling, err := worktree.Create(ctx, primaryRoot, "lane-sibling-b")
+	if err != nil {
+		t.Fatalf("worktree.Create sibling: %v", err)
+	}
+	defer worktree.Remove(ctx, primaryRoot, sibling.Path, true)
+	if err := os.Chdir(sibling.Path); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := run(ctx, []string{"run", "--min-quota", "0", "--packet", packetPath}, &stdout, &stderr)
+	if code == 0 {
+		t.Fatalf("run from sibling worktree exit code = 0, want non-zero; stderr = %q", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "linked worktree") {
+		t.Fatalf("stderr = %q, want it to refuse sibling worktree dispatch", stderr.String())
+	}
+	if *createCalled {
+		t.Fatal("CreateWorktree was called, want sibling-worktree refusal before allocation")
+	}
+}
+
+func TestResolvePrimaryRoot_RelativeCwdResolvesToPrimary(t *testing.T) {
+	if testing.Short() {
+		t.Skip("shells out to real git")
+	}
+	primaryRoot := initRepo(t)
+	sub := filepath.Join(primaryRoot, "nested", "cwd")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cwd := chdirRepo(t, sub)
+	defer os.Chdir(cwd)
+
+	got, err := resolvePrimaryRoot(context.Background())
+	if err != nil {
+		t.Fatalf("resolvePrimaryRoot() error = %v", err)
+	}
+	want, err := filepath.EvalSymlinks(primaryRoot)
+	if err != nil {
+		t.Fatalf("EvalSymlinks(primary): %v", err)
+	}
+	gotEval, err := filepath.EvalSymlinks(got)
+	if err != nil {
+		t.Fatalf("EvalSymlinks(got): %v", err)
+	}
+	if gotEval != want {
+		t.Fatalf("resolvePrimaryRoot() = %q, want primary %q", gotEval, want)
+	}
+}
+
+func writeLegacyDispatchPacket(t *testing.T, primaryRoot string) string {
+	t.Helper()
+	path := filepath.Join(primaryRoot, "packet-preflight.md")
+	content := "---\n" +
+		"id: lane-preflight\n" +
+		"executor: cursor-agent\n" +
+		"routed_by: preflight barrier\n" +
+		"legacy_main: true\n" +
+		"expected_parent_sha: " + currentHead(t, primaryRoot) + "\n" +
+		"---\n" +
+		admittedWriteBody
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write packet: %v", err)
+	}
+	return path
+}
+
+func plantOrchestratorSkillFile(t *testing.T, primaryRoot, runtime, rel, content string) {
+	t.Helper()
+	dir := filepath.Join(primaryRoot, "plugin", runtime, "skills", "lucind-ai", filepath.Dir(rel))
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(primaryRoot, "plugin", runtime, "skills", "lucind-ai", rel)
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func plantResultSchema(t *testing.T, primaryRoot string, data []byte) {
+	t.Helper()
+	dir := filepath.Join(primaryRoot, "internal", "result")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "result.schema.json"), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func spyCreateWorktree(t *testing.T) *bool {
+	t.Helper()
+	createCalled := false
+	origFactory := depsFactory
+	t.Cleanup(func() { depsFactory = origFactory })
+	depsFactory = func(runID, primaryRoot string, ledg *ledger.Ledger, timeout, approvalTimeout time.Duration) lucindrun.Deps {
+		deps := origFactory(runID, primaryRoot, ledg, timeout, approvalTimeout)
+		deps.CreateWorktree = func(ctx context.Context, primaryRoot, laneID, parentRef, baseSHA string) (worktree.Worktree, error) {
+			createCalled = true
+			return worktree.Worktree{Path: t.TempDir(), Branch: "lucind/" + laneID}, nil
+		}
+		deps.LookupExecutor = func(string) (executor.Executor, error) {
+			return testDoneExecutor{}, nil
+		}
+		deps.HasUniqueLaneCommits = func(context.Context, string, string) (bool, error) {
+			return true, nil
+		}
+		deps.PorcelainEmpty = func(context.Context, string) (bool, error) {
+			return true, nil
+		}
+		deps.CombineTree = func(ctx context.Context, primaryRoot, runID, parentRef, baseSHA string, branches []string) (string, string, error) {
+			return t.TempDir(), "integration-branch", nil
+		}
+		deps.RunChecks = func(ctx context.Context, worktreePath string) (bool, string, error) {
+			return true, "", nil
+		}
+		deps.PromoteTarget = func(ctx context.Context, primaryRoot, integrationBranch string) error {
+			return nil
+		}
+		return deps
+	}
+	return &createCalled
+}
+
+func chdirRepo(t *testing.T, dir string) string {
+	t.Helper()
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	return cwd
 }
