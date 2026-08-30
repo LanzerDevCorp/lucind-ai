@@ -1,0 +1,98 @@
+{
+  "packet_id": "verify-deterministic-lucind-ai-orchestrator-cursor-agent",
+  "status": "done",
+  "summary": "Qualitative verification of candidate 146bc95 (worktree HEAD 13eb3b3) against the five delta specs completed without re-running mechanical checks. Production paths satisfy hard-stop demotion, CLI skill/schema preflight, Claude/OpenCode byte-identity, omitted allowed_paths skip, wave-N+1 skill sequencing, and pin-existing packet/DAG/attempt behavior; RED assertions match tasks.md. Residuals are coverage gaps (Execute/ledger hard-stop persistence, CLI stderr text, missing-tree negatives) and preflight sitting after the quota gate, not spec contradictions.",
+  "hard_stops": [
+    {
+      "hard_stop": "Executing mechanical test/build commands when mechanical results are already provided.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Any credential value would need to be chosen, generated, or written.",
+      "fired": false
+    },
+    {
+      "hard_stop": "A done-criterion turns out to be impossible, or already true for a reason the packet did not anticipate.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Two reasonable interpretations exist for a spec requirement and the specification does not say which.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "change": "created",
+      "path": ".lucind/result.json",
+      "why": "Read-only judgment lane; this envelope is the only allowed write."
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every indirection introduced is demonstrably consumed by a terminal consumer. Verification citations trace to concrete symbols, spec requirements, or tests.",
+      "met": true,
+      "evidence": "preflightOrchestratorContract (cmd/lucind-ai/cli.go:854-867) is called from runDispatch (cli.go:363-366) and runFeatureCreate (cli.go:1110-1113) before depsFactory/CreateWorktree (cli.go:378,944-948) or feature.Service.Create (cli.go:1122-1123). skillTreesByteIdentical/readSkillTree (cli.go:870-927) and orchestratorSkillTrees/onDiskResultSchemaPath/embeddedResultSchema (cli.go:837-849) are only reached through that preflight. decideStatus HardStop.Fired loop (internal/run/run.go:891-895) is invoked from Execute (run.go:486); a Blocked return skips enforceAllowedPaths/enforceRequiredSkills/enforceCompletionMode (run.go:492-502). plantOrchestratorSkillFile/plantResultSchema/spyCreateWorktree are consumed by TestRunPreflight_SkillParity and initRepo/setupTestSkills (cli_test.go:863-865,5956-6030,6178-6209). TestSkillTreesByteIdentical (packet_test.go:939-962) is consumed by go test ./internal/packet. No unconsumed production indirection found."
+    },
+    {
+      "criterion": "The worktree carries no unique commits and no working-tree changes relative to the lane's birth point (git status --porcelain empty AND HEAD equals git merge-base HEAD \u003cprimary HEAD\u003e).",
+      "met": true,
+      "evidence": "git status --porcelain empty. HEAD=13eb3b373e031cfbeff336c2bf61ef4997ec6312. git merge-base HEAD feature/deterministic-lucind-ai-orchestrator = 13eb3b373e031cfbeff336c2bf61ef4997ec6312 (same as origin/feature/deterministic-lucind-ai-orchestrator). git log feature/deterministic-lucind-ai-orchestrator..HEAD empty. Only later write is this envelope at .lucind/result.json."
+    },
+    {
+      "criterion": "Qualitative evaluation completed (.lucind/result.json populated with status, summary, and structured findings).",
+      "met": true,
+      "evidence": ".lucind/result.json in this worktree contains status, summary, hard_stops (all five declared), done_criteria, findings, and files_changed; validated against .lucind/result.schema.json before this envelope was left as the lane result."
+    }
+  ],
+  "findings": [
+    {
+      "finding": "Hard-stop demotion satisfies the new acceptance-verifier scenario and extends, rather than duplicating, the live Fail-Closed requirement. After schema-valid result.Read, decideStatus loops envelope.HardStops and returns lane.Blocked when any Fired is true, regardless of envelope.Status. Execute consumes that status and does not run later Done-only enforcements. Live spec scenario 'Reject invalid result evidence' still gates lucind-ai accept receipts (internal/accept/accept.go:225-228); the delta adds the runtime status-deciding step the live prose implied but did not name.",
+      "evidence": "internal/run/run.go:868-896 (decideStatus after result.Read); internal/run/run.go:486-502 (Execute); internal/run/decide_status_test.go:12-38 (status=done + Fired=true → lane.Blocked); openspec/specs/acceptance-verifier/spec.md:31-38 vs openspec/changes/deterministic-lucind-ai-orchestrator/specs/acceptance-verifier/spec.md:7-39; internal/accept/accept.go:225-228",
+      "affects": "acceptance-verifier: Fail-Closed Mechanical Criteria / Fired hard stop demotes regardless of claimed status"
+    },
+    {
+      "finding": "The packet-authoring-contract omitted-allowed_paths scenario extends the live Versioned Contract requirement without contradicting authored write-paths (contract fields vs packet frontmatter). packet.Parse still leaves omitted AllowedPaths empty; DisjointAllowedPaths skips empty/omitted packets; enforceAllowedPaths runs only when len(AllowedPaths)\u003e0. TestParseAllowedPathsFrontmatter omitted case remains pinned.",
+      "evidence": "openspec/changes/deterministic-lucind-ai-orchestrator/specs/packet-authoring-contract/spec.md:7-29 vs openspec/specs/packet-authoring-contract/spec.md:9-26; internal/packet/packet_test.go:490-498; internal/packet/disjoint.go:24-33; internal/run/run.go:492",
+      "affects": "packet-authoring-contract: Packet omitting allowed paths defaults to open scope safely"
+    },
+    {
+      "finding": "Cross-runtime preflight is on both CLI barriers named by design Decision 2, before worktree or feature-ledger allocation. skillTreesByteIdentical compares file bytes under plugin/{claude-code,opencode}/skills/lucind-ai/; schema freshness is bytes.Equal of on-disk internal/result/result.schema.json vs result.SchemaJSON. This worktree's Claude and OpenCode trees are byte-identical (diff -rq exit 0). Matching trees planted in initRepo give existing dispatch tests the success path of the preflight-succeeds scenario.",
+      "evidence": "cmd/lucind-ai/cli.go:353-366,837-867,1110-1113; cmd/lucind-ai/cli_test.go:823-866,5956-6030; plugin/claude-code/skills/lucind-ai/SKILL.md:21; internal/packet/packet_test.go:939-962; spec deterministic-orchestrator-contract scenarios at openspec/changes/deterministic-lucind-ai-orchestrator/specs/deterministic-orchestrator-contract/spec.md:9-25",
+      "affects": "deterministic-orchestrator-contract: Cross-Runtime Orchestrator Preflight and Sequencing"
+    },
+    {
+      "finding": "sdd-apply wave-N+1-only-after-exit-0 and updated parent state are skill/Split responsibilities, not a scheduler inside ExecuteBatch. SKILL.md and sdd.md require halt on non-zero exit; recovery-reconciliation.md:29 requires refreshing base_sha and expected_parent_sha after each successful wave; Split prints lucind-ai run lines and, for multi-wave DAGs, warns on stderr to refresh those SHAs. ExecuteBatch remains a non-cancelling WaitGroup join. parent-feature-integration pin-existing ExecuteAttempt terminal replay and RecoverAttempt fail-closed on SHA mismatch were not modified in 146bc95; the named tests still exist.",
+      "evidence": "plugin/claude-code/skills/lucind-ai/SKILL.md:22-23; plugin/claude-code/skills/lucind-ai/references/strategies/sdd.md:19; plugin/claude-code/skills/lucind-ai/references/coordination/recovery-reconciliation.md:29; internal/dag/split.go:18-49; internal/run/batch.go:29-39; cmd/lucind-ai/cli_test.go:2392-2419; internal/run/attempt.go:217-250; internal/run/attempt_test.go:128-150,626-650; internal/run/integrate_feature.go:26-65,142-152",
+      "affects": "sdd-apply: Orchestrator Advances Only on a Passing Wave; parent-feature-integration: Recoverable Idempotent Attempts"
+    },
+    {
+      "finding": "decideStatus edge handling: empty HardStops do not demote; the first Fired=true short-circuits (equivalent to evaluating every stop for the demotion outcome); non-zero/timeout outcomes never read the envelope and stay Blocked; a Fired stop with claimed status deviated or failed still becomes lane.Blocked per 'regardless of the envelope's claimed top-level status'. No shared mutable state in decideStatus (no concurrency concern on the demotion itself). Unmet done_criteria are still not demoted here; that remains the accept-receipt path, which this delta did not retask.",
+      "evidence": "internal/run/run.go:869-896; internal/result/result.go:124-137,139-156; internal/accept/accept.go:230-233",
+      "affects": "acceptance-verifier decideStatus HardStop.Fired demotion edge cases"
+    },
+    {
+      "finding": "CLI preflight is placed with the linked-worktree check, after admitDispatchBatch and the agy quota gate. A skill-tree or schema mismatch therefore still can admit packets and rotate credentials before failing; it cannot call CreateWorktree. That matches design Decision 2 (extend existing barriers) and the spec's 'halt before any worktree allocation', but it is weaker than 'no side effects'. skillTreesByteIdentical ignores empty directories and file modes (content-only). Missing replica tree, missing canonical SKILL.md, and missing on-disk schema fail closed in code and lack dedicated CLI negative tests.",
+      "evidence": "cmd/lucind-ai/cli.go:296-366,870-927,1058-1123; cmd/lucind-ai/cli_test.go:5956-6107",
+      "affects": "deterministic-orchestrator-contract preflight ordering and negative coverage"
+    },
+    {
+      "finding": "Test quality: TestDecideStatus_FiredHardStopDemotes matches tasks.md 3.0-RED (schema-valid status=done + Fired=true must yield lane.Blocked; previously 1:1 LaneStatus). It drives real result.Read via WorktreeFS, not a mocked decideStatus, and asserts envelope.Status remains done while the returned lane status is Blocked. It does not go through Execute or assert a ledger Blocked row; Execute wiring at run.go:486-502 makes that a coverage gap, not an unwired production path. 3.0b-RED git-level staged vs untracked leftover tests call worktree.PorcelainEmpty and assert report.Status=lane.Failed.",
+      "evidence": "openspec/changes/deterministic-lucind-ai-orchestrator/tasks.md:45-47; internal/run/decide_status_test.go:12-38; internal/run/run.go:486-502; internal/run/run_test.go:1788-1858",
+      "affects": "Phase 3 RED/GREEN test quality"
+    },
+    {
+      "finding": "Test quality: TestRunPreflight_SkillParity matches tasks.md 5.0-RED halt-before-worktree.Create for skill mismatch and stale embedded schema, plus feature-create halt before ledger write. Assertions are terminal (non-zero process exit, spyCreateWorktree false, feature.Get not found), not tautologies on internal helpers. They do not assert stderr contains 'skill parity' or 'stale'. Causal chain is still sound because initRepo now plants matching trees+schema used by passing dispatch tests. TestRunDispatch_SiblingWorktreeRejected proves dispatch-from-a-sibling linked worktree is refused (threat-matrix git-repo selection), which is not the spec scenario 'preflight in primary while a sibling lane is active'; that isolation holds because preflight only reads primaryRoot plugin/schema paths.",
+      "evidence": "openspec/changes/deterministic-lucind-ai-orchestrator/tasks.md:57-58; cmd/lucind-ai/cli_test.go:5956-6135; openspec/changes/deterministic-lucind-ai-orchestrator/specs/deterministic-orchestrator-contract/spec.md:15-19; design.md:101-106",
+      "affects": "Phase 5 RED/GREEN test quality and concurrent-isolation scenario"
+    }
+  ],
+  "skills_loaded": [
+    "lucind-verify",
+    "lucind-executor",
+    "engram-memory"
+  ]
+}

@@ -1,0 +1,109 @@
+{
+  "packet_id": "tasks-deterministic-lucind-ai-orchestrator-synthesis",
+  "status": "done",
+  "summary": "Synthesized three tasks lens drafts into canonical tasks.md (1011 words, one sequential packet, no sidecar) and tasks-synthesis-notes.md. Citation verification dropped eleven unsupported line claims; OpenCode skill tree already exists and matches Claude, so 1.2 is re-sync. Two conventional commits, no AI attribution.",
+  "hard_stops": [
+    {
+      "hard_stop": "The three ## Assumed decomposition blocks are mutually irreconcilable and the spec and design do not choose between them. Write the notes file, leave tasks.md uncreated, and block.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Lens A's decomposition is refuted by code you verified. Do not substitute your own.",
+      "fired": false
+    },
+    {
+      "hard_stop": "No partition exists in which every wave is green on its own and every same-wave pair is disjoint. Report it; the correct answer may be a single packet, but say so rather than shipping a plan Integrate will revert.",
+      "fired": false
+    },
+    {
+      "hard_stop": "One or more lens drafts is missing from this worktree.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Covering all eight spine items honestly would require exceeding 1800 words. Report which item forces it rather than silently overrunning or silently cutting.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "change": "created",
+      "path": "openspec/changes/deterministic-lucind-ai-orchestrator/tasks.md",
+      "why": "Canonical tasks checklist assembled from verified lens claims under lens A's decomposition."
+    },
+    {
+      "change": "created",
+      "path": "openspec/changes/deterministic-lucind-ai-orchestrator/tasks-synthesis-notes.md",
+      "why": "Orchestrator-facing record of dropped citations, coverage gaps, and decomposition divergence."
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "tasks.md was committed as its own commit before tasks-synthesis-notes.md was started, confirmed by the mid-flow lucind-lane-check.sh run reporting a clean git status --porcelain.",
+      "met": true,
+      "evidence": "Mid-flow ./lucind-lane-check.sh --file openspec/changes/deterministic-lucind-ai-orchestrator/tasks.md --budget 1800 --skip-result → PASS  word budget: 1011 / 1800 words; PASS  git status --porcelain: clean; RESULT: PASS. First commit e3e45ca (tasks.md only) precedes notes commit 73ebf7b."
+    },
+    {
+      "criterion": "Every file:line citation surviving into tasks.md was opened and confirmed in this worktree, and every dropped claim is listed under ## Dropped Citations.",
+      "met": true,
+      "evidence": "Opened every citation in the three manifests against this tree. Survivors (e.g. run.go:868-893 decideStatus 1:1 mapping; packet.go:74-77,490-498 omitted allowed_paths; cli.go:353-361 and :958-1007 linked-worktree refusal) match the claims in tasks.md. Eleven unsupported claims are in tasks-synthesis-notes.md ## Dropped Citations."
+    },
+    {
+      "criterion": "Every wave was independently judged green-on-its-own, and every wave that was not is merged and reported under ## Coverage Gaps.",
+      "met": true,
+      "evidence": "Dispatch is one sequential packet (RED+GREEN in-lane). No wave merged for failing checks. Recorded under ## Coverage Gaps: B's two-wave table was re-checked as viable on exact files but declined as the sidecar shape (B recommended none; integrate.go:50-59)."
+    },
+    {
+      "criterion": "Every same-wave unit pair was re-checked against the component-boundary prefix rule rather than taken from lens B's table.",
+      "met": true,
+      "evidence": "Applied PathInScope (disjoint.go:13-22,24-48) to A's remapped units. Single packet has no same-wave pairs. Hypothetical exact-file lists for run.go vs attempt.go are disjoint; naming directory internal/run/ would collide units 3 and 4. Stated in tasks.md Suggested Work Units."
+    },
+    {
+      "criterion": "tasks.md exists, is under 1800 words, and substantively covers all eight spine items, with anything missing reported under ## Coverage Gaps.",
+      "met": true,
+      "evidence": "PASS  word budget: 1011 / 1800 words. Spine: forecast table + guard lines; work units with focused test/harness/rollback/executor; phased checklist; RED before GREEN for Applicable threat rows only; dependency table; single-packet green wave; executors; five spec requirements traced. Gaps (skill vs C forecast scoring; no tree-comparator test name) are in ## Coverage Gaps, not invented into tasks.md."
+    },
+    {
+      "criterion": "tasks-synthesis-notes.md exists with exactly the four required sections, each either populated or explicitly None, confirmed by the final lucind-lane-check.sh run.",
+      "met": true,
+      "evidence": "Final ./lucind-lane-check.sh --file openspec/changes/deterministic-lucind-ai-orchestrator/tasks-synthesis-notes.md --require-section Unresolved Contradictions --require-section Coverage Gaps --require-section Dropped Citations --require-section Decomposition Divergence → PASS  section present: ## Unresolved Contradictions; PASS  section present: ## Coverage Gaps; PASS  section present: ## Dropped Citations; PASS  section present: ## Decomposition Divergence; PASS  git status --porcelain: clean; PASS  result envelope: .lucind/result.json exists and parses as JSON; RESULT: PASS."
+    },
+    {
+      "criterion": "The work is committed with two conventional commits and no AI attribution, confirmed by the final lucind-lane-check.sh run reporting a clean git status --porcelain and a valid .lucind/result.json.",
+      "met": true,
+      "evidence": "git log -2: 73ebf7b docs(openspec): record tasks synthesis notes for deterministic orchestrator; e3e45ca docs(openspec): add canonical tasks for deterministic orchestrator. Neither message contains Co-authored-by. Final lane-check: PASS  git status --porcelain: clean; PASS  result envelope: .lucind/result.json exists and parses as JSON; RESULT: PASS."
+    },
+    {
+      "criterion": "No task depends on LUCIND_REQUIRED_SKILLS, required_skills frontmatter, integrate retry, or defect record/list/resolve/decline/defer — those belong to the unrelated feature/skill-provisioning-and-phase-specialist deliverable, excluded by design.md:119.",
+      "met": true,
+      "evidence": "tasks.md 1.1, 3.1, 4.1, and 5.1 explicitly forbid those surfaces. Lens B run.go:486-503 required-skills citation recorded as dropped work under ## Dropped Citations. printIntegrateReport integrate-retry banner is not retasked."
+    }
+  ],
+  "commit": "73ebf7bbb19f8b70a4644350fbe70c1b60640818",
+  "findings": [
+    {
+      "finding": "Citations verified: 100 manifest rows opened across the three drafts; 89 supported their claims or were kept with corrected live line numbers.",
+      "evidence": "Three Citation Manifest tables (tasks-lens-a.md:61-87, tasks-lens-b.md:45-72, tasks-lens-c.md:64-117) walked against this worktree.",
+      "affects": "apply phase uses only tasks.md line numbers"
+    },
+    {
+      "finding": "Citations dropped: 11 claims (wrong line ranges, nonexistent proving-command names, required_skills / OpenCode-create).",
+      "evidence": "openspec/changes/deterministic-lucind-ai-orchestrator/tasks-synthesis-notes.md ## Dropped Citations",
+      "affects": "apply must not recreate plugin/opencode/skills/lucind-ai/ from scratch"
+    },
+    {
+      "finding": "Waves merged for viability: 0. Contradictions escalated: 0. Coverage gaps: 5 (forecast skill vs C; OpenCode estimate; missing tree comparator; pin-existing phases 2/4; sidecar declined not merged).",
+      "evidence": "tasks-synthesis-notes.md ## Unresolved Contradictions (None) and ## Coverage Gaps",
+      "affects": "orchestrator ask-on-risk before apply; chain strategy pending"
+    }
+  ],
+  "skills_loaded": [
+    "lucind-executor",
+    "lucind-fan-out-lens",
+    "sdd-tasks",
+    "engram-memory"
+  ]
+}

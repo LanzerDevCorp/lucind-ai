@@ -29,8 +29,7 @@ Every decision and receipt MUST immutably bind the lane, packet, base commit and
 
 ### Requirement: Fail-Closed Mechanical Criteria
 
-The verifier MUST reject a missing or invalid result schema, packet or candidate-commit mismatch, fired hard stop, unmet done criterion, undeclared or out-of-scope change, or failed required check. For versioned contracts it MUST also reject any missing, extra, duplicate, reordered, or altered authored criterion or hard stop; mode or commit disagreement; and any path or change-classification mismatch against the canonical frozen candidate change set. A rejected attempt MUST NOT create or reuse a receipt.
-(Previously: Result validity checked reported criteria, stops, and changed paths but could not prove exact correspondence to frozen authored declarations or commit and classification semantics.)
+The verifier MUST reject a missing or invalid result schema, packet or candidate-commit mismatch, fired hard stop, unmet done criterion, undeclared or out-of-scope change, or failed required check. For versioned contracts it MUST also reject any missing, extra, duplicate, reordered, or altered authored criterion or hard stop; mode or commit disagreement; and any path or change-classification mismatch against the canonical frozen candidate change set. A rejected attempt MUST NOT create or reuse a receipt. The status-deciding step MUST explicitly evaluate every declared hard stop's `fired` value after schema validation and demote the lane to blocked when any is true, regardless of the envelope's claimed top-level status.
 
 #### Scenario: Reject invalid result evidence
 - GIVEN result evidence is missing, schema-invalid, mismatched, has a fired hard stop, or has an unmet done criterion
@@ -56,6 +55,12 @@ The verifier MUST reject a missing or invalid result schema, packet or candidate
 - GIVEN an admitted manual candidate is explicitly marked legacy
 - WHEN acceptance runs
 - THEN universal schema, scope, commit-state, and check rules MUST apply without inventing versioned declaration correspondence
+
+#### Scenario: Fired hard stop demotes regardless of claimed status
+
+- GIVEN a schema-valid result envelope where at least one declared hard stop's `fired` value is true
+- WHEN the verifier decides status
+- THEN the lane MUST be demoted to blocked even when `envelope.Status` claims `done`
 
 ### Requirement: Frozen Candidate Verification
 

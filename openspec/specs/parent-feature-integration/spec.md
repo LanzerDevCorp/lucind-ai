@@ -46,12 +46,12 @@ Lane and combine worktrees MUST start at the explicitly recorded immutable paren
 
 ### Requirement: Recoverable Idempotent Attempts
 
-Each attempt SHALL have a durable identity and recorded inputs. A retry MUST return its terminal result or resume from those inputs without a second promotion. After interruption or lease expiry, recovery MUST verify recorded expected and current refs before resuming; unsafe recovery SHALL fail closed while preserving evidence and worktrees.
+Each integration attempt SHALL maintain an immutable idempotency key and recorded inputs. A retry MUST return the recorded terminal result without re-dispatching lanes, or resume from those inputs without a second promotion. After interruption or lease expiry, recovery MUST verify recorded expected and current refs before resuming; unsafe recovery SHALL fail closed while preserving evidence and worktrees. CAS promotion failure due to stale parent SHAs MUST preserve all worktrees and ledger evidence.
 
 #### Scenario: Completed attempt is retried
 - GIVEN an attempt already reached a terminal result
 - WHEN its identity is replayed
-- THEN the same result SHALL be returned without another ref update
+- THEN the same result SHALL be returned without another ref update and without re-dispatching lanes
 
 #### Scenario: Expired lease is recovered
 - GIVEN an interrupted attempt whose lease expired
@@ -61,4 +61,4 @@ Each attempt SHALL have a durable identity and recorded inputs. A retry MUST ret
 #### Scenario: Recovery finds changed state
 - GIVEN an interrupted attempt whose recorded refs no longer match
 - WHEN recovery runs
-- THEN it MUST remain blocked and preserve diagnostic artifacts
+- THEN it MUST remain blocked and preserve diagnostic artifacts, worktrees, and ledger evidence

@@ -1,0 +1,60 @@
+{
+  "packet_id": "design-deterministic-lucind-ai-orchestrator-lens-c",
+  "status": "done",
+  "summary": "Authored openspec/changes/deterministic-lucind-ai-orchestrator/design-lens-c.md covering testing strategy, test seams, applicability threat matrix, and rollback/additivity decisions within the 1000-word budget. Verified all test seam citations against real code in the worktree and marked every threat matrix row as Applicable or N/A with rationale.",
+  "hard_stops": [
+    {
+      "hard_stop": "A behavior the specs require cannot be tested through any existing or proposed seam.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Whether a format delta is additive cannot be determined from the specs, so the rollback decision would be a guess.",
+      "fired": false
+    },
+    {
+      "hard_stop": "The threat matrix is missing from both ## Context and the skill reference.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/deterministic-lucind-ai-orchestrator/design-lens-c.md",
+      "change": "created",
+      "why": "Design Lens C artifact for failure, test, and rollback strategy"
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every named test seam carries a file:line citation that points at real code in this worktree, or is explicitly marked \"new seam required\".",
+      "met": true,
+      "evidence": "Every named seam in design-lens-c.md cites real code (e.g. internal/packet/packet.go:78, internal/dag/waves.go:16, internal/run/run.go:149, internal/run/integrate_feature.go:100, internal/worktree/worktree.go:47, cmd/lucind-ai/cli.go:60) or is explicitly marked \"new seam required\"."
+    },
+    {
+      "criterion": "Every threat-matrix row is marked Applicable or N/A with a reason, and every applicable row names a planned RED test.",
+      "met": true,
+      "evidence": "All 5 rows in design-lens-c.md Threat Matrix are marked Applicable or N/A with one-clause rationales, with planned RED tests defined for applicable Git repository selection and Commit state rows."
+    },
+    {
+      "criterion": "design-lens-c.md exists, is under 1000 words, and carries every skeleton section including ## Assumed architecture.",
+      "met": true,
+      "evidence": "openspec/changes/deterministic-lucind-ai-orchestrator/design-lens-c.md created with 908 words containing all required skeleton sections (Assumed architecture, Testing Strategy, Test Seams, Threat Matrix, Rollback and Additivity, Out of Scope, Open Questions)."
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (git status --porcelain empty and git log --oneline -1).",
+      "met": true,
+      "evidence": "Commit e5ad9fc authored with message \"docs(design): add deterministic orchestrator lens c\"; git status --porcelain is empty."
+    }
+  ],
+  "commit": "e5ad9fc",
+  "findings": [
+    {
+      "finding": "internal/feature/feature_test.go uses short 50-100ms lease TTLs in TestLeaseAcquisitionAndMonotonicFence and TestLeaseValidationAndStaleMutationRejection which expire during modernc.org/sqlite initialization under -race (taking ~1.5s), causing test failures.",
+      "evidence": "internal/feature/feature_test.go:183,221; go test ./internal/feature -race -count=1",
+      "affects": "internal/feature"
+    }
+  ]
+}
