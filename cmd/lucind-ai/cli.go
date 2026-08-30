@@ -2449,6 +2449,7 @@ func phaseDispatch(ctx context.Context, args []string, stdout, stderr io.Writer)
 			cand1 := filepath.Join(primaryRoot, ".lucind", "packets", fmt.Sprintf("%s-%s-synthesis.md", normPhase, changeName))
 			cand2 := filepath.Join(primaryRoot, "openspec", "changes", changeName, "packets", fmt.Sprintf("%s-%s-synthesis.md", normPhase, changeName))
 			cand3 := filepath.Join(primaryRoot, "openspec", "changes", changeName, fmt.Sprintf("%s-synthesis.md", normPhase))
+			// Existing synthesis packets already on disk are reused as-is without retroactively gaining ## Required skills (known cosmetic gap on stale local caches; env-var delivery still applies).
 			if _, err := os.Stat(cand1); err == nil {
 				packetPath = cand1
 			} else if _, err := os.Stat(cand2); err == nil {
