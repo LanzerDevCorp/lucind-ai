@@ -43,7 +43,7 @@ Old:
 Keep one Orchestrator authoritative for the Change. Agents own Lanes, not scope, priorities, Dependencies, Acceptance, or Promotion.
 
 New:
-Keep one Orchestrator authoritative for the Change. Agents own Lanes, not scope, priorities, or Dependencies; a named `sdd-*` phase-Specialist may independently Accept its own phase's Lanes; Promotion remains forbidden to every Agent, Specialist included.
+Keep one Orchestrator authoritative for the Change. Agents own Lanes, not scope, priorities, Dependencies, Acceptance, or Promotion — except that a named `sdd-*` phase-Specialist may independently Accept its own phase's Lanes; Promotion remains forbidden to every Agent, Specialist included.
 ```
 
 ### Decision 4 — Adapter coexistence; no Bash/Agent tools this Change
