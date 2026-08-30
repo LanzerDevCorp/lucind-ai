@@ -101,9 +101,9 @@ Wave mapping onto the checklist: 1 → 1.1–1.3, 1.6; 2 → 1.4–1.5, 2.1–2.
 
 ## Minor follow-ups (non-blocking, noted by third-pass verify, not required for this change)
 
-- [ ] 7.1 `TestPhaseSubcommandGatesPrematureSynthesis` (`cmd/lucind-ai/cli_test.go:5653-5657`) still negatively asserts the old `propose.md` filename is absent; should assert `proposal.md` is absent instead, to stay meaningful after the 6.1 rename.
-- [ ] 7.2 `specs/phase-specialist-dispatch/spec.md`'s requirement prose (not its scenario, already updated) still generically says `<phase>.md`; tighten the wording to match the `proposal.md`/`spec.md`/`design.md`/`tasks.md`/`apply.md`/`verify.md`/`remediate.md`/`archive.md` convention actually implemented.
-- [ ] 7.3 A synthesis packet already on disk in gitignored `.lucind/packets/` from before this fix is reused as-is (`cli.go:2447-2458`) and won't retroactively gain the `## Required skills` body section — env-var delivery still applies, so this is a cosmetic gap on stale local caches only, not a functional regression.
+- [x] 7.1 `TestPhaseSubcommandGatesPrematureSynthesis` (`cmd/lucind-ai/cli_test.go:5653-5657`) still negatively asserts the old `propose.md` filename is absent; should assert `proposal.md` is absent instead, to stay meaningful after the 6.1 rename. Fixed and confirmed at `cli_test.go:5654`.
+- [x] 7.2 `specs/phase-specialist-dispatch/spec.md`'s requirement prose (not its scenario, already updated) still generically says `<phase>.md`; tighten the wording to match the `proposal.md`/`spec.md`/`design.md`/`tasks.md`/`apply.md`/`verify.md`/`remediate.md`/`archive.md` convention actually implemented.
+- [x] 7.3 A synthesis packet already on disk in gitignored `.lucind/packets/` from before this fix is reused as-is (`cli.go:2447-2458`) and won't retroactively gain the `## Required skills` body section — env-var delivery still applies, so this is a cosmetic gap on stale local caches only, not a functional regression. Documented with an inline comment at the reuse branch.
 
 ## Dependency order
 
