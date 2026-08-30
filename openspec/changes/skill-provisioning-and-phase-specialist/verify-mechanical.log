@@ -1,35 +1,35 @@
 === lucind-ai mechanical check ===
-Git Commit SHA: 5bcd50bd8a9851a3ef90336042b8d2f123a806de
+Git Commit SHA: 490fd554cd44f1a955c5eac4ab2def496e40718c
 Command: lucind-checks.sh
-Duration: 1m32.970594771s
+Duration: 1m31.699763591s
 Exit Code: 0
 ==================================
-ok  	github.com/LanzerDevCorp/lucind-ai/cmd/lucind-ai	39.421s
+ok  	github.com/LanzerDevCorp/lucind-ai/cmd/lucind-ai	39.170s
 ?   	github.com/LanzerDevCorp/lucind-ai/cmd/plugincontent	[no test files]
-ok  	github.com/LanzerDevCorp/lucind-ai/internal/accept	14.116s
-ok  	github.com/LanzerDevCorp/lucind-ai/internal/barrier	1.015s
-ok  	github.com/LanzerDevCorp/lucind-ai/internal/buildcheck	1.940s
-ok  	github.com/LanzerDevCorp/lucind-ai/internal/candidatechange	1.174s
-ok  	github.com/LanzerDevCorp/lucind-ai/internal/conflicttriage	3.658s
-ok  	github.com/LanzerDevCorp/lucind-ai/internal/conflicttriage/fixture	4.257s
-ok  	github.com/LanzerDevCorp/lucind-ai/internal/dag	1.041s
-ok  	github.com/LanzerDevCorp/lucind-ai/internal/executor	16.853s
-ok  	github.com/LanzerDevCorp/lucind-ai/internal/feature	7.738s
-ok  	github.com/LanzerDevCorp/lucind-ai/internal/integrate	9.375s
+ok  	github.com/LanzerDevCorp/lucind-ai/internal/accept	13.977s
+ok  	github.com/LanzerDevCorp/lucind-ai/internal/barrier	1.016s
+ok  	github.com/LanzerDevCorp/lucind-ai/internal/buildcheck	1.875s
+ok  	github.com/LanzerDevCorp/lucind-ai/internal/candidatechange	1.143s
+ok  	github.com/LanzerDevCorp/lucind-ai/internal/conflicttriage	3.634s
+ok  	github.com/LanzerDevCorp/lucind-ai/internal/conflicttriage/fixture	4.398s
+ok  	github.com/LanzerDevCorp/lucind-ai/internal/dag	1.050s
+ok  	github.com/LanzerDevCorp/lucind-ai/internal/executor	16.880s
+ok  	github.com/LanzerDevCorp/lucind-ai/internal/feature	8.025s
+ok  	github.com/LanzerDevCorp/lucind-ai/internal/integrate	9.713s
 ok  	github.com/LanzerDevCorp/lucind-ai/internal/lane	1.014s
-ok  	github.com/LanzerDevCorp/lucind-ai/internal/lanecheck	1.143s
-ok  	github.com/LanzerDevCorp/lucind-ai/internal/ledger	58.812s
-ok  	github.com/LanzerDevCorp/lucind-ai/internal/ledgerpath	1.010s
-ok  	github.com/LanzerDevCorp/lucind-ai/internal/lucindconfig	1.017s
-ok  	github.com/LanzerDevCorp/lucind-ai/internal/overlap	1.557s
-ok  	github.com/LanzerDevCorp/lucind-ai/internal/packet	1.064s
-ok  	github.com/LanzerDevCorp/lucind-ai/internal/packetauthor	1.031s
-ok  	github.com/LanzerDevCorp/lucind-ai/internal/phasespec	1.033s
-ok  	github.com/LanzerDevCorp/lucind-ai/internal/reconcile	12.981s
-ok  	github.com/LanzerDevCorp/lucind-ai/internal/resolve	1.766s
-ok  	github.com/LanzerDevCorp/lucind-ai/internal/result	1.069s
-ok  	github.com/LanzerDevCorp/lucind-ai/internal/run	78.684s
-ok  	github.com/LanzerDevCorp/lucind-ai/internal/skillcontent	1.037s
-ok  	github.com/LanzerDevCorp/lucind-ai/internal/skillroots	1.021s
-ok  	github.com/LanzerDevCorp/lucind-ai/internal/skillset	1.013s
-ok  	github.com/LanzerDevCorp/lucind-ai/internal/worktree	1.814s
+ok  	github.com/LanzerDevCorp/lucind-ai/internal/lanecheck	1.173s
+ok  	github.com/LanzerDevCorp/lucind-ai/internal/ledger	58.799s
+ok  	github.com/LanzerDevCorp/lucind-ai/internal/ledgerpath	1.012s
+ok  	github.com/LanzerDevCorp/lucind-ai/internal/lucindconfig	1.015s
+ok  	github.com/LanzerDevCorp/lucind-ai/internal/overlap	1.613s
+ok  	github.com/LanzerDevCorp/lucind-ai/internal/packet	1.053s
+ok  	github.com/LanzerDevCorp/lucind-ai/internal/packetauthor	1.036s
+ok  	github.com/LanzerDevCorp/lucind-ai/internal/phasespec	1.043s
+ok  	github.com/LanzerDevCorp/lucind-ai/internal/reconcile	13.183s
+ok  	github.com/LanzerDevCorp/lucind-ai/internal/resolve	1.685s
+ok  	github.com/LanzerDevCorp/lucind-ai/internal/result	1.052s
+ok  	github.com/LanzerDevCorp/lucind-ai/internal/run	78.213s
+ok  	github.com/LanzerDevCorp/lucind-ai/internal/skillcontent	1.034s
+ok  	github.com/LanzerDevCorp/lucind-ai/internal/skillroots	1.024s
+ok  	github.com/LanzerDevCorp/lucind-ai/internal/skillset	1.014s
+ok  	github.com/LanzerDevCorp/lucind-ai/internal/worktree	1.794s
