@@ -755,6 +755,277 @@ func TestRenewRecomputesFreshEvidenceViaOverlap(t *testing.T) {
 	}
 }
 
+// TestRenewDefaultsSHAsFromResolveFeatureTipSHAWhenOmitted reproduces the silent-stale-seed
+// scenario: a caller renews without ever recomputing --source-sha/--target-sha (e.g. only ever
+// passed one of the two flags, or neither), so without a default, Renew would silently carry
+// forward whatever SHA the very first, automatically-created request happened to be seeded with
+// -- possibly stale forever, since nothing forces it to be recomputed on any later renewal. With
+// ResolveFeatureTipSHA wired, Renew must resolve each omitted SHA from the live feature instead.
+func TestRenewDefaultsSHAsFromResolveFeatureTipSHAWhenOmitted(t *testing.T) {
+	ctx := context.Background()
+	l := openTestLedger(t)
+
+	now := time.Date(2026, 8, 20, 20, 0, 0, 0, time.UTC)
+
+	staleEv := sampleRequiredEvidence()
+	staleEv.FeatureASHA = "sha_stale_source_1111111111111111111111"
+	staleEv.FeatureBSHA = "sha_stale_target_2222222222222222222222"
+	staleEv.Hash, _ = staleEv.ComputeHash()
+
+	freshEv := sampleRequiredEvidence()
+	freshEv.FeatureASHA = "sha_current_source_333333333333333333333"
+	freshEv.FeatureBSHA = "sha_current_target_444444444444444444444"
+	freshEv.Hash, _ = freshEv.ComputeHash()
+
+	fakeEvaluator := func(ctx context.Context, repoDir, baseSHA, shaA, shaB string, opts ...overlap.EvaluateOption) (*overlap.Evidence, error) {
+		if shaA == freshEv.FeatureASHA && shaB == freshEv.FeatureBSHA {
+			return freshEv, nil
+		}
+		return staleEv, nil
+	}
+
+	svc := NewService(l, WithClock(func() time.Time { return now }), WithOverlapEvaluator(fakeEvaluator))
+
+	req1, err := svc.CreateRequest(ctx, CreateRequestParams{
+		ID:            "req-stale-seed",
+		FeatureID:     "feature-target",
+		SourceFeature: "feature-source",
+		SourceParent:  "refs/heads/feature-source",
+		TargetFeature: "feature-target",
+		TargetParent:  "refs/heads/feature-target",
+		SourceSHA:     staleEv.FeatureASHA,
+		TargetSHA:     staleEv.FeatureBSHA,
+		Evidence:      staleEv,
+		TTL:           5 * time.Minute,
+	})
+	if err != nil {
+		t.Fatalf("CreateRequest: %v", err)
+	}
+
+	renewTime := now.Add(10 * time.Minute)
+	svcRenew := NewService(l, WithClock(func() time.Time { return renewTime }), WithOverlapEvaluator(fakeEvaluator))
+
+	resolvedFor := map[string]string{
+		"feature-source": freshEv.FeatureASHA,
+		"feature-target": freshEv.FeatureBSHA,
+	}
+	var resolvedCalls []string
+	resolver := func(ctx context.Context, featureID string) (string, error) {
+		resolvedCalls = append(resolvedCalls, featureID)
+		sha, ok := resolvedFor[featureID]
+		if !ok {
+			return "", errors.New("unexpected featureID")
+		}
+		return sha, nil
+	}
+
+	renewedReq, err := svcRenew.Renew(ctx, RenewParams{
+		OldRequestID: req1.ID,
+		RepoDir:      t.TempDir(),
+		BaseSHA:      staleEv.BaseSHA,
+		// CurrentSourceSHA/CurrentTargetSHA deliberately omitted: this is the
+		// exact scenario reported -- a caller who never recomputes both SHAs
+		// against the live repository on renewal.
+		TTL:                  15 * time.Minute,
+		NewRequestID:         "req-renewed-fresh",
+		ResolveFeatureTipSHA: resolver,
+	})
+	if err != nil {
+		t.Fatalf("Renew failed: %v", err)
+	}
+
+	if renewedReq.SourceSHA != freshEv.FeatureASHA {
+		t.Errorf("renewedReq.SourceSHA = %q, want resolver value %q (must not silently carry forward stale seed %q)",
+			renewedReq.SourceSHA, freshEv.FeatureASHA, staleEv.FeatureASHA)
+	}
+	if renewedReq.TargetSHA != freshEv.FeatureBSHA {
+		t.Errorf("renewedReq.TargetSHA = %q, want resolver value %q (must not silently carry forward stale seed %q)",
+			renewedReq.TargetSHA, freshEv.FeatureBSHA, staleEv.FeatureBSHA)
+	}
+	if len(resolvedCalls) != 2 {
+		t.Fatalf("resolver called %d times, want 2 (once for source feature, once for target feature); calls = %v", len(resolvedCalls), resolvedCalls)
+	}
+}
+
+// TestRenewExplicitSHAOverridesResolveFeatureTipSHA proves an explicit CurrentSourceSHA/
+// CurrentTargetSHA still wins over ResolveFeatureTipSHA -- the resolver is a default for the
+// omitted-flag case, never a mandatory override for a caller who genuinely needs to pin a
+// specific historical SHA.
+func TestRenewExplicitSHAOverridesResolveFeatureTipSHA(t *testing.T) {
+	ctx := context.Background()
+	l := openTestLedger(t)
+
+	now := time.Date(2026, 8, 20, 20, 0, 0, 0, time.UTC)
+
+	staleEv := sampleRequiredEvidence()
+	staleEv.FeatureASHA = "sha_stale_source_1111111111111111111111"
+	staleEv.FeatureBSHA = "sha_stale_target_2222222222222222222222"
+	staleEv.Hash, _ = staleEv.ComputeHash()
+
+	explicitEv := sampleRequiredEvidence()
+	explicitEv.FeatureASHA = "sha_explicit_source_55555555555555555555"
+	explicitEv.FeatureBSHA = "sha_explicit_target_66666666666666666666"
+	explicitEv.Hash, _ = explicitEv.ComputeHash()
+
+	fakeEvaluator := func(ctx context.Context, repoDir, baseSHA, shaA, shaB string, opts ...overlap.EvaluateOption) (*overlap.Evidence, error) {
+		if shaA == explicitEv.FeatureASHA && shaB == explicitEv.FeatureBSHA {
+			return explicitEv, nil
+		}
+		return staleEv, nil
+	}
+
+	svc := NewService(l, WithClock(func() time.Time { return now }), WithOverlapEvaluator(fakeEvaluator))
+
+	req1, err := svc.CreateRequest(ctx, CreateRequestParams{
+		ID:            "req-stale-seed-2",
+		FeatureID:     "feature-target",
+		SourceFeature: "feature-source",
+		SourceParent:  "refs/heads/feature-source",
+		TargetFeature: "feature-target",
+		TargetParent:  "refs/heads/feature-target",
+		SourceSHA:     staleEv.FeatureASHA,
+		TargetSHA:     staleEv.FeatureBSHA,
+		Evidence:      staleEv,
+		TTL:           5 * time.Minute,
+	})
+	if err != nil {
+		t.Fatalf("CreateRequest: %v", err)
+	}
+
+	renewTime := now.Add(10 * time.Minute)
+	svcRenew := NewService(l, WithClock(func() time.Time { return renewTime }), WithOverlapEvaluator(fakeEvaluator))
+
+	resolverCalled := false
+	resolver := func(ctx context.Context, featureID string) (string, error) {
+		resolverCalled = true
+		return "should-not-be-used", nil
+	}
+
+	renewedReq, err := svcRenew.Renew(ctx, RenewParams{
+		OldRequestID:         req1.ID,
+		RepoDir:              t.TempDir(),
+		BaseSHA:              staleEv.BaseSHA,
+		CurrentSourceSHA:     explicitEv.FeatureASHA,
+		CurrentTargetSHA:     explicitEv.FeatureBSHA,
+		TTL:                  15 * time.Minute,
+		NewRequestID:         "req-renewed-explicit",
+		ResolveFeatureTipSHA: resolver,
+	})
+	if err != nil {
+		t.Fatalf("Renew failed: %v", err)
+	}
+
+	if resolverCalled {
+		t.Error("ResolveFeatureTipSHA must not be called when both CurrentSourceSHA and CurrentTargetSHA are explicitly supplied")
+	}
+	if renewedReq.SourceSHA != explicitEv.FeatureASHA {
+		t.Errorf("renewedReq.SourceSHA = %q, want explicit override %q", renewedReq.SourceSHA, explicitEv.FeatureASHA)
+	}
+	if renewedReq.TargetSHA != explicitEv.FeatureBSHA {
+		t.Errorf("renewedReq.TargetSHA = %q, want explicit override %q", renewedReq.TargetSHA, explicitEv.FeatureBSHA)
+	}
+}
+
+// TestRenewSupersedesAlreadyApprovedOldRequest proves Renew also expires the old
+// request when it is already "approved" (not just "awaiting"). Without this, an
+// approved request whose SHAs later go stale (e.g. the other feature promoted
+// again after approval but before a candidate was resolved) is left dangling in
+// "approved" status forever, alongside the freshly renewed request for the same
+// direction. evaluateOverlapGate's overlap-request lookup (internal/run/attempt.go)
+// takes the first created_at match for a direction, so that stale-SHA approved
+// request would permanently shadow the new request's resolved candidate, causing
+// promotion to keep blocking with the exact same reconciliation-required reason
+// even after the human-in-the-loop resolution was correctly approved and resolved.
+func TestRenewSupersedesAlreadyApprovedOldRequest(t *testing.T) {
+	ctx := context.Background()
+	l := openTestLedger(t)
+
+	now := time.Date(2026, 8, 25, 21, 0, 0, 0, time.UTC)
+
+	ev1 := sampleRequiredEvidence()
+	ev1.FeatureASHA = "sha_old_source_11111111111111111111111"
+	ev1.FeatureBSHA = "sha_old_target_22222222222222222222222"
+	ev1.Hash, _ = ev1.ComputeHash()
+
+	ev2 := sampleRequiredEvidence()
+	ev2.FeatureASHA = "sha_fresh_source_3333333333333333333333"
+	ev2.FeatureBSHA = "sha_fresh_target_4444444444444444444444"
+	ev2.Hash, _ = ev2.ComputeHash()
+
+	fakeEvaluator := func(ctx context.Context, repoDir, baseSHA, shaA, shaB string, opts ...overlap.EvaluateOption) (*overlap.Evidence, error) {
+		if shaA == ev2.FeatureASHA && shaB == ev2.FeatureBSHA {
+			return ev2, nil
+		}
+		return ev1, nil
+	}
+
+	svc := NewService(l, WithClock(func() time.Time { return now }), WithOverlapEvaluator(fakeEvaluator))
+
+	req1, err := svc.CreateRequest(ctx, CreateRequestParams{
+		ID:            "req-stale-approved-1",
+		FeatureID:     "feature-target",
+		SourceFeature: "feature-source",
+		SourceParent:  "refs/heads/feature-source",
+		TargetFeature: "feature-target",
+		TargetParent:  "refs/heads/feature-target",
+		SourceSHA:     ev1.FeatureASHA,
+		TargetSHA:     ev1.FeatureBSHA,
+		Evidence:      ev1,
+		TTL:           5 * time.Minute,
+	})
+	if err != nil {
+		t.Fatalf("CreateRequest: %v", err)
+	}
+
+	// Approve the request -- moves it from "awaiting" to "approved" and
+	// creates a candidate, exactly like a human running `reconcile approve`.
+	approvedReq, _, err := svc.Approve(ctx, ApproveParams{
+		RequestID:     req1.ID,
+		SourceFeature: "feature-source",
+		TargetFeature: "feature-target",
+		Actor:         "human-actor",
+	})
+	if err != nil {
+		t.Fatalf("Approve: %v", err)
+	}
+	if approvedReq.Status != RequestStatusApproved {
+		t.Fatalf("approvedReq.Status = %v, want %v", approvedReq.Status, RequestStatusApproved)
+	}
+
+	// Time passes; the other feature promotes again, so the approved
+	// request's recorded SHAs go stale before any candidate got resolved.
+	// The operator renews it with fresh SHAs, exactly per
+	// recovery-reconciliation.md's documented sequence.
+	renewTime := now.Add(20 * time.Minute)
+	svcRenew := NewService(l, WithClock(func() time.Time { return renewTime }), WithOverlapEvaluator(fakeEvaluator))
+
+	renewedReq, err := svcRenew.Renew(ctx, RenewParams{
+		OldRequestID:     req1.ID,
+		RepoDir:          t.TempDir(),
+		BaseSHA:          ev1.BaseSHA,
+		CurrentSourceSHA: ev2.FeatureASHA,
+		CurrentTargetSHA: ev2.FeatureBSHA,
+		TTL:              15 * time.Minute,
+		NewRequestID:     "req-renewed-2",
+	})
+	if err != nil {
+		t.Fatalf("Renew failed: %v", err)
+	}
+	if renewedReq.Status != RequestStatusAwaiting {
+		t.Errorf("renewedReq.Status = %v, want %v", renewedReq.Status, RequestStatusAwaiting)
+	}
+
+	// The regression: the old, already-approved request must also be
+	// superseded (expired) by Renew, not left dangling in "approved".
+	oldRow, err := l.ReconciliationRequest(ctx, req1.ID)
+	if err != nil {
+		t.Fatalf("ReconciliationRequest(oldReq): %v", err)
+	}
+	if oldRow.Status != string(RequestStatusExpired) {
+		t.Errorf("oldRow.Status in DB = %q, want %q (an approved-but-stale request must be superseded on renew, or it permanently shadows the renewed request in evaluateOverlapGate's first-match lookup)", oldRow.Status, RequestStatusExpired)
+	}
+}
+
 // TestCandidateLifecycleTransitionsAndQueries proves candidate state transitions:
 // candidate_running -> integrated | failed | stale with atomic audit logging.
 func TestCandidateLifecycleTransitionsAndQueries(t *testing.T) {
@@ -1197,5 +1468,89 @@ func TestGetRequestAndCandidateNotFound(t *testing.T) {
 	_, err = svc.Cancel(ctx, "nonexistent-req", "local:user", "reason")
 	if !errors.Is(err, ErrRequestNotFound) {
 		t.Errorf("Cancel(nonexistent) error = %v, want ErrRequestNotFound", err)
+	}
+}
+
+// TestUpdateCandidateOutputOnly proves triage JSON lands in Candidate.Output
+// without changing status or CandidateSHA. UpdateCandidateStatus SQL does not
+// touch output, so this path must go through a dedicated output-only update.
+func TestUpdateCandidateOutputOnly(t *testing.T) {
+	ctx := context.Background()
+	l := openTestLedger(t)
+
+	now := time.Date(2026, 8, 23, 18, 0, 0, 0, time.UTC)
+	svc := NewService(l, WithClock(func() time.Time { return now }))
+
+	ev := sampleRequiredEvidence()
+	req, err := svc.CreateRequest(ctx, CreateRequestParams{
+		ID:            "req-output-only",
+		FeatureID:     "feature-target",
+		SourceFeature: "feature-source",
+		SourceParent:  "refs/heads/feature-source",
+		TargetFeature: "feature-target",
+		TargetParent:  "refs/heads/feature-target",
+		SourceSHA:     ev.FeatureASHA,
+		TargetSHA:     ev.FeatureBSHA,
+		Evidence:      ev,
+	})
+	if err != nil {
+		t.Fatalf("CreateRequest: %v", err)
+	}
+
+	_, cand, err := svc.Approve(ctx, ApproveParams{
+		RequestID:     req.ID,
+		SourceFeature: "feature-source",
+		TargetFeature: "feature-target",
+		Actor:         "local:testuser",
+		CandidateID:   "cand-output-only",
+	})
+	if err != nil {
+		t.Fatalf("Approve: %v", err)
+	}
+	if cand.Status != CandidateStatusRunning {
+		t.Fatalf("cand.Status = %v, want %v", cand.Status, CandidateStatusRunning)
+	}
+	if cand.CandidateSHA != "" {
+		t.Fatalf("cand.CandidateSHA = %q, want empty before output persist", cand.CandidateSHA)
+	}
+	if cand.Output != "" {
+		t.Fatalf("cand.Output = %q, want empty before output persist", cand.Output)
+	}
+
+	payload := `{"cause_summary":"business hunk","risk_band":"high","proposed_sha":"abc123","verify_budget":"~4 min: ./lucind-checks.sh"}`
+	updTime := now.Add(2 * time.Minute)
+	svcUpd := NewService(l, WithClock(func() time.Time { return updTime }))
+
+	got, err := svcUpd.UpdateCandidateOutput(ctx, cand.ID, payload)
+	if err != nil {
+		t.Fatalf("UpdateCandidateOutput: %v", err)
+	}
+	if got.Output != payload {
+		t.Errorf("got.Output = %q, want %q", got.Output, payload)
+	}
+	if got.Status != CandidateStatusRunning {
+		t.Errorf("got.Status = %v, want still %v", got.Status, CandidateStatusRunning)
+	}
+	if got.CandidateSHA != "" {
+		t.Errorf("got.CandidateSHA = %q, want empty (output-only must not write CandidateSHA)", got.CandidateSHA)
+	}
+
+	fromDB, err := svcUpd.GetCandidate(ctx, cand.ID)
+	if err != nil {
+		t.Fatalf("GetCandidate after output persist: %v", err)
+	}
+	if fromDB.Output != payload {
+		t.Errorf("fromDB.Output = %q, want persisted payload", fromDB.Output)
+	}
+	if fromDB.Status != CandidateStatusRunning {
+		t.Errorf("fromDB.Status = %v, want still %v", fromDB.Status, CandidateStatusRunning)
+	}
+	if fromDB.CandidateSHA != "" {
+		t.Errorf("fromDB.CandidateSHA = %q, want empty", fromDB.CandidateSHA)
+	}
+
+	_, err = svcUpd.UpdateCandidateOutput(ctx, "does-not-exist", payload)
+	if !errors.Is(err, ErrCandidateNotFound) {
+		t.Errorf("UpdateCandidateOutput(missing) error = %v, want ErrCandidateNotFound", err)
 	}
 }

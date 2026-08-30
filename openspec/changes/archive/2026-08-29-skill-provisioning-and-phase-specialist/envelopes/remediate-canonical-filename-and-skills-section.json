@@ -1,0 +1,86 @@
+{
+  "packet_id": "remediate-canonical-filename-and-skills-section",
+  "status": "done",
+  "summary": "Remediated propose phase canonical artifact filename from propose.md to proposal.md and wired ## Required skills section into phase specialist packet synthesis. Verified via unit and integration tests under strict TDD and confirmed full test suite passes with race detection.",
+  "hard_stops": [
+    {
+      "hard_stop": "Stop blocked if it's genuinely ambiguous which filename convention (propose.md vs proposal.md, etc.) is correct after checking all the evidence sources listed in Preconditions — describe the conflicting evidence instead of guessing.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Stop blocked if rendering ## Required skills into the specialist's packet requires resolved skill paths that aren't already available at that point in cli.go without duplicating skillroots resolution logic that belongs elsewhere.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "change": "modified",
+      "path": "internal/phasespec/phasespec.go",
+      "why": "Change canonical artifact filename mapping for propose/proposal to proposal.md"
+    },
+    {
+      "change": "modified",
+      "path": "internal/phasespec/phasespec_test.go",
+      "why": "Update test cases and add explicit unit tests for proposal.md canonical naming and isPhaseComplete check"
+    },
+    {
+      "change": "modified",
+      "path": "internal/phasespec/specialist_test.go",
+      "why": "Update test expectation to proposal.md"
+    },
+    {
+      "change": "modified",
+      "path": "cmd/lucind-ai/cli.go",
+      "why": "Add resolveSynthesisSkillPaths and format ## Required skills section into generated synthesis packet"
+    },
+    {
+      "change": "modified",
+      "path": "cmd/lucind-ai/cli_test.go",
+      "why": "Add TestPhaseSubcommandSpecialistPacketHasRequiredSkills, update proposal.md artifact checks, and stub ensureAgyQuota in overrideDispatchDeps"
+    },
+    {
+      "change": "modified",
+      "path": "openspec/changes/skill-provisioning-and-phase-specialist/specs/phase-specialist-dispatch/spec.md",
+      "why": "Update scenario text to reference proposal.md instead of propose.md"
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "CanonicalArtifactFilename/CanonicalArtifactPath for the propose phase now matches this repo's actual, currently-used artifact filename (verify by checking what name this very change's own directory or gentle-ai sdd-status output uses).",
+      "met": true,
+      "evidence": "internal/phasespec/phasespec.go:234-235 returns proposal.md, matching openspec/changes/skill-provisioning-and-phase-specialist/proposal.md and verified by TestCanonicalArtifactFilenamePropose."
+    },
+    {
+      "criterion": "A test proves isPhaseComplete now correctly recognizes a proposal.md (or whatever the corrected convention is) file as satisfying the propose-phase completeness check.",
+      "met": true,
+      "evidence": "internal/phasespec/phasespec_test.go:TestProposePhaseCompletenessRecognizesProposalMD PASS."
+    },
+    {
+      "criterion": "The specialist's dynamically-generated packet body now includes a ## Required skills section listing the resolved skill paths, matching the format used by compile.go's renderBody for consistency.",
+      "met": true,
+      "evidence": "cmd/lucind-ai/cli.go:2464-2503 resolves skills via resolveSynthesisSkillPaths and formats ## Required skills section between ## Hard stops and ## Return."
+    },
+    {
+      "criterion": "A test proves the specialist-generated packet body contains the ## Required skills section with the expected resolved paths.",
+      "met": true,
+      "evidence": "cmd/lucind-ai/cli_test.go:TestPhaseSubcommandSpecialistPacketHasRequiredSkills PASS."
+    },
+    {
+      "criterion": "go build ./... and go test ./... -race -count=1 are green.",
+      "met": true,
+      "evidence": "./lucind-checks.sh executed with exit code 0."
+    },
+    {
+      "criterion": "Commit conventionally with no AI attribution; clean status and latest commit evidence are recorded.",
+      "met": true,
+      "evidence": "commit c226b6d7fcb8595f7c42f84a6eef06ff2362cc26 has empty body ('git show -s --format=\"%b\" HEAD' empty) and 'git status --porcelain' clean."
+    }
+  ],
+  "commit": "c226b6d7fcb8595f7c42f84a6eef06ff2362cc26",
+  "skills_loaded": [
+    "lucind-executor",
+    "lucind-apply",
+    "go-testing",
+    "work-unit-commits"
+  ]
+}

@@ -1,0 +1,86 @@
+{
+  "packet_id": "ultrafixer-spec",
+  "status": "done",
+  "summary": "Authored delta specifications for ultrafixer-dispatch, defect-records, and dependencies-defects under openspec/changes/ultrafixer/specs/. Evaluated lane-execution and dropped it from the delta spec list in accordance with design.md's zero-new-Go dispatch plumbing decision, updating state.yaml's spec phase to done.",
+  "hard_stops": [
+    {
+      "hard_stop": "Any credential value would need to be chosen, generated, or written.",
+      "fired": false
+    },
+    {
+      "hard_stop": "A done-criterion turns out to be impossible, or already true for a reason the packet did not anticipate.",
+      "fired": false
+    },
+    {
+      "hard_stop": "The change would break something outside allowed_paths.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Two reasonable implementations exist and the packet does not say which.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    },
+    {
+      "hard_stop": "proposal.md and design.md genuinely disagree about a capability's scope in a way you cannot resolve by design.md taking precedence (design.md's engineering conclusions supersede proposal.md's earlier product-level draft where they conflict) — if even that doesn't resolve it, stop and name the exact contradiction.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/ultrafixer/specs/ultrafixer-dispatch/spec.md",
+      "change": "created",
+      "why": "Delta spec for ultrafixer-dispatch capability defining origin classification, two-axis evaluation, signal reproduction, isolated repair delivery, and multi-branch question encoding"
+    },
+    {
+      "path": "openspec/changes/ultrafixer/specs/defect-records/spec.md",
+      "change": "created",
+      "why": "Delta spec for defect-records capability defining ledger schema v8 DDL, RecordDefect API, and CLI inspection commands"
+    },
+    {
+      "path": "openspec/changes/ultrafixer/specs/dependencies-defects/spec.md",
+      "change": "created",
+      "why": "Delta spec for dependencies-defects capability upgrading manual coordination contract to automated ultrafixer packet execution"
+    },
+    {
+      "path": "openspec/changes/ultrafixer/state.yaml",
+      "change": "modified",
+      "why": "Update spec phase status to done with note documenting written specs and dropping of lane-execution"
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every indirection introduced is demonstrably consumed by a terminal consumer.",
+      "met": true,
+      "evidence": "Every Requirement maps to concrete mechanisms in design.md: ultrafixer-dispatch is consumed by Feature Orchestrators via cmd/lucind-ai/cli.go:169-174 and internal/executor/agy.go:136-150; defect-records is consumed by Ledger.RecordDefect/ListDefects in internal/ledger/ledger.go and CLI defect commands in cmd/lucind-ai/cli.go; dependencies-defects is consumed by Orchestrators reading plugin/claude-code/skills/lucind-ai/references/coordination/dependencies-defects.md:7-23."
+    },
+    {
+      "criterion": "The work is committed.",
+      "met": true,
+      "evidence": "git status --porcelain is empty; commit 8f78625 (docs(openspec): author ultrafixer delta specifications)."
+    },
+    {
+      "criterion": "One spec.md file exists per capability that genuinely needs a delta, under openspec/changes/ultrafixer/specs/\u003ccapability\u003e/spec.md, following the local convention.",
+      "met": true,
+      "evidence": "Created openspec/changes/ultrafixer/specs/ultrafixer-dispatch/spec.md, openspec/changes/ultrafixer/specs/defect-records/spec.md, and openspec/changes/ultrafixer/specs/dependencies-defects/spec.md adhering to # Delta for \u003ccapability\u003e, ## ADDED/MODIFIED Requirements, ### Requirement: \u003cname\u003e, and #### Scenario: \u003cname\u003e (GIVEN/WHEN/THEN) format."
+    },
+    {
+      "criterion": "You explicitly resolved the capability-list question in Context below (does lane-execution still need a MODIFIED delta given design.md's \"zero new Go dispatch plumbing\" conclusion, or does it drop out entirely) rather than copying proposal.md's capability list uncritically.",
+      "met": true,
+      "evidence": "Evaluated lane-execution against design.md's zero-new-Go dispatch plumbing conclusion (internal/run, internal/executor, internal/packet reused verbatim) and confirmed no behavioral delta exists, dropping it and documenting the rationale in state.yaml and result envelope."
+    },
+    {
+      "criterion": "openspec/changes/ultrafixer/state.yaml's phases.spec is updated to status: done with a short note: listing exactly which capability spec files were written (do not touch any other phase's entry).",
+      "met": true,
+      "evidence": "openspec/changes/ultrafixer/state.yaml:29-35 updated with status: done and explanatory note without modifying any other phase entries."
+    },
+    {
+      "criterion": "Every file:line citation used inside a Requirement's prose (if any) is verified against the actual current worktree, not copied blind.",
+      "met": true,
+      "evidence": "Verified internal/packet/packet.go:68 (BaseSHA), internal/ledger/ledger.go:1342-1350 (FeatureRow/base_sha), cmd/lucind-ai/cli.go:954-1045 (runFeatureStatus), internal/ledger/schema.go:10 (schemaVersion), internal/result/result.go:77-82 (Question), internal/result/result.go:95-99 (Finding), internal/result/result.go:102-115 (Envelope), internal/run/integrate_retry.go:18-45 (RebuildBatchForRetry), and plugin/claude-code/skills/lucind-ai/references/coordination/dependencies-defects.md:7-23 against worktree."
+    }
+  ],
+  "commit": "8f78625"
+}

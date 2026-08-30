@@ -1,0 +1,81 @@
+{
+  "packet_id": "ultrafixer-design",
+  "status": "done",
+  "summary": "Authored technical design for ultrafixer (openspec/changes/ultrafixer/design.md) resolving proposal's three open questions with schema v8 defect_records DDL, multi-branch result encoding via existing Question/Finding fields, and worktree cleanup reuse. Specified zero-new-Go dispatch plumbing via packet template asset, two-axis triage, CodeGraph + signal reproduction, and human-gated CAS promotion, and updated state.yaml design phase to done.",
+  "hard_stops": [
+    {
+      "hard_stop": "Any credential value would need to be chosen, generated, or written.",
+      "fired": false
+    },
+    {
+      "hard_stop": "A done-criterion turns out to be impossible, or already true for a reason the packet did not anticipate.",
+      "fired": false
+    },
+    {
+      "hard_stop": "The change would break something outside allowed_paths.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Two reasonable implementations exist and the packet does not say which.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Resolving one of proposal.md's three Open Questions turns out to require a genuine product decision beyond engineering judgment (e.g. it materially changes user-facing behavior already confirmed with the human). Name the exact tension; do not decide it unilaterally.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/ultrafixer/design.md",
+      "change": "created",
+      "why": "Technical design specification for ultrafixer capability resolving all open questions and defining interfaces, flows, file changes, and testing strategy"
+    },
+    {
+      "path": "openspec/changes/ultrafixer/state.yaml",
+      "change": "modified",
+      "why": "Updated phases.design status to done with summary note"
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every indirection introduced is demonstrably consumed by a terminal consumer. Every new type, field, table, CLI verb, or config key you specify in the design must name the exact file/function that will read/consume it, per this repo's own design.md convention.",
+      "met": true,
+      "evidence": "openspec/changes/ultrafixer/design.md defines terminal consumers for every indirection: defect_records schema v8 DDL \u0026 Go types consumed by ledger.Open (internal/ledger/ledger.go:128), Ledger.RecordDefect/ListDefects, cmd/lucind-ai/cli.go (runDefectRecord/runDefectList), and serve.Model (internal/serve/model.go:536-555); ultrafixer-packet-template.md consumed by feature Orchestrator via lucind-ai run --packet (cmd/lucind-ai/cli.go:169-174)."
+    },
+    {
+      "criterion": "The work is committed. Evidence: git status --porcelain empty and git log --oneline -1. Conventional commit, no AI attribution.",
+      "met": true,
+      "evidence": "git status --porcelain empty; commit 7821df8 docs(openspec): author ultrafixer technical design"
+    },
+    {
+      "criterion": "openspec/changes/ultrafixer/design.md exists, follows the local convention cited above, and every file:line citation is verified against the actual current worktree (not copied blind from explore.md/proposal.md without checking it still applies).",
+      "met": true,
+      "evidence": "openspec/changes/ultrafixer/design.md exists with verified citations against internal/ledger/schema.go:10,363-472, internal/result/result.go:77-115, internal/run/run.go:368-435,681-694, cmd/lucind-ai/cli.go:82-87,954-1045,1649-1685,1719-1838, internal/worktree/worktree.go:150-175,240-253, internal/overlap/overlap.go:353-375,1007-1025, internal/resolve/candidate.go:97-120."
+    },
+    {
+      "criterion": "openspec/changes/ultrafixer/state.yaml's phases.design is updated to status: done with a short note: (do not touch any other phase's entry).",
+      "met": true,
+      "evidence": "openspec/changes/ultrafixer/state.yaml lines 31-37 set phases.design.status to done with summary note; other phase entries unmodified."
+    },
+    {
+      "criterion": "The design explicitly resolves proposal.md's three Open Questions (Defect Record schema naming/columns, multi-branch question encoding, worktree pruning policy) with a stated Decision, not left as still-open.",
+      "met": true,
+      "evidence": "openspec/changes/ultrafixer/design.md Architecture Decisions and Open Questions sections explicitly resolve all 3 questions: defect_records schema v8 DDL with strict typed columns, multi-branch disposition encoding via existing Questions/Findings arrays without schema change, and worktree pruning via existing lucind-ai worktree cleanup --lane \u003cid\u003e."
+    },
+    {
+      "criterion": "The design explicitly states whether ultrafixer-dispatch requires ANY new Go code beyond a packet template + skill documentation (it may turn out to need none, reusing existing packet/Lane/agy machinery entirely — say so plainly if that's the conclusion), versus defect-records, which the proposal already scoped as requiring new ledger schema (v8) and therefore new Go code.",
+      "met": true,
+      "evidence": "openspec/changes/ultrafixer/design.md explicitly concludes ultrafixer-dispatch requires zero new Go code (reusing internal/run, internal/executor, internal/packet verbatim) and delivers via ultrafixer-packet-template.md and dependencies-defects.md, while defect-records introduces new ledger schema v8 DDL and Go models."
+    },
+    {
+      "criterion": "The design specifies the exact new packet template asset (e.g. plugin/claude-code/skills/lucind-ai/assets/ultrafixer-packet-template.md) an Orchestrator will use to dispatch a real ultrafixer Lane — its frontmatter shape, what Context it must carry (the failing check's exact command, since ultrafixer must work across ANY orchestrated project's toolchain, not just Go/lucind-ai's own), and how it differs from the generic packet-template.md.",
+      "met": true,
+      "evidence": "openspec/changes/ultrafixer/design.md Interfaces / Contracts specifies ultrafixer-packet-template.md with frontmatter (id, executor, model, base_sha, parent_ref, allowed_paths), generic failing command Context, and 3-step triage/repair workflow."
+    }
+  ],
+  "commit": "7821df8"
+}

@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+REAL_AGY="$HOME/.local/bin/agy"
+POOL="$HOME/.local/bin/agy-pool"
+
+if [[ ! -x "$REAL_AGY" ]]; then
+  echo "agyr: no se encontró el binario real de agy en $REAL_AGY" >&2
+  exit 127
+fi
+if [[ ! -x "$POOL" ]]; then
+  echo "agyr: no se encontró agy-pool en $POOL — corré 'agy-pool init' primero" >&2
+  exit 127
+fi
+
+max_attempts=$("$POOL" count 2>/dev/null || echo 1)
+[[ "$max_attempts" =~ ^[0-9]+$ ]] || max_attempts=1
+(( max_attempts < 1 )) && max_attempts=1
+
+attempt=0
+while (( attempt < max_attempts )); do
+  attempt=$((attempt + 1))
+  out_file=$(mktemp)
+  "$REAL_AGY" "$@" 2>&1 | tee "$out_file"
+  status=${PIPESTATUS[0]}
+
+  if grep -qiE '429|RESOURCE_EXHAUSTED|quota exceeded|rate limit exceeded' "$out_file"; then
+    current=$("$POOL" current 2>/dev/null || echo "desconocida")
+    echo "[agyr] Cuota agotada en $current (intento $attempt/$max_attempts). Rotando cuenta..." >&2
+    next_account=$("$POOL" next)
+    echo "[agyr] Cuenta activa ahora: $next_account. Reintentando..." >&2
+    rm -f "$out_file"
+    continue
+  fi
+
+  rm -f "$out_file"
+  exit "$status"
+done
+
+echo "[agyr] Las $max_attempts cuentas del pool agotaron su cuota. Abortando." >&2
+exit 1

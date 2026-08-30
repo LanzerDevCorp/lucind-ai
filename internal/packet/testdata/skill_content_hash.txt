@@ -1,0 +1,7 @@
+# Recorded content hash for plugin/claude-code/skills/lucind-ai/**, checked
+# by `make verify-plugin-content` (internal/skillcontent.Verify).
+#
+# Regenerate BOTH lines below with `make bump-plugin-version` -- a deliberate,
+# human-run action, never an automatic side effect of a skill-tree content edit.
+version: 2.0.11
+sha256: 9f765a63fb31dcab08f19562f8f217a33cf62fc75935a91a355745784db40296

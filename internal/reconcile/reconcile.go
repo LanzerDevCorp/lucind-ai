@@ -659,6 +659,18 @@ type RenewParams struct {
 	CurrentTargetSHA string
 	TTL              time.Duration
 	NewRequestID     string
+	// ResolveFeatureTipSHA resolves featureID's current real tip SHA (the
+	// same fallback chain evaluateOverlapGate itself uses for the opposing
+	// feature: live ParentRef resolution, then ExpectedParentSHA, then
+	// BaseSHA). It is used to default CurrentSourceSHA/CurrentTargetSHA
+	// when the caller omits them, instead of silently carrying forward
+	// whatever SHA the request being renewed already had stored -- which
+	// may be stale (e.g. the very first, automatically-created request's
+	// seed value) and would otherwise never converge with the current
+	// state of either feature. An explicit CurrentSourceSHA/CurrentTargetSHA
+	// always wins over this resolver; nil disables the default entirely
+	// and preserves the old carry-forward behavior.
+	ResolveFeatureTipSHA func(ctx context.Context, featureID string) (string, error)
 }
 
 // Renew recomputes fresh overlap evidence via overlap evaluation and creates a new awaiting reconciliation request,
@@ -675,11 +687,21 @@ func (s *Service) Renew(ctx context.Context, params RenewParams) (Request, error
 	}
 
 	sourceSHA := params.CurrentSourceSHA
+	if sourceSHA == "" && params.ResolveFeatureTipSHA != nil {
+		if sha, resolveErr := params.ResolveFeatureTipSHA(ctx, oldReq.SourceFeature); resolveErr == nil && sha != "" {
+			sourceSHA = sha
+		}
+	}
 	if sourceSHA == "" {
 		sourceSHA = oldReq.SourceSHA
 	}
 
 	targetSHA := params.CurrentTargetSHA
+	if targetSHA == "" && params.ResolveFeatureTipSHA != nil {
+		if sha, resolveErr := params.ResolveFeatureTipSHA(ctx, oldReq.TargetFeature); resolveErr == nil && sha != "" {
+			targetSHA = sha
+		}
+	}
 	if targetSHA == "" {
 		targetSHA = oldReq.TargetSHA
 	}
@@ -750,11 +772,22 @@ func (s *Service) Renew(ctx context.Context, params RenewParams) (Request, error
 	}
 
 	err = s.ledger.WriteWithAudit(ctx, func(tx *sql.Tx) error {
-		// Mark old request expired if it was awaiting
+		// Mark old request expired if it was awaiting OR already approved. A
+		// renewed request supersedes the old one either way: an awaiting
+		// request that never got a decision, or an approved request whose
+		// underlying SHAs have since gone stale (e.g. the other feature
+		// promoted again after approval, before a candidate was resolved).
+		// Leaving a stale *approved* request active would let it stay
+		// simultaneously "approved" alongside the freshly renewed request
+		// for the same direction; evaluateOverlapGate's overlap-request
+		// lookup takes the first created_at match for a direction, so the
+		// older, stale-SHA request would keep shadowing the new one's
+		// resolved candidate forever, permanently reproducing the same
+		// reconciliation-required block after every retry.
 		_, err := tx.ExecContext(ctx, `
 			UPDATE reconciliation_requests
 			SET status = ?, updated_at = ?
-			WHERE id = ? AND status = 'awaiting'`,
+			WHERE id = ? AND status IN ('awaiting', 'approved')`,
 			string(RequestStatusExpired), now.UTC().Format(time.RFC3339), oldReq.ID,
 		)
 		if err != nil {
@@ -905,6 +938,43 @@ func (s *Service) UpdateCandidateStatus(ctx context.Context, candidateID string,
 	cand.UpdatedAt = now
 
 	return cand, nil
+}
+
+// UpdateCandidateOutput persists JSON into Candidate.Output without changing
+// status or CandidateSHA. UpdateCandidateStatus SQL does not touch output.
+func (s *Service) UpdateCandidateOutput(ctx context.Context, candidateID, output string) (Candidate, error) {
+	cand, err := s.GetCandidate(ctx, candidateID)
+	if err != nil {
+		return Candidate{}, err
+	}
+
+	now := s.clock()
+	row := ledger.ReconciliationCandidateRow{
+		ID:            cand.ID,
+		RequestID:     cand.RequestID,
+		Status:        string(cand.Status),
+		AllowedPaths:  strings.Join(cand.AllowedPaths, ","),
+		Model:         cand.Model,
+		Config:        cand.Config,
+		Output:        output,
+		Checks:        cand.Checks,
+		CandidateSHA:  cand.CandidateSHA,
+		FailureReason: cand.FailureReason,
+		CreatedAt:     cand.CreatedAt,
+		UpdatedAt:     now,
+	}
+	if err := s.ledger.UpdateReconciliationCandidate(ctx, row); err != nil {
+		if errors.Is(err, ledger.ErrReconciliationCandidateNotFound) {
+			return Candidate{}, ErrCandidateNotFound
+		}
+		return Candidate{}, fmt.Errorf("reconcile: update candidate output: %w", err)
+	}
+
+	updated, err := s.GetCandidate(ctx, candidateID)
+	if err != nil {
+		return Candidate{}, err
+	}
+	return updated, nil
 }
 
 func toCandidate(r ledger.ReconciliationCandidateRow) Candidate {

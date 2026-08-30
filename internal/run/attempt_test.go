@@ -4,13 +4,19 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/LanzerDevCorp/lucind-ai/internal/conflicttriage/fixture"
 	"github.com/LanzerDevCorp/lucind-ai/internal/feature"
 	"github.com/LanzerDevCorp/lucind-ai/internal/integrate"
 	"github.com/LanzerDevCorp/lucind-ai/internal/ledger"
+	"github.com/LanzerDevCorp/lucind-ai/internal/reconcile"
 	"github.com/LanzerDevCorp/lucind-ai/internal/run"
 	"github.com/LanzerDevCorp/lucind-ai/internal/worktree"
 )
@@ -19,15 +25,19 @@ type attemptSpies struct {
 	mu sync.Mutex
 
 	createWorktreeCalls []string
-	combineCalls        []string
-	checkCalls          []string
-	promoteCASCalls     []struct {
+	combineCalls        []struct {
+		RunID     string
+		ParentRef string
+		BaseSHA   string
+	}
+	checkCalls      []string
+	promoteCASCalls []struct {
 		ParentRef    string
 		CandidateSHA string
 		ExpectedSHA  string
 	}
 
-	combineFunc func(ctx context.Context, primaryRoot, runID string, branches []string) (string, string, error)
+	combineFunc func(ctx context.Context, primaryRoot, runID, parentRef, baseSHA string, branches []string) (string, string, error)
 	checkFunc   func(ctx context.Context, worktreePath string) (bool, string, error)
 	promoteFunc func(ctx context.Context, primaryRoot, parentRef, candidateSHA, expectedSHA string) error
 	refSHAFunc  func(ctx context.Context, primaryRoot, ref string) (string, error)
@@ -56,13 +66,17 @@ func newAttemptTestDeps(t *testing.T, spies *attemptSpies) (run.Deps, *ledger.Le
 			spies.mu.Unlock()
 			return worktree.Worktree{Path: primaryRoot + "/wt/" + laneID, Branch: "lucind/" + laneID, BaseSHA: "base-sha-1"}, nil
 		},
-		CombineTree: func(ctx context.Context, primaryRoot, runID string, branches []string) (string, string, error) {
+		CombineTree: func(ctx context.Context, primaryRoot, runID, parentRef, baseSHA string, branches []string) (string, string, error) {
 			spies.mu.Lock()
-			spies.combineCalls = append(spies.combineCalls, runID)
+			spies.combineCalls = append(spies.combineCalls, struct {
+				RunID     string
+				ParentRef string
+				BaseSHA   string
+			}{RunID: runID, ParentRef: parentRef, BaseSHA: baseSHA})
 			fn := spies.combineFunc
 			spies.mu.Unlock()
 			if fn != nil {
-				return fn(ctx, primaryRoot, runID, branches)
+				return fn(ctx, primaryRoot, runID, parentRef, baseSHA, branches)
 			}
 			return primaryRoot + "/integrate-" + runID, "integrate-" + runID, nil
 		},
@@ -178,6 +192,51 @@ func TestAttemptReplayTerminalReturnsStoredResultWithoutSpies(t *testing.T) {
 				t.Errorf("PromoteCAS called %d times, want 0", len(spies.promoteCASCalls))
 			}
 		})
+	}
+}
+
+// TestAttemptCombinePassesFeatureParentRefAndBaseSHA guards against the
+// integration worktree being branched from primaryRoot's current checkout
+// instead of the feature's declared parent: it asserts CombineTree receives
+// req.ParentRef and req.BaseSHA, not empty strings.
+func TestAttemptCombinePassesFeatureParentRefAndBaseSHA(t *testing.T) {
+	spies := &attemptSpies{}
+	deps, _, featSvc := newAttemptTestDeps(t, spies)
+
+	featID := "feat-parent-thread"
+	_, err := featSvc.Create(context.Background(), featID, "refs/heads/feature-parent", "base-sha-parent", "expected-parent-sha-1")
+	if err != nil {
+		t.Fatalf("featSvc.Create() error = %v", err)
+	}
+
+	req := run.AttemptRequest{
+		ID:                "att-parent-thread-1",
+		FeatureID:         featID,
+		ParentRef:         "refs/heads/feature-parent",
+		BaseSHA:           "base-sha-parent",
+		ExpectedParentSHA: "expected-parent-sha-1",
+		IdempotencyKey:    "key-parent-thread",
+		Owner:             "owner-parent",
+		Branches:          []string{"lucind/lane-1"},
+	}
+
+	res, err := run.ExecuteAttempt(context.Background(), deps, req)
+	if err != nil {
+		t.Fatalf("ExecuteAttempt() error = %v", err)
+	}
+	if res.Status != run.AttemptStatusPromoted {
+		t.Fatalf("res.Status = %v, want %v", res.Status, run.AttemptStatusPromoted)
+	}
+
+	if len(spies.combineCalls) != 1 {
+		t.Fatalf("CombineTree calls = %d, want 1", len(spies.combineCalls))
+	}
+	got := spies.combineCalls[0]
+	if got.ParentRef != req.ParentRef {
+		t.Errorf("CombineTree ParentRef = %q, want %q (req.ParentRef)", got.ParentRef, req.ParentRef)
+	}
+	if got.BaseSHA != req.BaseSHA {
+		t.Errorf("CombineTree BaseSHA = %q, want %q (req.BaseSHA)", got.BaseSHA, req.BaseSHA)
 	}
 }
 
@@ -342,7 +401,7 @@ func TestAttemptStateTransitionSequenceAndFailures(t *testing.T) {
 
 	t.Run("failure during combine stage", func(t *testing.T) {
 		spies := &attemptSpies{
-			combineFunc: func(ctx context.Context, primaryRoot, runID string, branches []string) (string, string, error) {
+			combineFunc: func(ctx context.Context, primaryRoot, runID, parentRef, baseSHA string, branches []string) (string, string, error) {
 				return "", "", fmt.Errorf("%w: conflict in file.go", integrate.ErrMergeConflict)
 			},
 		}
@@ -453,6 +512,76 @@ func TestAttemptStateTransitionSequenceAndFailures(t *testing.T) {
 			t.Errorf("res.FailureReason is empty, want detail about stale CAS failure")
 		}
 	})
+}
+
+// TestAttemptFailureReleasesLeaseForImmediateRetry proves that a definitively
+// failed attempt (combine or checks failure -- the "base was red" scenario
+// that motivates "lucind-ai integrate retry") releases its feature lease
+// immediately, rather than holding it until FeatureLeaseTTL naturally
+// expires. Without this, a subsequent attempt on the same feature -- a fresh
+// redispatch, or a retry of the already-completed lane branches -- would be
+// rejected with ErrLeaseHeld for no reason: nothing is still using the lease
+// once the attempt that held it is terminal.
+func TestAttemptFailureReleasesLeaseForImmediateRetry(t *testing.T) {
+	cases := []struct {
+		name  string
+		spies *attemptSpies
+	}{
+		{
+			name: "combine failure",
+			spies: &attemptSpies{
+				combineFunc: func(ctx context.Context, primaryRoot, runID, parentRef, baseSHA string, branches []string) (string, string, error) {
+					return "", "", fmt.Errorf("%w: conflict in file.go", integrate.ErrMergeConflict)
+				},
+			},
+		},
+		{
+			name: "checks failure",
+			spies: &attemptSpies{
+				checkFunc: func(ctx context.Context, worktreePath string) (bool, string, error) {
+					return false, "base is red", nil
+				},
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			deps, _, featSvc := newAttemptTestDeps(t, tc.spies)
+
+			featID := "feat-release-on-failure-" + strings.ReplaceAll(tc.name, " ", "-")
+			_, err := featSvc.Create(context.Background(), featID, "refs/heads/feature-rel", "base-sha-1", "expected-parent-sha-1")
+			if err != nil {
+				t.Fatalf("featSvc.Create() error = %v", err)
+			}
+
+			req := run.AttemptRequest{
+				ID:                "att-release-1-" + tc.name,
+				FeatureID:         featID,
+				ParentRef:         "refs/heads/feature-rel",
+				BaseSHA:           "base-sha-1",
+				ExpectedParentSHA: "expected-parent-sha-1",
+				IdempotencyKey:    "key-release-1-" + tc.name,
+				Owner:             "owner-first",
+				Branches:          []string{"lucind/lane-1"},
+			}
+
+			res, err := run.ExecuteAttempt(context.Background(), deps, req)
+			if err != nil {
+				t.Fatalf("ExecuteAttempt() unexpected hard error = %v", err)
+			}
+			if res.Status != run.AttemptStatusFailed {
+				t.Fatalf("res.Status = %v, want %v", res.Status, run.AttemptStatusFailed)
+			}
+
+			// A second, unrelated owner must be able to acquire the lease
+			// immediately -- no TTL wait required -- proving the first
+			// attempt's failure released it rather than leaving it held.
+			if _, err := featSvc.AcquireLease(context.Background(), featID, "owner-second", 30*time.Second); err != nil {
+				t.Errorf("AcquireLease() by a second owner immediately after a failed attempt = %v, want success (lease should have been released on failure)", err)
+			}
+		})
+	}
 }
 
 func TestAttemptInterruptionAndRecoveryRefMatch(t *testing.T) {
@@ -882,5 +1011,239 @@ func TestAttemptValidationSentinels(t *testing.T) {
 	_, err = run.RecoverAttempt(context.Background(), deps, "")
 	if !errors.Is(err, run.ErrAttemptIDRequired) {
 		t.Errorf("RecoverAttempt(\"\") error = %v, want ErrAttemptIDRequired", err)
+	}
+}
+
+func TestFixtureRetryAdoptsSHAAndCASOnMatchingTip(t *testing.T) {
+	ctx := context.Background()
+	spies := &attemptSpies{}
+	deps, l, _ := newAttemptTestDeps(t, spies)
+
+	fix, err := fixture.GenerateFixture(ctx, fixture.GeneratorOptions{
+		RepoRoot:   t.TempDir(),
+		Ledger:     l,
+		FeatureAID: "feat-cas-a",
+		FeatureBID: "feat-cas-b",
+		ParentRefA: "refs/heads/feature-cas-a",
+		ParentRefB: "refs/heads/feature-cas-b",
+		SharedBase: true,
+	})
+	if err != nil {
+		t.Fatalf("GenerateFixture: %v", err)
+	}
+
+	const parentTipA = "parent-tip-a"
+	otherTip := fix.FeatureBSHA
+	deps.PrimaryRoot = fix.RepoRoot
+	deps.ResolveCandidateSHA = func(ctx context.Context, primaryRoot, worktreePath, branch string) (string, error) {
+		return fix.FeatureASHA, nil
+	}
+	deps.ResolveRefSHA = func(ctx context.Context, primaryRoot, ref string) (string, error) {
+		if ref == fix.FeatureB.ParentRef {
+			return otherTip, nil
+		}
+		return parentTipA, nil
+	}
+
+	req1 := run.AttemptRequest{
+		ID:                "att-cas-a-1",
+		FeatureID:         fix.FeatureA.ID,
+		ParentRef:         fix.FeatureA.ParentRef,
+		BaseSHA:           fix.BaseSHA,
+		ExpectedParentSHA: parentTipA,
+		IdempotencyKey:    "idem-cas-a-1",
+		Owner:             "owner-cas-a",
+		Branches:          []string{"lucind/lane-cas-a-1"},
+	}
+	res1, err := run.ExecuteAttempt(ctx, deps, req1)
+	if err != nil {
+		t.Fatalf("ExecuteAttempt(block): %v", err)
+	}
+	if res1.Status != run.AttemptStatusBlocked {
+		t.Fatalf("res1.Status = %v, want blocked (fixture must force ClassRequired)", res1.Status)
+	}
+
+	var reqID string
+	if err := l.DB().QueryRowContext(ctx, `SELECT id FROM reconciliation_requests LIMIT 1`).Scan(&reqID); err != nil {
+		t.Fatalf("query request id: %v", err)
+	}
+	reconcileSvc := reconcile.NewService(l, reconcile.WithClock(deps.Now))
+	_, _, err = reconcileSvc.Approve(ctx, reconcile.ApproveParams{
+		RequestID:     reqID,
+		SourceFeature: fix.FeatureA.ID,
+		TargetFeature: fix.FeatureB.ID,
+		Actor:         "test-actor",
+	})
+	if err != nil {
+		t.Fatalf("Approve: %v", err)
+	}
+	cand, err := l.ReconciliationCandidateByRequest(ctx, reqID)
+	if err != nil {
+		t.Fatalf("ReconciliationCandidateByRequest: %v", err)
+	}
+	const resolvedSHA = "resolved-sha-fixture"
+	if _, err := reconcileSvc.UpdateCandidateStatus(ctx, cand.ID, reconcile.CandidateStatusIntegrated, resolvedSHA, ""); err != nil {
+		t.Fatalf("UpdateCandidateStatus: %v", err)
+	}
+
+	req2 := run.AttemptRequest{
+		ID:                "att-cas-a-2",
+		FeatureID:         fix.FeatureA.ID,
+		ParentRef:         fix.FeatureA.ParentRef,
+		BaseSHA:           fix.BaseSHA,
+		ExpectedParentSHA: parentTipA,
+		IdempotencyKey:    "idem-cas-a-2",
+		Owner:             "owner-cas-a-retry",
+		Branches:          []string{"lucind/lane-cas-a-1"},
+	}
+	res2, err := run.ExecuteAttempt(ctx, deps, req2)
+	if err != nil {
+		t.Fatalf("ExecuteAttempt(retry): %v", err)
+	}
+	if res2.Status != run.AttemptStatusPromoted {
+		t.Fatalf("res2.Status = %v, want promoted; reason=%q", res2.Status, res2.FailureReason)
+	}
+	if res2.CandidateSHA != resolvedSHA {
+		t.Errorf("res2.CandidateSHA = %q, want %q", res2.CandidateSHA, resolvedSHA)
+	}
+	if len(spies.promoteCASCalls) != 1 {
+		t.Fatalf("PromoteCAS called %d times, want 1", len(spies.promoteCASCalls))
+	}
+	if spies.promoteCASCalls[0].CandidateSHA != resolvedSHA {
+		t.Errorf("PromoteCAS CandidateSHA = %q, want %q", spies.promoteCASCalls[0].CandidateSHA, resolvedSHA)
+	}
+}
+
+func TestFixtureRetryReblocksOnTipDrift(t *testing.T) {
+	ctx := context.Background()
+	spies := &attemptSpies{}
+	deps, l, _ := newAttemptTestDeps(t, spies)
+
+	fix, err := fixture.GenerateFixture(ctx, fixture.GeneratorOptions{
+		RepoRoot:   t.TempDir(),
+		Ledger:     l,
+		FeatureAID: "feat-drift-a",
+		FeatureBID: "feat-drift-b",
+		ParentRefA: "refs/heads/feature-drift-a",
+		ParentRefB: "refs/heads/feature-drift-b",
+		SharedBase: true,
+	})
+	if err != nil {
+		t.Fatalf("GenerateFixture: %v", err)
+	}
+
+	const parentTipA = "parent-tip-drift-a"
+	otherTip := fix.FeatureBSHA
+	deps.PrimaryRoot = fix.RepoRoot
+	deps.ResolveCandidateSHA = func(ctx context.Context, primaryRoot, worktreePath, branch string) (string, error) {
+		return fix.FeatureASHA, nil
+	}
+	deps.ResolveRefSHA = func(ctx context.Context, primaryRoot, ref string) (string, error) {
+		if ref == fix.FeatureB.ParentRef {
+			return otherTip, nil
+		}
+		return parentTipA, nil
+	}
+
+	req1 := run.AttemptRequest{
+		ID:                "att-drift-a-1",
+		FeatureID:         fix.FeatureA.ID,
+		ParentRef:         fix.FeatureA.ParentRef,
+		BaseSHA:           fix.BaseSHA,
+		ExpectedParentSHA: parentTipA,
+		IdempotencyKey:    "idem-drift-a-1",
+		Owner:             "owner-drift-a",
+		Branches:          []string{"lucind/lane-drift-a-1"},
+	}
+	res1, err := run.ExecuteAttempt(ctx, deps, req1)
+	if err != nil {
+		t.Fatalf("ExecuteAttempt(block): %v", err)
+	}
+	if res1.Status != run.AttemptStatusBlocked {
+		t.Fatalf("res1.Status = %v, want blocked", res1.Status)
+	}
+
+	var reqID string
+	if err := l.DB().QueryRowContext(ctx, `SELECT id FROM reconciliation_requests LIMIT 1`).Scan(&reqID); err != nil {
+		t.Fatalf("query request id: %v", err)
+	}
+	reconcileSvc := reconcile.NewService(l, reconcile.WithClock(deps.Now))
+	_, _, err = reconcileSvc.Approve(ctx, reconcile.ApproveParams{
+		RequestID:     reqID,
+		SourceFeature: fix.FeatureA.ID,
+		TargetFeature: fix.FeatureB.ID,
+		Actor:         "test-actor",
+	})
+	if err != nil {
+		t.Fatalf("Approve: %v", err)
+	}
+	cand, err := l.ReconciliationCandidateByRequest(ctx, reqID)
+	if err != nil {
+		t.Fatalf("ReconciliationCandidateByRequest: %v", err)
+	}
+	if _, err := reconcileSvc.UpdateCandidateStatus(ctx, cand.ID, reconcile.CandidateStatusIntegrated, "stale-resolved-sha", ""); err != nil {
+		t.Fatalf("UpdateCandidateStatus: %v", err)
+	}
+
+	branchB := strings.TrimPrefix(fix.FeatureB.ParentRef, "refs/heads/")
+	cmd := exec.Command("git", "-C", fix.RepoRoot, "checkout", branchB)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git checkout %s: %v\n%s", branchB, err, out)
+	}
+	driftFile := filepath.Join(fix.RepoRoot, "drift.txt")
+	if err := os.WriteFile(driftFile, []byte("tip moved\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(drift.txt): %v", err)
+	}
+	cmd = exec.Command("git", "-C", fix.RepoRoot, "-c", "user.email=attempt@lucind.ai", "-c", "user.name=attempt", "add", "drift.txt")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git add: %v\n%s", err, out)
+	}
+	cmd = exec.Command("git", "-C", fix.RepoRoot, "-c", "user.email=attempt@lucind.ai", "-c", "user.name=attempt", "commit", "-m", "tip drift")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git commit: %v\n%s", err, out)
+	}
+	out, err := exec.Command("git", "-C", fix.RepoRoot, "rev-parse", "HEAD").Output()
+	if err != nil {
+		t.Fatalf("rev-parse: %v", err)
+	}
+	otherTip = strings.TrimSpace(string(out))
+	req2 := run.AttemptRequest{
+		ID:                "att-drift-a-2",
+		FeatureID:         fix.FeatureA.ID,
+		ParentRef:         fix.FeatureA.ParentRef,
+		BaseSHA:           fix.BaseSHA,
+		ExpectedParentSHA: parentTipA,
+		IdempotencyKey:    "idem-drift-a-2",
+		Owner:             "owner-drift-a-retry",
+		Branches:          []string{"lucind/lane-drift-a-1"},
+	}
+	res2, err := run.ExecuteAttempt(ctx, deps, req2)
+	if err != nil {
+		t.Fatalf("ExecuteAttempt(drift retry): %v", err)
+	}
+	if res2.Status != run.AttemptStatusBlocked {
+		t.Fatalf("res2.Status = %v, want blocked on tip drift; reason=%q", res2.Status, res2.FailureReason)
+	}
+	if res2.CandidateSHA == "stale-resolved-sha" {
+		t.Errorf("retry adopted stale SHA %q after tip drift", res2.CandidateSHA)
+	}
+	if len(spies.promoteCASCalls) != 0 {
+		t.Errorf("PromoteCAS called %d times, want 0 on tip drift", len(spies.promoteCASCalls))
+	}
+
+	// The block reason must distinguish "a resolution exists but was registered
+	// against a stale tip" from a genuinely fresh, unresolved conflict -- reusing
+	// the exact same generic message for both is indistinguishable from "you
+	// haven't resolved this yet" and was the reported silent trap: an operator has
+	// no way to tell a correctly-registered resolution from one pinned to a SHA
+	// that has since moved.
+	if !strings.Contains(res2.FailureReason, "registered against a stale tip for") {
+		t.Errorf("res2.FailureReason = %q, want it to explicitly call out a stale-tip resolution, not the generic overlap message", res2.FailureReason)
+	}
+	if !strings.Contains(res2.FailureReason, fix.FeatureBSHA) {
+		t.Errorf("res2.FailureReason = %q, want it to include the recorded (stale) SHA %q", res2.FailureReason, fix.FeatureBSHA)
+	}
+	if !strings.Contains(res2.FailureReason, otherTip) {
+		t.Errorf("res2.FailureReason = %q, want it to include the current (drifted) SHA %q", res2.FailureReason, otherTip)
 	}
 }

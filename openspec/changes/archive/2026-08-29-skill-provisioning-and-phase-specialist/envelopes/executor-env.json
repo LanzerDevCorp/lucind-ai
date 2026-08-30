@@ -1,0 +1,56 @@
+{
+  "packet_id": "executor-env",
+  "status": "done",
+  "summary": "Delivered required skills to child executors via LUCIND_REQUIRED_SKILLS JSON environment variable while stripping inherited values. Added subprocess-stub tests across all concrete executors and unit tests for requestEnv.",
+  "hard_stops": [
+    {
+      "hard_stop": "Stop blocked if inherited skill values are retained or write paths are injected through this channel.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Stop blocked for out-of-scope edits, impossible criteria, unresolved alternatives, or contradictory instructions.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "change": "modified",
+      "path": "internal/executor/executor.go",
+      "why": "Add RequiredSkills to Request and update requestEnv to serialize LUCIND_REQUIRED_SKILLS and strip inherited values"
+    },
+    {
+      "change": "modified",
+      "path": "internal/executor/executor_test.go",
+      "why": "Add unit tests verifying requestEnv JSON injection and inherited value stripping"
+    },
+    {
+      "change": "created",
+      "path": "internal/executor/required_skills_test.go",
+      "why": "Add subprocess-stub tests for concrete executors validating child process environment"
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "RED then GREEN subprocess-stub tests cover JSON injection, inherited-value stripping, and empty declarations.",
+      "met": true,
+      "evidence": "internal/executor/required_skills_test.go:13-149 executes subprocess stubs across agy, opencode, claude, and cursor-agent verifying JSON encoding, stripping of inherited env vars, and clean omission on empty declarations."
+    },
+    {
+      "criterion": "Run focused executor tests and go test ./... -race -count=1 successfully.",
+      "met": true,
+      "evidence": "go test ./internal/executor/... passed; ./lucind-checks.sh executed CGO_ENABLED=0 go build ./... and go test ./... -race -count=1 cleanly with zero exit code."
+    },
+    {
+      "criterion": "Request.RequiredSkills is consumed by requestEnv and the child process; cite code and test evidence.",
+      "met": true,
+      "evidence": "internal/executor/executor.go:43-46 consumes req.RequiredSkills and injects JSON into LUCIND_REQUIRED_SKILLS; child stub prints $LUCIND_REQUIRED_SKILLS consumed in internal/executor/required_skills_test.go:36-47."
+    },
+    {
+      "criterion": "Commit conventionally with no AI attribution; clean status and latest commit evidence are recorded.",
+      "met": true,
+      "evidence": "Commit 043d73fec975c922961a4eaf7f89936a0ce54a3f 'feat(executor): deliver required skills via LUCIND_REQUIRED_SKILLS env' with empty body/trailers; working tree clean."
+    }
+  ],
+  "commit": "043d73fec975c922961a4eaf7f89936a0ce54a3f",
+  "session_id": "e52c4bcc-e5f6-4007-8f5a-07abe03bd5cd"
+}

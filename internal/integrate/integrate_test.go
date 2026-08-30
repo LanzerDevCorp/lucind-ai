@@ -3,11 +3,14 @@ package integrate_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/LanzerDevCorp/lucind-ai/internal/integrate"
 	"github.com/LanzerDevCorp/lucind-ai/internal/worktree"
@@ -73,12 +76,12 @@ func TestCombineHappyPath(t *testing.T) {
 	// Return to main
 	runGit(t, primaryRoot, "checkout", "main")
 
-	wtPath, branchName, err := integrate.Combine(context.Background(), primaryRoot, "run-happy", []string{"lucind/lane-1", "lucind/lane-2"})
+	wtPath, branchName, err := integrate.Combine(context.Background(), primaryRoot, "run-happy", "", "", []string{"lucind/lane-1", "lucind/lane-2"})
 	if err != nil {
 		t.Fatalf("Combine() error = %v, want nil", err)
 	}
 	defer func() {
-		_ = worktree.Remove(context.Background(), primaryRoot, wtPath)
+		_ = worktree.Remove(context.Background(), primaryRoot, wtPath, true)
 		_ = worktree.DeleteBranch(context.Background(), primaryRoot, branchName)
 	}()
 
@@ -106,6 +109,113 @@ func TestCombineHappyPath(t *testing.T) {
 	}
 	if string(f2Data) != "lane 2 content\n" {
 		t.Errorf("file2.txt content = %q, want %q", string(f2Data), "lane 2 content\n")
+	}
+}
+
+// TestCombineRetryProducesDeterministicCandidateSHA reproduces the
+// "integrate retry" non-determinism defect: combining the exact same,
+// unchanged lane branch onto the exact same parent twice in a row (as a
+// blocked feature attempt's retry does -- see internal/run/integrate_retry.go
+// RebuildBatchForRetry, which rebuilds from the same preserved "done" lane
+// branches without any redispatch) must produce the same combined tree AND
+// the same candidate commit SHA both times. Before the fix, each call
+// stamped its merge commit with the current wall-clock time, so two
+// back-to-back retries against byte-identical inputs produced two different
+// commit SHAs -- which meant a reconciliation resolved against retry N's
+// candidate could never carry forward to retry N+1's freshly-regenerated,
+// unrelated candidate SHA.
+func TestCombineRetryProducesDeterministicCandidateSHA(t *testing.T) {
+	if testing.Short() {
+		t.Skip("shells out to real git")
+	}
+
+	primaryRoot := initRepo(t)
+
+	runGit(t, primaryRoot, "checkout", "-b", "lucind/lane-retry")
+	if err := os.WriteFile(filepath.Join(primaryRoot, "lane.txt"), []byte("lane content\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(lane.txt) error = %v", err)
+	}
+	runGit(t, primaryRoot, "add", "lane.txt")
+	runGit(t, primaryRoot, "commit", "-m", "lane commit")
+	runGit(t, primaryRoot, "checkout", "main")
+
+	wtPath1, branchName1, err := integrate.Combine(context.Background(), primaryRoot, "run-retry-1", "", "", []string{"lucind/lane-retry"})
+	if err != nil {
+		t.Fatalf("Combine() first call error = %v, want nil", err)
+	}
+	sha1 := runGit(t, wtPath1, "rev-parse", "HEAD")
+	tree1 := runGit(t, wtPath1, "rev-parse", "HEAD^{tree}")
+	_ = worktree.Remove(context.Background(), primaryRoot, wtPath1, true)
+	_ = worktree.DeleteBranch(context.Background(), primaryRoot, branchName1)
+
+	// A real wall-clock gap between retries, matching the actual scenario
+	// (a human runs reconcile renew/approve/resolve between retries) --
+	// without the fix, this alone changes the merge commit's timestamp and
+	// therefore its SHA.
+	time.Sleep(1100 * time.Millisecond)
+
+	wtPath2, branchName2, err := integrate.Combine(context.Background(), primaryRoot, "run-retry-2", "", "", []string{"lucind/lane-retry"})
+	if err != nil {
+		t.Fatalf("Combine() second call (retry) error = %v, want nil", err)
+	}
+	defer func() {
+		_ = worktree.Remove(context.Background(), primaryRoot, wtPath2, true)
+		_ = worktree.DeleteBranch(context.Background(), primaryRoot, branchName2)
+	}()
+	sha2 := runGit(t, wtPath2, "rev-parse", "HEAD")
+	tree2 := runGit(t, wtPath2, "rev-parse", "HEAD^{tree}")
+
+	if tree1 != tree2 {
+		t.Fatalf("combined tree differs across retries of the exact same branch: tree1 = %s, tree2 = %s", tree1, tree2)
+	}
+	if sha1 != sha2 {
+		t.Errorf("candidate_sha differs across retries of the exact same, unchanged branch: sha1 = %s, sha2 = %s (want identical, same as identical tree1/tree2 = %s)", sha1, sha2, tree1)
+	}
+}
+
+func TestCombineBranchesFromFeatureParentNotPrimaryHEAD(t *testing.T) {
+	if testing.Short() {
+		t.Skip("shells out to real git")
+	}
+
+	primaryRoot := initRepo(t)
+
+	// Create a feature parent branch representing where a feature's lanes
+	// were rooted (its declared base_sha).
+	runGit(t, primaryRoot, "checkout", "-b", "feature/foo")
+	if err := os.WriteFile(filepath.Join(primaryRoot, "feature_base.txt"), []byte("feature base\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(feature_base.txt) error = %v", err)
+	}
+	runGit(t, primaryRoot, "add", "feature_base.txt")
+	runGit(t, primaryRoot, "commit", "-m", "feature base commit")
+	baseSHA := runGit(t, primaryRoot, "rev-parse", "HEAD")
+
+	// Advance primaryRoot's checked-out branch (main) past the feature's
+	// parent, simulating dev moving on while the feature's lanes ran.
+	runGit(t, primaryRoot, "checkout", "main")
+	if err := os.WriteFile(filepath.Join(primaryRoot, "dev_only.txt"), []byte("dev moved on\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(dev_only.txt) error = %v", err)
+	}
+	runGit(t, primaryRoot, "add", "dev_only.txt")
+	runGit(t, primaryRoot, "commit", "-m", "dev commit unrelated to the feature")
+
+	runID := "run-parent-fix"
+	wtPath, branchName, err := integrate.Combine(context.Background(), primaryRoot, runID, "refs/heads/feature/foo", baseSHA, nil)
+	if err != nil {
+		t.Fatalf("Combine() error = %v, want nil", err)
+	}
+	defer func() {
+		_ = worktree.Remove(context.Background(), primaryRoot, wtPath, true)
+		_ = worktree.DeleteBranch(context.Background(), primaryRoot, branchName)
+	}()
+
+	gotHead := runGit(t, wtPath, "rev-parse", "HEAD")
+	if gotHead != baseSHA {
+		t.Errorf("integration worktree HEAD = %q, want %q (feature's base SHA, not primaryRoot's current checkout)", gotHead, baseSHA)
+	}
+
+	if _, statErr := os.Stat(filepath.Join(wtPath, "dev_only.txt")); !os.IsNotExist(statErr) {
+		t.Errorf("integration worktree contains dev_only.txt, want it absent: the combined tree must not swallow unrelated commits from primaryRoot's current checkout")
 	}
 }
 
@@ -147,7 +257,7 @@ func TestCombineErrMergeConflictSentinel(t *testing.T) {
 		return "", errors.New("cannot resolve")
 	}
 
-	_, _, err := integrate.CombineWithInvoker(context.Background(), primaryRoot, "run-sentinel", []string{"lucind/lane-c1", "lucind/lane-c2"}, neverResolves)
+	_, _, err := integrate.CombineWithInvoker(context.Background(), primaryRoot, "run-sentinel", "", "", []string{"lucind/lane-c1", "lucind/lane-c2"}, neverResolves)
 	if err == nil {
 		t.Fatal("Combine() error = nil, want non-nil ErrMergeConflict")
 	}
@@ -198,7 +308,7 @@ func TestCombineConflictCleansUp(t *testing.T) {
 		return "", errors.New("cannot resolve")
 	}
 
-	_, _, err := integrate.CombineWithInvoker(context.Background(), primaryRoot, runID, []string{"lucind/lane-ca", "lucind/lane-cb"}, neverResolves)
+	_, _, err := integrate.CombineWithInvoker(context.Background(), primaryRoot, runID, "", "", []string{"lucind/lane-ca", "lucind/lane-cb"}, neverResolves)
 	if err == nil {
 		t.Fatal("Combine() error = nil, want ErrMergeConflict")
 	}
@@ -260,12 +370,12 @@ func TestCombineConflictResolved(t *testing.T) {
 		return "resolved", nil
 	}
 
-	wtPath, branchName, err := integrate.CombineWithInvoker(context.Background(), primaryRoot, runID, []string{"lucind/lane-res-a", "lucind/lane-res-b"}, fakeInvoker)
+	wtPath, branchName, err := integrate.CombineWithInvoker(context.Background(), primaryRoot, runID, "", "", []string{"lucind/lane-res-a", "lucind/lane-res-b"}, fakeInvoker)
 	if err != nil {
 		t.Fatalf("CombineWithInvoker() error = %v, want nil", err)
 	}
 	defer func() {
-		_ = worktree.Remove(context.Background(), primaryRoot, wtPath)
+		_ = worktree.Remove(context.Background(), primaryRoot, wtPath, true)
 		_ = worktree.DeleteBranch(context.Background(), primaryRoot, branchName)
 	}()
 
@@ -322,7 +432,7 @@ func TestCombineConflictResolutionFailsCleansUp(t *testing.T) {
 		return "failed to resolve", errors.New("resolution error")
 	}
 
-	_, _, err := integrate.CombineWithInvoker(context.Background(), primaryRoot, runID, []string{"lucind/lane-fail-a", "lucind/lane-fail-b"}, fakeInvoker)
+	_, _, err := integrate.CombineWithInvoker(context.Background(), primaryRoot, runID, "", "", []string{"lucind/lane-fail-a", "lucind/lane-fail-b"}, fakeInvoker)
 	if err == nil {
 		t.Fatal("CombineWithInvoker() error = nil, want ErrMergeConflict")
 	}
@@ -352,7 +462,7 @@ func TestCombineWorktreeCreateError(t *testing.T) {
 
 	// Invalid primary root that does not exist
 	nonExistentRoot := filepath.Join(t.TempDir(), "non-existent")
-	_, _, err := integrate.Combine(context.Background(), nonExistentRoot, "run-err", []string{"branch1"})
+	_, _, err := integrate.Combine(context.Background(), nonExistentRoot, "run-err", "", "", []string{"branch1"})
 	if err == nil {
 		t.Fatal("Combine() error = nil, want non-nil when Create fails")
 	}
@@ -431,6 +541,122 @@ func TestCheckExecutionError(t *testing.T) {
 	_, _, err := integrate.Check(ctx, dir)
 	if err == nil {
 		t.Fatal("Check() error = nil, want execution error for cancelled context")
+	}
+}
+
+func TestCheckUsesFixedScriptArgumentOwnedCWDAndAllowlistedEnvironment(t *testing.T) {
+	if testing.Short() {
+		t.Skip("shells out to sh")
+	}
+	parent := t.TempDir()
+	dir := filepath.Join(parent, "candidate; touch escaped")
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("LUCIND_HOSTILE_SECRET", "must-not-leak")
+	script := `#!/bin/sh
+printf 'argv0=%s\n' "$0"
+printf 'cwd=%s\n' "$PWD"
+printf 'hostile=%s\n' "${LUCIND_HOSTILE_SECRET-unset}"
+printf 'path=%s\n' "${PATH-unset}"
+`
+	if err := os.WriteFile(filepath.Join(dir, "lucind-checks.sh"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	passed, out, err := integrate.Check(context.Background(), dir)
+	if err != nil || !passed {
+		t.Fatalf("Check() = %t, %q, %v", passed, out, err)
+	}
+	for _, want := range []string{"argv0=" + filepath.Join(dir, "lucind-checks.sh"), "cwd=" + dir, "hostile=unset", "path=" + os.Getenv("PATH")} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("output %q missing %q", out, want)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(parent, "escaped")); !os.IsNotExist(err) {
+		t.Fatalf("metacharacter path escaped argv boundary: %v", err)
+	}
+}
+
+func TestCheckRejectsRelativeRootAndMissingRequiredEnvironment(t *testing.T) {
+	if _, _, err := integrate.Check(context.Background(), "relative/root"); err == nil {
+		t.Fatal("relative root accepted")
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "lucind-checks.sh"), []byte("exit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", "")
+	if _, _, err := integrate.Check(context.Background(), dir); err == nil || !strings.Contains(err.Error(), "PATH") {
+		t.Fatalf("missing PATH error = %v", err)
+	}
+}
+
+func TestCheckReportsExitSignalAndTimeoutAsMechanicalFailure(t *testing.T) {
+	if testing.Short() {
+		t.Skip("shells out to sh")
+	}
+	tests := []struct {
+		name, script string
+		timeout      time.Duration
+	}{
+		{name: "exit seven", script: "echo exit-seven; exit 7\n"},
+		{name: "self term", script: "echo self-term; kill -TERM $$\n"},
+		{name: "timeout", script: "sleep 30\n", timeout: 100 * time.Millisecond},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, "lucind-checks.sh"), []byte(tt.script), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			ctx := context.Background()
+			cancel := func() {}
+			if tt.timeout > 0 {
+				ctx, cancel = context.WithTimeout(ctx, tt.timeout)
+			}
+			defer cancel()
+			start := time.Now()
+			passed, _, err := integrate.Check(ctx, dir)
+			if passed || err != nil {
+				t.Fatalf("Check() = %t, err %v; want mechanical failure", passed, err)
+			}
+			if tt.timeout > 0 && time.Since(start) > 2*time.Second {
+				t.Fatalf("timeout returned after %v", time.Since(start))
+			}
+		})
+	}
+}
+
+func TestCheckReapsTermIgnoringDescendant(t *testing.T) {
+	if testing.Short() {
+		t.Skip("shells out to sh")
+	}
+	dir := t.TempDir()
+	pidFile := filepath.Join(dir, "child.pid")
+	script := `#!/bin/sh
+sh -c 'trap "" TERM; echo $$ > "$1"; while :; do sleep 1; done' child "` + pidFile + `" &
+wait
+`
+	if err := os.WriteFile(filepath.Join(dir, "lucind-checks.sh"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	defer cancel()
+	passed, _, err := integrate.Check(ctx, dir)
+	if passed || err != nil {
+		t.Fatalf("Check() = %t, %v", passed, err)
+	}
+	data, err := os.ReadFile(pidFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pid int
+	if _, err := fmt.Sscanf(strings.TrimSpace(string(data)), "%d", &pid); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(50 * time.Millisecond)
+	if err := syscall.Kill(pid, 0); !errors.Is(err, syscall.ESRCH) {
+		t.Fatalf("descendant pid %d still exists: %v", pid, err)
 	}
 }
 
@@ -820,4 +1046,3 @@ func (m *mockGitRunner) Run(ctx context.Context, dir string, args ...string) ([]
 	}
 	return nil, nil
 }
-

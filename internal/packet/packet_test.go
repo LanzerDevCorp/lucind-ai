@@ -1,6 +1,7 @@
 package packet_test
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"os/exec"
@@ -126,6 +127,258 @@ func TestParseAgentAbsentLeavesFieldEmpty(t *testing.T) {
 	}
 	if p.Agent != "" {
 		t.Errorf("Agent = %q, want empty", p.Agent)
+	}
+}
+
+func TestParseObservabilityFrontmatter(t *testing.T) {
+	tests := []struct {
+		name            string
+		extra           string
+		wantSDDPhase    string
+		wantFanoutGroup string
+		wantSkill       string
+		wantLaneRole    string
+		wantAdhocSkills []string
+	}{
+		{
+			name: "all observability keys present with lane role and adhoc skills",
+			extra: "lane_role: apply\n" +
+				"sdd_phase: apply\n" +
+				"fanout_group: ledger\n" +
+				"skill: lucind-apply\n" +
+				"adhoc_skills: [\"custom-1\", \"custom-2\"]\n",
+			wantSDDPhase:    "apply",
+			wantFanoutGroup: "ledger",
+			wantSkill:       "lucind-apply",
+			wantLaneRole:    "apply",
+			wantAdhocSkills: []string{"custom-1", "custom-2"},
+		},
+		{
+			name:            "omitted keys default to empty",
+			extra:           "",
+			wantSDDPhase:    "",
+			wantFanoutGroup: "",
+			wantSkill:       "",
+			wantLaneRole:    "",
+			wantAdhocSkills: nil,
+		},
+		{
+			name: "explicit empty keys are empty strings",
+			extra: "sdd_phase:\n" +
+				"fanout_group:   \n" +
+				"skill:\n",
+			wantSDDPhase:    "",
+			wantFanoutGroup: "",
+			wantSkill:       "",
+			wantLaneRole:    "",
+			wantAdhocSkills: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			src := "---\n" +
+				"id: fix-auth\n" +
+				"executor: agy\n" +
+				"routed_by: touches auth, Tier A verification required\n" +
+				tt.extra +
+				"---\n\n" +
+				"## Goal\n"
+			p, err := packet.Parse(strings.NewReader(src))
+			if err != nil {
+				t.Fatalf("Parse() error = %v, want nil", err)
+			}
+			if p.SDDPhase != tt.wantSDDPhase {
+				t.Errorf("SDDPhase = %q, want %q", p.SDDPhase, tt.wantSDDPhase)
+			}
+			if p.FanoutGroup != tt.wantFanoutGroup {
+				t.Errorf("FanoutGroup = %q, want %q", p.FanoutGroup, tt.wantFanoutGroup)
+			}
+			if p.Skill != tt.wantSkill {
+				t.Errorf("Skill = %q, want %q", p.Skill, tt.wantSkill)
+			}
+			if p.LaneRole != tt.wantLaneRole {
+				t.Errorf("LaneRole = %q, want %q", p.LaneRole, tt.wantLaneRole)
+			}
+			if !slices.Equal(p.AdhocSkills, tt.wantAdhocSkills) && !(len(p.AdhocSkills) == 0 && len(tt.wantAdhocSkills) == 0) {
+				t.Errorf("AdhocSkills = %v, want %v", p.AdhocSkills, tt.wantAdhocSkills)
+			}
+			if p.Path != "" {
+				t.Errorf("Path = %q, want empty (Parse does not invent a filesystem path)", p.Path)
+			}
+		})
+	}
+}
+
+func TestParseLaneRoleAndPhaseValidation(t *testing.T) {
+	validRoles := []string{"lens", "synthesis", "apply", "verify", "archive", "ultrafixer", "human"}
+	validPhases := []string{"explore", "propose", "spec", "design", "tasks", "apply", "verify", "remediate", "archive"}
+
+	for _, role := range validRoles {
+		t.Run("valid role "+role, func(t *testing.T) {
+			src := "---\n" +
+				"id: test-role\n" +
+				"executor: agy\n" +
+				"routed_by: test\n" +
+				"lane_role: " + role + "\n" +
+				"---\n\n## Goal\nTest\n"
+			p, err := packet.Parse(strings.NewReader(src))
+			if err != nil {
+				t.Fatalf("Parse() error = %v, want nil", err)
+			}
+			if p.LaneRole != role {
+				t.Errorf("LaneRole = %q, want %q", p.LaneRole, role)
+			}
+		})
+	}
+
+	for _, phase := range validPhases {
+		t.Run("valid role with valid phase "+phase, func(t *testing.T) {
+			src := "---\n" +
+				"id: test-role-phase\n" +
+				"executor: agy\n" +
+				"routed_by: test\n" +
+				"lane_role: lens\n" +
+				"sdd_phase: " + phase + "\n" +
+				"---\n\n## Goal\nTest\n"
+			p, err := packet.Parse(strings.NewReader(src))
+			if err != nil {
+				t.Fatalf("Parse() error = %v, want nil", err)
+			}
+			if p.LaneRole != "lens" || p.SDDPhase != phase {
+				t.Errorf("LaneRole=%q SDDPhase=%q, want lens/%s", p.LaneRole, p.SDDPhase, phase)
+			}
+		})
+	}
+
+	t.Run("invalid lane_role rejected", func(t *testing.T) {
+		src := "---\n" +
+			"id: test-role\n" +
+			"executor: agy\n" +
+			"routed_by: test\n" +
+			"lane_role: invalid_role\n" +
+			"---\n\n## Goal\nTest\n"
+		_, err := packet.Parse(strings.NewReader(src))
+		if !errors.Is(err, packet.ErrInvalidLaneRole) {
+			t.Fatalf("Parse() error = %v, want %v", err, packet.ErrInvalidLaneRole)
+		}
+	})
+
+	t.Run("invalid sdd_phase rejected when lane_role present", func(t *testing.T) {
+		src := "---\n" +
+			"id: test-role\n" +
+			"executor: agy\n" +
+			"routed_by: test\n" +
+			"lane_role: apply\n" +
+			"sdd_phase: bogus_phase\n" +
+			"---\n\n## Goal\nTest\n"
+		_, err := packet.Parse(strings.NewReader(src))
+		if !errors.Is(err, packet.ErrInvalidSDDPhase) {
+			t.Fatalf("Parse() error = %v, want %v", err, packet.ErrInvalidSDDPhase)
+		}
+	})
+
+	t.Run("legacy omission: arbitrary sdd_phase permitted when lane_role omitted", func(t *testing.T) {
+		src := "---\n" +
+			"id: test-legacy\n" +
+			"executor: agy\n" +
+			"routed_by: test\n" +
+			"sdd_phase: unvalidated_custom_phase\n" +
+			"---\n\n## Goal\nTest\n"
+		p, err := packet.Parse(strings.NewReader(src))
+		if err != nil {
+			t.Fatalf("Parse() error = %v, want nil", err)
+		}
+		if p.LaneRole != "" {
+			t.Errorf("LaneRole = %q, want empty", p.LaneRole)
+		}
+		if p.SDDPhase != "unvalidated_custom_phase" {
+			t.Errorf("SDDPhase = %q, want unvalidated_custom_phase", p.SDDPhase)
+		}
+	})
+}
+
+func TestParseAdhocSkills(t *testing.T) {
+	tests := []struct {
+		name       string
+		src        string
+		wantSkills []string
+		wantErr    error
+	}{
+		{
+			name: "valid adhoc skills array",
+			src: "---\n" +
+				"id: test-adhoc\n" +
+				"executor: agy\n" +
+				"routed_by: test\n" +
+				"adhoc_skills: [\"skill-a\", \"skill-b\"]\n" +
+				"---\n\n## Goal\nTest\n",
+			wantSkills: []string{"skill-a", "skill-b"},
+		},
+		{
+			name: "valid empty array",
+			src: "---\n" +
+				"id: test-adhoc\n" +
+				"executor: agy\n" +
+				"routed_by: test\n" +
+				"adhoc_skills: []\n" +
+				"---\n\n## Goal\nTest\n",
+			wantSkills: []string{},
+		},
+		{
+			name: "invalid non-array string",
+			src: "---\n" +
+				"id: test-adhoc\n" +
+				"executor: agy\n" +
+				"routed_by: test\n" +
+				"adhoc_skills: bare-string\n" +
+				"---\n\n## Goal\nTest\n",
+			wantErr: packet.ErrInvalidAdhocSkills,
+		},
+		{
+			name: "invalid number array",
+			src: "---\n" +
+				"id: test-adhoc\n" +
+				"executor: agy\n" +
+				"routed_by: test\n" +
+				"adhoc_skills: [1, 2, 3]\n" +
+				"---\n\n## Goal\nTest\n",
+			wantErr: packet.ErrInvalidAdhocSkills,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p, err := packet.Parse(strings.NewReader(tt.src))
+			if tt.wantErr != nil {
+				if !errors.Is(err, tt.wantErr) {
+					t.Fatalf("Parse() error = %v, want %v", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Parse() error = %v, want nil", err)
+			}
+			if !slices.Equal(p.AdhocSkills, tt.wantSkills) && !(len(p.AdhocSkills) == 0 && len(tt.wantSkills) == 0) {
+				t.Errorf("AdhocSkills = %v, want %v", p.AdhocSkills, tt.wantSkills)
+			}
+		})
+	}
+}
+
+func TestParseIgnoresRequiredSkillsFrontmatter(t *testing.T) {
+	src := "---\n" +
+		"id: test-ignore-required\n" +
+		"executor: agy\n" +
+		"routed_by: test\n" +
+		"required_skills: [\"malicious-skill\", \"authored-path\"]\n" +
+		"---\n\n## Goal\nTest\n"
+	p, err := packet.Parse(strings.NewReader(src))
+	if err != nil {
+		t.Fatalf("Parse() error = %v, want nil", err)
+	}
+	if len(p.RequiredSkills) != 0 {
+		t.Errorf("RequiredSkills = %v, want empty/nil (required_skills must never be parsed from frontmatter)", p.RequiredSkills)
 	}
 }
 
@@ -337,6 +590,54 @@ func TestParseAllowedPathsFrontmatter(t *testing.T) {
 	}
 }
 
+func TestParseReadOnlyPathsFrontmatter(t *testing.T) {
+	tests := []struct {
+		name string
+		src  string
+		want []string
+	}{
+		{
+			name: "preserves declared input paths",
+			src: "---\n" +
+				"id: inspect-auth\n" +
+				"executor: agy\n" +
+				"routed_by: inspect auth\n" +
+				"read_only_paths: [\"docs/spec.md\", \"internal/auth/config.go\"]\n" +
+				"---\n\n## Goal\nInspect auth.\n",
+			want: []string{"docs/spec.md", "internal/auth/config.go"},
+		},
+		{
+			name: "omitted declaration remains empty",
+			src: "---\n" +
+				"id: inspect-auth\n" +
+				"executor: agy\n" +
+				"routed_by: inspect auth\n" +
+				"---\n\n## Goal\nInspect auth.\n",
+			want: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := packet.Parse(strings.NewReader(tt.src))
+			if err != nil {
+				t.Fatalf("Parse() error = %v", err)
+			}
+			if !slices.Equal(got.ReadOnlyPaths, tt.want) {
+				t.Fatalf("ReadOnlyPaths = %v, want %v", got.ReadOnlyPaths, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseRejectsNonArrayReadOnlyPaths(t *testing.T) {
+	src := "---\nid: inspect-auth\nexecutor: agy\nrouted_by: inspect auth\nread_only_paths: null\n---\nbody\n"
+	_, err := packet.Parse(strings.NewReader(src))
+	if !errors.Is(err, packet.ErrInvalidReadOnlyPaths) {
+		t.Fatalf("Parse() error = %v, want %v", err, packet.ErrInvalidReadOnlyPaths)
+	}
+}
+
 func TestParseRejectsIncompletePackets(t *testing.T) {
 	tests := []struct {
 		name string
@@ -474,12 +775,56 @@ func TestPacketTemplateAssetContract(t *testing.T) {
 }
 
 func TestSkillAssetContract(t *testing.T) {
-	skillPath := filepath.Join("..", "..", "plugin", "claude-code", "skills", "lucind-ai", "SKILL.md")
+	skillDir := filepath.Join("..", "..", "plugin", "claude-code", "skills", "lucind-ai")
+	skillPath := filepath.Join(skillDir, "SKILL.md")
 	data, err := os.ReadFile(skillPath)
 	if err != nil {
 		t.Fatalf("ReadFile(%s) error = %v", skillPath, err)
 	}
-	content := string(data)
+	router := string(data)
+	content := router
+	err = filepath.WalkDir(filepath.Join(skillDir, "references"), func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() || filepath.Ext(path) != ".md" {
+			return nil
+		}
+		data, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return readErr
+		}
+		content += "\n" + string(data)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("read skill references: %v", err)
+	}
+
+	references := []string{
+		"references/core/domain.md",
+		"references/core/safety.md",
+		"references/modes/isolated.md",
+		"references/modes/exclusive.md",
+		"references/strategies/direct.md",
+		"references/strategies/sdd.md",
+		"references/strategies/fan-out.md",
+		"references/coordination/dependencies-defects.md",
+		"references/coordination/recovery-reconciliation.md",
+		"references/contracts/packets-results.md",
+		"references/contracts/acceptance-promotion.md",
+		"references/adapters/executors.md",
+		"references/adapters/claude-agent-teams.md",
+		"references/operations/troubleshooting.md",
+	}
+	for _, reference := range references {
+		if !strings.Contains(router, "`"+reference+"`") {
+			t.Errorf("SKILL.md missing pointer to %s", reference)
+		}
+		if _, statErr := os.Stat(filepath.Join(skillDir, filepath.FromSlash(reference))); statErr != nil {
+			t.Errorf("SKILL.md pointer %s does not resolve: %v", reference, statErr)
+		}
+	}
 
 	// Explore is documented as dispatchable via lucind-ai run.
 	if !strings.Contains(content, "Dispatch via `lucind-ai run`") {
@@ -509,9 +854,9 @@ func TestSkillAssetContract(t *testing.T) {
 		t.Errorf("SKILL.md verify row was modified or removed")
 	}
 
-	// Unrelated section present from earlier in the session is preserved.
-	if !strings.Contains(content, "### Where to author packet files") {
-		t.Errorf("SKILL.md missing 'Where to author packet files' section")
+	// The dirty-primary-root hazard remains explicit after modularization.
+	if !strings.Contains(content, ".lucind/packets/") || !strings.Contains(content, "primary root") {
+		t.Errorf("skill package missing packet location and dirty-primary-root hazard")
 	}
 
 	// Frontmatter table documents the five feature-target keys (2.1-RED).
@@ -554,6 +899,101 @@ func TestSkillAssetContract(t *testing.T) {
 		if !strings.Contains(content, flag) {
 			t.Errorf("SKILL.md invocation/CLI section missing run flag %q", flag)
 		}
+	}
+
+	contextPath := filepath.Join("..", "..", "CONTEXT.md")
+	contextData, err := os.ReadFile(contextPath)
+	if err != nil {
+		t.Fatalf("ReadFile(%s) error = %v", contextPath, err)
+	}
+	parts := strings.SplitN(string(contextData), "## Language\n\n", 2)
+	if len(parts) != 2 {
+		t.Fatalf("CONTEXT.md missing Language glossary")
+	}
+	domainPath := filepath.Join(skillDir, "references", "core", "domain.md")
+	domainData, err := os.ReadFile(domainPath)
+	if err != nil {
+		t.Fatalf("ReadFile(%s) error = %v", domainPath, err)
+	}
+	if !strings.Contains(string(domainData), strings.TrimSpace(parts[1])) {
+		t.Errorf("references/core/domain.md canonical projection drifted from CONTEXT.md")
+	}
+}
+
+// pluginManifest mirrors the fields this test reads from
+// plugin/claude-code/.claude-plugin/plugin.json.
+type pluginManifest struct {
+	Version string `json:"version"`
+}
+
+// marketplaceManifest mirrors the fields this test reads from
+// .claude-plugin/marketplace.json.
+type marketplaceManifest struct {
+	Plugins []struct {
+		Name    string `json:"name"`
+		Version string `json:"version"`
+	} `json:"plugins"`
+}
+
+// TestPluginVersionGuardsSkillContent asserts plugin.json's version and
+// marketplace.json's version for the "lucind-ai" plugin stay in lockstep.
+// This is a cheap, always-true invariant regardless of what content
+// changed, so it stays a blocking go test / lucind-ai check gate.
+//
+// This test used to ALSO recompute a content hash of the shipped skill tree
+// (plugin/claude-code/skills/lucind-ai/**) and require plugin.json's
+// version to be bumped, and internal/packet/testdata/skill_content_hash.txt
+// regenerated, in the same commit as any change under that tree. That
+// forced every isolated feature branch touching the skill tree to bump the
+// same shared version field to stay green: with 2+ features doing so
+// concurrently, each bump tripped lucind-ai's own overlap-required
+// reconciliation gate against every other one, and that gate has no support
+// for resolving 3+ simultaneous overlaps in one retry pass -- an unfixable
+// deadlock with no valid resolve/promote sequence. A version bump must be a
+// deliberate, human-run action, never an automatic side effect of ordinary
+// content edits, so that check now lives in `make verify-plugin-content`
+// (internal/skillcontent.Verify) instead of here; `make bump-plugin-version`
+// is the only place a bump should originate from.
+func TestPluginVersionGuardsSkillContent(t *testing.T) {
+	repoRoot := filepath.Join("..", "..")
+
+	pluginPath := filepath.Join(repoRoot, "plugin", "claude-code", ".claude-plugin", "plugin.json")
+	pluginData, err := os.ReadFile(pluginPath)
+	if err != nil {
+		t.Fatalf("ReadFile(%s) error = %v", pluginPath, err)
+	}
+	var pm pluginManifest
+	if err := json.Unmarshal(pluginData, &pm); err != nil {
+		t.Fatalf("parse %s: %v", pluginPath, err)
+	}
+	if pm.Version == "" {
+		t.Fatalf("%s: version is empty", pluginPath)
+	}
+
+	marketplacePath := filepath.Join(repoRoot, ".claude-plugin", "marketplace.json")
+	marketplaceData, err := os.ReadFile(marketplacePath)
+	if err != nil {
+		t.Fatalf("ReadFile(%s) error = %v", marketplacePath, err)
+	}
+	var mm marketplaceManifest
+	if err := json.Unmarshal(marketplaceData, &mm); err != nil {
+		t.Fatalf("parse %s: %v", marketplacePath, err)
+	}
+	var marketplaceVersion string
+	found := false
+	for _, p := range mm.Plugins {
+		if p.Name == "lucind-ai" {
+			marketplaceVersion = p.Version
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("%s: no plugin named \"lucind-ai\" in the plugins array", marketplacePath)
+	}
+
+	if pm.Version != marketplaceVersion {
+		t.Fatalf("plugin.json version %q does not match marketplace.json version %q for plugin \"lucind-ai\" -- they must stay in lockstep", pm.Version, marketplaceVersion)
 	}
 }
 
@@ -649,7 +1089,7 @@ func TestPacketTemplateVerifyPointerNote(t *testing.T) {
 }
 
 func TestSkillMDVerifyOperationalWorkflow(t *testing.T) {
-	skillPath := filepath.Join("..", "..", "plugin", "claude-code", "skills", "lucind-ai", "SKILL.md")
+	skillPath := filepath.Join("..", "..", "plugin", "claude-code", "skills", "lucind-ai", "references", "strategies", "sdd.md")
 	data, err := os.ReadFile(skillPath)
 	if err != nil {
 		t.Fatalf("ReadFile(%s) error = %v", skillPath, err)
@@ -778,12 +1218,12 @@ func TestHumanPacketTemplateUntouched(t *testing.T) {
 
 func TestParseFeatureTargetFrontmatter(t *testing.T) {
 	tests := []struct {
-		name                   string
-		src                    string
-		wantFeature            string
-		wantParentRef          string
-		wantBaseSHA            string
-		wantExpectedParentSHA  string
+		name                  string
+		src                   string
+		wantFeature           string
+		wantParentRef         string
+		wantBaseSHA           string
+		wantExpectedParentSHA string
 	}{
 		{
 			name: "all four target fields present",
@@ -945,7 +1385,7 @@ func TestExplorePacketTemplatesContract(t *testing.T) {
 			wantPaths:    []string{"openspec/changes/<change-id>/explore-lens-a.md"},
 			wantStrings: []string{
 				"problem and candidates",
-				"~/.claude/skills/sdd-explore/SKILL.md",
+				"<sdd-explore>",
 				"Explore Lens A — Problem & Candidates",
 				"Lens B owns",
 				"Lens C owns",
@@ -959,7 +1399,7 @@ func TestExplorePacketTemplatesContract(t *testing.T) {
 			wantPaths:    []string{"openspec/changes/<change-id>/explore-lens-b.md"},
 			wantStrings: []string{
 				"capabilities and scenarios",
-				"~/.claude/skills/sdd-explore/SKILL.md",
+				"<sdd-explore>",
 				"Explore Lens B — Capabilities & Scenarios",
 				"Lens A owns",
 				"Lens C owns",
@@ -973,7 +1413,7 @@ func TestExplorePacketTemplatesContract(t *testing.T) {
 			wantPaths:    []string{"openspec/changes/<change-id>/explore-lens-c.md"},
 			wantStrings: []string{
 				"risks, trade-offs",
-				"~/.claude/skills/sdd-explore/SKILL.md",
+				"<sdd-explore>",
 				"Explore Lens C — Risks, Trade-offs & Spikes",
 				"Lens A owns",
 				"Lens B owns",
@@ -1090,7 +1530,7 @@ func TestProposePacketTemplatesContract(t *testing.T) {
 			wantPaths:    []string{"openspec/changes/<change-id>/propose-lens-a.md"},
 			wantStrings: []string{
 				"candidate and approach",
-				"~/.claude/skills/sdd-propose/SKILL.md",
+				"<sdd-propose>",
 				"Proposal Lens A — Candidate & Approach",
 				"Lens B owns",
 				"Lens C owns",
@@ -1104,7 +1544,7 @@ func TestProposePacketTemplatesContract(t *testing.T) {
 			wantPaths:    []string{"openspec/changes/<change-id>/propose-lens-b.md"},
 			wantStrings: []string{
 				"capability impact and delta specs",
-				"~/.claude/skills/sdd-propose/SKILL.md",
+				"<sdd-propose>",
 				"Proposal Lens B — Capability Impact & Specs",
 				"Lens A owns",
 				"Lens C owns",
@@ -1118,7 +1558,7 @@ func TestProposePacketTemplatesContract(t *testing.T) {
 			wantPaths:    []string{"openspec/changes/<change-id>/propose-lens-c.md"},
 			wantStrings: []string{
 				"risks, rollback, and test impact",
-				"~/.claude/skills/sdd-propose/SKILL.md",
+				"<sdd-propose>",
 				"Proposal Lens C — Risks, Rollback & Test Impact",
 				"Lens A owns",
 				"Lens B owns",
@@ -1234,7 +1674,7 @@ func TestDesignPacketTemplatesContract(t *testing.T) {
 			wantPaths:    []string{"openspec/changes/<change-id>/design-lens-a.md"},
 			wantStrings: []string{
 				"decisions lens",
-				"~/.claude/skills/sdd-design/SKILL.md",
+				"<sdd-design>",
 				"Design Lens A — Decisions",
 				"Lens B owns",
 				"Lens C owns",
@@ -1248,7 +1688,7 @@ func TestDesignPacketTemplatesContract(t *testing.T) {
 			wantPaths:    []string{"openspec/changes/<change-id>/design-lens-b.md"},
 			wantStrings: []string{
 				"surface-and-flow lens",
-				"~/.claude/skills/sdd-design/SKILL.md",
+				"<sdd-design>",
 				"Design Lens B — Surface & Flow",
 				"Lens A owns",
 				"Lens C owns",
@@ -1262,7 +1702,7 @@ func TestDesignPacketTemplatesContract(t *testing.T) {
 			wantPaths:    []string{"openspec/changes/<change-id>/design-lens-c.md"},
 			wantStrings: []string{
 				"failure-test-rollback lens",
-				"~/.claude/skills/sdd-design/SKILL.md",
+				"<sdd-design>",
 				"Design Lens C — Failure, Test & Rollback",
 				"Lens A owns",
 				"Lens B owns",
@@ -1357,9 +1797,6 @@ func TestDesignPacketTemplatesContract(t *testing.T) {
 	}
 }
 
-
-
-
 func TestSpecPacketTemplatesContract(t *testing.T) {
 	assetsDir := filepath.Join("..", "..", "plugin", "claude-code", "skills", "lucind-ai", "assets")
 	templates := []struct {
@@ -1377,7 +1814,7 @@ func TestSpecPacketTemplatesContract(t *testing.T) {
 			wantPaths:    []string{"openspec/changes/<change-id>/spec-lens-a.md"},
 			wantStrings: []string{
 				"capabilities and requirements",
-				"~/.claude/skills/sdd-spec/SKILL.md",
+				"<sdd-spec>",
 				"Spec Lens A — Capabilities & Requirements",
 				"Lens B owns",
 				"Lens C owns",
@@ -1391,7 +1828,7 @@ func TestSpecPacketTemplatesContract(t *testing.T) {
 			wantPaths:    []string{"openspec/changes/<change-id>/spec-lens-b.md"},
 			wantStrings: []string{
 				"scenarios and coverage",
-				"~/.claude/skills/sdd-spec/SKILL.md",
+				"<sdd-spec>",
 				"Spec Lens B — Scenarios & Coverage",
 				"Lens A owns",
 				"Lens C owns",
@@ -1405,7 +1842,7 @@ func TestSpecPacketTemplatesContract(t *testing.T) {
 			wantPaths:    []string{"openspec/changes/<change-id>/spec-lens-c.md"},
 			wantStrings: []string{
 				"live-spec conflict and migration",
-				"~/.claude/skills/sdd-spec/SKILL.md",
+				"<sdd-spec>",
 				"Spec Lens C — Live-Spec Conflicts & Migration",
 				"Lens A owns",
 				"Lens B owns",
@@ -1525,7 +1962,7 @@ func TestTasksPacketTemplatesContract(t *testing.T) {
 			wantPaths:    []string{"openspec/changes/<change-id>/tasks-lens-a.md"},
 			wantStrings: []string{
 				"decomposition and ordering",
-				"~/.claude/skills/sdd-tasks/SKILL.md",
+				"<sdd-tasks>",
 				"Tasks Lens A — Decomposition & Ordering",
 				"Lens B owns",
 				"Lens C owns",
@@ -1539,7 +1976,7 @@ func TestTasksPacketTemplatesContract(t *testing.T) {
 			wantPaths:    []string{"openspec/changes/<change-id>/tasks-lens-b.md"},
 			wantStrings: []string{
 				"partition and dispatch-shape",
-				"~/.claude/skills/sdd-tasks/SKILL.md",
+				"<sdd-tasks>",
 				"Tasks Lens B — Partition & Dispatch Shape",
 				"Lens A owns",
 				"Lens C owns",
@@ -1559,7 +1996,7 @@ func TestTasksPacketTemplatesContract(t *testing.T) {
 			wantPaths:    []string{"openspec/changes/<change-id>/tasks-lens-c.md"},
 			wantStrings: []string{
 				"proof and review-burden",
-				"~/.claude/skills/sdd-tasks/SKILL.md",
+				"<sdd-tasks>",
 				"Tasks Lens C — Proof & Review Burden",
 				"Lens A owns",
 				"Lens B owns",
@@ -1709,7 +2146,7 @@ func TestArchivePacketTemplateContract(t *testing.T) {
 	}
 
 	wantStrings := []string{
-		"~/.claude/skills/sdd-archive/SKILL.md",
+		"<sdd-archive>",
 		// The copy rule and its only acceptable evidence.
 		"cp -R",
 		"git mv",
@@ -1747,5 +2184,75 @@ func TestArchivePacketTemplateContract(t *testing.T) {
 	}
 	if p.Feature != "" || p.ParentRef != "" || p.BaseSHA != "" || p.ExpectedParentSHA != "" {
 		t.Errorf("template declares feature-target fields; a reusable template must declare no dispatch target")
+	}
+}
+
+// TestUltrafixerPacketTemplateContract asserts that ultrafixer-packet-template.md
+// conforms to the packet parser contract and contains the required frontmatter and sections.
+func TestUltrafixerPacketTemplateContract(t *testing.T) {
+	path := filepath.Join("..", "..", "plugin", "claude-code", "skills", "lucind-ai", "assets", "ultrafixer-packet-template.md")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(%s) error = %v", path, err)
+	}
+	content := string(data)
+
+	p, err := packet.Parse(strings.NewReader(content))
+	if err != nil {
+		t.Fatalf("packet.Parse() error = %v", err)
+	}
+
+	if p.ID != "<id>" {
+		t.Errorf("ID = %q, want %q", p.ID, "<id>")
+	}
+	if p.Executor != "agy" {
+		t.Errorf("Executor = %q, want %q", p.Executor, "agy")
+	}
+	if p.RoutedBy != "pre-existing defect triage and repair" {
+		t.Errorf("RoutedBy = %q, want %q", p.RoutedBy, "pre-existing defect triage and repair")
+	}
+	if p.Model != "gemini-3.7-flash-high" {
+		t.Errorf("Model = %q, want %q", p.Model, "gemini-3.7-flash-high")
+	}
+	if p.BaseSHA != "<base_sha>" {
+		t.Errorf("BaseSHA = %q, want %q", p.BaseSHA, "<base_sha>")
+	}
+	if p.ParentRef != "<parent_ref>" {
+		t.Errorf("ParentRef = %q, want %q", p.ParentRef, "<parent_ref>")
+	}
+
+	wantSections := []string{
+		"## Goal",
+		"## Preconditions",
+		"## Done criteria",
+		"## Allowed paths",
+		"## Hard stops",
+		"## Context",
+		"### Failing check command",
+		"### Error transcript and signature",
+		"### Feature metadata",
+		"## Return",
+	}
+	for _, sec := range wantSections {
+		if !strings.Contains(content, sec) {
+			t.Errorf("template missing expected section %q", sec)
+		}
+	}
+
+	// Protocol assertions from ultrafixer-dispatch and defect-records specs
+	if strings.Contains(content, "auto-merge") {
+		t.Errorf("template contains contradictory 'auto-merge' label")
+	}
+	if !strings.Contains(content, "conventional commit") {
+		t.Errorf("template missing conventional commit instruction")
+	}
+	if !strings.Contains(content, "Co-Authored-By") {
+		t.Errorf("template missing Co-Authored-By prohibition")
+	}
+	if !strings.Contains(content, "Auto-integrating or merging the repair commit directly into any branch") {
+		t.Errorf("template missing hard stop forbidding auto-integration")
+	}
+	if !strings.Contains(content, "lucind-ai defect decline") && !strings.Contains(content, "disposition=declined") {
+		t.Errorf("template missing declined disposition instruction")
 	}
 }

@@ -43,16 +43,22 @@
     },
     "files_changed": {
       "type": "array",
-      "description": "Every path created, modified, or deleted INSIDE the worktree, relative to the worktree root. For a path outside the worktree, use external_changes instead — it has no representation here.",
+      "description": "Every canonical path change INSIDE the worktree. Copies require both source_path and destination path.",
       "items": {
         "type": "object",
         "additionalProperties": false,
         "required": ["path", "change"],
         "properties": {
           "path": { "type": "string" },
-          "change": { "type": "string", "enum": ["created", "modified", "deleted"] },
+          "source_path": { "type": "string" },
+          "change": { "type": "string", "enum": ["created", "modified", "deleted", "copied"] },
           "why": { "type": "string" }
-        }
+        },
+        "allOf": [{
+          "if": { "properties": { "change": { "const": "copied" } } },
+          "then": { "required": ["source_path"] },
+          "else": { "not": { "required": ["source_path"] } }
+        }]
       }
     },
     "external_changes": {
@@ -150,6 +156,11 @@
           "affects": { "type": "string" }
         }
       }
+    },
+    "skills_loaded": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Skills loaded by the executor during lane execution."
     },
     "session_id": {
       "type": "string",

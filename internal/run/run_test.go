@@ -4,19 +4,23 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"testing/fstest"
 	"time"
 
+	"github.com/LanzerDevCorp/lucind-ai/internal/candidatechange"
 	"github.com/LanzerDevCorp/lucind-ai/internal/executor"
 	"github.com/LanzerDevCorp/lucind-ai/internal/lane"
 	"github.com/LanzerDevCorp/lucind-ai/internal/ledger"
 	"github.com/LanzerDevCorp/lucind-ai/internal/packet"
+	"github.com/LanzerDevCorp/lucind-ai/internal/packetauthor"
 	"github.com/LanzerDevCorp/lucind-ai/internal/result"
 	"github.com/LanzerDevCorp/lucind-ai/internal/run"
 	"github.com/LanzerDevCorp/lucind-ai/internal/worktree"
@@ -38,6 +42,17 @@ type fakeExecutor struct {
 	// dispatch have both already gone through.
 	beforeReturn func()
 }
+
+type progressExecutor struct {
+	run func(context.Context, executor.Request) (executor.Outcome, error)
+}
+
+func (e progressExecutor) Run(ctx context.Context, req executor.Request) (executor.Outcome, error) {
+	return e.run(ctx, req)
+}
+
+func (progressExecutor) DefaultModel() string  { return "test-model" }
+func (progressExecutor) KnownModels() []string { return []string{"test-model"} }
 
 func (f *fakeExecutor) Run(_ context.Context, req executor.Request) (executor.Outcome, error) {
 	f.gotReq = req
@@ -77,6 +92,180 @@ func testPacket() packet.Packet {
 		BaseSHA:           "b000000000000000000000000000000000000000",
 		ExpectedParentSHA: "b000000000000000000000000000000000000000",
 		Body:              "do the thing",
+		Model:             "test-model",
+		Agent:             "test-agent",
+		SDDPhase:          "apply",
+		FanoutGroup:       "ledger",
+		Skill:             "lucind-apply",
+		Path:              ".lucind/packets/lane-a.md",
+	}
+}
+
+// TestExecuteUpdatesLaneMetadataAfterRegisterLane proves Execute snapshots
+// packet dispatch context (including Skill and PacketPath) via
+// UpdateLaneMetadata immediately after RegisterLane.
+func TestExecuteUpdatesLaneMetadataAfterRegisterLane(t *testing.T) {
+	exec := progressExecutor{run: func(_ context.Context, req executor.Request) (executor.Outcome, error) {
+		return executor.Outcome{ExitCode: 0}, nil
+	}}
+	wtPath := t.TempDir()
+	deps := newTestDeps(t, wtPath, func(string) fs.FS {
+		return fstest.MapFS{resultEnvelopePathForTest(): {Data: []byte(doneEnvelopeJSON)}}
+	}, exec)
+
+	p := testPacket()
+	p.AllowedPaths = []string{"internal/run/run.go"}
+	if _, err := run.Execute(context.Background(), deps, p); err != nil {
+		t.Fatalf("Execute() error = %v, want nil", err)
+	}
+
+	got, err := deps.Ledger.GetLaneMetadata(context.Background(), deps.RunID, p.ID)
+	if err != nil {
+		t.Fatalf("GetLaneMetadata() error = %v", err)
+	}
+	if got.Model != p.Model || got.Agent != p.Agent || got.Feature != p.Feature {
+		t.Fatalf("metadata model/agent/feature = (%q,%q,%q), want (%q,%q,%q)",
+			got.Model, got.Agent, got.Feature, p.Model, p.Agent, p.Feature)
+	}
+	if got.SDDPhase != p.SDDPhase || got.FanoutGroup != p.FanoutGroup {
+		t.Fatalf("metadata sdd_phase/fanout_group = (%q,%q), want (%q,%q)",
+			got.SDDPhase, got.FanoutGroup, p.SDDPhase, p.FanoutGroup)
+	}
+	if got.Skill != p.Skill || got.PacketPath != p.Path {
+		t.Fatalf("metadata skill/packet_path = (%q,%q), want (%q,%q)",
+			got.Skill, got.PacketPath, p.Skill, p.Path)
+	}
+	if !reflect.DeepEqual(got.AllowedPaths, p.AllowedPaths) {
+		t.Fatalf("metadata AllowedPaths = %v, want %v", got.AllowedPaths, p.AllowedPaths)
+	}
+}
+
+func TestExecuteExposesReadOnlyInputsWithoutChangingWriteScopeOrPrompt(t *testing.T) {
+	wtPath := t.TempDir()
+	exec := &fakeExecutor{}
+	deps := newTestDeps(t, wtPath, func(string) fs.FS {
+		return fstest.MapFS{resultEnvelopePathForTest(): {Data: []byte(doneEnvelopeJSON)}}
+	}, exec)
+	p := testPacket()
+	p.Body = "manual body bytes stay exact\r\nincluding line endings\r\n"
+	p.AllowedPaths = []string{"internal/write"}
+	p.ReadOnlyPaths = []string{"docs/spec.md", "internal/input"}
+
+	if _, err := run.Execute(context.Background(), deps, p); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if exec.gotReq.Prompt != p.Body {
+		t.Fatalf("Prompt bytes = %q, want unchanged %q", exec.gotReq.Prompt, p.Body)
+	}
+	if !reflect.DeepEqual(exec.gotReq.ReadOnlyPaths, p.ReadOnlyPaths) {
+		t.Fatalf("Request.ReadOnlyPaths = %v, want %v", exec.gotReq.ReadOnlyPaths, p.ReadOnlyPaths)
+	}
+	if !reflect.DeepEqual(p.AllowedPaths, []string{"internal/write"}) {
+		t.Fatalf("AllowedPaths = %v, want write scope unchanged", p.AllowedPaths)
+	}
+}
+
+func TestExecuteDoneAtomicallyFreezesAcceptanceCandidate(t *testing.T) {
+	wtPath := t.TempDir()
+	runGit(t, wtPath, "init", "-b", "main")
+	runGit(t, wtPath, "config", "user.name", "acceptance-test")
+	runGit(t, wtPath, "config", "user.email", "acceptance-test@example.com")
+	if err := os.WriteFile(filepath.Join(wtPath, "seed.txt"), []byte("seed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, wtPath, "add", "seed.txt")
+	runGit(t, wtPath, "commit", "-m", "seed")
+	baseSHA := gitRevParse(t, wtPath, "HEAD")
+	if err := os.MkdirAll(filepath.Join(wtPath, "internal", "run"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wtPath, "internal", "run", "candidate.go"), []byte("package run\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, wtPath, "add", "internal/run/candidate.go")
+	runGit(t, wtPath, "commit", "-m", "candidate")
+	deps := newTestDeps(t, wtPath, func(string) fs.FS {
+		return fstest.MapFS{resultEnvelopePathForTest(): {Data: []byte(doneEnvelopeJSON)}}
+	}, &fakeExecutor{}, baseSHA)
+	deps.ResolveCandidateIdentity = func(context.Context, string, string, string) (run.CandidateIdentity, error) {
+		return run.CandidateIdentity{
+			BaseCommit: "base-full", BaseTree: "base-tree", CandidateCommit: "candidate-full", CandidateTree: "candidate-tree",
+		}, nil
+	}
+	p := testPacket()
+	p.BaseSHA = baseSHA
+	p.ExpectedParentSHA = baseSHA
+	p.AllowedPaths = []string{"internal/run/", "cmd/lucind-ai", "internal/run"}
+
+	report, err := run.Execute(context.Background(), deps, p)
+	if err != nil || report.Status != lane.Done {
+		t.Fatalf("Execute() = %+v, %v", report, err)
+	}
+	got, err := deps.Ledger.GetLaneCandidate(context.Background(), deps.RunID, p.ID)
+	if err != nil {
+		t.Fatalf("GetLaneCandidate() error = %v", err)
+	}
+	if got.BaseCommit != "base-full" || got.BaseTree != "base-tree" || got.CandidateCommit != "candidate-full" || got.CandidateTree != "candidate-tree" {
+		t.Fatalf("candidate git identity = %+v", got)
+	}
+	if got.PacketDigest == "" || !reflect.DeepEqual(got.AllowedPaths, []string{"cmd/lucind-ai", "internal/run"}) {
+		t.Fatalf("candidate packet identity = digest:%q paths:%v", got.PacketDigest, got.AllowedPaths)
+	}
+}
+
+func TestExecuteDoneFreezesCompiledAuthoringEvidence(t *testing.T) {
+	wtPath := t.TempDir()
+	deps := newTestDeps(t, wtPath, func(string) fs.FS {
+		return fstest.MapFS{resultEnvelopePathForTest(): {Data: []byte(doneEnvelopeJSON)}}
+	}, &fakeExecutor{})
+	deps.ResolveCandidateIdentity = func(context.Context, string, string, string) (run.CandidateIdentity, error) {
+		return run.CandidateIdentity{BaseCommit: "base", BaseTree: "base-tree", CandidateCommit: "candidate", CandidateTree: "candidate-tree"}, nil
+	}
+	deps.CollectCandidateChanges = func(context.Context, candidatechange.Request) ([]candidatechange.Change, error) {
+		return []candidatechange.Change{{Change: candidatechange.Modified, Path: "internal/write/file.go"}}, nil
+	}
+	p := testPacket()
+	p.ReadOnlyPaths = []string{"docs/input.md"}
+	p.Authoring = &packet.Authoring{
+		ContractVersion: packetauthor.ContractVersion,
+		Digest:          "compiled-digest",
+		ContractJSON:    []byte(`{"version":"packet-author/v1","route_intent":"route","mode":"write","write_paths":["internal/write"],"read_only_paths":["docs/input.md"],"goal":"goal","done_criteria":["criterion"],"hard_stops":["stop"],"result":{"path":".lucind/result.json","schema":".lucind/result.schema.json"}}` + "\n"),
+		BindingJSON:     []byte(`{"kind":"feature","feature":"feat-lane-a","parent_ref":"refs/heads/main","base_sha":"base","expected_parent_sha":"candidate"}`),
+	}
+
+	if _, err := run.Execute(context.Background(), deps, p); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	candidate, err := deps.Ledger.GetLaneCandidate(context.Background(), deps.RunID, p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	evidence, err := ledger.DecodeAuthoringEvidence(candidate.AuthoringEvidenceVersion, candidate.AuthoringEvidenceJSON, candidate.AuthoringEvidenceHash)
+	if err != nil {
+		t.Fatalf("DecodeAuthoringEvidence() error = %v", err)
+	}
+	if candidate.PacketDigest != "compiled-digest" || evidence.PacketDigest != "compiled-digest" {
+		t.Fatalf("packet digest candidate=%q evidence=%q", candidate.PacketDigest, evidence.PacketDigest)
+	}
+	if !reflect.DeepEqual(evidence.ReadOnlyPaths, p.ReadOnlyPaths) || len(evidence.Changes) != 1 || evidence.Changes[0].Path != "internal/write/file.go" {
+		t.Fatalf("evidence read paths/changes = %v / %v", evidence.ReadOnlyPaths, evidence.Changes)
+	}
+}
+
+func TestExecuteDoneRejectsAbsentCandidateIdentity(t *testing.T) {
+	wtPath := t.TempDir()
+	deps := newTestDeps(t, wtPath, func(string) fs.FS {
+		return fstest.MapFS{resultEnvelopePathForTest(): {Data: []byte(doneEnvelopeJSON)}}
+	}, &fakeExecutor{})
+	deps.ResolveCandidateIdentity = func(context.Context, string, string, string) (run.CandidateIdentity, error) {
+		return run.CandidateIdentity{}, errors.New("identity unavailable")
+	}
+	_, err := run.Execute(context.Background(), deps, testPacket())
+	if err == nil || !strings.Contains(err.Error(), "freeze done candidate") {
+		t.Fatalf("Execute() error = %v, want frozen identity failure", err)
+	}
+	if _, err := deps.Ledger.GetLaneCandidate(context.Background(), deps.RunID, "lane-a"); !errors.Is(err, ledger.ErrLaneCandidateNotFound) {
+		t.Fatalf("GetLaneCandidate() error = %v, want no candidate", err)
 	}
 }
 
@@ -113,6 +302,9 @@ func newTestDeps(t *testing.T, wtPath string, fsys func(string) fs.FS, exec exec
 		},
 		WorktreeFS: fsys,
 		Now:        func() time.Time { return now },
+		ResolveCandidateIdentity: func(context.Context, string, string, string) (run.CandidateIdentity, error) {
+			return run.CandidateIdentity{BaseCommit: "base", BaseTree: "base-tree", CandidateCommit: "candidate", CandidateTree: "candidate-tree"}, nil
+		},
 		HasUniqueLaneCommits: func(context.Context, string, string) (bool, error) {
 			return true, nil
 		},
@@ -124,6 +316,281 @@ func newTestDeps(t *testing.T, wtPath string, fsys func(string) fs.FS, exec exec
 		},
 	}
 }
+
+func TestExecuteProgressWriterFlushesAtBatchSize(t *testing.T) {
+	const eventCount = 32
+	flushed := make(chan []ledger.LaneProgress, 1)
+	exec := progressExecutor{run: func(_ context.Context, req executor.Request) (executor.Outcome, error) {
+		for i := 0; i < eventCount; i++ {
+			req.Progress <- executor.ProgressEvent{Message: fmt.Sprintf("event-%02d", i), At: time.Unix(int64(i+1), 0)}
+		}
+		select {
+		case batch := <-flushed:
+			if len(batch) != eventCount {
+				t.Errorf("first progress batch length = %d, want %d", len(batch), eventCount)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("progress batch did not flush at 32 events while the executor was still running")
+		}
+		return executor.Outcome{ExitCode: 0}, nil
+	}}
+
+	wtPath := t.TempDir()
+	deps := newTestDeps(t, wtPath, func(string) fs.FS {
+		return fstest.MapFS{resultEnvelopePathForTest(): {Data: []byte(doneEnvelopeJSON)}}
+	}, exec)
+	deps.AppendProgressBatch = func(ctx context.Context, batch []ledger.LaneProgress) error {
+		copyOfBatch := append([]ledger.LaneProgress(nil), batch...)
+		flushed <- copyOfBatch
+		return deps.Ledger.AppendProgressBatch(ctx, batch)
+	}
+
+	if _, err := run.Execute(context.Background(), deps, testPacket()); err != nil {
+		t.Fatalf("Execute() error = %v, want nil", err)
+	}
+	got, err := deps.Ledger.GetProgressAfter(context.Background(), deps.RunID, "lane-a", 0)
+	if err != nil {
+		t.Fatalf("GetProgressAfter() error = %v", err)
+	}
+	if len(got) != eventCount {
+		t.Fatalf("persisted progress count = %d, want %d", len(got), eventCount)
+	}
+}
+
+// TestExecuteProgressWriterForwardsTelemetryFields proves writeLaneProgress
+// copies TotalTokens/CostUSD/ToolCalls from ProgressEvent onto LaneProgress
+// so decoder telemetry survives the ledger round-trip.
+func TestExecuteProgressWriterForwardsTelemetryFields(t *testing.T) {
+	exec := progressExecutor{run: func(_ context.Context, req executor.Request) (executor.Outcome, error) {
+		req.Progress <- executor.ProgressEvent{
+			Message: "usage", At: time.Unix(1, 0),
+			TotalTokens: 23459, CostUSD: 0.12, ToolCalls: 3,
+		}
+		return executor.Outcome{ExitCode: 0}, nil
+	}}
+
+	wtPath := t.TempDir()
+	deps := newTestDeps(t, wtPath, func(string) fs.FS {
+		return fstest.MapFS{resultEnvelopePathForTest(): {Data: []byte(doneEnvelopeJSON)}}
+	}, exec)
+
+	if _, err := run.Execute(context.Background(), deps, testPacket()); err != nil {
+		t.Fatalf("Execute() error = %v, want nil", err)
+	}
+	got, err := deps.Ledger.GetProgressAfter(context.Background(), deps.RunID, "lane-a", 0)
+	if err != nil {
+		t.Fatalf("GetProgressAfter() error = %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("persisted progress count = %d, want 1", len(got))
+	}
+	if got[0].TotalTokens != 23459 || got[0].CostUSD != 0.12 || got[0].ToolCalls != 3 {
+		t.Fatalf("telemetry = tokens %d cost %v tools %d, want 23459 / 0.12 / 3",
+			got[0].TotalTokens, got[0].CostUSD, got[0].ToolCalls)
+	}
+}
+
+func TestExecuteProgressWriterFlushesOnInterval(t *testing.T) {
+	flushed := make(chan []ledger.LaneProgress, 1)
+	started := time.Now()
+	exec := progressExecutor{run: func(_ context.Context, req executor.Request) (executor.Outcome, error) {
+		req.Progress <- executor.ProgressEvent{Message: "waiting", At: time.Unix(1, 0)}
+		select {
+		case batch := <-flushed:
+			if len(batch) != 1 || batch[0].Message != "waiting" {
+				t.Errorf("interval batch = %+v, want one waiting event", batch)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("progress batch did not flush on the 250 ms interval while the executor was still running")
+		}
+		return executor.Outcome{ExitCode: 0}, nil
+	}}
+
+	wtPath := t.TempDir()
+	deps := newTestDeps(t, wtPath, func(string) fs.FS {
+		return fstest.MapFS{resultEnvelopePathForTest(): {Data: []byte(doneEnvelopeJSON)}}
+	}, exec)
+	deps.AppendProgressBatch = func(ctx context.Context, batch []ledger.LaneProgress) error {
+		flushed <- append([]ledger.LaneProgress(nil), batch...)
+		return deps.Ledger.AppendProgressBatch(ctx, batch)
+	}
+
+	if _, err := run.Execute(context.Background(), deps, testPacket()); err != nil {
+		t.Fatalf("Execute() error = %v, want nil", err)
+	}
+	if elapsed := time.Since(started); elapsed < 200*time.Millisecond {
+		t.Fatalf("interval flush completed after %v, want approximately 250 ms rather than an immediate flush", elapsed)
+	}
+}
+
+func TestExecuteProgressWriterFlushesOnShutdown(t *testing.T) {
+	const eventCount = 3
+	flushed := make(chan []ledger.LaneProgress, 1)
+	exec := progressExecutor{run: func(_ context.Context, req executor.Request) (executor.Outcome, error) {
+		for i := 0; i < eventCount; i++ {
+			req.Progress <- executor.ProgressEvent{Message: fmt.Sprintf("final-%d", i), At: time.Unix(int64(i+1), 0)}
+		}
+		return executor.Outcome{ExitCode: 0}, nil
+	}}
+
+	wtPath := t.TempDir()
+	deps := newTestDeps(t, wtPath, func(string) fs.FS {
+		return fstest.MapFS{resultEnvelopePathForTest(): {Data: []byte(doneEnvelopeJSON)}}
+	}, exec)
+	deps.AppendProgressBatch = func(ctx context.Context, batch []ledger.LaneProgress) error {
+		flushed <- append([]ledger.LaneProgress(nil), batch...)
+		return deps.Ledger.AppendProgressBatch(ctx, batch)
+	}
+
+	if _, err := run.Execute(context.Background(), deps, testPacket()); err != nil {
+		t.Fatalf("Execute() error = %v, want nil", err)
+	}
+	select {
+	case batch := <-flushed:
+		if len(batch) != eventCount {
+			t.Fatalf("shutdown batch length = %d, want %d", len(batch), eventCount)
+		}
+	default:
+		t.Fatal("executor shutdown did not flush the partial progress batch")
+	}
+}
+
+func TestExecuteBatchProgressWritersKeepConcurrentLanesIsolated(t *testing.T) {
+	const eventsPerLane = 40
+	exec := progressExecutor{run: func(_ context.Context, req executor.Request) (executor.Outcome, error) {
+		laneID := filepath.Base(req.WorktreePath)
+		for i := 0; i < eventsPerLane; i++ {
+			req.Progress <- executor.ProgressEvent{Message: fmt.Sprintf("%s-%02d", laneID, i), At: time.Unix(int64(i+1), 0)}
+		}
+		return executor.Outcome{ExitCode: 0}, nil
+	}}
+
+	root := t.TempDir()
+	deps := newTestDeps(t, filepath.Join(root, "unused"), func(path string) fs.FS {
+		laneID := filepath.Base(path)
+		envelope := fmt.Sprintf(`{"packet_id":%q,"status":"done","summary":"done","hard_stops":[]}`, laneID)
+		return fstest.MapFS{resultEnvelopePathForTest(): {Data: []byte(envelope)}}
+	}, exec)
+	deps.CreateWorktree = func(_ context.Context, _, laneID, _, _ string) (worktree.Worktree, error) {
+		path := filepath.Join(root, laneID)
+		if err := os.MkdirAll(path, 0o755); err != nil {
+			return worktree.Worktree{}, err
+		}
+		return worktree.Worktree{Path: path, Branch: "lucind/" + laneID}, nil
+	}
+
+	pA := testPacket()
+	pB := testPacket()
+	pB.ID = "lane-b"
+	pB.Feature = "feat-lane-b"
+	report, err := run.ExecuteBatch(context.Background(), deps, []packet.Packet{pA, pB})
+	if err != nil {
+		t.Fatalf("ExecuteBatch() error = %v", err)
+	}
+	if !report.Released {
+		t.Fatalf("ExecuteBatch().Released = false, want true; reports = %+v", report.Lanes)
+	}
+	for _, laneID := range []string{"lane-a", "lane-b"} {
+		got, err := deps.Ledger.GetProgressAfter(context.Background(), deps.RunID, laneID, 0)
+		if err != nil {
+			t.Fatalf("GetProgressAfter(%q) error = %v", laneID, err)
+		}
+		if len(got) != eventsPerLane {
+			t.Fatalf("progress count for %s = %d, want %d", laneID, len(got), eventsPerLane)
+		}
+		for _, event := range got {
+			if !strings.HasPrefix(event.Message, laneID+"-") {
+				t.Fatalf("progress for %s contains another lane's message %q", laneID, event.Message)
+			}
+		}
+	}
+}
+
+func TestExecuteProgressProducerDropsWritesWhenChannelIsFull(t *testing.T) {
+	const overflowEvents = 100
+	appendStarted := make(chan struct{})
+	releaseAppend := make(chan struct{})
+	accepted, dropped := 0, 0
+	exec := progressExecutor{run: func(_ context.Context, req executor.Request) (executor.Outcome, error) {
+		for i := 0; i < 32; i++ {
+			req.Progress <- executor.ProgressEvent{Message: fmt.Sprintf("initial-%02d", i), At: time.Unix(int64(i+1), 0)}
+		}
+		select {
+		case <-appendStarted:
+		case <-time.After(2 * time.Second):
+			t.Fatal("progress writer did not begin the threshold flush")
+		}
+		for i := 0; i < overflowEvents; i++ {
+			event := executor.ProgressEvent{Message: fmt.Sprintf("overflow-%03d", i), At: time.Unix(int64(i+100), 0)}
+			select {
+			case req.Progress <- event:
+				accepted++
+			default:
+				dropped++
+			}
+		}
+		close(releaseAppend)
+		return executor.Outcome{ExitCode: 0}, nil
+	}}
+
+	wtPath := t.TempDir()
+	deps := newTestDeps(t, wtPath, func(string) fs.FS {
+		return fstest.MapFS{resultEnvelopePathForTest(): {Data: []byte(doneEnvelopeJSON)}}
+	}, exec)
+	firstAppend := true
+	deps.AppendProgressBatch = func(ctx context.Context, batch []ledger.LaneProgress) error {
+		if firstAppend {
+			firstAppend = false
+			close(appendStarted)
+			<-releaseAppend
+		}
+		return deps.Ledger.AppendProgressBatch(ctx, batch)
+	}
+
+	if _, err := run.Execute(context.Background(), deps, testPacket()); err != nil {
+		t.Fatalf("Execute() error = %v, want nil", err)
+	}
+	if accepted != 32 || dropped != overflowEvents-32 {
+		t.Fatalf("non-blocking overflow writes accepted=%d dropped=%d, want accepted=32 dropped=%d", accepted, dropped, overflowEvents-32)
+	}
+}
+
+func TestExecuteProgressInsertErrorIsObservableWithoutChangingLaneStatus(t *testing.T) {
+	wantErr := errors.New("forced progress insert failure")
+	exec := progressExecutor{run: func(_ context.Context, req executor.Request) (executor.Outcome, error) {
+		req.Progress <- executor.ProgressEvent{Message: "will fail", At: time.Unix(1, 0)}
+		return executor.Outcome{ExitCode: 0}, nil
+	}}
+
+	wtPath := t.TempDir()
+	deps := newTestDeps(t, wtPath, func(string) fs.FS {
+		return fstest.MapFS{resultEnvelopePathForTest(): {Data: []byte(doneEnvelopeJSON)}}
+	}, exec)
+	deps.AppendProgressBatch = func(context.Context, []ledger.LaneProgress) error { return wantErr }
+
+	report, err := run.Execute(context.Background(), deps, testPacket())
+	if err != nil {
+		t.Fatalf("Execute() error = %v, want nil", err)
+	}
+	if report.Status != lane.Done {
+		t.Fatalf("report.Status = %v, want %v despite progress insert failure", report.Status, lane.Done)
+	}
+	if !strings.Contains(report.Diagnosis, wantErr.Error()) {
+		t.Errorf("report.Diagnosis = %q, want progress insert error %q", report.Diagnosis, wantErr)
+	}
+	if details := laneNoteDetails(t, deps.Ledger, deps.RunID); !anyContains(details, wantErr.Error()) {
+		t.Errorf("lane notes = %+v, want progress insert error %q", details, wantErr)
+	}
+	states, err := deps.Ledger.LaneStates(context.Background(), deps.RunID)
+	if err != nil {
+		t.Fatalf("LaneStates() error = %v", err)
+	}
+	if len(states) != 1 || states[0].Status != lane.Done {
+		t.Fatalf("LaneStates() = %+v, want lane-a=done", states)
+	}
+}
+
+func resultEnvelopePathForTest() string { return ".lucind/result.json" }
 
 func TestExecuteHappyPathEnvelopeDoneReachesLaneDone(t *testing.T) {
 	wtPath := t.TempDir()
@@ -2311,71 +2778,6 @@ func TestExecuteScopeCheckEmptyAllowedPathsArraySkipsGitAndStaysDone(t *testing.
 			}
 		})
 	}
-}
-
-func TestParseDiffNameStatusZ_EmbeddedNewlineAndRenamePair(t *testing.T) {
-	tests := []struct {
-		name  string
-		input []byte
-		want  []string
-	}{
-		{
-			name:  "rename pair R100",
-			input: []byte("R100\x00old path\x00new path\x00"),
-			want:  []string{"old path", "new path"},
-		},
-		{
-			name:  "ordinary modified M",
-			input: []byte("M\x00dir/file.go\x00"),
-			want:  []string{"dir/file.go"},
-		},
-		{
-			name:  "path with embedded newline",
-			input: []byte("M\x00dir/\nweird.go\x00"),
-			want:  []string{"dir/\nweird.go"},
-		},
-		{
-			name:  "copy pair C100",
-			input: []byte("C100\x00src\x00dst\x00"),
-			want:  []string{"src", "dst"},
-		},
-		{
-			name:  "multiple mixed entries",
-			input: []byte("M\x00a.go\x00R100\x00old.go\x00new.go\x00A\x00added.go\x00"),
-			want:  []string{"a.go", "old.go", "new.go", "added.go"},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := run.ParseDiffNameStatusZ(tt.input)
-			if !slicesEqual(got, tt.want) {
-				t.Errorf("ParseDiffNameStatusZ() = %q, want %q", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestParseLSFilesZ(t *testing.T) {
-	input := []byte("a.go\x00file with spaces.txt\x00dir/\nweird.go\x00")
-	want := []string{"a.go", "file with spaces.txt", "dir/\nweird.go"}
-
-	got := run.ParseLSFilesZ(input)
-	if !slicesEqual(got, want) {
-		t.Errorf("ParseLSFilesZ() = %q, want %q", got, want)
-	}
-}
-
-func slicesEqual(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
 }
 
 func TestExecuteApprovalWaitBlocksUntilDecideApprovePersistsDone(t *testing.T) {

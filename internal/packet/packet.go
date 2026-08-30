@@ -9,6 +9,8 @@ import (
 	"errors"
 	"io"
 	"strings"
+
+	"github.com/LanzerDevCorp/lucind-ai/internal/skillset"
 )
 
 // delimiter opens and closes the frontmatter block.
@@ -19,15 +21,28 @@ const delimiter = "---"
 // is an instruction the binary would have to invent, which is exactly what
 // dispatch must never do.
 var (
-	ErrNoFrontmatter   = errors.New("packet: document has no closed --- frontmatter block")
-	ErrMissingID       = errors.New("packet: frontmatter is missing a non-empty id")
-	ErrMissingExecutor = errors.New("packet: frontmatter is missing a non-empty executor")
-	ErrMissingRoutedBy = errors.New("packet: frontmatter is missing a non-empty routed_by")
-	ErrEmptyBody       = errors.New("packet: body is empty, there is no prompt to dispatch")
-	ErrInvalidReadOnly = errors.New("packet: frontmatter read_only must be a boolean (true or false)")
-	ErrInvalidLegacyMain = errors.New("packet: frontmatter legacy_main must be a boolean (true or false)")
-	ErrInvalidAllowedPaths = errors.New("packet: frontmatter allowed_paths must be a JSON array of strings")
+	ErrNoFrontmatter        = errors.New("packet: document has no closed --- frontmatter block")
+	ErrMissingID            = errors.New("packet: frontmatter is missing a non-empty id")
+	ErrMissingExecutor      = errors.New("packet: frontmatter is missing a non-empty executor")
+	ErrMissingRoutedBy      = errors.New("packet: frontmatter is missing a non-empty routed_by")
+	ErrEmptyBody            = errors.New("packet: body is empty, there is no prompt to dispatch")
+	ErrInvalidReadOnly      = errors.New("packet: frontmatter read_only must be a boolean (true or false)")
+	ErrInvalidLegacyMain    = errors.New("packet: frontmatter legacy_main must be a boolean (true or false)")
+	ErrInvalidAllowedPaths  = errors.New("packet: frontmatter allowed_paths must be a JSON array of strings")
+	ErrInvalidReadOnlyPaths = errors.New("packet: frontmatter read_only_paths must be a JSON array of strings")
+	ErrInvalidLaneRole      = errors.New("packet: frontmatter lane_role is invalid")
+	ErrInvalidSDDPhase      = errors.New("packet: frontmatter sdd_phase is invalid")
+	ErrInvalidAdhocSkills   = errors.New("packet: frontmatter adhoc_skills must be a JSON array of strings")
 )
+
+// Authoring is immutable typed input retained for candidate evidence. It is
+// nil for manually authored packets, which remain on the legacy evidence path.
+type Authoring struct {
+	ContractVersion string
+	Digest          string
+	ContractJSON    []byte
+	BindingJSON     []byte
+}
 
 // Packet is one unit of delegated work.
 type Packet struct {
@@ -60,6 +75,11 @@ type Packet struct {
 	// permitted to touch. When omitted or empty, the packet is undeclared
 	// and path checks are skipped.
 	AllowedPaths []string
+	// ReadOnlyPaths declares executor-visible inputs without granting write
+	// authority. AllowedPaths remains the sole write scope.
+	ReadOnlyPaths []string
+	// Authoring carries a compiled contract when one was admitted in-process.
+	Authoring *Authoring
 	// Feature identifies the target feature for parent integration.
 	Feature string
 	// ParentRef is the target parent git reference (e.g. refs/heads/feature/foo).
@@ -70,6 +90,27 @@ type Packet struct {
 	ExpectedParentSHA string
 	// LegacyMain indicates legacy mode dispatch targeting main.
 	LegacyMain bool
+	// SDDPhase is the optional planning/apply phase declared in frontmatter
+	// (sdd_phase). Omitted or empty keys leave this at "".
+	SDDPhase string
+	// LaneRole is the optional lane role declared in frontmatter (lane_role).
+	// Closed set: {lens, synthesis, apply, verify, archive, ultrafixer, human}.
+	LaneRole string
+	// FanoutGroup is the optional fan-out group declared in frontmatter
+	// (fanout_group). Omitted or empty keys leave this at "".
+	FanoutGroup string
+	// Skill is the optional static skill name declared in frontmatter
+	// (skill). Omitted or empty keys leave this at "". Parse never invents
+	// live Skill telemetry — it only reflects the frontmatter key.
+	Skill string
+	// AdhocSkills is the optional list of ad-hoc skills declared in frontmatter (adhoc_skills).
+	AdhocSkills []string
+	// RequiredSkills is the derived list of required skills. Populated by admission
+	// or compilation, never parsed directly from frontmatter.
+	RequiredSkills []string
+	// Path is the on-disk packet path. Parse does not set it; the CLI
+	// assigns it from the --packet flag after a successful Parse.
+	Path string
 	// Body is the Markdown prompt, passed to the executor unchanged.
 	Body string
 }
@@ -128,6 +169,21 @@ func Parse(r io.Reader) (Packet, error) {
 			default:
 				return Packet{}, ErrInvalidLegacyMain
 			}
+		case "lane_role":
+			p.LaneRole = strings.TrimSpace(value)
+		case "sdd_phase":
+			p.SDDPhase = strings.TrimSpace(value)
+		case "fanout_group":
+			p.FanoutGroup = strings.TrimSpace(value)
+		case "skill":
+			p.Skill = strings.TrimSpace(value)
+		case "adhoc_skills":
+			trimmed := strings.TrimSpace(value)
+			var skills []string
+			if len(trimmed) == 0 || trimmed[0] != '[' || json.Unmarshal([]byte(trimmed), &skills) != nil {
+				return Packet{}, ErrInvalidAdhocSkills
+			}
+			p.AdhocSkills = skills
 		case "allowed_paths":
 			trimmed := strings.TrimSpace(value)
 			var paths []string
@@ -135,11 +191,27 @@ func Parse(r io.Reader) (Packet, error) {
 				return Packet{}, ErrInvalidAllowedPaths
 			}
 			p.AllowedPaths = paths
+		case "read_only_paths":
+			trimmed := strings.TrimSpace(value)
+			var paths []string
+			if len(trimmed) == 0 || trimmed[0] != '[' || json.Unmarshal([]byte(trimmed), &paths) != nil {
+				return Packet{}, ErrInvalidReadOnlyPaths
+			}
+			p.ReadOnlyPaths = paths
 		}
 	}
 
 	if !closed {
 		return Packet{}, ErrNoFrontmatter
+	}
+
+	if p.LaneRole != "" {
+		if !skillset.IsValidLaneRole(p.LaneRole) {
+			return Packet{}, ErrInvalidLaneRole
+		}
+		if p.SDDPhase != "" && !skillset.IsValidSDDPhase(p.SDDPhase) {
+			return Packet{}, ErrInvalidSDDPhase
+		}
 	}
 
 	var body strings.Builder

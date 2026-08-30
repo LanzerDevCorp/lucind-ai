@@ -9,3 +9,10 @@
 # os
 Thumbs.db
 .DS_Store
+
+# agy CLI scratch state
+.antigravitycli/
+
+# SQLite sidecars: transient, recreated on open, never part of a .backup snapshot
+*.db-shm
+*.db-wal

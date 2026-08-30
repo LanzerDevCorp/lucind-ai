@@ -3,24 +3,32 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/LanzerDevCorp/lucind-ai/internal/accept"
 	"github.com/LanzerDevCorp/lucind-ai/internal/executor"
 	"github.com/LanzerDevCorp/lucind-ai/internal/feature"
 	"github.com/LanzerDevCorp/lucind-ai/internal/lane"
 	"github.com/LanzerDevCorp/lucind-ai/internal/ledger"
 	"github.com/LanzerDevCorp/lucind-ai/internal/overlap"
+	"github.com/LanzerDevCorp/lucind-ai/internal/packet"
+	"github.com/LanzerDevCorp/lucind-ai/internal/packetauthor"
+	"github.com/LanzerDevCorp/lucind-ai/internal/phasespec"
 	"github.com/LanzerDevCorp/lucind-ai/internal/reconcile"
 	"github.com/LanzerDevCorp/lucind-ai/internal/result"
 	lucindrun "github.com/LanzerDevCorp/lucind-ai/internal/run"
-	"github.com/LanzerDevCorp/lucind-ai/internal/serve"
 	"github.com/LanzerDevCorp/lucind-ai/internal/worktree"
 )
 
@@ -349,6 +357,36 @@ func TestRunAcceptsOpencodeExecutor(t *testing.T) {
 	}
 }
 
+// TestRunAcceptsClaudeExecutor proves that a packet specifying
+// "executor: claude" passes the pre-dispatch unsupported executor check.
+func TestRunAcceptsClaudeExecutor(t *testing.T) {
+	factory, ok := supportedExecutors["claude"]
+	if !ok {
+		t.Fatalf("supportedExecutors[%q] not found, want claude to be accepted as a supported executor", "claude")
+	}
+	if factory == nil || factory() == nil {
+		t.Fatalf("supportedExecutors[%q] factory returned nil", "claude")
+	}
+}
+
+// TestEveryExecutorOwnsExactlyOneProviderFamily pins the invariant that made
+// adding a fourth executor safe: each registered executor may run on its own
+// models only, so a model string copied from a sibling packet can never
+// silently dispatch -- and bill -- against a different provider. Adding an
+// executor whose KnownModels overlaps another's would break this.
+func TestEveryExecutorOwnsExactlyOneProviderFamily(t *testing.T) {
+	owner := map[string]string{}
+	for name, factory := range supportedExecutors {
+		for _, model := range factory().KnownModels() {
+			if prior, clash := owner[model]; clash {
+				t.Errorf("model %q is claimed by both %q and %q; every model must belong to exactly one executor", model, prior, name)
+				continue
+			}
+			owner[model] = name
+		}
+	}
+}
+
 // TestRunRepeatablePacketFlagPreservesOrderAndProcessesEachOne proves
 // --packet is genuinely repeatable, not a last-value-wins flag: the FIRST
 // packet given is malformed, so its parse error must surface (naming its
@@ -386,6 +424,34 @@ func TestRunRepeatablePacketFlagPreservesOrderAndProcessesEachOne(t *testing.T) 
 	}
 	if !strings.Contains(stderr.String(), firstPath) {
 		t.Fatalf("stderr = %q, want it to name the first packet's path %q -- if it names the second packet instead, --packet is not actually repeatable", stderr.String(), firstPath)
+	}
+}
+
+// TestRunPacketFlagPopulatesPacketPath proves the load loop stamps each
+// successfully parsed packet with the --packet path that produced it.
+// Parse itself never invents a filesystem path; only this CLI wiring does.
+func TestRunPacketFlagPopulatesPacketPath(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "packet.md")
+	content := "---\n" +
+		"id: lane-path\n" +
+		"executor: agy\n" +
+		"routed_by: path capture\n" +
+		"---\n" +
+		"Do the thing.\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write packet fixture: %v", err)
+	}
+
+	got, err := loadPacket(path)
+	if err != nil {
+		t.Fatalf("loadPacket(%q) error = %v", path, err)
+	}
+	if got.Path != path {
+		t.Fatalf("Packet.Path = %q, want %q", got.Path, path)
+	}
+	if got.ID != "lane-path" {
+		t.Fatalf("Packet.ID = %q, want lane-path (parse still reflects frontmatter)", got.ID)
 	}
 }
 
@@ -467,6 +533,7 @@ func TestRunOverlappingAllowedPathsFailsBeforeCreateWorktree(t *testing.T) {
 	defer func() { depsFactory = origFactory }()
 	depsFactory = func(runID, primaryRoot string, ledg *ledger.Ledger, timeout, approvalTimeout time.Duration) lucindrun.Deps {
 		deps := origFactory(runID, primaryRoot, ledg, timeout, approvalTimeout)
+		deps.ResolveCandidateIdentity = stubCandidateIdentity
 		deps.CreateWorktree = func(ctx context.Context, primaryRoot, laneID, parentRef, baseSHA string) (worktree.Worktree, error) {
 			createCalled = true
 			return origFactory(runID, primaryRoot, ledg, timeout, approvalTimeout).CreateWorktree(ctx, primaryRoot, laneID, parentRef, baseSHA)
@@ -638,6 +705,25 @@ func TestPrintReportOmitsDiagnosisBlockWhenNoneCaptured(t *testing.T) {
 	}
 }
 
+func TestPrintReportEmitsTroubleshootingBannerOnNonDone(t *testing.T) {
+	var stdout bytes.Buffer
+	r := lucindrun.Report{
+		LaneID:   "lane-a",
+		Status:   lane.Blocked,
+		Worktree: "/tmp/worktrees/lane-a",
+	}
+
+	printReport(&stdout, r)
+
+	out := stdout.String()
+	if !strings.Contains(out, "troubleshooting.md") {
+		t.Errorf("printReport output = %q, want reference to troubleshooting.md", out)
+	}
+	if !strings.Contains(out, "git -C /tmp/worktrees/lane-a status") || !strings.Contains(out, "git -C /tmp/worktrees/lane-a diff") {
+		t.Errorf("printReport output = %q, want git diff and status inspection commands", out)
+	}
+}
+
 // TestPrintReportOmitsDiagnosisBlockForDoneLane proves a lane that
 // reached lane.Done never prints a diagnosis block, even in the
 // (currently impossible) case its Diagnosis field were somehow set --
@@ -661,14 +747,19 @@ func TestPrintReportOmitsDiagnosisBlockForDoneLane(t *testing.T) {
 	if strings.Contains(out, "captured diagnosis") {
 		t.Errorf("printReport output = %q, want no diagnosis block for a lane.Done report", out)
 	}
+	if strings.Contains(out, "troubleshooting.md") {
+		t.Errorf("printReport output = %q, want no troubleshooting banner for a lane.Done report", out)
+	}
 }
 
 // TestPrintIntegrateReportIncludesIntegratedAndRevertedIDs (Task 5.1) proves that
 // given an IntegrateReport with both integrated and reverted lanes, printIntegrateReport
-// writes the integrate summary line and the integrated_ids and reverted_ids lines.
+// writes the integrate summary line, the integrated_ids and reverted_ids lines, and
+// the integrate retry banner citing recovery-reconciliation.md.
 func TestPrintIntegrateReportIncludesIntegratedAndRevertedIDs(t *testing.T) {
 	var stdout bytes.Buffer
 	rep := lucindrun.IntegrateReport{
+		RunID:      "run-456",
 		Attempted:  true,
 		Passed:     true,
 		Integrated: []string{"apply-ledger"},
@@ -688,11 +779,17 @@ func TestPrintIntegrateReportIncludesIntegratedAndRevertedIDs(t *testing.T) {
 	if !strings.Contains(out, "reverted_ids: apply-serve") {
 		t.Errorf("printIntegrateReport output = %q, want it to contain reverted_ids: apply-serve", out)
 	}
+	if !strings.Contains(out, "lucind-ai integrate retry --run run-456") {
+		t.Errorf("printIntegrateReport output = %q, want integrate retry command banner", out)
+	}
+	if !strings.Contains(out, "recovery-reconciliation.md") {
+		t.Errorf("printIntegrateReport output = %q, want reference to recovery-reconciliation.md", out)
+	}
 }
 
 // TestPrintIntegrateReportAllIntegratedExplicitlyEmptyRevertedIDs (Task 5.2) proves that
 // when all lanes integrate and none are reverted, printIntegrateReport writes integrated_ids
-// and an explicitly empty reverted_ids: line (not omitted).
+// and an explicitly empty reverted_ids: line (not omitted), and omits the retry guidance banner.
 func TestPrintIntegrateReportAllIntegratedExplicitlyEmptyRevertedIDs(t *testing.T) {
 	var stdout bytes.Buffer
 	rep := lucindrun.IntegrateReport{
@@ -714,6 +811,9 @@ func TestPrintIntegrateReportAllIntegratedExplicitlyEmptyRevertedIDs(t *testing.
 	if !strings.Contains(out, "reverted_ids:\n") {
 		t.Errorf("printIntegrateReport output = %q, want it to contain explicitly empty reverted_ids:", out)
 	}
+	if strings.Contains(out, "integrate retry") || strings.Contains(out, "recovery-reconciliation.md") {
+		t.Errorf("printIntegrateReport output = %q, want retry banner omitted when no reverted lanes", out)
+	}
 }
 
 // initRepo creates a throwaway git repository in t.TempDir() with one
@@ -728,10 +828,38 @@ func initRepo(t *testing.T) string {
 	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("seed\n"), 0o644); err != nil {
 		t.Fatalf("WriteFile(README.md) error = %v", err)
 	}
+	setupTestSkills(t, root)
 	runGit(t, root, "add", "README.md")
 	runGit(t, root, "commit", "-m", "seed commit")
 
 	return root
+}
+
+func setupTestSkills(t *testing.T, root string) {
+	t.Helper()
+	skillsDir := filepath.Join(root, ".agents", "skills")
+	skills := []string{
+		"lucind-executor", "lucind-apply", "lucind-verify", "lucind-fan-out-lens",
+		"sdd-explore", "sdd-propose", "sdd-spec", "sdd-design", "sdd-tasks",
+		"sdd-apply", "sdd-verify", "sdd-archive",
+	}
+	for _, s := range skills {
+		sDir := filepath.Join(skillsDir, s)
+		if err := os.MkdirAll(sDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(sDir, "SKILL.md"), []byte("# "+s+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	lucindDir := filepath.Join(root, ".lucind")
+	if err := os.MkdirAll(lucindDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	rootsYaml := "roots:\n  - " + skillsDir + "\n"
+	if err := os.WriteFile(filepath.Join(lucindDir, "skill-roots.yaml"), []byte(rootsYaml), 0o644); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func runGit(t *testing.T, dir string, args ...string) {
@@ -1064,9 +1192,9 @@ func TestRunSequentialInvocationsProduceDistinctRunIDs(t *testing.T) {
 		"executor: agy\n" +
 		"routed_by: test\n" +
 		"legacy_main: true\n" +
-		"expected_parent_sha: 1111111111111111111111111111111111111111\n" +
+		"expected_parent_sha: " + currentHead(t, primaryRoot) + "\n" +
 		"---\n" +
-		"Task 1\n"
+		admittedWriteBody
 	if err := os.WriteFile(p1, []byte(p1Content), 0o644); err != nil {
 		t.Fatalf("write packet 1: %v", err)
 	}
@@ -1075,6 +1203,7 @@ func TestRunSequentialInvocationsProduceDistinctRunIDs(t *testing.T) {
 	defer func() { depsFactory = origFactory }()
 	depsFactory = func(runID, primaryRoot string, ledg *ledger.Ledger, timeout, approvalTimeout time.Duration) lucindrun.Deps {
 		deps := origFactory(runID, primaryRoot, ledg, timeout, approvalTimeout)
+		deps.ResolveCandidateIdentity = stubCandidateIdentity
 		deps.CreateWorktree = func(ctx context.Context, primaryRoot, laneID, parentRef, baseSHA string) (worktree.Worktree, error) {
 			return worktree.Worktree{Path: t.TempDir(), Branch: "branch-" + laneID}, nil
 		}
@@ -1087,7 +1216,7 @@ func TestRunSequentialInvocationsProduceDistinctRunIDs(t *testing.T) {
 		deps.LookupExecutor = func(name string) (executor.Executor, error) {
 			return testDoneExecutor{}, nil
 		}
-		deps.CombineTree = func(ctx context.Context, primaryRoot, runID string, branches []string) (string, string, error) {
+		deps.CombineTree = func(ctx context.Context, primaryRoot, runID, parentRef, baseSHA string, branches []string) (string, string, error) {
 			return t.TempDir(), "integration-branch", nil
 		}
 		deps.RunChecks = func(ctx context.Context, worktreePath string) (bool, string, error) {
@@ -1144,6 +1273,812 @@ func TestRunSequentialInvocationsProduceDistinctRunIDs(t *testing.T) {
 	}
 }
 
+// TestRunDispatchRegistersRunRowInLedger proves that `lucind-ai run` inserts
+// a runs table row for its own dispatch. Before this fix, ledger.RegisterRun
+// had zero production callers -- the runs table was written only by tests --
+// so ledger.ListRuns always returned zero rows despite a ledger full of
+// lanes and events carrying valid run_id values.
+func TestRunDispatchRegistersRunRowInLedger(t *testing.T) {
+	primaryRoot := initRepo(t)
+
+	p1 := filepath.Join(primaryRoot, "packet-1.md")
+	p1Content := "---\n" +
+		"id: lane-1\n" +
+		"executor: agy\n" +
+		"routed_by: test\n" +
+		"legacy_main: true\n" +
+		"expected_parent_sha: 1111111111111111111111111111111111111111\n" +
+		"---\n" +
+		admittedWriteBody
+	if err := os.WriteFile(p1, []byte(p1Content), 0o644); err != nil {
+		t.Fatalf("write packet 1: %v", err)
+	}
+
+	overrideDispatchDeps(t, testDoneExecutor{})
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(primaryRoot); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(cwd)
+
+	before := time.Now().UTC().Add(-time.Second)
+	var stdout, stderr bytes.Buffer
+	code := run(context.Background(), []string{"run", "--packet", p1}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run exit code = %d, want 0; stderr = %q", code, stderr.String())
+	}
+	after := time.Now().UTC().Add(time.Second)
+
+	runID := extractRunID(stdout.String())
+	if runID == "" {
+		t.Fatalf("stdout has no run id line; stdout = %q", stdout.String())
+	}
+
+	l, err := ledger.Open(context.Background(), primaryRoot)
+	if err != nil {
+		t.Fatalf("ledger.Open: %v", err)
+	}
+	defer l.Close()
+
+	got, err := l.GetRun(context.Background(), runID)
+	if err != nil {
+		t.Fatalf("GetRun(%q): %v -- lucind-ai run must register its own run row", runID, err)
+	}
+	if got.Status != string(lane.Done) {
+		t.Errorf("run.Status = %q, want %q after every lane finished done", got.Status, lane.Done)
+	}
+	if got.LaneCount != 1 {
+		t.Errorf("run.LaneCount = %d, want 1", got.LaneCount)
+	}
+	if got.StartedAt.Before(before) || got.StartedAt.After(after) {
+		t.Errorf("run.StartedAt = %v, want within [%v, %v]", got.StartedAt, before, after)
+	}
+	if got.EndedAt == nil {
+		t.Fatal("run.EndedAt is nil, want a terminal timestamp once dispatch concluded")
+	}
+	if got.EndedAt.Before(before) || got.EndedAt.After(after) {
+		t.Errorf("run.EndedAt = %v, want within [%v, %v]", *got.EndedAt, before, after)
+	}
+	if got.PID != os.Getpid() {
+		t.Errorf("run.PID = %d, want os.Getpid() %d", got.PID, os.Getpid())
+	}
+}
+
+// writeAgyPacket writes a minimal legacy-mode packet naming the given
+// executor, for tests exercising runDispatch's agy quota gate.
+func writeAgyPacket(t *testing.T, dir, laneID, executorName string) string {
+	t.Helper()
+	path := filepath.Join(dir, laneID+".md")
+	content := "---\n" +
+		"id: " + laneID + "\n" +
+		"executor: " + executorName + "\n" +
+		"routed_by: test\n" +
+		"legacy_main: true\n" +
+		"expected_parent_sha: 1111111111111111111111111111111111111111\n" +
+		"---\n" +
+		admittedWriteBody
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write packet: %v", err)
+	}
+	return path
+}
+
+const admittedWriteBody = "## Done criteria\n- Complete the requested work.\n\n## Return\nWrite the result envelope to .lucind/result.json in this worktree.\nValidate it against .lucind/result.schema.json before writing.\nCommit the completed work.\n"
+
+func currentHead(t *testing.T, repo string) string {
+	t.Helper()
+	out, err := exec.Command("git", "-C", repo, "rev-parse", "HEAD").Output()
+	if err != nil {
+		t.Fatalf("git rev-parse HEAD: %v", err)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+func TestAdmitDispatchBatchPreservesManualAndCompilesTypedContract(t *testing.T) {
+	repo := initRepo(t)
+	head := currentHead(t, repo)
+	manualBody := strings.ReplaceAll(admittedWriteBody, "\n", "\r\n")
+	contract := &packetauthor.Contract{
+		Version: packetauthor.ContractVersion, RouteIntent: "compiled route", Mode: packetauthor.ModeWrite,
+		WritePaths: []string{"internal/compiled"}, ReadOnlyPaths: []string{"docs/input.md"}, Goal: "Compile safely",
+		DoneCriteria: []string{"compiled criterion"}, HardStops: []string{"stop on ambiguity"},
+		Result: packetauthor.ResultObligations{Path: ".lucind/result.json", Schema: ".lucind/result.schema.json"},
+	}
+	inputs := []dispatchAuthoringInput{
+		{Packet: packet.Packet{ID: "manual", Executor: "agy", RoutedBy: "manual route", LegacyMain: true, ExpectedParentSHA: head, AllowedPaths: []string{"internal/manual"}, Body: manualBody}},
+		{Packet: packet.Packet{ID: "compiled", Executor: "agy", RoutedBy: "compiled route", LegacyMain: true, ExpectedParentSHA: head}, Contract: contract},
+	}
+
+	got, err := admitDispatchBatch(context.Background(), repo, inputs)
+	if err != nil {
+		t.Fatalf("admitDispatchBatch() error = %v", err)
+	}
+	if got[0].Body != manualBody {
+		t.Fatalf("manual body changed:\n got %q\nwant %q", got[0].Body, manualBody)
+	}
+	if got[1].Body == "" || got[1].Authoring == nil || len(got[1].Authoring.ContractJSON) == 0 {
+		t.Fatalf("compiled packet lacks rendered body or frozen authoring input: %+v", got[1])
+	}
+	if !reflect.DeepEqual(got[1].AllowedPaths, []string{"internal/compiled"}) || !reflect.DeepEqual(got[1].ReadOnlyPaths, []string{"docs/input.md"}) {
+		t.Fatalf("compiled scopes = write:%v read:%v", got[1].AllowedPaths, got[1].ReadOnlyPaths)
+	}
+}
+
+func TestAdmitDispatchBatchReturnsDeterministicMixedDiagnostics(t *testing.T) {
+	repo := initRepo(t)
+	head := currentHead(t, repo)
+	missingObligations := "## Done criteria\n- done\n\n## Return\nNo result instructions.\nCommit the work.\n"
+	readOnlyConflict := "## Done criteria\n- inspect\n\n## Return\nWrite the result envelope to .lucind/result.json in this worktree.\nValidate it against .lucind/result.schema.json before writing.\nAfter you commit, report success.\n"
+	inputs := []dispatchAuthoringInput{
+		{Packet: packet.Packet{ID: "first", Executor: "agy", RoutedBy: "first", LegacyMain: true, ExpectedParentSHA: head, Body: missingObligations}},
+		{Packet: packet.Packet{ID: "second", Executor: "agy", RoutedBy: "second", LegacyMain: true, ExpectedParentSHA: head, ReadOnly: true, ReadOnlyPaths: []string{"../secret"}, Body: readOnlyConflict}},
+		{Packet: packet.Packet{ID: "third", Executor: "agy", RoutedBy: "third", Feature: "missing", ParentRef: "refs/heads/missing", BaseSHA: head, ExpectedParentSHA: head, Body: admittedWriteBody}},
+	}
+
+	_, err := admitDispatchBatch(context.Background(), repo, inputs)
+	var diagnostics packetauthor.Diagnostics
+	if !errors.As(err, &diagnostics) {
+		t.Fatalf("error = %T %v, want packetauthor.Diagnostics", err, err)
+	}
+	want := []string{"0:PA_RESULT_PATH_MISSING", "0:PA_RESULT_SCHEMA_MISSING", "1:PA_MODE_COMMIT_CONFLICT", "1:PA_PATH_INVALID", "2:PA_TARGET_INCOMPLETE"}
+	got := make([]string, len(diagnostics))
+	for i, diagnostic := range diagnostics {
+		got[i] = fmt.Sprintf("%d:%s", diagnostic.PacketIndex, diagnostic.Code)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("diagnostics = %v, want %v", got, want)
+	}
+}
+
+// TestWU6TypedAuthoringReachesAcceptanceWithShadowIsolation proves the full
+// typed path without making the specialist authoritative: admission produces
+// the packet consumed by Execute, Execute freezes evidence, Acceptance
+// independently verifies the result and candidate diff, and shadow evidence
+// is persisted beside (never inside) the canonical receipt.
+func TestWU6TypedAuthoringReachesAcceptanceWithShadowIsolation(t *testing.T) {
+	if testing.Short() {
+		t.Skip("uses real Git worktrees and SQLite")
+	}
+
+	ctx := context.Background()
+	repo := initRepo(t)
+	if err := os.WriteFile(filepath.Join(repo, ".gitignore"), []byte(".lucind/\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "lucind-checks.sh"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repo, "add", ".gitignore", "lucind-checks.sh")
+	runGit(t, repo, "commit", "-m", "add test check harness")
+	head := currentHead(t, repo)
+
+	contract := packetauthor.Contract{
+		Version: packetauthor.ContractVersion, RouteIntent: "typed integration proof", Mode: packetauthor.ModeWrite,
+		WritePaths: []string{"internal/typed-proof.txt"}, ReadOnlyPaths: []string{"docs/input.md"},
+		Goal: "Prove typed authoring reaches acceptance.", DoneCriteria: []string{"typed criterion"},
+		HardStops: []string{"stop on unsafe output"}, Result: packetauthor.ResultObligations{
+			Path: ".lucind/result.json", Schema: ".lucind/result.schema.json",
+		},
+	}
+	binding := packetauthor.TargetBinding{LegacyMain: &packetauthor.LegacyMainTarget{ExpectedParentSHA: head, LiveParentSHA: head}}
+	compiled, err := packetauthor.Compile(contract, binding)
+	if err != nil {
+		t.Fatalf("Compile() error = %v", err)
+	}
+
+	admitted, err := admitDispatchBatch(ctx, repo, []dispatchAuthoringInput{{
+		Packet:   packet.Packet{ID: "typed-lane", Executor: "agy", RoutedBy: "source route", LegacyMain: true, ExpectedParentSHA: head},
+		Contract: &contract,
+	}})
+	if err != nil {
+		t.Fatalf("admitDispatchBatch() error = %v", err)
+	}
+	if len(admitted) != 1 || admitted[0].Authoring == nil || admitted[0].Body != string(compiled.Body) || admitted[0].Authoring.Digest != compiled.Digest {
+		t.Fatalf("admitted typed packet = %+v, want deterministic compiled artifact", admitted)
+	}
+	if !reflect.DeepEqual(admitted[0].ReadOnlyPaths, contract.ReadOnlyPaths) || !reflect.DeepEqual(admitted[0].AllowedPaths, contract.WritePaths) {
+		t.Fatalf("admitted scopes = write:%v read:%v", admitted[0].AllowedPaths, admitted[0].ReadOnlyPaths)
+	}
+
+	l, err := ledger.Open(ctx, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	const runID = "wu6-typed-run"
+	if err := l.RegisterRun(ctx, ledger.Run{RunID: runID, Status: string(lane.Running), LaneCount: 1, StartedAt: time.Now().UTC(), PID: os.Getpid()}); err != nil {
+		t.Fatal(err)
+	}
+
+	dispatcher := &typedIntegrationExecutor{t: t, path: "internal/typed-proof.txt", criterion: contract.DoneCriteria[0], stop: contract.HardStops[0]}
+	deps := productionDeps(runID, repo, l, time.Minute, 0)
+	deps.LookupExecutor = func(string) (executor.Executor, error) { return dispatcher, nil }
+	report, err := lucindrun.Execute(ctx, deps, admitted[0])
+	if err != nil || report.Status != lane.Done {
+		t.Fatalf("Execute() = %+v, %v", report, err)
+	}
+	if dispatcher.request.Prompt != string(compiled.Body) || !reflect.DeepEqual(dispatcher.request.ReadOnlyPaths, contract.ReadOnlyPaths) {
+		t.Fatalf("executor request lost typed packet facts: prompt=%q read_only=%v", dispatcher.request.Prompt, dispatcher.request.ReadOnlyPaths)
+	}
+
+	candidate, err := l.GetLaneCandidate(ctx, runID, admitted[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if candidate.AuthoringEvidenceVersion != ledger.AuthoringEvidenceVersion || candidate.AuthoringEvidenceHash == "" || candidate.ResultHash == "" {
+		t.Fatalf("candidate lacks frozen versioned evidence: %+v", candidate)
+	}
+	evidence, err := ledger.DecodeAuthoringEvidence(candidate.AuthoringEvidenceVersion, candidate.AuthoringEvidenceJSON, candidate.AuthoringEvidenceHash)
+	if err != nil {
+		t.Fatalf("DecodeAuthoringEvidence() error = %v", err)
+	}
+	if !reflect.DeepEqual(evidence.DoneCriteria, contract.DoneCriteria) || !reflect.DeepEqual(evidence.HardStops, contract.HardStops) || len(evidence.Changes) != 1 || evidence.Changes[0].Path != "internal/typed-proof.txt" || evidence.ResultHash != candidate.ResultHash {
+		t.Fatalf("frozen correspondence = %+v", evidence)
+	}
+	packetPath := filepath.Join(repo, ".lucind", "packets", "typed-lane.md")
+	if err := os.MkdirAll(filepath.Dir(packetPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(packetPath, compiled.Body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(packetPath, []byte("edited after dispatch\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if contents, err := os.ReadFile(packetPath); err != nil {
+		t.Fatal(err)
+	} else if string(contents) == string(compiled.Body) {
+		t.Fatal("source packet was not mutated after dispatch")
+	}
+	unchanged, err := l.GetLaneCandidate(ctx, runID, admitted[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if unchanged.AuthoringEvidenceJSON != candidate.AuthoringEvidenceJSON || unchanged.AuthoringEvidenceHash != candidate.AuthoringEvidenceHash || unchanged.ResultHash != candidate.ResultHash {
+		t.Fatal("frozen candidate evidence changed after source packet mutation")
+	}
+
+	// A result mutation with a recomputed result hash still cannot replace the
+	// frozen evidence. Use a second immutable candidate row rather than
+	// bypassing the ledger's append-only trigger.
+	const tamperedRun, tamperedLane = "wu6-tampered-run", "tampered-lane"
+	if err := l.RegisterRun(ctx, ledger.Run{RunID: tamperedRun, Status: string(lane.Running), LaneCount: 1, StartedAt: time.Now().UTC(), PID: os.Getpid()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.RegisterLane(ctx, ledger.Lane{RunID: tamperedRun, LaneID: tamperedLane, PacketID: tamperedLane, Executor: "agy", RoutingCondition: "mutation", Status: lane.Running}); err != nil {
+		t.Fatal(err)
+	}
+	tampered := candidate
+	tampered.RunID, tampered.LaneID, tampered.PacketID = tamperedRun, tamperedLane, tamperedLane
+	mutatedResult := strings.Replace(candidate.ResultJSON, "typed-lane", tamperedLane, 1)
+	mutatedResult = strings.Replace(mutatedResult, contract.DoneCriteria[0], "tampered criterion", 1)
+	tampered.ResultJSON, tampered.ResultHash = mutatedResult, integrationHash("result:v1", mutatedResult)
+	tamperedEvidence, err := ledger.DecodeAuthoringEvidence(candidate.AuthoringEvidenceVersion, candidate.AuthoringEvidenceJSON, candidate.AuthoringEvidenceHash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tamperedEvidence.ResultHash = tampered.ResultHash
+	tampered.AuthoringEvidenceJSON, tampered.AuthoringEvidenceHash, err = ledger.FreezeAuthoringEvidence(tamperedEvidence)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := l.SetDoneCandidate(ctx, tampered); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := (accept.NewVerifier(repo, l)).Verify(ctx, accept.AcceptanceRequest{RunID: tamperedRun, LaneID: tamperedLane}); err == nil {
+		t.Fatal("Acceptance accepted a result whose declaration diverges from frozen evidence")
+	}
+
+	receipt, err := (accept.NewVerifier(repo, l)).Verify(ctx, accept.AcceptanceRequest{RunID: runID, LaneID: admitted[0].ID})
+	if err != nil {
+		t.Fatalf("Acceptance.Verify() error = %v", err)
+	}
+	if receipt.Binding.BindingVersion != "binding:v2" || receipt.Binding.AuthoringEvidenceHash != candidate.AuthoringEvidenceHash || receipt.ResultHash != candidate.ResultHash {
+		t.Fatalf("acceptance binding = %+v", receipt.Binding)
+	}
+
+	manual, err := packetauthor.Compile(contract, binding)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := &wu6SpecialistRunner{contract: contract}
+	shadow := packetauthor.Observe(ctx, manual, contract, runner, binding)
+	if !shadow.Valid || !shadow.Equivalent || !shadow.DigestEqual || !shadow.ReplayStable || !shadow.ManualSelected || shadow.Warning != nil {
+		t.Fatalf("shadow comparison = %+v", shadow)
+	}
+	diffJSON, err := json.Marshal(shadow.Differences)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := l.PersistShadowAttempt(ctx, ledger.ShadowAttempt{
+		ID: "wu6-shadow", RunID: runID, LaneID: admitted[0].ID, InputHash: "typed-input", SpecialistIdentity: packetauthor.SpecialistAgentName,
+		FailureClass: string(shadow.FailureClass), Valid: shadow.Valid, Equivalent: shadow.Equivalent, ReplayStable: shadow.ReplayStable,
+		DiffJSON: string(diffJSON), ManualDigest: shadow.ManualDigest, SpecialistDigest: shadow.SpecialistDigest, LatencyMS: shadow.LatencyMS, CreatedAt: time.Now().UTC(),
+	}, &ledger.ShadowReview{AttemptID: "wu6-shadow", Reviewer: "wu6", ReviewMS: 1, CreatedAt: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	var shadowRows, receiptRows int
+	if err := l.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM packet_author_shadow_attempts WHERE id = 'wu6-shadow'`).Scan(&shadowRows); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM acceptance_receipts WHERE receipt_id = ?`, receipt.ReceiptID).Scan(&receiptRows); err != nil {
+		t.Fatal(err)
+	}
+	if shadowRows != 1 || receiptRows != 1 {
+		t.Fatalf("isolated persistence counts = shadow:%d receipt:%d", shadowRows, receiptRows)
+	}
+	if string(manual.Body) != string(compiled.Body) || shadow.ManualDigest != manual.Digest {
+		t.Fatal("shadow observation changed the canonical manual artifact")
+	}
+}
+
+func TestWU6ShadowFallbackAndDisablePreserveManualCanonicality(t *testing.T) {
+	contract := validPacketAuthorSource()
+	binding := packetauthor.TargetBinding{LegacyMain: &packetauthor.LegacyMainTarget{
+		ExpectedParentSHA: strings.Repeat("a", 40), LiveParentSHA: strings.Repeat("a", 40),
+	}}
+	manual, err := packetauthor.Compile(contract, binding)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := append([]byte(nil), manual.Body...)
+	fallback := packetauthor.Observe(context.Background(), manual, contract, specialistRunnerFunc(func(context.Context, packetauthor.SpecialistInvocation) (packetauthor.SpecialistResponse, error) {
+		return packetauthor.SpecialistResponse{Identity: "default", Output: []byte(`{}`)}, nil
+	}), binding)
+	if fallback.FailureClass != packetauthor.ShadowFailureFallbackAgent || !fallback.ManualSelected || string(manual.Body) != string(body) {
+		t.Fatalf("fallback shadow result = %+v; manual body changed", fallback)
+	}
+	disabled := packetauthor.Disabled(manual)
+	if disabled.FailureClass != packetauthor.ShadowFailureDisabled || !disabled.ManualSelected || disabled.ManualDigest != manual.Digest || string(manual.Body) != string(body) {
+		t.Fatalf("disabled shadow result = %+v; manual body changed", disabled)
+	}
+}
+
+func TestWU6AdmissionRejectsInvalidReadOnlyInput(t *testing.T) {
+	repo := initRepo(t)
+	head := currentHead(t, repo)
+	_, err := admitDispatchBatch(context.Background(), repo, []dispatchAuthoringInput{{
+		Packet: packet.Packet{
+			ID: "wu6-invalid-input", Executor: "agy", RoutedBy: "source route",
+			LegacyMain: true, ExpectedParentSHA: head, ReadOnlyPaths: []string{"../secret"},
+			Body: admittedWriteBody,
+		},
+	}})
+	var diagnostics packetauthor.Diagnostics
+	if !errors.As(err, &diagnostics) || len(diagnostics) != 1 || diagnostics[0].Code != packetauthor.CodePathInvalid {
+		t.Fatalf("admission error = %T %v, want one %s diagnostic", err, err, packetauthor.CodePathInvalid)
+	}
+}
+
+type typedIntegrationExecutor struct {
+	t         *testing.T
+	path      string
+	criterion string
+	stop      string
+	request   executor.Request
+}
+
+func (e *typedIntegrationExecutor) Run(_ context.Context, request executor.Request) (executor.Outcome, error) {
+	e.request = request
+	proof := filepath.Join(request.WorktreePath, e.path)
+	if err := os.MkdirAll(filepath.Dir(proof), 0o755); err != nil {
+		return executor.Outcome{}, err
+	}
+	if err := os.WriteFile(proof, []byte("typed proof\n"), 0o644); err != nil {
+		return executor.Outcome{}, err
+	}
+	runGit(e.t, request.WorktreePath, "add", e.path)
+	runGit(e.t, request.WorktreePath, "commit", "-m", "typed authoring proof")
+	candidate := currentHead(e.t, request.WorktreePath)
+	envelope := result.Envelope{
+		PacketID: "typed-lane", Status: "done", Summary: "typed result",
+		HardStops:    []result.HardStop{{HardStop: e.stop, Fired: false}},
+		FilesChanged: []result.FileChange{{Change: "created", Path: e.path}},
+		DoneCriteria: []result.DoneCriterion{{Criterion: e.criterion, Met: true}}, Commit: candidate,
+	}
+	data, err := json.Marshal(envelope)
+	if err != nil {
+		return executor.Outcome{}, err
+	}
+	if err := os.WriteFile(filepath.Join(request.WorktreePath, ".lucind", "result.json"), data, 0o644); err != nil {
+		return executor.Outcome{}, err
+	}
+	return executor.Outcome{ExitCode: 0}, nil
+}
+
+func (*typedIntegrationExecutor) DefaultModel() string  { return "typed-test-model" }
+func (*typedIntegrationExecutor) KnownModels() []string { return []string{"typed-test-model"} }
+
+type wu6SpecialistRunner struct {
+	contract packetauthor.Contract
+}
+
+func (r *wu6SpecialistRunner) Run(context.Context, packetauthor.SpecialistInvocation) (packetauthor.SpecialistResponse, error) {
+	data, err := json.Marshal(struct {
+		Version  string                `json:"version"`
+		Contract packetauthor.Contract `json:"contract"`
+	}{packetauthor.SpecialistOutputV1, r.contract})
+	if err != nil {
+		return packetauthor.SpecialistResponse{}, err
+	}
+	return packetauthor.SpecialistResponse{Identity: packetauthor.SpecialistAgentName, Output: data}, nil
+}
+
+func integrationHash(domain, value string) string {
+	h := sha256.New()
+	var size [8]byte
+	for _, field := range []string{domain, value} {
+		binary.BigEndian.PutUint64(size[:], uint64(len(field)))
+		_, _ = h.Write(size[:])
+		_, _ = h.Write([]byte(field))
+	}
+	return "sha256:" + hex.EncodeToString(h.Sum(nil))
+}
+
+func TestPrintAdmissionErrorOffersExplicitTargetRemediation(t *testing.T) {
+	var stderr bytes.Buffer
+	printAdmissionError(&stderr, packetauthor.Diagnostics{{
+		PacketIndex: 0, ItemIndex: -1, Code: packetauthor.CodeTargetIncomplete,
+		Field: "target", Message: "exactly one typed target is required",
+	}})
+	for _, want := range []string{"complete feature target", "--legacy-main", "--expected-parent-sha"} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Fatalf("stderr = %q, want remediation containing %q", stderr.String(), want)
+		}
+	}
+}
+
+type countingDispatchExecutor struct{ calls *int }
+
+func (e countingDispatchExecutor) Run(context.Context, executor.Request) (executor.Outcome, error) {
+	*e.calls++
+	return executor.Outcome{}, errors.New("executor should not run for a rejected batch")
+}
+func (countingDispatchExecutor) DefaultModel() string  { return "test-model" }
+func (countingDispatchExecutor) KnownModels() []string { return []string{"test-model"} }
+
+func TestRunDispatchRejectsWholeBatchBeforeQuotaAllocationAndExecutor(t *testing.T) {
+	repo := initRepo(t)
+	head := currentHead(t, repo)
+	writePacket := func(name, id, readOnlyPaths, body string) string {
+		t.Helper()
+		path := filepath.Join(repo, name)
+		content := fmt.Sprintf("---\nid: %s\nexecutor: agy\nrouted_by: test\nlegacy_main: true\nexpected_parent_sha: %s\n%s---\n%s", id, head, readOnlyPaths, body)
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	safe := writePacket("safe.md", "safe", "", admittedWriteBody)
+	unsafe := writePacket("unsafe.md", "unsafe", "read_only_paths: [\"../secret\"]\n", "## Done criteria\n- done\n\n## Return\nCommit the work.\n")
+
+	quotaCalls, allocationCalls, executorCalls := 0, 0, 0
+	origGate, origFactory := ensureAgyQuota, depsFactory
+	t.Cleanup(func() { ensureAgyQuota, depsFactory = origGate, origFactory })
+	ensureAgyQuota = func(context.Context, float64) error { quotaCalls++; return nil }
+	depsFactory = func(runID, primaryRoot string, ledg *ledger.Ledger, timeout, approvalTimeout time.Duration) lucindrun.Deps {
+		deps := origFactory(runID, primaryRoot, ledg, timeout, approvalTimeout)
+		deps.CreateWorktree = func(context.Context, string, string, string, string) (worktree.Worktree, error) {
+			allocationCalls++
+			return worktree.Worktree{Path: t.TempDir(), Branch: "lucind/test", BaseSHA: head}, nil
+		}
+		deps.LookupExecutor = func(string) (executor.Executor, error) {
+			return countingDispatchExecutor{calls: &executorCalls}, nil
+		}
+		return deps
+	}
+
+	cwd, _ := os.Getwd()
+	if err := os.Chdir(repo); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(cwd) })
+	var stdout, stderr bytes.Buffer
+	code := run(context.Background(), []string{"run", "--packet", safe, "--packet", unsafe}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("exit = %d, want 1", code)
+	}
+	if quotaCalls != 0 || allocationCalls != 0 || executorCalls != 0 {
+		t.Fatalf("side effects = quota:%d allocation:%d executor:%d, want all zero", quotaCalls, allocationCalls, executorCalls)
+	}
+	if !strings.Contains(stderr.String(), "packet[1] PA_RESULT_PATH_MISSING") || !strings.Contains(stderr.String(), "packet[1] PA_RESULT_SCHEMA_MISSING") {
+		t.Fatalf("stderr = %q, want deterministic packet-indexed diagnostics", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "packet[1] PA_PATH_INVALID read_only_paths[0]") {
+		t.Fatalf("stderr = %q, want indexed malformed input diagnostic", stderr.String())
+	}
+}
+
+func TestRunDispatchRejectsStaleCompiledBodyBeforeAllocation(t *testing.T) {
+	repo := initRepo(t)
+	head := currentHead(t, repo)
+	stale := strings.Repeat("f", 40)
+	if stale == head {
+		stale = strings.Repeat("e", 40)
+	}
+	artifact, err := packetauthor.Compile(packetauthor.Contract{
+		Version: packetauthor.ContractVersion, RouteIntent: "compiled route", Mode: packetauthor.ModeWrite,
+		WritePaths: []string{"internal/compiled"}, Goal: "Compiled goal", DoneCriteria: []string{"done"}, HardStops: []string{"stop"},
+		Result: packetauthor.ResultObligations{Path: ".lucind/result.json", Schema: ".lucind/result.schema.json"},
+	}, packetauthor.TargetBinding{LegacyMain: &packetauthor.LegacyMainTarget{ExpectedParentSHA: head, LiveParentSHA: head}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(repo, "compiled.md")
+	content := fmt.Sprintf("---\nid: compiled\nexecutor: agy\nrouted_by: compiled route\nlegacy_main: true\nexpected_parent_sha: %s\nallowed_paths: [\"internal/compiled\"]\n---\n%s", stale, artifact.Body)
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	allocations := 0
+	origFactory := depsFactory
+	t.Cleanup(func() { depsFactory = origFactory })
+	depsFactory = func(runID, primaryRoot string, ledg *ledger.Ledger, timeout, approvalTimeout time.Duration) lucindrun.Deps {
+		allocations++
+		return origFactory(runID, primaryRoot, ledg, timeout, approvalTimeout)
+	}
+	cwd, _ := os.Getwd()
+	_ = os.Chdir(repo)
+	t.Cleanup(func() { _ = os.Chdir(cwd) })
+	var stdout, stderr bytes.Buffer
+	code := run(context.Background(), []string{"run", "--packet", path, "--min-quota", "0"}, &stdout, &stderr)
+	if code != 1 || allocations != 0 || !strings.Contains(stderr.String(), packetauthor.CodeTargetStale) {
+		t.Fatalf("run = exit:%d allocations:%d stderr:%q, want stale rejection before allocation", code, allocations, stderr.String())
+	}
+}
+
+// TestRunDispatchGatesOnAgyQuotaForAgyExecutorBatch proves runDispatch calls
+// the agy quota gate (ensureAgyQuota), with the --min-quota flag's value,
+// before dispatching a batch that includes an agy-executed packet. This is
+// the wave-level gate: --packet is repeated once per lane in the same
+// invocation, so this hook fires once per wave, never once per lane.
+func TestRunDispatchGatesOnAgyQuotaForAgyExecutorBatch(t *testing.T) {
+	primaryRoot := initRepo(t)
+	p1 := writeAgyPacket(t, primaryRoot, "lane-1", "agy")
+	overrideDispatchDeps(t, testDoneExecutor{})
+
+	var gateCalled bool
+	var gateMinFraction float64
+	origGate := ensureAgyQuota
+	ensureAgyQuota = func(ctx context.Context, minFraction float64) error {
+		gateCalled = true
+		gateMinFraction = minFraction
+		return nil
+	}
+	t.Cleanup(func() { ensureAgyQuota = origGate })
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(primaryRoot); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(cwd)
+
+	var stdout, stderr bytes.Buffer
+	code := run(context.Background(), []string{"run", "--packet", p1}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run exit code = %d, want 0; stderr = %q", code, stderr.String())
+	}
+	if !gateCalled {
+		t.Fatal("ensureAgyQuota was not called for a batch containing an agy-executed packet")
+	}
+	if gateMinFraction != defaultMinQuota {
+		t.Errorf("ensureAgyQuota minFraction = %v, want default %v", gateMinFraction, defaultMinQuota)
+	}
+}
+
+// TestRunDispatchSkipsAgyQuotaGateForNonAgyBatch proves the gate is skipped
+// entirely when no packet in the batch names the agy executor, since the
+// pooled-account quota it checks is meaningless for other executors' billing.
+func TestRunDispatchSkipsAgyQuotaGateForNonAgyBatch(t *testing.T) {
+	primaryRoot := initRepo(t)
+	p1 := writeAgyPacket(t, primaryRoot, "lane-1", "cursor-agent")
+	overrideDispatchDeps(t, testDoneExecutor{})
+
+	var gateCalled bool
+	origGate := ensureAgyQuota
+	ensureAgyQuota = func(ctx context.Context, minFraction float64) error {
+		gateCalled = true
+		return nil
+	}
+	t.Cleanup(func() { ensureAgyQuota = origGate })
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(primaryRoot); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(cwd)
+
+	var stdout, stderr bytes.Buffer
+	code := run(context.Background(), []string{"run", "--packet", p1}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run exit code = %d, want 0; stderr = %q", code, stderr.String())
+	}
+	if gateCalled {
+		t.Error("ensureAgyQuota was called for a batch with no agy-executed packet, want skipped")
+	}
+}
+
+// TestRunDispatchBlocksWaveWhenAgyQuotaGateFails proves a failing quota gate
+// blocks the whole wave before any ledger or worktree side effect -- no lane
+// dispatches, and no run row is registered, matching the same "fail before
+// ExecuteBatch" contract as the batch-disjointness check above it.
+func TestRunDispatchBlocksWaveWhenAgyQuotaGateFails(t *testing.T) {
+	primaryRoot := initRepo(t)
+	p1 := writeAgyPacket(t, primaryRoot, "lane-1", "agy")
+	overrideDispatchDeps(t, testDoneExecutor{})
+
+	const gateErr = "all pooled accounts below the quota minimum"
+	origGate := ensureAgyQuota
+	ensureAgyQuota = func(ctx context.Context, minFraction float64) error {
+		return errors.New(gateErr)
+	}
+	t.Cleanup(func() { ensureAgyQuota = origGate })
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(primaryRoot); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(cwd)
+
+	var stdout, stderr bytes.Buffer
+	code := run(context.Background(), []string{"run", "--packet", p1}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("run exit code = %d, want 1 when the quota gate fails", code)
+	}
+	if !strings.Contains(stderr.String(), gateErr) {
+		t.Errorf("stderr = %q, want it to contain %q", stderr.String(), gateErr)
+	}
+	if extractRunID(stdout.String()) != "" {
+		t.Errorf("stdout = %q, want no run id line: the gate must block before RegisterRun", stdout.String())
+	}
+}
+
+// TestRunDispatchMinQuotaFlagOverridesDefault proves --min-quota reaches the
+// gate as-given.
+func TestRunDispatchMinQuotaFlagOverridesDefault(t *testing.T) {
+	primaryRoot := initRepo(t)
+	p1 := writeAgyPacket(t, primaryRoot, "lane-1", "agy")
+	overrideDispatchDeps(t, testDoneExecutor{})
+
+	var gateMinFraction float64
+	origGate := ensureAgyQuota
+	ensureAgyQuota = func(ctx context.Context, minFraction float64) error {
+		gateMinFraction = minFraction
+		return nil
+	}
+	t.Cleanup(func() { ensureAgyQuota = origGate })
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(primaryRoot); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(cwd)
+
+	var stdout, stderr bytes.Buffer
+	code := run(context.Background(), []string{"run", "--packet", p1, "--min-quota", "0.25"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run exit code = %d, want 0; stderr = %q", code, stderr.String())
+	}
+	if gateMinFraction != 0.25 {
+		t.Errorf("ensureAgyQuota minFraction = %v, want 0.25", gateMinFraction)
+	}
+}
+
+// TestRunDispatchMinQuotaZeroDisablesGate proves --min-quota 0 is an
+// explicit escape hatch: the gate is skipped even for an agy-executor batch.
+func TestRunDispatchMinQuotaZeroDisablesGate(t *testing.T) {
+	primaryRoot := initRepo(t)
+	p1 := writeAgyPacket(t, primaryRoot, "lane-1", "agy")
+	overrideDispatchDeps(t, testDoneExecutor{})
+
+	var gateCalled bool
+	origGate := ensureAgyQuota
+	ensureAgyQuota = func(ctx context.Context, minFraction float64) error {
+		gateCalled = true
+		return nil
+	}
+	t.Cleanup(func() { ensureAgyQuota = origGate })
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(primaryRoot); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(cwd)
+
+	var stdout, stderr bytes.Buffer
+	code := run(context.Background(), []string{"run", "--packet", p1, "--min-quota", "0"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run exit code = %d, want 0; stderr = %q", code, stderr.String())
+	}
+	if gateCalled {
+		t.Error("ensureAgyQuota was called with --min-quota 0, want the gate disabled")
+	}
+}
+
+// TestRunDispatchRecordsFailedStatusWhenLaneDoesNotFinishDone proves the run
+// row's terminal status tracks the actual outcome instead of being left at
+// "running" forever when a lane does not finish done. A run row stuck at
+// "running" would overcount serve.Model.GetOverview's ActiveRunCount
+// indefinitely -- the exact "phantom active dispatch" state the console
+// must never show.
+func TestRunDispatchRecordsFailedStatusWhenLaneDoesNotFinishDone(t *testing.T) {
+	primaryRoot := initRepo(t)
+
+	p1 := filepath.Join(primaryRoot, "packet-1.md")
+	p1Content := "---\n" +
+		"id: lane-1\n" +
+		"executor: agy\n" +
+		"routed_by: test\n" +
+		"legacy_main: true\n" +
+		"expected_parent_sha: 1111111111111111111111111111111111111111\n" +
+		"---\n" +
+		admittedWriteBody
+	if err := os.WriteFile(p1, []byte(p1Content), 0o644); err != nil {
+		t.Fatalf("write packet 1: %v", err)
+	}
+
+	overrideDispatchDeps(t, testDoneExecutor{
+		exitCode: 1,
+		envelope: `{"packet_id": "lane-1", "status": "blocked", "summary": "blocked", "hard_stops": [{"hard_stop": "stop", "fired": true, "note": "test block"}]}`,
+	})
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(primaryRoot); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(cwd)
+
+	var stdout, stderr bytes.Buffer
+	code := run(context.Background(), []string{"run", "--packet", p1}, &stdout, &stderr)
+	if code == 0 {
+		t.Fatalf("run exit code = 0, want non-zero after a blocked lane; stdout = %q", stdout.String())
+	}
+
+	runID := extractRunID(stdout.String())
+	if runID == "" {
+		t.Fatalf("stdout has no run id line; stdout = %q", stdout.String())
+	}
+
+	l, err := ledger.Open(context.Background(), primaryRoot)
+	if err != nil {
+		t.Fatalf("ledger.Open: %v", err)
+	}
+	defer l.Close()
+
+	got, err := l.GetRun(context.Background(), runID)
+	if err != nil {
+		t.Fatalf("GetRun(%q): %v", runID, err)
+	}
+	if got.Status == string(lane.Running) {
+		t.Error(`run.Status is still "running" after the dispatch concluded, want a terminal status`)
+	}
+	if got.EndedAt == nil {
+		t.Error("run.EndedAt is nil, want a terminal timestamp even on a non-done outcome")
+	}
+}
+
 const persistEnvelopeFinding = "integrated lane Findings must survive worktree removal"
 
 // TestRunDispatchPersistsIntegratedLaneEnvelopeToPrimaryRoot proves that
@@ -1160,9 +2095,9 @@ func TestRunDispatchPersistsIntegratedLaneEnvelopeToPrimaryRoot(t *testing.T) {
 		"executor: agy\n" +
 		"routed_by: test\n" +
 		"legacy_main: true\n" +
-		"expected_parent_sha: 1111111111111111111111111111111111111111\n" +
+		"expected_parent_sha: " + currentHead(t, primaryRoot) + "\n" +
 		"---\n" +
-		"Task 1\n"
+		admittedWriteBody
 	if err := os.WriteFile(p1, []byte(p1Content), 0o644); err != nil {
 		t.Fatalf("write packet 1: %v", err)
 	}
@@ -1171,6 +2106,7 @@ func TestRunDispatchPersistsIntegratedLaneEnvelopeToPrimaryRoot(t *testing.T) {
 	defer func() { depsFactory = origFactory }()
 	depsFactory = func(runID, primaryRoot string, ledg *ledger.Ledger, timeout, approvalTimeout time.Duration) lucindrun.Deps {
 		deps := origFactory(runID, primaryRoot, ledg, timeout, approvalTimeout)
+		deps.ResolveCandidateIdentity = stubCandidateIdentity
 		deps.CreateWorktree = func(ctx context.Context, primaryRoot, laneID, parentRef, baseSHA string) (worktree.Worktree, error) {
 			return worktree.Worktree{Path: t.TempDir(), Branch: "branch-" + laneID}, nil
 		}
@@ -1183,7 +2119,7 @@ func TestRunDispatchPersistsIntegratedLaneEnvelopeToPrimaryRoot(t *testing.T) {
 		deps.LookupExecutor = func(name string) (executor.Executor, error) {
 			return testDoneExecutorWithFindings{}, nil
 		}
-		deps.CombineTree = func(ctx context.Context, primaryRoot, runID string, branches []string) (string, string, error) {
+		deps.CombineTree = func(ctx context.Context, primaryRoot, runID, parentRef, baseSHA string, branches []string) (string, string, error) {
 			return t.TempDir(), "integration-branch", nil
 		}
 		deps.RunChecks = func(ctx context.Context, worktreePath string) (bool, string, error) {
@@ -1254,7 +2190,16 @@ type testDoneExecutor struct {
 func (e testDoneExecutor) Run(ctx context.Context, req executor.Request) (executor.Outcome, error) {
 	envelope := e.envelope
 	if envelope == "" {
-		envelope = `{"packet_id": "lane-1", "status": "done", "summary": "done", "hard_stops": []}`
+		skills := req.RequiredSkills
+		if skills == nil {
+			skills = []string{}
+		}
+		skillsJSON, _ := json.Marshal(skills)
+		pid := filepath.Base(req.WorktreePath)
+		if pid == "" || pid == "." {
+			pid = "lane-1"
+		}
+		envelope = fmt.Sprintf(`{"packet_id": %q, "status": "done", "summary": "done", "hard_stops": [], "skills_loaded": %s}`, pid, string(skillsJSON))
 	}
 	envelopePath := filepath.Join(req.WorktreePath, ".lucind", "result.json")
 	_ = os.MkdirAll(filepath.Dir(envelopePath), 0o755)
@@ -1316,8 +2261,8 @@ func writeApplyDagTwoPacketFixture(t *testing.T) (wave1Path, wave2Path string) {
 	if err := os.MkdirAll(bodiesDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	rootBody := "## Goal\n\nRoot packet work that the leaf depends on.\n"
-	leafBody := "## Goal\n\nLeaf packet work that runs after the root.\n"
+	rootBody := "## Goal\n\nRoot packet work that the leaf depends on.\n\n" + admittedWriteBody
+	leafBody := "## Goal\n\nLeaf packet work that runs after the root.\n\n" + admittedWriteBody
 	if err := os.WriteFile(filepath.Join(bodiesDir, "apply-root.md"), []byte(rootBody), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -1333,7 +2278,7 @@ packets:
     legacy_main: true
     expected_parent_sha: 1111111111111111111111111111111111111111
     allowed_paths:
-      - internal/root/
+      - internal/root
     depends_on: []
     body_path: bodies/apply-root.md
   - id: apply-leaf
@@ -1342,7 +2287,7 @@ packets:
     legacy_main: true
     expected_parent_sha: 1111111111111111111111111111111111111111
     allowed_paths:
-      - internal/leaf/
+      - internal/leaf
     depends_on:
       - apply-root
     body_path: bodies/apply-leaf.md
@@ -1388,10 +2333,21 @@ func packetPathFromWaveLine(t *testing.T, line string) string {
 // Block as a git failure once emitted packets carry allowed_paths.
 func overrideDispatchDeps(t *testing.T, exec executor.Executor) {
 	t.Helper()
+	origQuota := ensureAgyQuota
+	t.Cleanup(func() { ensureAgyQuota = origQuota })
+	ensureAgyQuota = func(context.Context, float64) error {
+		return nil
+	}
+	origResolver := resolveAdmissionRefSHA
+	t.Cleanup(func() { resolveAdmissionRefSHA = origResolver })
+	resolveAdmissionRefSHA = func(context.Context, string, string) (string, error) {
+		return "1111111111111111111111111111111111111111", nil
+	}
 	origFactory := depsFactory
 	t.Cleanup(func() { depsFactory = origFactory })
 	depsFactory = func(runID, primaryRoot string, ledg *ledger.Ledger, timeout, approvalTimeout time.Duration) lucindrun.Deps {
 		deps := origFactory(runID, primaryRoot, ledg, timeout, approvalTimeout)
+		deps.ResolveCandidateIdentity = stubCandidateIdentity
 		deps.CreateWorktree = origFactory(runID, primaryRoot, ledg, timeout, approvalTimeout).CreateWorktree
 		deps.HasUniqueLaneCommits = func(ctx context.Context, worktreePath, baseSHA string) (bool, error) {
 			return true, nil
@@ -1402,7 +2358,7 @@ func overrideDispatchDeps(t *testing.T, exec executor.Executor) {
 		deps.LookupExecutor = func(name string) (executor.Executor, error) {
 			return exec, nil
 		}
-		deps.CombineTree = func(ctx context.Context, primaryRoot, runID string, branches []string) (string, string, error) {
+		deps.CombineTree = func(ctx context.Context, primaryRoot, runID, parentRef, baseSHA string, branches []string) (string, string, error) {
 			return t.TempDir(), "integration-branch", nil
 		}
 		deps.RunChecks = func(ctx context.Context, worktreePath string) (bool, string, error) {
@@ -1422,6 +2378,12 @@ func overrideDispatchDeps(t *testing.T, exec executor.Executor) {
 		}
 		return deps
 	}
+}
+
+func stubCandidateIdentity(context.Context, string, string, string) (lucindrun.CandidateIdentity, error) {
+	return lucindrun.CandidateIdentity{
+		BaseCommit: "base-commit", BaseTree: "base-tree", CandidateCommit: "candidate-commit", CandidateTree: "candidate-tree",
+	}, nil
 }
 
 // TestApplyDagTwoWaveSequentialDispatch (Phase 7.3) parses the two
@@ -1621,6 +2583,9 @@ func TestRunCheckScriptPasses(t *testing.T) {
 	}
 	if !strings.Contains(strings.ToLower(outStr), "duration") {
 		t.Errorf("stdout = %q, want it to contain execution duration", outStr)
+	}
+	if !strings.Contains(outStr, "resolved root:") {
+		t.Errorf("stdout = %q, want it to contain 'resolved root:'", outStr)
 	}
 }
 
@@ -1905,26 +2870,6 @@ func TestFormatMechanicalLogHeader(t *testing.T) {
 	}
 }
 
-func TestServeNonLoopbackAddrRejectedAtCLI(t *testing.T) {
-	var stdout, stderr bytes.Buffer
-	code := run(context.Background(), []string{"serve", "--addr", "0.0.0.0:7433"}, &stdout, &stderr)
-	if code == 0 {
-		t.Fatalf("serve with 0.0.0.0 exit code = 0, want non-zero")
-	}
-	if !strings.Contains(strings.ToLower(stderr.String()), "loopback") {
-		t.Fatalf("stderr = %q, want it to mention loopback error", stderr.String())
-	}
-}
-
-func TestServeFlagsAndSubcommandRecognized(t *testing.T) {
-	var stdout, stderr bytes.Buffer
-	// Invalid flag should fail with usage
-	code := run(context.Background(), []string{"serve", "--invalid-flag"}, &stdout, &stderr)
-	if code == 0 {
-		t.Fatalf("serve with invalid flag exit code = 0, want non-zero")
-	}
-}
-
 func TestDefaultApproverNotEmpty(t *testing.T) {
 	app := defaultApprover()
 	if app == "" {
@@ -1955,7 +2900,7 @@ func TestRunLegacyModeDispatch(t *testing.T) {
 			"executor: agy\n" +
 			"routed_by: legacy dispatch\n" +
 			"---\n" +
-			"Legacy task\n"
+			admittedWriteBody
 		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -1996,7 +2941,7 @@ func TestRunLegacyModeDispatch(t *testing.T) {
 			"executor: agy\n" +
 			"routed_by: legacy dispatch\n" +
 			"---\n" +
-			"Legacy task\n"
+			admittedWriteBody
 		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -2396,10 +3341,10 @@ func TestFeatureRenewCLI(t *testing.T) {
 		}
 		defer ledg2.Close()
 
-		model := serve.NewModel(ledg2)
-		newLease, err := model.GetLease(context.Background(), "feat-renew")
+		featSvc := feature.NewService(ledg2)
+		newLease, err := featSvc.GetLease(context.Background(), "feat-renew")
 		if err != nil {
-			t.Fatalf("model.GetLease error = %v", err)
+			t.Fatalf("featSvc.GetLease error = %v", err)
 		}
 		if !newLease.ExpiresAt.After(lease.ExpiresAt) {
 			t.Errorf("renewed expires_at = %v, want it after original %v", newLease.ExpiresAt, lease.ExpiresAt)
@@ -2464,6 +3409,119 @@ func TestFeatureRenewCLI(t *testing.T) {
 	})
 }
 
+// TestFeatureDisableCLI covers "lucind-ai feature disable": the supported way
+// to retire a feature registered against a base that turned out to be
+// unusable, so it stops counting as active and its ID can be reused with a
+// corrected anchor -- see internal/feature.Service.reactivateDisabled.
+func TestFeatureDisableCLI(t *testing.T) {
+	primaryRoot := initRepo(t)
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(primaryRoot); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(cwd)
+
+	redBaseSHA := "1111111111111111111111111111111111111111"
+	greenBaseSHA := "4444444444444444444444444444444444444444"
+
+	ledg, err := ledger.Open(context.Background(), primaryRoot)
+	if err != nil {
+		t.Fatalf("ledger.Open error = %v", err)
+	}
+	featSvc := feature.NewService(ledg)
+	if _, err := featSvc.Create(context.Background(), "feat-stale", "refs/heads/feature-stale", redBaseSHA); err != nil {
+		t.Fatalf("featSvc.Create error = %v", err)
+	}
+	ledg.Close()
+
+	t.Run("disables an active feature", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		code := run(context.Background(), []string{"feature", "disable", "--id", "feat-stale"}, &stdout, &stderr)
+		if code != 0 {
+			t.Fatalf("feature disable exit code = %d, want 0; stderr = %q", code, stderr.String())
+		}
+		if !strings.Contains(stdout.String(), "feat-stale") || !strings.Contains(stdout.String(), "disabled") {
+			t.Errorf("stdout = %q, want it to report feat-stale disabled", stdout.String())
+		}
+
+		ledg2, err := ledger.Open(context.Background(), primaryRoot)
+		if err != nil {
+			t.Fatalf("ledger.Open error = %v", err)
+		}
+		defer ledg2.Close()
+
+		f, err := feature.NewService(ledg2).Get(context.Background(), "feat-stale")
+		if err != nil {
+			t.Fatalf("Get after disable error = %v", err)
+		}
+		if f.Status != feature.StatusDisabled {
+			t.Errorf("f.Status = %v, want disabled", f.Status)
+		}
+
+		active, err := ledg2.ActiveFeatures(context.Background())
+		if err != nil {
+			t.Fatalf("ActiveFeatures error = %v", err)
+		}
+		for _, af := range active {
+			if af.ID == "feat-stale" {
+				t.Errorf("ActiveFeatures still lists disabled feature %q", af.ID)
+			}
+		}
+	})
+
+	t.Run("feature create re-anchors and reactivates the disabled id with a new base", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		code := run(context.Background(), []string{
+			"feature", "create",
+			"--id", "feat-stale",
+			"--parent", "refs/heads/feature-stale-corrected",
+			"--base-sha", greenBaseSHA,
+		}, &stdout, &stderr)
+		if code != 0 {
+			t.Fatalf("feature create (re-anchor) exit code = %d, want 0; stderr = %q", code, stderr.String())
+		}
+
+		ledg2, err := ledger.Open(context.Background(), primaryRoot)
+		if err != nil {
+			t.Fatalf("ledger.Open error = %v", err)
+		}
+		defer ledg2.Close()
+
+		f, err := feature.NewService(ledg2).Get(context.Background(), "feat-stale")
+		if err != nil {
+			t.Fatalf("Get after re-anchor error = %v", err)
+		}
+		if f.Status != feature.StatusActive || f.BaseSHA != greenBaseSHA || f.ParentRef != "refs/heads/feature-stale-corrected" {
+			t.Errorf("reanchored feature = %+v, want active with base_sha %s", f, greenBaseSHA)
+		}
+	})
+
+	t.Run("disabling an unknown id fails with non-zero exit", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		code := run(context.Background(), []string{"feature", "disable", "--id", "feat-does-not-exist"}, &stdout, &stderr)
+		if code == 0 {
+			t.Fatalf("feature disable on unknown id exit code = 0, want non-zero")
+		}
+		if stderr.String() == "" {
+			t.Errorf("stderr is empty, want an error surfaced")
+		}
+	})
+
+	t.Run("missing --id fails with usage/error", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		code := run(context.Background(), []string{"feature", "disable"}, &stdout, &stderr)
+		if code == 0 {
+			t.Fatalf("feature disable without --id exit code = 0, want non-zero")
+		}
+		if !strings.Contains(stderr.String(), "--id") {
+			t.Errorf("stderr = %q, want it to contain %q", stderr.String(), "--id")
+		}
+	})
+}
+
 func TestWorktreeCleanupCLI(t *testing.T) {
 	if testing.Short() {
 		t.Skip("shells out to real git")
@@ -2496,6 +3554,81 @@ func TestWorktreeCleanupCLI(t *testing.T) {
 		}
 	})
 
+	t.Run("unforced dirty cleanup exits 1 with diagnostics and preserves files", func(t *testing.T) {
+		wt, err := worktree.Create(context.Background(), primaryRoot, "dirty-lane")
+		if err != nil {
+			t.Fatalf("worktree.Create error = %v", err)
+		}
+
+		dirtyFile := filepath.Join(wt.Path, "wip.txt")
+		if err := os.WriteFile(dirtyFile, []byte("uncommitted work in progress\n"), 0o644); err != nil {
+			t.Fatalf("WriteFile error = %v", err)
+		}
+
+		var stdout, stderr bytes.Buffer
+		code := run(context.Background(), []string{"worktree", "cleanup", "--lane", "dirty-lane"}, &stdout, &stderr)
+		if code != 1 {
+			t.Fatalf("worktree cleanup without --force on dirty tree exit code = %d, want 1; stderr = %q", code, stderr.String())
+		}
+
+		stderrStr := stderr.String()
+		if !strings.Contains(stderrStr, "troubleshooting.md") {
+			t.Errorf("stderr = %q, want diagnostic pointer to troubleshooting.md", stderrStr)
+		}
+		if !strings.Contains(stderrStr, "--force") {
+			t.Errorf("stderr = %q, want mention of --force flag", stderrStr)
+		}
+		if !strings.Contains(stderrStr, "git") || !strings.Contains(stderrStr, "diff") {
+			t.Errorf("stderr = %q, want git diff / status inspection commands", stderrStr)
+		}
+
+		if _, err := os.Stat(dirtyFile); err != nil {
+			t.Errorf("dirty file was deleted: %v", err)
+		}
+		if !worktree.IsLinkedWorktree(wt.Path) {
+			t.Errorf("worktree was removed despite being dirty")
+		}
+	})
+
+	t.Run("dirty cleanup with --force exits 0 and removes files", func(t *testing.T) {
+		wtPath := filepath.Join(filepath.Dir(primaryRoot), filepath.Base(primaryRoot)+"-worktrees", "dirty-lane")
+		if !worktree.IsLinkedWorktree(wtPath) {
+			t.Fatalf("dirty-lane worktree does not exist before --force cleanup")
+		}
+
+		var stdout, stderr bytes.Buffer
+		code := run(context.Background(), []string{"worktree", "cleanup", "--lane", "dirty-lane", "--force"}, &stdout, &stderr)
+		if code != 0 {
+			t.Fatalf("worktree cleanup with --force exit code = %d, want 0; stderr = %q", code, stderr.String())
+		}
+
+		if _, err := os.Stat(wtPath); !os.IsNotExist(err) {
+			t.Errorf("os.Stat(%q) err = %v, want os.IsNotExist after forced cleanup", wtPath, err)
+		}
+	})
+
+	t.Run("dirty cleanup with -f exits 0 and removes files", func(t *testing.T) {
+		wt, err := worktree.Create(context.Background(), primaryRoot, "dirty-lane-short")
+		if err != nil {
+			t.Fatalf("worktree.Create error = %v", err)
+		}
+
+		dirtyFile := filepath.Join(wt.Path, "wip.txt")
+		if err := os.WriteFile(dirtyFile, []byte("uncommitted work\n"), 0o644); err != nil {
+			t.Fatalf("WriteFile error = %v", err)
+		}
+
+		var stdout, stderr bytes.Buffer
+		code := run(context.Background(), []string{"worktree", "cleanup", "--lane", "dirty-lane-short", "-f"}, &stdout, &stderr)
+		if code != 0 {
+			t.Fatalf("worktree cleanup with -f exit code = %d, want 0; stderr = %q", code, stderr.String())
+		}
+
+		if _, err := os.Stat(wt.Path); !os.IsNotExist(err) {
+			t.Errorf("os.Stat(%q) err = %v, want os.IsNotExist after -f cleanup", wt.Path, err)
+		}
+	})
+
 	t.Run("nonexistent lane is idempotent and still exits 0", func(t *testing.T) {
 		var stdout, stderr bytes.Buffer
 		code := run(context.Background(), []string{"worktree", "cleanup", "--lane", "never-existed"}, &stdout, &stderr)
@@ -2512,6 +3645,30 @@ func TestWorktreeCleanupCLI(t *testing.T) {
 		}
 		if !strings.Contains(stderr.String(), "--lane") {
 			t.Errorf("stderr = %q, want --lane mentioned", stderr.String())
+		}
+	})
+
+	t.Run("refuses invocation from inside linked worktree", func(t *testing.T) {
+		wt, err := worktree.Create(context.Background(), primaryRoot, "inner-wt")
+		if err != nil {
+			t.Fatalf("worktree.Create error = %v", err)
+		}
+		defer func() {
+			_ = os.Chdir(primaryRoot)
+			_ = worktree.Remove(context.Background(), primaryRoot, wt.Path, true)
+		}()
+
+		if err := os.Chdir(wt.Path); err != nil {
+			t.Fatalf("Chdir error = %v", err)
+		}
+
+		var stdout, stderr bytes.Buffer
+		code := run(context.Background(), []string{"worktree", "cleanup", "--lane", "inner-wt"}, &stdout, &stderr)
+		if code != 1 {
+			t.Fatalf("worktree cleanup inside linked worktree exit code = %d, want 1; stderr = %q", code, stderr.String())
+		}
+		if !strings.Contains(stderr.String(), "refusing to run from inside a linked worktree") {
+			t.Errorf("stderr = %q, want linked worktree refusal error", stderr.String())
 		}
 	})
 }
@@ -2879,6 +4036,35 @@ func TestReconcileResolveCLI(t *testing.T) {
 	})
 }
 
+func TestReconcileResolve_RejectsLinkedWorktree(t *testing.T) {
+	primaryRoot := initRepo(t)
+	linked := filepath.Join(t.TempDir(), "linked")
+	runGit(t, primaryRoot, "worktree", "add", linked, "-b", "linked-resolve")
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(linked); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(cwd)
+
+	var stdout, stderr bytes.Buffer
+	code := run(context.Background(), []string{
+		"reconcile", "resolve",
+		"--candidate", "cand-linked",
+		"--sha", "HEAD",
+		"--actor", "test-actor",
+	}, &stdout, &stderr)
+	if code == 0 {
+		t.Fatalf("reconcile resolve from linked worktree exit code = 0, want non-zero; stdout=%q stderr=%q", stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "linked worktree") {
+		t.Errorf("stderr = %q, want linked worktree refusal", stderr.String())
+	}
+}
+
 func TestReconcileDeclineCancelRenewCLI(t *testing.T) {
 	primaryRoot := initRepo(t)
 	cwd, err := os.Getwd()
@@ -3069,19 +4255,20 @@ func TestReconcileDeclineCancelRenewCLI(t *testing.T) {
 	})
 }
 
-
-
-
-
-
 // featureDispatchDeps stubs the compare-and-swap promotion path so a
 // feature-targeted dispatch can be driven end to end without a second real
 // feature branch in the fixture repository.
 func featureDispatchDeps(t *testing.T, promoted *[]string) func(string, string, *ledger.Ledger, time.Duration, time.Duration) lucindrun.Deps {
 	t.Helper()
+	origResolver := resolveAdmissionRefSHA
+	t.Cleanup(func() { resolveAdmissionRefSHA = origResolver })
+	resolveAdmissionRefSHA = func(context.Context, string, string) (string, error) {
+		return "1111111111111111111111111111111111111111", nil
+	}
 	origFactory := depsFactory
 	return func(runID, primaryRoot string, ledg *ledger.Ledger, timeout, approvalTimeout time.Duration) lucindrun.Deps {
 		deps := origFactory(runID, primaryRoot, ledg, timeout, approvalTimeout)
+		deps.ResolveCandidateIdentity = stubCandidateIdentity
 		deps.CreateWorktree = func(ctx context.Context, primaryRoot, laneID, parentRef, baseSHA string) (worktree.Worktree, error) {
 			return worktree.Worktree{Path: t.TempDir(), Branch: "branch-" + laneID}, nil
 		}
@@ -3094,7 +4281,7 @@ func featureDispatchDeps(t *testing.T, promoted *[]string) func(string, string, 
 		deps.LookupExecutor = func(name string) (executor.Executor, error) {
 			return testDoneExecutor{}, nil
 		}
-		deps.CombineTree = func(ctx context.Context, primaryRoot, runID string, branches []string) (string, string, error) {
+		deps.CombineTree = func(ctx context.Context, primaryRoot, runID, parentRef, baseSHA string, branches []string) (string, string, error) {
 			return t.TempDir(), "integration-branch", nil
 		}
 		deps.RunChecks = func(ctx context.Context, worktreePath string) (bool, string, error) {
@@ -3141,7 +4328,7 @@ func TestRunDispatchFeatureBatchRecordsIntegrationAttempt(t *testing.T) {
 		"base_sha: 1111111111111111111111111111111111111111\n" +
 		"expected_parent_sha: 1111111111111111111111111111111111111111\n" +
 		"---\n" +
-		"Task 1\n"
+		admittedWriteBody
 	if err := os.WriteFile(p1, []byte(p1Content), 0o644); err != nil {
 		t.Fatalf("write packet 1: %v", err)
 	}
@@ -3211,7 +4398,7 @@ func TestRunDispatchRejectsMixedFeatureTargets(t *testing.T) {
 			"base_sha: 1111111111111111111111111111111111111111\n" +
 			"expected_parent_sha: 1111111111111111111111111111111111111111\n" +
 			"---\n" +
-			"Task\n"
+			admittedWriteBody
 		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 			t.Fatalf("write packet %s: %v", name, err)
 		}
@@ -3220,11 +4407,17 @@ func TestRunDispatchRejectsMixedFeatureTargets(t *testing.T) {
 
 	p1 := writePacket("packet-1.md", "lane-a", "feat-alpha")
 	p2 := writePacket("packet-2.md", "lane-b", "feat-beta")
+	origResolver := resolveAdmissionRefSHA
+	t.Cleanup(func() { resolveAdmissionRefSHA = origResolver })
+	resolveAdmissionRefSHA = func(context.Context, string, string) (string, error) {
+		return "1111111111111111111111111111111111111111", nil
+	}
 
 	origFactory := depsFactory
 	t.Cleanup(func() { depsFactory = origFactory })
 	depsFactory = func(runID, primaryRoot string, ledg *ledger.Ledger, timeout, approvalTimeout time.Duration) lucindrun.Deps {
 		deps := origFactory(runID, primaryRoot, ledg, timeout, approvalTimeout)
+		deps.ResolveCandidateIdentity = stubCandidateIdentity
 		deps.CreateWorktree = func(ctx context.Context, primaryRoot, laneID, parentRef, baseSHA string) (worktree.Worktree, error) {
 			t.Errorf("CreateWorktree called for lane %q; a mixed-target batch must be rejected before any lane dispatches", laneID)
 			return worktree.Worktree{}, nil
@@ -3248,5 +4441,1510 @@ func TestRunDispatchRejectsMixedFeatureTargets(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "same feature target") {
 		t.Errorf("stderr = %q, want it to explain that one batch promotes onto one feature target", stderr.String())
+	}
+}
+
+// TestIntegrateRetryCLI proves the Defect B fix end to end: a lane that
+// reaches its own "done" but is reverted only because the batch-level
+// checks fail (e.g. the base was red, unrelated to the lane's own work) can
+// be re-integrated later, once the base is fixed, WITHOUT redispatching the
+// lane -- "lucind-ai integrate retry" rebuilds the batch straight from the
+// ledger and the lane's own preserved worktree/result envelope.
+func TestIntegrateRetryCLI(t *testing.T) {
+	primaryRoot := initRepo(t)
+
+	p1 := filepath.Join(primaryRoot, "packet-1.md")
+	p1Content := "---\n" +
+		"id: lane-retry-1\n" +
+		"executor: agy\n" +
+		"routed_by: test\n" +
+		"feature: feat-retry\n" +
+		"parent_ref: refs/heads/feature-retry\n" +
+		"base_sha: 1111111111111111111111111111111111111111\n" +
+		"expected_parent_sha: 1111111111111111111111111111111111111111\n" +
+		"---\n" +
+		admittedWriteBody
+	if err := os.WriteFile(p1, []byte(p1Content), 0o644); err != nil {
+		t.Fatalf("write packet 1: %v", err)
+	}
+
+	var (
+		checksPass bool
+		promoted   []string
+	)
+	origResolver := resolveAdmissionRefSHA
+	t.Cleanup(func() { resolveAdmissionRefSHA = origResolver })
+	resolveAdmissionRefSHA = func(context.Context, string, string) (string, error) {
+		return "1111111111111111111111111111111111111111", nil
+	}
+	origFactory := depsFactory
+	t.Cleanup(func() { depsFactory = origFactory })
+	depsFactory = func(runID, primaryRoot string, ledg *ledger.Ledger, timeout, approvalTimeout time.Duration) lucindrun.Deps {
+		deps := origFactory(runID, primaryRoot, ledg, timeout, approvalTimeout)
+		deps.ResolveCandidateIdentity = stubCandidateIdentity
+		deps.CreateWorktree = func(ctx context.Context, primaryRoot, laneID, parentRef, baseSHA string) (worktree.Worktree, error) {
+			return worktree.Worktree{Path: t.TempDir(), Branch: "branch-" + laneID}, nil
+		}
+		deps.HasUniqueLaneCommits = func(ctx context.Context, worktreePath, baseSHA string) (bool, error) {
+			return true, nil
+		}
+		deps.PorcelainEmpty = func(ctx context.Context, worktreePath string) (bool, error) {
+			return true, nil
+		}
+		deps.LookupExecutor = func(name string) (executor.Executor, error) {
+			return testDoneExecutor{envelope: `{"packet_id": "lane-retry-1", "status": "done", "summary": "done", "hard_stops": []}`}, nil
+		}
+		deps.CombineTree = func(ctx context.Context, primaryRoot, runID, parentRef, baseSHA string, branches []string) (string, string, error) {
+			return t.TempDir(), "integration-branch", nil
+		}
+		// checksPass simulates the base itself going from red to green
+		// between the original dispatch and the later retry, with no
+		// change at all to the lane's own work.
+		deps.RunChecks = func(ctx context.Context, worktreePath string) (bool, string, error) {
+			if checksPass {
+				return true, "", nil
+			}
+			return false, "base is red", nil
+		}
+		deps.ResolveRefSHA = func(ctx context.Context, primaryRoot, ref string) (string, error) {
+			return "1111111111111111111111111111111111111111", nil
+		}
+		deps.ResolveCandidateSHA = func(ctx context.Context, primaryRoot, worktreePath, branch string) (string, error) {
+			return "2222222222222222222222222222222222222222", nil
+		}
+		deps.PromoteCAS = func(ctx context.Context, primaryRoot, parentRef, candidateSHA, expectedSHA string) error {
+			promoted = append(promoted, parentRef+" "+expectedSHA+"->"+candidateSHA)
+			return nil
+		}
+		deps.PromoteTarget = func(ctx context.Context, primaryRoot, integrationBranch string) error {
+			t.Errorf("PromoteTarget called on a feature-targeted batch; promotion must go through the compare-and-swap attempt path")
+			return nil
+		}
+		deps.DiscardCombined = func(ctx context.Context, primaryRoot, worktreePath, branchName string) error {
+			return nil
+		}
+		deps.RemoveLaneWorktree = func(ctx context.Context, primaryRoot, worktreePath, branch string) error {
+			return nil
+		}
+		return deps
+	}
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(primaryRoot); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(cwd)
+
+	// Original dispatch: the lane itself reaches "done", but the base is
+	// red, so the batch-level checks fail and the lane is reverted.
+	checksPass = false
+	var stdout, stderr bytes.Buffer
+	code := run(context.Background(), []string{"run", "--packet", p1}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("initial run exit code = %d, want 1 (reverted); stderr = %q stdout = %q", code, stderr.String(), stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "reverted_ids: lane-retry-1") {
+		t.Fatalf("initial run stdout = %q, want lane-retry-1 in reverted_ids", stdout.String())
+	}
+	if len(promoted) != 0 {
+		t.Fatalf("PromoteCAS calls = %v, want none from the reverted first attempt", promoted)
+	}
+
+	runID := extractRunID(stdout.String())
+	if runID == "" {
+		t.Fatalf("could not extract run id from stdout: %q", stdout.String())
+	}
+
+	// The base is fixed; retry integration for the SAME run, with no
+	// redispatch of lane-retry-1.
+	checksPass = true
+	var retryStdout, retryStderr bytes.Buffer
+	retryCode := run(context.Background(), []string{"integrate", "retry", "--run", runID}, &retryStdout, &retryStderr)
+	if retryCode != 0 {
+		t.Fatalf("integrate retry exit code = %d, want 0; stderr = %q stdout = %q", retryCode, retryStderr.String(), retryStdout.String())
+	}
+	if !strings.Contains(retryStdout.String(), "integrated_ids: lane-retry-1") {
+		t.Errorf("retry stdout = %q, want lane-retry-1 in integrated_ids", retryStdout.String())
+	}
+	if len(promoted) != 1 {
+		t.Fatalf("PromoteCAS calls = %v, want exactly one compare-and-swap promotion from the retry", promoted)
+	}
+	want := "refs/heads/feature-retry 1111111111111111111111111111111111111111->2222222222222222222222222222222222222222"
+	if promoted[0] != want {
+		t.Errorf("PromoteCAS call = %q, want %q", promoted[0], want)
+	}
+}
+
+// TestIntegrateRetryCLIRequiresRun proves --run is validated before any
+// ledger or git work happens.
+func TestIntegrateRetryCLIRequiresRun(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := run(context.Background(), []string{"integrate", "retry"}, &stdout, &stderr)
+	if code == 0 {
+		t.Fatalf("integrate retry without --run exit code = 0, want non-zero")
+	}
+	if !strings.Contains(stderr.String(), "--run") {
+		t.Errorf("stderr = %q, want it to contain %q", stderr.String(), "--run")
+	}
+}
+
+// TestIntegrateRetryCLIUnknownRun proves an unknown run id is reported
+// clearly rather than silently doing nothing.
+func TestIntegrateRetryCLIUnknownRun(t *testing.T) {
+	primaryRoot := initRepo(t)
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(primaryRoot); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(cwd)
+
+	var stdout, stderr bytes.Buffer
+	code := run(context.Background(), []string{"integrate", "retry", "--run", "run-does-not-exist"}, &stdout, &stderr)
+	if code == 0 {
+		t.Fatalf("integrate retry with unknown run exit code = 0, want non-zero")
+	}
+	if stderr.String() == "" {
+		t.Errorf("stderr is empty, want an error surfaced")
+	}
+}
+
+func TestDefectSubcommandUnknownAction(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	codeNoAction := run(context.Background(), []string{"defect"}, &stdout, &stderr)
+	if codeNoAction == 0 {
+		t.Fatalf("lucind-ai defect without action exit code = 0, want non-zero")
+	}
+	if !strings.Contains(stderr.String(), "action") {
+		t.Errorf("stderr = %q, want it to mention action requirement", stderr.String())
+	}
+
+	stderr.Reset()
+	codeUnknown := run(context.Background(), []string{"defect", "bogus"}, &stdout, &stderr)
+	if codeUnknown == 0 {
+		t.Fatalf("lucind-ai defect bogus exit code = 0, want non-zero")
+	}
+	if !strings.Contains(stderr.String(), "unknown defect subcommand") {
+		t.Errorf("stderr = %q, want it to mention unknown defect subcommand", stderr.String())
+	}
+}
+
+func TestDefectListCLIRequiresFeature(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := run(context.Background(), []string{"defect", "list"}, &stdout, &stderr)
+	if code == 0 {
+		t.Fatalf("lucind-ai defect list without --feature exit code = 0, want non-zero")
+	}
+	if !strings.Contains(stderr.String(), "--feature") {
+		t.Errorf("stderr = %q, want it to contain --feature", stderr.String())
+	}
+}
+
+func TestDefectRecordCLI(t *testing.T) {
+	primaryRoot := initRepo(t)
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(primaryRoot); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(cwd)
+
+	baseSHA := strings.Repeat("1", 40)
+	ctx := context.Background()
+	var stdout, stderr bytes.Buffer
+	// Create feature first
+	createCode := run(ctx, []string{"feature", "create", "--id", "feat-defect-1", "--parent", "refs/heads/feature-defect-1", "--base-sha", baseSHA}, &stdout, &stderr)
+	if createCode != 0 {
+		t.Fatalf("feature create exit code = %d, want 0; stderr = %q", createCode, stderr.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	recordCode := run(ctx, []string{
+		"defect", "record",
+		"--id", "defect-rec-1",
+		"--feature", "feat-defect-1",
+		"--signature", "TestAuthFailed",
+		"--evidence", "stack trace: nil pointer",
+		"--disposition", "recorded",
+	}, &stdout, &stderr)
+	if recordCode != 0 {
+		t.Fatalf("defect record exit code = %d, want 0; stderr = %q", recordCode, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "recorded defect defect-rec-1 for feature feat-defect-1") {
+		t.Errorf("stdout = %q, want recorded defect confirmation", stdout.String())
+	}
+
+	// Verify defect is persisted in ledger
+	ledg, err := ledger.Open(ctx, primaryRoot)
+	if err != nil {
+		t.Fatalf("open ledger: %v", err)
+	}
+	defer ledg.Close()
+
+	rec, err := ledg.GetDefect(ctx, "defect-rec-1")
+	if err != nil {
+		t.Fatalf("GetDefect(defect-rec-1): %v", err)
+	}
+	if rec.ID != "defect-rec-1" || rec.FeatureID != "feat-defect-1" ||
+		rec.ErrorSignature != "TestAuthFailed" || rec.Evidence != "stack trace: nil pointer" ||
+		rec.Disposition != ledger.DefectDispositionRecorded {
+		t.Errorf("persisted DefectRecord = %+v", rec)
+	}
+}
+
+func TestDefectRecordCLIRequiresFlags(t *testing.T) {
+	primaryRoot := initRepo(t)
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(primaryRoot); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(cwd)
+
+	ctx := context.Background()
+
+	// Missing --id
+	var stdout, stderr bytes.Buffer
+	code := run(ctx, []string{"defect", "record", "--feature", "f1", "--signature", "sig1"}, &stdout, &stderr)
+	if code == 0 || !strings.Contains(stderr.String(), "--id") {
+		t.Fatalf("defect record without --id code = %d, want non-zero; stderr = %q", code, stderr.String())
+	}
+
+	// Missing --feature
+	stdout.Reset()
+	stderr.Reset()
+	code = run(ctx, []string{"defect", "record", "--id", "id1", "--signature", "sig1"}, &stdout, &stderr)
+	if code == 0 || !strings.Contains(stderr.String(), "--feature") {
+		t.Fatalf("defect record without --feature code = %d, want non-zero; stderr = %q", code, stderr.String())
+	}
+
+	// Missing --signature
+	stdout.Reset()
+	stderr.Reset()
+	code = run(ctx, []string{"defect", "record", "--id", "id1", "--feature", "f1"}, &stdout, &stderr)
+	if code == 0 || !strings.Contains(stderr.String(), "--signature") {
+		t.Fatalf("defect record without --signature code = %d, want non-zero; stderr = %q", code, stderr.String())
+	}
+}
+
+func TestDefectListCLI(t *testing.T) {
+	primaryRoot := initRepo(t)
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(primaryRoot); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(cwd)
+
+	baseSHA := strings.Repeat("2", 40)
+	ctx := context.Background()
+	var stdout, stderr bytes.Buffer
+	// Create feature first
+	createCode := run(ctx, []string{"feature", "create", "--id", "feat-list-1", "--parent", "refs/heads/feature-list-1", "--base-sha", baseSHA}, &stdout, &stderr)
+	if createCode != 0 {
+		t.Fatalf("feature create exit code = %d, want 0; stderr = %q", createCode, stderr.String())
+	}
+
+	// Record two defects
+	run(ctx, []string{"defect", "record", "--id", "def-l-1", "--feature", "feat-list-1", "--signature", "sig-1", "--disposition", "recorded"}, &stdout, &stderr)
+	run(ctx, []string{"defect", "record", "--id", "def-l-2", "--feature", "feat-list-1", "--signature", "sig-2", "--disposition", "repaired"}, &stdout, &stderr)
+
+	stdout.Reset()
+	stderr.Reset()
+	listCode := run(ctx, []string{"defect", "list", "--feature", "feat-list-1"}, &stdout, &stderr)
+	if listCode != 0 {
+		t.Fatalf("defect list exit code = %d, want 0; stderr = %q", listCode, stderr.String())
+	}
+
+	out := stdout.String()
+	if !strings.Contains(out, "def-l-1") || !strings.Contains(out, "sig-1") || !strings.Contains(out, "recorded") {
+		t.Errorf("defect list output missing def-l-1 details: %q", out)
+	}
+	if !strings.Contains(out, "def-l-2") || !strings.Contains(out, "sig-2") || !strings.Contains(out, "repaired") {
+		t.Errorf("defect list output missing def-l-2 details: %q", out)
+	}
+}
+
+func TestDefectRecordCLIRejectsInvalidDisposition(t *testing.T) {
+	primaryRoot := initRepo(t)
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(primaryRoot); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(cwd)
+
+	baseSHA := strings.Repeat("3", 40)
+	ctx := context.Background()
+	var stdout, stderr bytes.Buffer
+	createCode := run(ctx, []string{"feature", "create", "--id", "feat-disp-test", "--parent", "refs/heads/feature-disp-test", "--base-sha", baseSHA}, &stdout, &stderr)
+	if createCode != 0 {
+		t.Fatalf("feature create exit code = %d, want 0; stderr = %q", createCode, stderr.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code := run(ctx, []string{
+		"defect", "record",
+		"--id", "def-bad-disp",
+		"--feature", "feat-disp-test",
+		"--signature", "sig",
+		"--disposition", "not-a-valid-disposition",
+	}, &stdout, &stderr)
+	if code == 0 {
+		t.Fatalf("defect record with invalid disposition exit code = %d, want non-zero", code)
+	}
+	if !strings.Contains(stderr.String(), "invalid disposition") {
+		t.Errorf("stderr = %q, want it to mention 'invalid disposition'", stderr.String())
+	}
+}
+
+func TestDefectDeclineCLI(t *testing.T) {
+	primaryRoot := initRepo(t)
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(primaryRoot); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(cwd)
+
+	baseSHA := strings.Repeat("4", 40)
+	ctx := context.Background()
+	var stdout, stderr bytes.Buffer
+	// Create feature first
+	createCode := run(ctx, []string{"feature", "create", "--id", "feat-decline-1", "--parent", "refs/heads/feature-decline-1", "--base-sha", baseSHA}, &stdout, &stderr)
+	if createCode != 0 {
+		t.Fatalf("feature create exit code = %d, want 0; stderr = %q", createCode, stderr.String())
+	}
+
+	// Record a defect with disposition recorded
+	recordCode := run(ctx, []string{
+		"defect", "record",
+		"--id", "defect-to-decline",
+		"--feature", "feat-decline-1",
+		"--signature", "TestFixMe",
+		"--evidence", "broken test",
+		"--disposition", "recorded",
+	}, &stdout, &stderr)
+	if recordCode != 0 {
+		t.Fatalf("defect record exit code = %d; stderr = %q", recordCode, stderr.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	// Decline the defect
+	declineCode := run(ctx, []string{"defect", "decline", "--id", "defect-to-decline"}, &stdout, &stderr)
+	if declineCode != 0 {
+		t.Fatalf("defect decline exit code = %d, want 0; stderr = %q", declineCode, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "declined defect defect-to-decline") {
+		t.Errorf("stdout = %q, want confirmation 'declined defect defect-to-decline'", stdout.String())
+	}
+
+	// Verify in ledger that disposition is now declined
+	ledg, err := ledger.Open(ctx, primaryRoot)
+	if err != nil {
+		t.Fatalf("open ledger: %v", err)
+	}
+	defer ledg.Close()
+
+	rec, err := ledg.GetDefect(ctx, "defect-to-decline")
+	if err != nil {
+		t.Fatalf("GetDefect: %v", err)
+	}
+	if rec.Disposition != ledger.DefectDispositionDeclined {
+		t.Errorf("Disposition = %q, want %q", rec.Disposition, ledger.DefectDispositionDeclined)
+	}
+}
+
+func TestDefectDeclineCLIRequiresFlags(t *testing.T) {
+	primaryRoot := initRepo(t)
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(primaryRoot); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(cwd)
+
+	ctx := context.Background()
+	var stdout, stderr bytes.Buffer
+	code := run(ctx, []string{"defect", "decline"}, &stdout, &stderr)
+	if code == 0 || !strings.Contains(stderr.String(), "--id") {
+		t.Fatalf("defect decline without --id code = %d, want non-zero; stderr = %q", code, stderr.String())
+	}
+}
+
+func TestDefectDeclineCLINotFound(t *testing.T) {
+	primaryRoot := initRepo(t)
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(primaryRoot); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(cwd)
+
+	ctx := context.Background()
+	var stdout, stderr bytes.Buffer
+	code := run(ctx, []string{"defect", "decline", "--id", "nonexistent-id"}, &stdout, &stderr)
+	if code == 0 {
+		t.Fatalf("defect decline nonexistent ID code = %d, want non-zero", code)
+	}
+}
+
+func TestLinkedWorktreeCommands(t *testing.T) {
+	primaryRoot := initRepo(t)
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(primaryRoot); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(cwd)
+
+	baseSHA := strings.Repeat("5", 40)
+	ctx := context.Background()
+	var stdout, stderr bytes.Buffer
+
+	// 1. Create feature in primary repo
+	createCode := run(ctx, []string{"feature", "create", "--id", "feat-wt-1", "--parent", "refs/heads/feature-wt-1", "--base-sha", baseSHA}, &stdout, &stderr)
+	if createCode != 0 {
+		t.Fatalf("feature create exit code = %d, want 0; stderr = %q", createCode, stderr.String())
+	}
+
+	// 2. Record an initial defect in primary repo
+	recCode := run(ctx, []string{
+		"defect", "record",
+		"--id", "def-wt-1",
+		"--feature", "feat-wt-1",
+		"--signature", "sig-initial",
+		"--evidence", "stack-initial",
+		"--disposition", "recorded",
+	}, &stdout, &stderr)
+	if recCode != 0 {
+		t.Fatalf("defect record in primary root exit code = %d; stderr = %q", recCode, stderr.String())
+	}
+
+	// 3. Create a linked worktree
+	wt, err := worktree.Create(ctx, primaryRoot, "lane-wt-test")
+	if err != nil {
+		t.Fatalf("worktree.Create: %v", err)
+	}
+	defer worktree.Remove(ctx, primaryRoot, wt.Path, true)
+
+	if !worktree.IsLinkedWorktree(wt.Path) {
+		t.Fatalf("IsLinkedWorktree(%q) = false, want true", wt.Path)
+	}
+
+	// 4. Switch working directory into the linked worktree
+	if err := os.Chdir(wt.Path); err != nil {
+		t.Fatalf("os.Chdir to worktree: %v", err)
+	}
+
+	// 5. Test feature status from inside linked worktree
+	stdout.Reset()
+	stderr.Reset()
+	statusCode := run(ctx, []string{"feature", "status", "--id", "feat-wt-1"}, &stdout, &stderr)
+	if statusCode != 0 {
+		t.Errorf("feature status in linked worktree exit code = %d, want 0; stderr = %q", statusCode, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "feat-wt-1") {
+		t.Errorf("feature status stdout = %q, want it to contain 'feat-wt-1'", stdout.String())
+	}
+
+	// 6. Test defect list from inside linked worktree
+	stdout.Reset()
+	stderr.Reset()
+	listCode := run(ctx, []string{"defect", "list", "--feature", "feat-wt-1"}, &stdout, &stderr)
+	if listCode != 0 {
+		t.Errorf("defect list in linked worktree exit code = %d, want 0; stderr = %q", listCode, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "def-wt-1") {
+		t.Errorf("defect list stdout = %q, want it to contain 'def-wt-1'", stdout.String())
+	}
+
+	// 7. Test defect record from inside linked worktree
+	stdout.Reset()
+	stderr.Reset()
+	recordCode := run(ctx, []string{
+		"defect", "record",
+		"--id", "def-wt-2",
+		"--feature", "feat-wt-1",
+		"--signature", "sig-from-wt",
+		"--evidence", "stack-from-wt",
+		"--disposition", "recorded",
+	}, &stdout, &stderr)
+	if recordCode != 0 {
+		t.Errorf("defect record in linked worktree exit code = %d, want 0; stderr = %q", recordCode, stderr.String())
+	}
+
+	// 8. Test defect decline from inside linked worktree
+	stdout.Reset()
+	stderr.Reset()
+	declineCode := run(ctx, []string{"defect", "decline", "--id", "def-wt-1"}, &stdout, &stderr)
+	if declineCode != 0 {
+		t.Errorf("defect decline in linked worktree exit code = %d, want 0; stderr = %q", declineCode, stderr.String())
+	}
+
+	// 9. Verify in primary root's ledger that updates persisted
+	ledg, err := ledger.Open(ctx, primaryRoot)
+	if err != nil {
+		t.Fatalf("open ledger: %v", err)
+	}
+	defer ledg.Close()
+
+	d1, err := ledg.GetDefect(ctx, "def-wt-1")
+	if err != nil {
+		t.Fatalf("GetDefect(def-wt-1): %v", err)
+	}
+	if d1.Disposition != ledger.DefectDispositionDeclined {
+		t.Errorf("def-wt-1 disposition = %q, want %q", d1.Disposition, ledger.DefectDispositionDeclined)
+	}
+
+	d2, err := ledg.GetDefect(ctx, "def-wt-2")
+	if err != nil {
+		t.Fatalf("GetDefect(def-wt-2): %v", err)
+	}
+	if d2.ErrorSignature != "sig-from-wt" || d2.Disposition != ledger.DefectDispositionRecorded {
+		t.Errorf("def-wt-2 = %+v, want signature 'sig-from-wt' and disposition 'recorded'", d2)
+	}
+}
+
+// TestRunCheckFromLinkedWorktreeTestsWorktreeOwnCode proves the runCheck
+// regression fix: "check" run from inside a linked worktree must test and
+// report the WORKTREE's own commit and lucind-checks.sh -- never silently
+// redirect to the primary checkout's. resolvePrimaryRoot's
+// git-common-dir-based semantics are correct for the 18 ledger-touching call
+// sites, but "check" never touches the ledger; it tests wherever the caller
+// is actually standing, worktree or not. The two lucind-checks.sh scripts
+// and commits below are deliberately never merged/visible to each other --
+// a real, local, uncommitted-relative-to-primary divergence -- so a run
+// against the wrong root is unambiguously detectable by its output.
+func TestRunCheckFromLinkedWorktreeTestsWorktreeOwnCode(t *testing.T) {
+	if testing.Short() {
+		t.Skip("shells out to real git")
+	}
+	primaryRoot := initRepo(t)
+
+	primaryScript := "#!/bin/sh\necho \"PASS: primary\"\nexit 0\n"
+	if err := os.WriteFile(filepath.Join(primaryRoot, "lucind-checks.sh"), []byte(primaryScript), 0o755); err != nil {
+		t.Fatalf("WriteFile(primary lucind-checks.sh) error = %v", err)
+	}
+	runGit(t, primaryRoot, "add", "lucind-checks.sh")
+	runGit(t, primaryRoot, "commit", "-m", "add primary lucind-checks.sh")
+
+	ctx := context.Background()
+	wt, err := worktree.Create(ctx, primaryRoot, "lane-check-wt")
+	if err != nil {
+		t.Fatalf("worktree.Create: %v", err)
+	}
+	defer worktree.Remove(ctx, primaryRoot, wt.Path, true)
+
+	if !worktree.IsLinkedWorktree(wt.Path) {
+		t.Fatalf("IsLinkedWorktree(%q) = false, want true", wt.Path)
+	}
+
+	// A commit that exists ONLY in the worktree's own branch -- never merged
+	// or visible from the primary checkout.
+	worktreeScript := "#!/bin/sh\necho \"PASS: worktree own code\"\nexit 0\n"
+	if err := os.WriteFile(filepath.Join(wt.Path, "lucind-checks.sh"), []byte(worktreeScript), 0o755); err != nil {
+		t.Fatalf("WriteFile(worktree lucind-checks.sh) error = %v", err)
+	}
+	runGit(t, wt.Path, "add", "lucind-checks.sh")
+	runGit(t, wt.Path, "commit", "-m", "worktree-only change")
+
+	cmd := exec.Command("git", "rev-parse", "HEAD")
+	cmd.Dir = wt.Path
+	worktreeHeadBytes, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git rev-parse HEAD (worktree): %v", err)
+	}
+	worktreeHead := strings.TrimSpace(string(worktreeHeadBytes))
+
+	cmd = exec.Command("git", "rev-parse", "HEAD")
+	cmd.Dir = primaryRoot
+	primaryHeadBytes, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git rev-parse HEAD (primary): %v", err)
+	}
+	primaryHead := strings.TrimSpace(string(primaryHeadBytes))
+
+	if worktreeHead == primaryHead {
+		t.Fatalf("worktree and primary HEAD unexpectedly identical (%s); test setup did not diverge them", worktreeHead)
+	}
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(wt.Path); err != nil {
+		t.Fatalf("os.Chdir to worktree: %v", err)
+	}
+	defer os.Chdir(cwd)
+
+	var stdout, stderr bytes.Buffer
+	code := run(ctx, []string{"check"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("check in linked worktree exit code = %d, want 0; stderr = %q, stdout = %q", code, stderr.String(), stdout.String())
+	}
+
+	outStr := stdout.String()
+	if !strings.Contains(outStr, "PASS: worktree own code") {
+		t.Errorf("stdout = %q, want it to contain the WORKTREE's own script output %q -- got the primary checkout's script instead, meaning check tested the wrong code", outStr, "PASS: worktree own code")
+	}
+	if strings.Contains(outStr, "PASS: primary") {
+		t.Errorf("stdout = %q, unexpectedly contains the PRIMARY checkout's script output -- check ran against primary instead of the worktree", outStr)
+	}
+	if !strings.Contains(outStr, worktreeHead) {
+		t.Errorf("stdout = %q, want it to report the worktree's own commit %q", outStr, worktreeHead)
+	}
+	if strings.Contains(outStr, primaryHead) {
+		t.Errorf("stdout = %q, unexpectedly reports the PRIMARY checkout's commit %q instead of the worktree's own %q", outStr, primaryHead, worktreeHead)
+	}
+}
+
+func TestAcceptNoFlags(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := run(context.Background(), []string{"accept"}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("run(accept with no flags) = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "--run and --lane are required") {
+		t.Fatalf("stderr = %q, want required persisted identity", stderr.String())
+	}
+}
+
+// TestUsageAdvertisesAcceptRunAndLane guards the top-level usage string against
+// drift: accept takes exactly --run and --lane, so the one invocation a person
+// sees on a usage error must not describe flags the subcommand does not parse.
+func TestUsageAdvertisesAcceptRunAndLane(t *testing.T) {
+	if !strings.Contains(usage, "lucind-ai accept --run <run-id> --lane <lane-id>") {
+		t.Fatalf("usage = %q, want it to advertise the real accept signature", usage)
+	}
+}
+
+type fakeAcceptanceVerifier struct {
+	receipt ledger.AcceptanceReceipt
+	err     error
+	request accept.AcceptanceRequest
+}
+
+func runGitOutput(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v: %v: %s", args, err, out)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+func (f *fakeAcceptanceVerifier) Verify(_ context.Context, request accept.AcceptanceRequest) (ledger.AcceptanceReceipt, error) {
+	f.request = request
+	return f.receipt, f.err
+}
+
+func TestAcceptRequiresExactReceiptAndRendersMechanicalEvidenceOnly(t *testing.T) {
+	primaryRoot := t.TempDir()
+	runGit(t, primaryRoot, "init", "-b", "main")
+	runGit(t, primaryRoot, "config", "user.name", "lucind-test")
+	runGit(t, primaryRoot, "config", "user.email", "test@lucind.ai")
+	if err := os.WriteFile(filepath.Join(primaryRoot, "README.md"), []byte("seed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, primaryRoot, "add", "README.md")
+	runGit(t, primaryRoot, "commit", "-m", "seed commit")
+	refsBefore := runGitOutput(t, primaryRoot, "show-ref")
+
+	fake := &fakeAcceptanceVerifier{receipt: ledger.AcceptanceReceipt{
+		ReceiptID: "receipt-1", BindingHash: "binding-1", ResultHash: "result-1", ChecksHash: "checks-1",
+		Binding: ledger.AcceptanceBinding{RunID: "run-1", LaneID: "lane-1", CandidateCommit: "candidate-1"}, Cleanup: "removed",
+	}}
+	originalFactory := acceptVerifierFactory
+	acceptVerifierFactory = func(string, *ledger.Ledger) acceptanceVerifier { return fake }
+	t.Cleanup(func() { acceptVerifierFactory = originalFactory })
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(primaryRoot); err != nil {
+		t.Fatalf("os.Chdir: %v", err)
+	}
+	defer os.Chdir(cwd)
+
+	var stdout, stderr bytes.Buffer
+	code := run(context.Background(), []string{"accept", "--run", "run-1", "--lane", "lane-1"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("accept exit code = %d, want 0; stderr = %q, stdout = %q", code, stderr.String(), stdout.String())
+	}
+	out := stdout.String()
+	for _, want := range []string{"receipt-1", "binding-1", "mechanical evidence", "qualitative approval remains separate", "acceptance-promotion.md", "steps 2–10"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("stdout %q missing %q", out, want)
+		}
+	}
+	if strings.Contains(strings.ToLower(out), "semantically approved") {
+		t.Fatalf("output escalates authority: %q", out)
+	}
+	if fake.request != (accept.AcceptanceRequest{RunID: "run-1", LaneID: "lane-1"}) {
+		t.Fatalf("request = %+v", fake.request)
+	}
+	if refsAfter := runGitOutput(t, primaryRoot, "show-ref"); refsAfter != refsBefore {
+		t.Fatalf("CLI mutated refs")
+	}
+
+	fake.err = errors.New("exact receipt absent")
+	stdout.Reset()
+	stderr.Reset()
+	if code := run(context.Background(), []string{"accept", "--run", "run-1", "--lane", "lane-1"}, &stdout, &stderr); code == 0 {
+		t.Fatal("accept succeeded without receipt")
+	}
+}
+
+func TestFeatureLeaseReleaseCLI(t *testing.T) {
+	primaryRoot := t.TempDir()
+
+	runGit(t, primaryRoot, "init", "-b", "main")
+	runGit(t, primaryRoot, "config", "user.name", "lucind-test")
+	runGit(t, primaryRoot, "config", "user.email", "test@lucind.ai")
+
+	seedFile := filepath.Join(primaryRoot, "README.md")
+	if err := os.WriteFile(seedFile, []byte("# Test\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(README.md): %v", err)
+	}
+	runGit(t, primaryRoot, "add", "README.md")
+	runGit(t, primaryRoot, "commit", "-m", "initial commit")
+
+	cmd := exec.Command("git", "rev-parse", "HEAD")
+	cmd.Dir = primaryRoot
+	baseSHABytes, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("rev-parse HEAD: %v", err)
+	}
+	baseSHA := strings.TrimSpace(string(baseSHABytes))
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(primaryRoot); err != nil {
+		t.Fatalf("os.Chdir: %v", err)
+	}
+	defer os.Chdir(cwd)
+
+	// Create feature in ledger
+	var stdout, stderr bytes.Buffer
+	code := run(context.Background(), []string{"feature", "create", "--id", "feat-lease-test", "--parent", "refs/heads/feature-test", "--base-sha", baseSHA}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("feature create exit code = %d: %s", code, stderr.String())
+	}
+
+	// Acquire lease via ledger
+	ledg, err := ledger.Open(context.Background(), primaryRoot)
+	if err != nil {
+		t.Fatalf("open ledger: %v", err)
+	}
+	featSvc := feature.NewService(ledg)
+	l, err := featSvc.AcquireLease(context.Background(), "feat-lease-test", "test-worker", time.Hour)
+	if err != nil {
+		t.Fatalf("AcquireLease: %v", err)
+	}
+	ledg.Close()
+
+	// Check status
+	stdout.Reset()
+	stderr.Reset()
+	code = run(context.Background(), []string{"feature", "lease", "status", "--id", "feat-lease-test"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("feature lease status exit code = %d: %s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "valid:      true") {
+		t.Errorf("stdout = %q, want valid: true", stdout.String())
+	}
+
+	// Try release with live PID (should fail)
+	stdout.Reset()
+	stderr.Reset()
+	code = run(context.Background(), []string{"feature", "lease", "release", "--id", "feat-lease-test", "--pid", fmt.Sprintf("%d", os.Getpid())}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("feature lease release with live PID exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "is still alive") {
+		t.Errorf("stderr = %q, want it to mention process is still alive", stderr.String())
+	}
+
+	// Release with matching owner and fence
+	stdout.Reset()
+	stderr.Reset()
+	code = run(context.Background(), []string{"feature", "lease", "release", "--id", "feat-lease-test", "--owner", l.Owner, "--fence", fmt.Sprintf("%d", l.Fence)}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("feature lease release exit code = %d: %s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "lease:   released") {
+		t.Errorf("stdout = %q, want lease: released", stdout.String())
+	}
+
+	// Check status after release
+	stdout.Reset()
+	stderr.Reset()
+	code = run(context.Background(), []string{"feature", "lease", "status", "--id", "feat-lease-test"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("feature lease status after release exit code = %d: %s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "valid:      false") {
+		t.Errorf("stdout = %q, want valid: false", stdout.String())
+	}
+}
+
+func TestReconcileWaitStableCLI(t *testing.T) {
+	primaryRoot := t.TempDir()
+
+	runGit(t, primaryRoot, "init", "-b", "main")
+	runGit(t, primaryRoot, "config", "user.name", "lucind-test")
+	runGit(t, primaryRoot, "config", "user.email", "test@lucind.ai")
+
+	seedFile := filepath.Join(primaryRoot, "README.md")
+	if err := os.WriteFile(seedFile, []byte("# Test\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(README.md): %v", err)
+	}
+	runGit(t, primaryRoot, "add", "README.md")
+	runGit(t, primaryRoot, "commit", "-m", "initial commit")
+
+	cmd := exec.Command("git", "rev-parse", "HEAD")
+	cmd.Dir = primaryRoot
+	baseSHABytes, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("rev-parse HEAD: %v", err)
+	}
+	baseSHA := strings.TrimSpace(string(baseSHABytes))
+
+	// Source branch
+	runGit(t, primaryRoot, "checkout", "-b", "feature-src")
+	if err := os.WriteFile(filepath.Join(primaryRoot, "conflict.txt"), []byte("source content\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, primaryRoot, "add", "conflict.txt")
+	runGit(t, primaryRoot, "commit", "-m", "source commit")
+	srcSHABytes, _ := exec.Command("git", "-C", primaryRoot, "rev-parse", "HEAD").Output()
+	srcSHA := strings.TrimSpace(string(srcSHABytes))
+
+	// Target branch
+	runGit(t, primaryRoot, "checkout", "main")
+	runGit(t, primaryRoot, "checkout", "-b", "feature-tgt")
+	if err := os.WriteFile(filepath.Join(primaryRoot, "conflict.txt"), []byte("target content\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, primaryRoot, "add", "conflict.txt")
+	runGit(t, primaryRoot, "commit", "-m", "target commit")
+	tgtSHABytes, _ := exec.Command("git", "-C", primaryRoot, "rev-parse", "HEAD").Output()
+	tgtSHA := strings.TrimSpace(string(tgtSHABytes))
+
+	runGit(t, primaryRoot, "checkout", "main")
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(primaryRoot); err != nil {
+		t.Fatalf("os.Chdir: %v", err)
+	}
+	defer os.Chdir(cwd)
+
+	ledg, err := ledger.Open(context.Background(), primaryRoot)
+	if err != nil {
+		t.Fatalf("open ledger: %v", err)
+	}
+	featSvc := feature.NewService(ledg)
+	_, _ = featSvc.Create(context.Background(), "feat-s", "refs/heads/feature-src", baseSHA)
+	_, _ = featSvc.Create(context.Background(), "feat-t", "refs/heads/feature-tgt", baseSHA)
+
+	reconcileSvc := reconcile.NewService(ledg)
+	ev := &overlap.Evidence{
+		Version:     "1.0",
+		BaseSHA:     baseSHA,
+		FeatureASHA: srcSHA,
+		FeatureBSHA: tgtSHA,
+		Class:       overlap.ClassRequired,
+		Signals: overlap.Signals{
+			ConflictPaths: []string{"conflict.txt"},
+		},
+	}
+
+	req, err := reconcileSvc.CreateRequest(context.Background(), reconcile.CreateRequestParams{
+		ID:            "req-ws-1",
+		FeatureID:     "feat-t",
+		SourceFeature: "feat-s",
+		SourceParent:  "refs/heads/feature-src",
+		TargetFeature: "feat-t",
+		TargetParent:  "refs/heads/feature-tgt",
+		SourceSHA:     srcSHA,
+		TargetSHA:     tgtSHA,
+		Evidence:      ev,
+		TTL:           10 * time.Minute,
+	})
+	if err != nil {
+		t.Fatalf("CreateRequest: %v", err)
+	}
+	ledg.Close()
+
+	// Renew with --wait-stable
+	var stdout, stderr bytes.Buffer
+	code := run(context.Background(), []string{"reconcile", "renew", "--request", req.ID, "--target-sha", "refs/heads/feature-tgt", "--wait-stable", "50ms"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("reconcile renew exit code = %d: %s", code, stderr.String())
+	}
+	renewOut := stdout.String()
+	var newReqID string
+	for _, line := range strings.Split(renewOut, "\n") {
+		if strings.HasPrefix(line, "request:") {
+			newReqID = strings.TrimSpace(strings.TrimPrefix(line, "request:"))
+			break
+		}
+	}
+	if newReqID == "" {
+		t.Fatalf("could not parse new request ID from renew output: %s", renewOut)
+	}
+
+	// Read renewed request from ledger
+	ledg, _ = ledger.Open(context.Background(), primaryRoot)
+	renewedReq, err := ledg.ReconciliationRequest(context.Background(), newReqID)
+	if err != nil {
+		t.Fatalf("ReconciliationRequest failed: %v", err)
+	}
+	ledg.Close()
+
+	sourceFeat, _, targetFeat, _ := reconcile.ParseDirection(renewedReq.Direction)
+
+	// Approve renewed request to create candidate
+	stdout.Reset()
+	stderr.Reset()
+	code = run(context.Background(), []string{"reconcile", "approve", "--request", newReqID, "--source", sourceFeat, "--target", targetFeat}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("reconcile approve exit code = %d: %s", code, stderr.String())
+	}
+
+	// Read candidate ID from ledger
+	ledg, _ = ledger.Open(context.Background(), primaryRoot)
+	cand, err := ledg.ReconciliationCandidateByRequest(context.Background(), newReqID)
+	if err != nil || cand.ID == "" {
+		t.Fatalf("ReconciliationCandidateByRequest failed: %v", err)
+	}
+	candID := cand.ID
+	ledg.Close()
+
+	// Resolve candidate with --wait-stable
+	stdout.Reset()
+	stderr.Reset()
+	code = run(context.Background(), []string{"reconcile", "resolve", "--candidate", candID, "--sha", srcSHA, "--wait-stable", "50ms"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("reconcile resolve exit code = %d: %s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "status:    integrated") {
+		t.Errorf("stdout = %q, want status: integrated", stdout.String())
+	}
+}
+
+// TestEveryDefectDispositionIsReachableFromCLI is the guard for the class of
+// defect that lets a durable record enter a state it can never leave. The
+// defect_records CHECK constraint admits four dispositions, and
+// UpdateDefectDisposition accepts any of them, but for a long time only
+// "declined" had a CLI path: a genuinely repaired defect stayed "recorded"
+// forever, indistinguishable from one nobody had looked at.
+//
+// This drives the real CLI for every value in the declared vocabulary rather
+// than grepping for call sites, so a disposition added to the schema without a
+// way to reach it fails here.
+func TestEveryDefectDispositionIsReachableFromCLI(t *testing.T) {
+	for _, tc := range []struct {
+		disposition ledger.DefectDisposition
+		args        func(id string) []string
+	}{
+		{ledger.DefectDispositionRecorded, func(id string) []string { return nil }},
+		{ledger.DefectDispositionRepaired, func(id string) []string {
+			return []string{"defect", "resolve", "--id", id}
+		}},
+		{ledger.DefectDispositionDeclined, func(id string) []string {
+			return []string{"defect", "decline", "--id", id}
+		}},
+		{ledger.DefectDispositionDeferred, func(id string) []string {
+			return []string{"defect", "defer", "--id", id}
+		}},
+	} {
+		t.Run(string(tc.disposition), func(t *testing.T) {
+			primaryRoot := initRepo(t)
+			cwd, err := os.Getwd()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chdir(primaryRoot); err != nil {
+				t.Fatal(err)
+			}
+			defer os.Chdir(cwd)
+
+			ctx := context.Background()
+			var stdout, stderr bytes.Buffer
+
+			featureID := "feat-reach-" + string(tc.disposition)
+			if code := run(ctx, []string{
+				"feature", "create", "--id", featureID,
+				"--parent", "refs/heads/" + featureID,
+				"--base-sha", strings.Repeat("7", 40),
+			}, &stdout, &stderr); code != 0 {
+				t.Fatalf("feature create exit = %d; stderr = %q", code, stderr.String())
+			}
+
+			defectID := "def-reach-" + string(tc.disposition)
+			if code := run(ctx, []string{
+				"defect", "record",
+				"--id", defectID,
+				"--feature", featureID,
+				"--signature", "sig-" + string(tc.disposition),
+			}, &stdout, &stderr); code != 0 {
+				t.Fatalf("defect record exit = %d; stderr = %q", code, stderr.String())
+			}
+
+			if args := tc.args(defectID); args != nil {
+				stdout.Reset()
+				stderr.Reset()
+				if code := run(ctx, args, &stdout, &stderr); code != 0 {
+					t.Fatalf("%v exit = %d, want 0; stderr = %q", args, code, stderr.String())
+				}
+			}
+
+			ledg, err := ledger.Open(ctx, primaryRoot)
+			if err != nil {
+				t.Fatalf("open ledger: %v", err)
+			}
+			defer ledg.Close()
+
+			rec, err := ledg.GetDefect(ctx, defectID)
+			if err != nil {
+				t.Fatalf("GetDefect: %v", err)
+			}
+			if rec.Disposition != tc.disposition {
+				t.Errorf("Disposition = %q, want %q", rec.Disposition, tc.disposition)
+			}
+		})
+	}
+}
+
+func TestDefectResolveCLIRequiresID(t *testing.T) {
+	primaryRoot := initRepo(t)
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(primaryRoot); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(cwd)
+
+	ctx := context.Background()
+	var stdout, stderr bytes.Buffer
+	if code := run(ctx, []string{"defect", "resolve"}, &stdout, &stderr); code == 0 || !strings.Contains(stderr.String(), "--id") {
+		t.Fatalf("defect resolve without --id code = %d, want non-zero naming --id; stderr = %q", code, stderr.String())
+	}
+}
+
+func TestDefectResolveCLINotFound(t *testing.T) {
+	primaryRoot := initRepo(t)
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(primaryRoot); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(cwd)
+
+	ctx := context.Background()
+	var stdout, stderr bytes.Buffer
+	if code := run(ctx, []string{"defect", "resolve", "--id", "nonexistent-id"}, &stdout, &stderr); code == 0 {
+		t.Fatalf("defect resolve on unknown id code = %d, want non-zero", code)
+	}
+}
+
+type mockCLIStatusQuerier struct {
+	output []byte
+	err    error
+}
+
+func (m *mockCLIStatusQuerier) QueryStatus(_ context.Context, _ string) ([]byte, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	return m.output, nil
+}
+
+func TestPhaseSubcommandRequiresPhaseName(t *testing.T) {
+	ctx := context.Background()
+	var stdout, stderr bytes.Buffer
+	code := run(ctx, []string{"phase"}, &stdout, &stderr)
+	if code == 0 {
+		t.Fatalf("run(phase) = %d, want non-zero", code)
+	}
+	if !strings.Contains(stderr.String(), "phase name is required") {
+		t.Fatalf("expected stderr to say 'phase name is required', got %q", stderr.String())
+	}
+}
+
+func TestPhaseSubcommandGatesPrematureSynthesis(t *testing.T) {
+	primaryRoot := initRepo(t)
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(primaryRoot); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(cwd)
+
+	change := "test-change"
+	statusJSON := []byte(`{
+  "schemaName": "gentle-ai.sdd-status",
+  "schemaVersion": 1,
+  "changeName": "` + change + `",
+  "artifactPaths": {},
+  "artifacts": {
+    "proposal": "missing"
+  },
+  "dependencies": {
+    "proposal": "ready"
+  },
+  "nextRecommended": "propose"
+}`)
+
+	origQuerier := defaultStatusQuerier
+	defer func() { defaultStatusQuerier = origQuerier }()
+	defaultStatusQuerier = func(string) phasespec.StatusQuerier {
+		return &mockCLIStatusQuerier{output: statusJSON}
+	}
+
+	ctx := context.Background()
+	var stdout, stderr bytes.Buffer
+	// propose synthesis requires lens-a, lens-b, lens-c merged; with mock querier (no merged lenses), it must fail
+	code := run(ctx, []string{"phase", "propose", "--change", change}, &stdout, &stderr)
+	if code == 0 {
+		t.Fatalf("expected run(phase propose) to fail when lenses unmerged, got code 0; stdout=%q, stderr=%q", stdout.String(), stderr.String())
+	}
+
+	// Verify no artifact was created
+	artifactPath := filepath.Join(primaryRoot, "openspec", "changes", change, "proposal.md")
+	if _, err := os.Stat(artifactPath); err == nil {
+		t.Fatalf("expected artifact %s to NOT exist, but it was created", artifactPath)
+	}
+}
+
+func TestPhaseSubcommandFailsClosedOnMalformedStatusJSON(t *testing.T) {
+	primaryRoot := initRepo(t)
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(primaryRoot); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(cwd)
+
+	origQuerier := defaultStatusQuerier
+	defer func() { defaultStatusQuerier = origQuerier }()
+	defaultStatusQuerier = func(string) phasespec.StatusQuerier {
+		return &mockCLIStatusQuerier{output: []byte(`{ invalid json `)}
+	}
+
+	ctx := context.Background()
+	var stdout, stderr bytes.Buffer
+	code := run(ctx, []string{"phase", "propose"}, &stdout, &stderr)
+	if code == 0 {
+		t.Fatalf("expected run(phase) on malformed status to fail, got 0")
+	}
+}
+
+func TestPhaseSubcommandPhaseAlreadyComplete(t *testing.T) {
+	primaryRoot := initRepo(t)
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(primaryRoot); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(cwd)
+
+	change := "test-change"
+	statusJSON := []byte(`{
+  "schemaName": "gentle-ai.sdd-status",
+  "schemaVersion": 1,
+  "changeName": "` + change + `",
+  "artifactPaths": {},
+  "artifacts": {
+    "proposal": "done"
+  },
+  "dependencies": {
+    "proposal": "all_done"
+  },
+  "nextRecommended": "spec"
+}`)
+
+	origQuerier := defaultStatusQuerier
+	defer func() { defaultStatusQuerier = origQuerier }()
+	defaultStatusQuerier = func(string) phasespec.StatusQuerier {
+		return &mockCLIStatusQuerier{output: statusJSON}
+	}
+
+	// Create canonical artifact on disk
+	artifactDir := filepath.Join(primaryRoot, "openspec", "changes", change)
+	if err := os.MkdirAll(artifactDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	artifactPath := filepath.Join(artifactDir, "proposal.md")
+	if err := os.WriteFile(artifactPath, []byte("# Proposal\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx := context.Background()
+	var stdout, stderr bytes.Buffer
+	code := run(ctx, []string{"phase", "propose", "--change", change}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("expected run(phase propose) on complete phase to exit 0, got %d; stderr=%s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "already complete") {
+		t.Fatalf("expected stdout to report already complete, got %q", stdout.String())
+	}
+}
+
+func TestPhaseSubcommandPhaseNotCompleteIfFileMissingOnDisk(t *testing.T) {
+	primaryRoot := initRepo(t)
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(primaryRoot); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(cwd)
+
+	change := "test-change"
+	// Status says proposal: done, but we do NOT create propose.md on disk, and lenses are unmerged -> must gate synthesis and fail
+	statusJSON := []byte(`{
+  "schemaName": "gentle-ai.sdd-status",
+  "schemaVersion": 1,
+  "changeName": "` + change + `",
+  "artifacts": {
+    "proposal": "done"
+  },
+  "dependencies": {
+    "proposal": "all_done"
+  },
+  "nextRecommended": "spec"
+}`)
+
+	origQuerier := defaultStatusQuerier
+	defer func() { defaultStatusQuerier = origQuerier }()
+	defaultStatusQuerier = func(string) phasespec.StatusQuerier {
+		return &mockCLIStatusQuerier{output: statusJSON}
+	}
+
+	ctx := context.Background()
+	var stdout, stderr bytes.Buffer
+	code := run(ctx, []string{"phase", "propose", "--change", change}, &stdout, &stderr)
+	// Because file is missing from disk, it treats phase as incomplete; and because lenses are unmerged, it returns 1 (cannot start synthesis)
+	if code == 0 {
+		t.Fatalf("expected run(phase propose) to fail when artifact missing from disk and lenses unmerged, got 0; stdout=%s", stdout.String())
+	}
+	if strings.Contains(stdout.String(), "already complete") {
+		t.Fatalf("expected stdout to NOT say already complete, got %q", stdout.String())
+	}
+}
+
+func TestPhaseSubcommandDispatchesSynthesisWhenLensesMerged(t *testing.T) {
+	primaryRoot := initRepo(t)
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(primaryRoot); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(cwd)
+
+	change := "test-change"
+	statusJSON := []byte(`{
+  "schemaName": "gentle-ai.sdd-status",
+  "schemaVersion": 1,
+  "changeName": "` + change + `",
+  "lenses": {
+    "lens-a": {"id": "lens-a", "accepted": true, "merged": true},
+    "lens-b": {"id": "lens-b", "accepted": true, "merged": true},
+    "lens-c": {"id": "lens-c", "accepted": true, "merged": true}
+  },
+  "artifacts": {
+    "proposal": "missing"
+  },
+  "dependencies": {
+    "proposal": "ready"
+  },
+  "nextRecommended": "propose"
+}`)
+
+	origQuerier := defaultStatusQuerier
+	defer func() { defaultStatusQuerier = origQuerier }()
+	defaultStatusQuerier = func(string) phasespec.StatusQuerier {
+		return &mockCLIStatusQuerier{output: statusJSON}
+	}
+
+	overrideDispatchDeps(t, testDoneExecutor{
+		envelope: fmt.Sprintf(`{"packet_id": "propose-%s-synthesis", "status": "done", "summary": "done", "hard_stops": [], "skills_loaded": ["lucind-executor", "lucind-fan-out-lens", "sdd-propose"]}`, change),
+	})
+
+	ctx := context.Background()
+	var stdout, stderr bytes.Buffer
+	code := run(ctx, []string{"phase", "propose", "--change", change}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("expected run(phase propose) to exit 0, got %d; stderr=%s, stdout=%s", code, stderr.String(), stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "synthesis dispatched") {
+		t.Fatalf("expected stdout to report synthesis dispatched, got %q", stdout.String())
+	}
+}
+
+func TestPhaseSubcommandSpecialistPacketHasRequiredSkills(t *testing.T) {
+	primaryRoot := initRepo(t)
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(primaryRoot); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(cwd)
+
+	change := "test-skills-change"
+	statusJSON := []byte(`{
+  "schemaName": "gentle-ai.sdd-status",
+  "schemaVersion": 1,
+  "changeName": "` + change + `",
+  "lenses": {
+    "lens-a": {"id": "lens-a", "accepted": true, "merged": true},
+    "lens-b": {"id": "lens-b", "accepted": true, "merged": true},
+    "lens-c": {"id": "lens-c", "accepted": true, "merged": true}
+  },
+  "artifacts": {
+    "proposal": "missing"
+  },
+  "dependencies": {
+    "proposal": "ready"
+  },
+  "nextRecommended": "propose"
+}`)
+
+	origQuerier := defaultStatusQuerier
+	defer func() { defaultStatusQuerier = origQuerier }()
+	defaultStatusQuerier = func(string) phasespec.StatusQuerier {
+		return &mockCLIStatusQuerier{output: statusJSON}
+	}
+
+	overrideDispatchDeps(t, testDoneExecutor{
+		envelope: fmt.Sprintf(`{"packet_id": "propose-%s-synthesis", "status": "done", "summary": "done", "hard_stops": [], "skills_loaded": ["lucind-executor", "lucind-fan-out-lens", "sdd-propose"]}`, change),
+	})
+
+	ctx := context.Background()
+	var stdout, stderr bytes.Buffer
+	code := run(ctx, []string{"phase", "propose", "--change", change}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("expected run(phase propose) to exit 0, got %d; stderr=%s, stdout=%s", code, stderr.String(), stdout.String())
+	}
+
+	packetPath := filepath.Join(primaryRoot, ".lucind", "packets", fmt.Sprintf("propose-%s-synthesis.md", change))
+	packetBytes, err := os.ReadFile(packetPath)
+	if err != nil {
+		t.Fatalf("failed to read generated packet at %s: %v", packetPath, err)
+	}
+	packetContent := string(packetBytes)
+
+	// 1. Verify ## Required skills heading exists
+	if !strings.Contains(packetContent, "\n## Required skills\n") {
+		t.Fatalf("expected generated packet to contain '## Required skills' section, got:\n%s", packetContent)
+	}
+
+	// 2. Verify all expected resolved skill paths are listed
+	expectedSkills := []string{
+		filepath.Join(primaryRoot, ".agents", "skills", "lucind-executor", "SKILL.md"),
+		filepath.Join(primaryRoot, ".agents", "skills", "lucind-fan-out-lens", "SKILL.md"),
+		filepath.Join(primaryRoot, ".agents", "skills", "sdd-propose", "SKILL.md"),
+	}
+	for _, expectedSkill := range expectedSkills {
+		expectedLine := "- " + expectedSkill
+		if !strings.Contains(packetContent, expectedLine) {
+			t.Errorf("expected packet to contain %q, but was missing from:\n%s", expectedLine, packetContent)
+		}
+	}
+
+	// 3. Verify ordering: ## Hard stops comes before ## Required skills, which comes before ## Return
+	hardStopsIdx := strings.Index(packetContent, "## Hard stops")
+	reqSkillsIdx := strings.Index(packetContent, "## Required skills")
+	returnIdx := strings.Index(packetContent, "## Return")
+	if hardStopsIdx == -1 || reqSkillsIdx == -1 || returnIdx == -1 {
+		t.Fatalf("missing section headings: hardStops=%d, reqSkills=%d, return=%d", hardStopsIdx, reqSkillsIdx, returnIdx)
+	}
+	if !(hardStopsIdx < reqSkillsIdx && reqSkillsIdx < returnIdx) {
+		t.Fatalf("incorrect section order: hardStops=%d, reqSkills=%d, return=%d", hardStopsIdx, reqSkillsIdx, returnIdx)
+	}
+}
+
+func TestPhaseSubcommandUnknownPhase(t *testing.T) {
+	primaryRoot := initRepo(t)
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(primaryRoot); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(cwd)
+
+	change := "test-change"
+	statusJSON := []byte(`{
+  "schemaName": "gentle-ai.sdd-status",
+  "schemaVersion": 1,
+  "changeName": "` + change + `",
+  "artifactPaths": {},
+  "artifacts": {},
+  "dependencies": {}
+}`)
+
+	origQuerier := defaultStatusQuerier
+	defer func() { defaultStatusQuerier = origQuerier }()
+	defaultStatusQuerier = func(string) phasespec.StatusQuerier {
+		return &mockCLIStatusQuerier{output: statusJSON}
+	}
+
+	ctx := context.Background()
+	var stdout, stderr bytes.Buffer
+	code := run(ctx, []string{"phase", "unrecognized-phase", "--change", change}, &stdout, &stderr)
+	if code == 0 {
+		t.Fatalf("expected run(phase unrecognized) to return non-zero, got 0")
 	}
 }

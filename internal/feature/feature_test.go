@@ -150,6 +150,106 @@ func TestFeatureBaseSHAAndParentRefImmutable(t *testing.T) {
 	}
 }
 
+// TestFeatureDisableThenCreateReanchorsAndReactivates covers the "retire and
+// recreate" path for a feature registered against a base that turned out to be
+// unusable: Disable frees the ID (excludes it from ActiveFeatures/the overlap
+// gate), and a subsequent Create against the SAME id but a DIFFERENT
+// parentRef/baseSHA reactivates it under the new anchor instead of returning
+// ErrFeatureImmutable. An still-active feature must keep rejecting a changed
+// anchor (see TestFeatureBaseSHAAndParentRefImmutable) -- only a disabled one
+// may be re-anchored.
+func TestFeatureDisableThenCreateReanchorsAndReactivates(t *testing.T) {
+	ctx := context.Background()
+	svc, l := newTestService(t)
+
+	feat, err := svc.Create(ctx, "feat-retire", "refs/heads/feature-red-base", "sha-red-base")
+	if err != nil {
+		t.Fatalf("initial Create: %v", err)
+	}
+	if feat.Status != StatusActive {
+		t.Fatalf("initial feat.Status = %v, want active", feat.Status)
+	}
+
+	// While active, a changed anchor is still rejected.
+	if _, err := svc.Create(ctx, "feat-retire", "refs/heads/feature-green-base", "sha-green-base"); !errors.Is(err, ErrFeatureImmutable) {
+		t.Fatalf("Create against active feature with changed anchor = %v, want ErrFeatureImmutable", err)
+	}
+
+	if err := svc.Disable(ctx, "feat-retire"); err != nil {
+		t.Fatalf("Disable: %v", err)
+	}
+
+	// A disabled feature must not appear in ActiveFeatures (the set the
+	// overlap gate iterates).
+	active, err := l.ActiveFeatures(ctx)
+	if err != nil {
+		t.Fatalf("ActiveFeatures: %v", err)
+	}
+	for _, f := range active {
+		if f.ID == "feat-retire" {
+			t.Fatalf("ActiveFeatures still contains disabled feature %q", f.ID)
+		}
+	}
+
+	// Re-create the SAME id against a corrected, different base -- this must
+	// succeed and reactivate the feature rather than returning
+	// ErrFeatureImmutable.
+	reanchored, err := svc.Create(ctx, "feat-retire", "refs/heads/feature-green-base", "sha-green-base")
+	if err != nil {
+		t.Fatalf("Create after Disable (re-anchor) failed: %v", err)
+	}
+	if reanchored.Status != StatusActive {
+		t.Errorf("reanchored.Status = %v, want active", reanchored.Status)
+	}
+	if reanchored.ParentRef != "refs/heads/feature-green-base" || reanchored.BaseSHA != "sha-green-base" {
+		t.Errorf("reanchored feature = %+v, want new anchor refs/heads/feature-green-base / sha-green-base", reanchored)
+	}
+	if reanchored.ID != "feat-retire" {
+		t.Errorf("reanchored.ID = %q, want feat-retire (ID reused, not a new registration)", reanchored.ID)
+	}
+
+	// The reactivated feature is active again and appears in ActiveFeatures.
+	got, err := svc.Get(ctx, "feat-retire")
+	if err != nil {
+		t.Fatalf("Get after re-anchor: %v", err)
+	}
+	if got.Status != StatusActive || got.BaseSHA != "sha-green-base" {
+		t.Errorf("Get after re-anchor = %+v, want active with base_sha sha-green-base", got)
+	}
+
+	active, err = l.ActiveFeatures(ctx)
+	if err != nil {
+		t.Fatalf("ActiveFeatures after re-anchor: %v", err)
+	}
+	found := false
+	for _, f := range active {
+		if f.ID == "feat-retire" {
+			found = true
+			if f.BaseSHA != "sha-green-base" {
+				t.Errorf("ActiveFeatures row base_sha = %q, want sha-green-base", f.BaseSHA)
+			}
+		}
+	}
+	if !found {
+		t.Errorf("ActiveFeatures does not contain reactivated feature feat-retire")
+	}
+
+	// Audit trail records the reactivation.
+	events, err := l.IntegrationEvents(ctx, "feat-retire")
+	if err != nil {
+		t.Fatalf("IntegrationEvents: %v", err)
+	}
+	hasReactivated := false
+	for _, e := range events {
+		if e.Type == "feature_reactivated" {
+			hasReactivated = true
+		}
+	}
+	if !hasReactivated {
+		t.Errorf("expected a feature_reactivated audit event, events = %+v", events)
+	}
+}
+
 func TestFeatureCreateRejectsMainAndLucindNamespaces(t *testing.T) {
 	ctx := context.Background()
 	svc, _ := newTestService(t)
@@ -180,7 +280,7 @@ func TestLeaseAcquisitionAndMonotonicFence(t *testing.T) {
 	svc, _ := newTestService(t)
 
 	// 1. Initial acquisition on non-existent lease -> fence 1
-	l1, err := svc.AcquireLease(ctx, "feat-lease-1", "worker-1", 100*time.Millisecond)
+	l1, err := svc.AcquireLease(ctx, "feat-lease-1", "worker-1", 250*time.Millisecond)
 	if err != nil {
 		t.Fatalf("AcquireLease 1 failed: %v", err)
 	}
@@ -192,16 +292,16 @@ func TestLeaseAcquisitionAndMonotonicFence(t *testing.T) {
 	}
 
 	// 2. Active lease cannot be acquired by another worker
-	_, err = svc.AcquireLease(ctx, "feat-lease-1", "worker-2", 100*time.Millisecond)
+	_, err = svc.AcquireLease(ctx, "feat-lease-1", "worker-2", 250*time.Millisecond)
 	if !errors.Is(err, ErrLeaseHeld) {
 		t.Fatalf("AcquireLease while active returned %v, want ErrLeaseHeld", err)
 	}
 
 	// 3. Wait for lease to expire
-	time.Sleep(120 * time.Millisecond)
+	time.Sleep(300 * time.Millisecond)
 
 	// 4. Acquisition of expired lease succeeds and increments fence monotonically (1 -> 2)
-	l2, err := svc.AcquireLease(ctx, "feat-lease-1", "worker-2", 100*time.Millisecond)
+	l2, err := svc.AcquireLease(ctx, "feat-lease-1", "worker-2", 250*time.Millisecond)
 	if err != nil {
 		t.Fatalf("AcquireLease 2 failed: %v", err)
 	}
@@ -218,7 +318,7 @@ func TestLeaseValidationAndStaleMutationRejection(t *testing.T) {
 	svc, _ := newTestService(t)
 
 	// Worker 1 acquires lease (fence 1) with short TTL
-	l1, err := svc.AcquireLease(ctx, "feat-lease-stale", "worker-1", 50*time.Millisecond)
+	l1, err := svc.AcquireLease(ctx, "feat-lease-stale", "worker-1", 200*time.Millisecond)
 	if err != nil {
 		t.Fatalf("AcquireLease worker-1: %v", err)
 	}
@@ -229,7 +329,7 @@ func TestLeaseValidationAndStaleMutationRejection(t *testing.T) {
 	}
 
 	// Wait for expiration
-	time.Sleep(60 * time.Millisecond)
+	time.Sleep(250 * time.Millisecond)
 
 	// Validate expired lease returns ErrLeaseExpired
 	err = svc.ValidateLease(ctx, "feat-lease-stale", l1.Owner, l1.Fence)
@@ -458,5 +558,101 @@ func TestExportedHelpersAndEdgeCases(t *testing.T) {
 	}
 	if gotL.Valid(time.Now().UTC().Add(2 * time.Hour)) {
 		t.Error("expected gotL to be invalid in 2 hours")
+	}
+
+	// ForceReleaseLease
+	if err := svc.ForceReleaseLease(ctx, "feat-get-lease"); err != nil {
+		t.Fatalf("ForceReleaseLease: %v", err)
+	}
+	releasedL, err := svc.GetLease(ctx, "feat-get-lease")
+	if err != nil {
+		t.Fatalf("GetLease after force release: %v", err)
+	}
+	if releasedL.Valid(time.Now().UTC()) {
+		t.Error("expected forced release lease to be expired")
+	}
+	if err := svc.ForceReleaseLease(ctx, ""); !errors.Is(err, ErrFeatureIDMissing) {
+		t.Errorf("ForceReleaseLease empty ID returned %v, want ErrFeatureIDMissing", err)
+	}
+}
+
+func TestFeatureListMethods(t *testing.T) {
+	ctx := context.Background()
+	svc, ledg := newTestService(t)
+
+	// Test empty lists
+	features, err := svc.List(ctx)
+	if err != nil {
+		t.Fatalf("List on empty DB: %v", err)
+	}
+	if len(features) != 0 {
+		t.Errorf("List returned %d features, want 0", len(features))
+	}
+
+	leases, err := svc.ListLeases(ctx)
+	if err != nil {
+		t.Fatalf("ListLeases on empty DB: %v", err)
+	}
+	if len(leases) != 0 {
+		t.Errorf("ListLeases returned %d leases, want 0", len(leases))
+	}
+
+	// Create features
+	f1, err := svc.Create(ctx, "feat-1", "refs/heads/branch-1", "sha1")
+	if err != nil {
+		t.Fatalf("Create feat-1: %v", err)
+	}
+	f2, err := svc.Create(ctx, "feat-2", "refs/heads/branch-2", "sha2")
+	if err != nil {
+		t.Fatalf("Create feat-2: %v", err)
+	}
+
+	features, err = svc.List(ctx)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(features) != 2 {
+		t.Fatalf("List returned %d features, want 2", len(features))
+	}
+	if features[0].ID != f1.ID || features[1].ID != f2.ID {
+		t.Errorf("features = [%s, %s], want [%s, %s]", features[0].ID, features[1].ID, f1.ID, f2.ID)
+	}
+
+	// Acquire leases
+	l1, err := svc.AcquireLease(ctx, "feat-1", "worker-1", time.Hour)
+	if err != nil {
+		t.Fatalf("AcquireLease: %v", err)
+	}
+
+	leases, err = svc.ListLeases(ctx)
+	if err != nil {
+		t.Fatalf("ListLeases: %v", err)
+	}
+	if len(leases) != 1 {
+		t.Fatalf("ListLeases returned %d leases, want 1", len(leases))
+	}
+	if leases[0].FeatureID != l1.FeatureID {
+		t.Errorf("leases[0].FeatureID = %q, want %q", leases[0].FeatureID, l1.FeatureID)
+	}
+
+	// Insert test integration_attempts
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	_, err = ledg.DB().ExecContext(ctx, `
+		INSERT INTO integration_attempts (id, feature_id, idempotency_key, status, owner, fence, candidate_sha, failure_reason, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		"att-1", "feat-1", "key-1", "promoted", "worker-1", 1, "cand-sha", "", now, now)
+	if err != nil {
+		t.Fatalf("insert integration_attempt: %v", err)
+	}
+
+	attempts, err := svc.ListAttempts(ctx, "feat-1")
+	if err != nil {
+		t.Fatalf("ListAttempts: %v", err)
+	}
+	if len(attempts) != 1 {
+		t.Fatalf("ListAttempts returned %d attempts, want 1", len(attempts))
+	}
+	if attempts[0].ID != "att-1" || attempts[0].Status != "promoted" {
+		t.Errorf("attempts[0] = %+v, want ID=att-1 Status=promoted", attempts[0])
 	}
 }

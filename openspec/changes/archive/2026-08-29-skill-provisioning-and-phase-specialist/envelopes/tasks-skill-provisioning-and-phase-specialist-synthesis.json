@@ -1,0 +1,94 @@
+{
+  "packet_id": "tasks-skill-provisioning-and-phase-specialist-synthesis",
+  "status": "done",
+  "summary": "Synthesized canonical tasks.md (1614 words) and tasks-synthesis-notes.md for skill-provisioning-and-phase-specialist after verifying citations against this worktree. Lens A's 4 phases and 15 tasks are the checklist; Lens B's 10 units and 4 waves stand with no merge; Lens C's forecast and four Applicable RED rows are folded in. Two conventional commits, no AI attribution.",
+  "hard_stops": [
+    {
+      "hard_stop": "The three ## Assumed decomposition blocks are mutually irreconcilable and the spec and design do not choose between them. Write the notes file, leave tasks.md uncreated, and block.",
+      "fired": false,
+      "note": "All three converged independently on a four-stage structure over the same File Changes table. Grouping differs; Lens A remains authoritative."
+    },
+    {
+      "hard_stop": "Lens A's decomposition is refuted by code you verified. Do not substitute your own.",
+      "fired": false,
+      "note": "A's 15 production tasks match design.md:89-108. One dependency edge (2.3 on 2.2) and the .opencode modify claim were dropped as citation failures, not a substitute decomposition."
+    },
+    {
+      "hard_stop": "No partition exists in which every wave is green on its own and every same-wave pair is disjoint. Report it.",
+      "fired": false,
+      "note": "Four waves judged green on the combined tree; same-wave pairs re-checked against PathInScope in internal/packet/disjoint.go:8-22,24-48. No merge."
+    },
+    {
+      "hard_stop": "One or more lens drafts is missing from this worktree.",
+      "fired": false,
+      "note": "tasks-lens-a.md, tasks-lens-b.md, and tasks-lens-c.md were all present."
+    },
+    {
+      "hard_stop": "Covering all eight spine items honestly would require exceeding 1800 words. Report which item forces it.",
+      "fired": false,
+      "note": "tasks.md is 1614 words and covers all eight spine items."
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false,
+      "note": "sdd-tasks 530-word budget vs packet 1800: packet wins on execution. Skill wins on checklist contract, which is met."
+    }
+  ],
+  "files_changed": [
+    {
+      "change": "created",
+      "path": "openspec/changes/skill-provisioning-and-phase-specialist/tasks.md",
+      "why": "Canonical tasks checklist assembled from three verified lens drafts."
+    },
+    {
+      "change": "created",
+      "path": "openspec/changes/skill-provisioning-and-phase-specialist/tasks-synthesis-notes.md",
+      "why": "Synthesis notes with the four required sections for the orchestrator."
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "tasks.md was committed as its own commit before tasks-synthesis-notes.md was started, confirmed by the mid-flow lucind-lane-check.sh run reporting a clean git status --porcelain.",
+      "met": true,
+      "evidence": "Mid-flow ./lucind-lane-check.sh --file openspec/changes/skill-provisioning-and-phase-specialist/tasks.md --budget 1800 --skip-result: PASS word budget: 1614 / 1800 words; PASS git status --porcelain: clean; RESULT: PASS. First commit c804a5d existed before tasks-synthesis-notes.md was written."
+    },
+    {
+      "criterion": "Every file:line citation surviving into tasks.md was opened and confirmed in this worktree, and every dropped claim is listed under ## Dropped Citations.",
+      "met": true,
+      "evidence": "Citation pass opened every unique manifest range plus prose citations. Dropped, retargeted, prospective, and verified outcomes are in openspec/changes/skill-provisioning-and-phase-specialist/tasks-synthesis-notes.md ## Dropped Citations."
+    },
+    {
+      "criterion": "Every wave was independently judged green-on-its-own, and every wave that was not is merged and reported under ## Coverage Gaps.",
+      "met": true,
+      "evidence": "Waves 1–4 judged green on the combined tree; zero waves merged. Judgment recorded in tasks.md Wave plan and tasks-synthesis-notes.md ## Coverage Gaps."
+    },
+    {
+      "criterion": "Every same-wave unit pair was re-checked against the component-boundary prefix rule rather than taken from lens B's table.",
+      "met": true,
+      "evidence": "Re-applied PathInScope (internal/packet/disjoint.go:8-22) and DisjointAllowedPaths pairwise logic (:24-48). Wave 1 four internal/\u003cpkg\u003e/ dirs including skillset vs skillroots; Wave 2 packet+packetauthor vs executor vs phasespec; Wave 3 run+accept vs .agents/skills + plugin assets."
+    },
+    {
+      "criterion": "tasks.md exists, is under 1800 words, and substantively covers all eight spine items, with anything missing reported under ## Coverage Gaps.",
+      "met": true,
+      "evidence": "Mid-flow lucind-lane-check.sh: PASS word budget: 1614 / 1800 words. Spine: forecast table, work units, 4-phase checklist, 4 Applicable RED tasks and no push-state RED, dependency order, green waves + disjoint pairs, executor agy per DAG, all 8 requirements traced."
+    },
+    {
+      "criterion": "tasks-synthesis-notes.md exists with exactly the four required sections, each either populated or explicitly None, confirmed by the final lucind-lane-check.sh run.",
+      "met": true,
+      "evidence": "Final ./lucind-lane-check.sh: PASS section present: ## Unresolved Contradictions; PASS section present: ## Coverage Gaps; PASS section present: ## Dropped Citations; PASS section present: ## Decomposition Divergence; PASS git status --porcelain: clean; PASS result envelope: .lucind/result.json exists and parses as JSON; RESULT: PASS. Unresolved Contradictions is None."
+    },
+    {
+      "criterion": "The work is committed with two conventional commits and no AI attribution, confirmed by the final lucind-lane-check.sh run reporting a clean git status --porcelain and a valid .lucind/result.json.",
+      "met": true,
+      "evidence": "c804a5d docs(openspec): add canonical tasks for skill provisioning and phase specialist; dd8d5ab docs(openspec): record tasks synthesis notes for skill provisioning. git log -1 --format=%B has no Co-authored-by. HEAD dd8d5ab780506c0c631a238d286612353e52c9b8."
+    }
+  ],
+  "commit": "dd8d5ab780506c0c631a238d286612353e52c9b8",
+  "findings": [
+    {
+      "finding": "Citation pass: 8 dropped claims, 6 retargeted, 9 prospective test symbols kept as proving commands, remaining unique manifest/prose citations verified. Contradictions escalated: 0. Waves merged: 0. Coverage gaps: none beyond recording the skill 530-vs-packet 1800 budget as packet-wins-on-execution.",
+      "evidence": "openspec/changes/skill-provisioning-and-phase-specialist/tasks-synthesis-notes.md ## Dropped Citations, ## Coverage Gaps, ## Unresolved Contradictions",
+      "affects": "apply-phase proving commands and Wave 2 phasespec (library, no cmd import)"
+    }
+  ]
+}

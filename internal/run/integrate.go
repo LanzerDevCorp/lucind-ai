@@ -42,7 +42,7 @@ func Integrate(ctx context.Context, deps Deps, batch BatchReport) (IntegrateRepo
 		branches[i] = worktree.BranchFor(id)
 	}
 
-	worktreePath, branchName, err := deps.CombineTree(ctx, deps.PrimaryRoot, deps.RunID, branches)
+	worktreePath, branchName, err := deps.CombineTree(ctx, deps.PrimaryRoot, deps.RunID, "", "", branches)
 	if err != nil {
 		return handleRedBatch(ctx, deps, batch, err.Error(), now)
 	}
@@ -102,7 +102,7 @@ func handleRedBatch(ctx context.Context, deps Deps, batch BatchReport, triggerRe
 		branches[i] = worktree.BranchFor(id)
 	}
 
-	worktreePath, branchName, err := deps.CombineTree(ctx, deps.PrimaryRoot, deps.RunID, branches)
+	worktreePath, branchName, err := deps.CombineTree(ctx, deps.PrimaryRoot, deps.RunID, "", "", branches)
 	if err != nil {
 		revertLanes(ctx, deps, batch.Outcome.Integrate, err.Error(), now)
 		return IntegrateReport{
@@ -160,6 +160,11 @@ func completeIntegration(ctx context.Context, deps Deps, batch BatchReport, inte
 		wtPath := laneWorktrees[id]
 		_ = deps.PersistEnvelope(ctx, deps.PrimaryRoot, id, laneEnvelopes[id])
 		_ = deps.RemoveLaneWorktree(ctx, deps.PrimaryRoot, wtPath, worktree.BranchFor(id))
+		// Mirror of revertLanes, which writes (Blocked, preserved=true) as a
+		// pair. Writing only preserved here left a lane that was reverted once
+		// and later integrated -- by bisection, or by "integrate retry" --
+		// stranded at Blocked forever, disagreeing with both stdout and git.
+		_ = deps.Ledger.SetStatus(ctx, deps.RunID, id, lane.Done, now)
 		_ = deps.Ledger.SetWorktreePreserved(ctx, deps.RunID, id, false)
 	}
 
@@ -260,7 +265,7 @@ func tryCombine(ctx context.Context, deps Deps, laneIDs []string) bool {
 		branches[i] = worktree.BranchFor(id)
 	}
 
-	worktreePath, branchName, err := deps.CombineTree(ctx, deps.PrimaryRoot, deps.RunID, branches)
+	worktreePath, branchName, err := deps.CombineTree(ctx, deps.PrimaryRoot, deps.RunID, "", "", branches)
 	if err != nil {
 		return false
 	}

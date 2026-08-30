@@ -36,7 +36,10 @@ func formatTimestamp(t time.Time) string {
 }
 
 func parseTimestamp(s string) (time.Time, error) {
-	return time.Parse(time.RFC3339Nano, s)
+	if t, err := time.Parse(time.RFC3339Nano, s); err == nil {
+		return t, nil
+	}
+	return time.Parse(time.RFC3339, s)
 }
 
 // Status represents the lifecycle status of a feature.
@@ -85,6 +88,20 @@ func (l Lease) Valid(now time.Time) bool {
 	return now.Before(l.ExpiresAt)
 }
 
+// Attempt represents one row of the integration_attempts table.
+type Attempt struct {
+	ID             string
+	FeatureID      string
+	IdempotencyKey string
+	Status         string
+	Owner          string
+	Fence          int64
+	CandidateSHA   string
+	FailureReason  string
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+}
+
 // Service provides feature lifecycle and lease operations backed by the ledger.
 type Service struct {
 	ledger *ledger.Ledger
@@ -113,8 +130,17 @@ func ValidateParentRef(parentRef string) error {
 }
 
 // Create records a new feature, transitioning created -> active and emitting audit events.
-// If the feature already exists with identical parentRef and baseSHA, it returns the existing feature.
-// If existing parentRef or baseSHA differ, ErrFeatureImmutable is returned.
+// If the feature already exists and is active, its parentRef and baseSHA are immutable:
+// identical values return the existing feature idempotently, and differing values
+// return ErrFeatureImmutable. This protects any attempt already recorded against that
+// anchor from having its base silently moved out from under it.
+//
+// If the feature already exists but has been disabled (see Disable), Create instead
+// reactivates it under the given parentRef/baseSHA -- which may differ from the
+// disabled feature's original anchor. This is the supported "retire and recreate"
+// path: an active feature's anchor cannot be re-pointed in place, but once a feature
+// has been explicitly retired via "lucind-ai feature disable", its ID is free to be
+// re-anchored to a corrected base and reused rather than orphaned forever.
 func (s *Service) Create(ctx context.Context, id, parentRef, baseSHA string, expectedParentSHA ...string) (Feature, error) {
 	if strings.TrimSpace(id) == "" {
 		return Feature{}, ErrFeatureIDRequired
@@ -134,6 +160,9 @@ func (s *Service) Create(ctx context.Context, id, parentRef, baseSHA string, exp
 	// Check if already exists
 	existing, err := s.Get(ctx, id)
 	if err == nil {
+		if existing.Status == StatusDisabled {
+			return s.reactivateDisabled(ctx, existing, parentRef, baseSHA, expParentSHA)
+		}
 		if existing.ParentRef != parentRef || existing.BaseSHA != baseSHA {
 			return Feature{}, ErrFeatureImmutable
 		}
@@ -193,6 +222,42 @@ func (s *Service) Create(ctx context.Context, id, parentRef, baseSHA string, exp
 	}, nil
 }
 
+// reactivateDisabled re-anchors a previously disabled feature to a (possibly new)
+// parentRef/baseSHA and transitions it back to active, freeing the ID for reuse
+// instead of leaving it permanently blocked by ErrFeatureImmutable. It is only
+// reachable from Create when the existing row's status is StatusDisabled.
+func (s *Service) reactivateDisabled(ctx context.Context, existing Feature, parentRef, baseSHA, expParentSHA string) (Feature, error) {
+	now := time.Now().UTC()
+	nowStr := formatTimestamp(now)
+
+	err := s.ledger.WriteWithAudit(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, `
+			UPDATE features SET parent_ref = ?, base_sha = ?, expected_parent_sha = ?, status = ?, updated_at = ?
+			WHERE id = ?`,
+			parentRef, baseSHA, expParentSHA, string(StatusActive), nowStr, existing.ID,
+		)
+		return err
+	}, ledger.IntegrationEvent{
+		FeatureID: existing.ID,
+		Type:      "feature_reactivated",
+		Detail:    fmt.Sprintf("parent_ref=%s base_sha=%s (previous_base_sha=%s)", parentRef, baseSHA, existing.BaseSHA),
+		At:        now,
+	})
+	if err != nil {
+		return Feature{}, fmt.Errorf("feature: reactivate disabled feature %q: %w", existing.ID, err)
+	}
+
+	return Feature{
+		ID:                existing.ID,
+		ParentRef:         parentRef,
+		BaseSHA:           baseSHA,
+		ExpectedParentSHA: expParentSHA,
+		Status:            StatusActive,
+		CreatedAt:         existing.CreatedAt,
+		UpdatedAt:         now,
+	}, nil
+}
+
 // Activate transitions a created feature to active state.
 func (s *Service) Activate(ctx context.Context, id string) error {
 	feat, err := s.Get(ctx, id)
@@ -220,7 +285,10 @@ func (s *Service) Activate(ctx context.Context, id string) error {
 	})
 }
 
-// Disable transitions an active feature to disabled state.
+// Disable transitions an active feature to disabled state. A disabled feature is
+// excluded from Ledger.ActiveFeatures (and therefore from the overlap gate's active
+// set), and its ID becomes eligible for re-anchoring via Create -- see
+// reactivateDisabled.
 func (s *Service) Disable(ctx context.Context, id string) error {
 	feat, err := s.Get(ctx, id)
 	if err != nil {
@@ -473,6 +541,37 @@ func (s *Service) ReleaseLease(ctx context.Context, featureID, owner string, fen
 	return nil
 }
 
+// ForceReleaseLease forcefully expires any active lease on featureID, enabling immediate recovery or re-acquisition.
+func (s *Service) ForceReleaseLease(ctx context.Context, featureID string) error {
+	if strings.TrimSpace(featureID) == "" {
+		return ErrFeatureIDMissing
+	}
+
+	now := time.Now().UTC()
+	nowStr := formatTimestamp(now)
+	pastStr := formatTimestamp(time.Unix(0, 0).UTC())
+
+	res, err := s.ledger.DB().ExecContext(ctx, `
+		UPDATE feature_leases
+		SET expires_at = ?, updated_at = ?
+		WHERE feature_id = ?`,
+		pastStr, nowStr, featureID,
+	)
+	if err != nil {
+		return fmt.Errorf("feature: force release lease: %w", err)
+	}
+
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("feature: read rows affected: %w", err)
+	}
+	if affected == 0 {
+		return ErrLeaseNotFound
+	}
+
+	return nil
+}
+
 // ValidateLease verifies that (owner, fence) is the current active, unexpired leaseholder.
 // Returns ErrLeaseNotFound if no lease exists, ErrStaleLease if owner/fence does not match,
 // or ErrLeaseExpired if the lease has expired.
@@ -539,4 +638,108 @@ func (s *Service) GetLease(ctx context.Context, featureID string) (Lease, error)
 	}
 
 	return l, nil
+}
+
+// List returns all features ordered by creation time ascending.
+func (s *Service) List(ctx context.Context) ([]Feature, error) {
+	rows, err := s.ledger.DB().QueryContext(ctx, `
+		SELECT id, parent_ref, base_sha, expected_parent_sha, status, created_at, updated_at
+		FROM features ORDER BY created_at ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("feature: list features: %w", err)
+	}
+	defer rows.Close()
+
+	out := []Feature{}
+	for rows.Next() {
+		var (
+			f                    Feature
+			status               string
+			createdAt, updatedAt string
+		)
+		if err := rows.Scan(&f.ID, &f.ParentRef, &f.BaseSHA, &f.ExpectedParentSHA, &status, &createdAt, &updatedAt); err != nil {
+			return nil, fmt.Errorf("feature: scan feature row: %w", err)
+		}
+		f.Status = Status(status)
+		if t, err := parseTimestamp(createdAt); err == nil {
+			f.CreatedAt = t
+		}
+		if t, err := parseTimestamp(updatedAt); err == nil {
+			f.UpdatedAt = t
+		}
+		out = append(out, f)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("feature: iterate features: %w", err)
+	}
+	return out, nil
+}
+
+// ListLeases returns all feature leases ordered by acquired time ascending.
+func (s *Service) ListLeases(ctx context.Context) ([]Lease, error) {
+	rows, err := s.ledger.DB().QueryContext(ctx, `
+		SELECT feature_id, owner, fence, expires_at, acquired_at, updated_at
+		FROM feature_leases ORDER BY acquired_at ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("feature: list leases: %w", err)
+	}
+	defer rows.Close()
+
+	out := []Lease{}
+	for rows.Next() {
+		var (
+			l                                Lease
+			expiresAt, acquiredAt, updatedAt string
+		)
+		if err := rows.Scan(&l.FeatureID, &l.Owner, &l.Fence, &expiresAt, &acquiredAt, &updatedAt); err != nil {
+			return nil, fmt.Errorf("feature: scan lease row: %w", err)
+		}
+		if t, err := parseTimestamp(expiresAt); err == nil {
+			l.ExpiresAt = t
+		}
+		if t, err := parseTimestamp(acquiredAt); err == nil {
+			l.AcquiredAt = t
+		}
+		if t, err := parseTimestamp(updatedAt); err == nil {
+			l.UpdatedAt = t
+		}
+		out = append(out, l)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("feature: iterate leases: %w", err)
+	}
+	return out, nil
+}
+
+// ListAttempts returns all integration attempts for featureID ordered by creation time ascending.
+func (s *Service) ListAttempts(ctx context.Context, featureID string) ([]Attempt, error) {
+	rows, err := s.ledger.DB().QueryContext(ctx, `
+		SELECT id, feature_id, idempotency_key, status, owner, fence, candidate_sha, failure_reason, created_at, updated_at
+		FROM integration_attempts WHERE feature_id = ? ORDER BY created_at ASC`, featureID)
+	if err != nil {
+		return nil, fmt.Errorf("feature: list attempts: %w", err)
+	}
+	defer rows.Close()
+
+	out := []Attempt{}
+	for rows.Next() {
+		var (
+			a                    Attempt
+			createdAt, updatedAt string
+		)
+		if err := rows.Scan(&a.ID, &a.FeatureID, &a.IdempotencyKey, &a.Status, &a.Owner, &a.Fence, &a.CandidateSHA, &a.FailureReason, &createdAt, &updatedAt); err != nil {
+			return nil, fmt.Errorf("feature: scan attempt row: %w", err)
+		}
+		if t, err := parseTimestamp(createdAt); err == nil {
+			a.CreatedAt = t
+		}
+		if t, err := parseTimestamp(updatedAt); err == nil {
+			a.UpdatedAt = t
+		}
+		out = append(out, a)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("feature: iterate attempts: %w", err)
+	}
+	return out, nil
 }

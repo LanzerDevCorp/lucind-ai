@@ -1,0 +1,442 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+GEMINI_DIR="$HOME/.gemini"
+POOL_DIR="$GEMINI_DIR/profiles"
+POOL_CONF="$POOL_DIR/pool.conf"
+STATE_FILE="$POOL_DIR/.state"
+ACTIVE_FILE="$POOL_DIR/.active"
+LOG_FILE="$POOL_DIR/rotate.log"
+# Antigravity CLI (the current "agy" binary) keeps a single OAuth token file
+# with no embedded email — unlike the classic Gemini CLI's oauth_creds.json +
+# google_accounts.json pair. Identity is tracked by the pool itself (ACTIVE_FILE),
+# not read back from the credential.
+CREDS_FILE="$GEMINI_DIR/antigravity-cli/antigravity-oauth-token"
+# Real agy binary, resolved the same way agyr resolves it -- not via PATH,
+# since agy-pool itself may not be on PATH when this runs.
+AGY_BIN="$HOME/.local/bin/agy"
+
+DEFAULT_ACCOUNTS=(
+  "lanzerdev20@gmail.com"
+  "ponenofeik5@gmail.com"
+  "lucindadsanchez@gmail.com"
+  "corp.systems.lanzer@gmail.com"
+  "corp.systems.lucinda@gmail.com"
+)
+
+slug_of() {
+  local email="$1"
+  echo "${email%%@*}"
+}
+
+ensure_pool_dir() {
+  mkdir -p "$POOL_DIR"
+}
+
+require_conf() {
+  if [[ ! -f "$POOL_CONF" ]]; then
+    echo "agy-pool: no existe $POOL_CONF — corré 'agy-pool init' primero" >&2
+    exit 1
+  fi
+}
+
+active_email() {
+  if [[ ! -f "$ACTIVE_FILE" ]]; then
+    echo ""
+    return 0
+  fi
+  cat "$ACTIVE_FILE" 2>/dev/null || echo ""
+}
+
+log() {
+  ensure_pool_dir
+  echo "$(date -Iseconds) $*" >> "$LOG_FILE"
+}
+
+pool_lines() {
+  require_conf
+  grep -v '^[[:space:]]*$' "$POOL_CONF"
+}
+
+pool_count() {
+  pool_lines | wc -l | tr -d '[:space:]'
+}
+
+pool_index_of() {
+  local email="$1"
+  local i=0
+  while IFS= read -r line; do
+    if [[ "$line" == "$email" ]]; then
+      echo "$i"
+      return 0
+    fi
+    i=$((i + 1))
+  done < <(pool_lines)
+  echo "-1"
+}
+
+# Internal: atomically activates the saved profile for <email> and records
+# the rotation pointer. Shared by `use` and `next` so both stay in sync and
+# both take the same flock around the state-file mutation.
+swap_in() {
+  local email="$1"
+  local slug profile_dir
+  slug=$(slug_of "$email")
+  profile_dir="$POOL_DIR/$slug"
+
+  if [[ ! -f "$profile_dir/antigravity-oauth-token" ]]; then
+    echo "agy-pool: no hay perfil guardado para $email — corré 'agy-pool save $email' primero (logueado como esa cuenta)" >&2
+    exit 1
+  fi
+
+  ensure_pool_dir
+  mkdir -p "$(dirname "$CREDS_FILE")"
+  exec 9>"$STATE_FILE.lock"
+  flock 9
+
+  cp "$profile_dir/antigravity-oauth-token" "$CREDS_FILE.tmp"
+  mv -f "$CREDS_FILE.tmp" "$CREDS_FILE"
+  chmod 600 "$CREDS_FILE"
+
+  echo "$email" > "$ACTIVE_FILE"
+
+  local idx
+  idx=$(pool_index_of "$email")
+  echo "$idx" > "$STATE_FILE"
+
+  flock -u 9
+  exec 9>&-
+
+  log "use $email"
+  echo "Cuenta activa: $email"
+}
+
+# agy_usage_json runs `agy --print "/usage" --output-format json` against
+# whichever credential is currently active. This is a free local slash
+# command (agy reports num_turns:0 for it) -- checking it costs no model
+# quota, which is what makes calling it before every wave affordable.
+agy_usage_json() {
+  "$AGY_BIN" --print "/usage" --output-format json 2>/dev/null
+}
+
+# extract_gemini_5h reads a raw agy /usage JSON response from stdin and
+# prints the "Gemini Models" group's 5-hour bucket remaining_fraction, or
+# nothing (exit 1) if it can't be found/parsed.
+extract_gemini_5h() {
+  python3 -c '
+import json, sys
+try:
+    d = json.load(sys.stdin)
+    for group in d["command"]["data"]["groups"]:
+        for bucket in group["buckets"]:
+            if bucket["id"] == "gemini-5h":
+                print(bucket["remaining_fraction"])
+                sys.exit(0)
+except Exception:
+    pass
+sys.exit(1)
+'
+}
+
+usage_cache_file() {
+  echo "$POOL_DIR/$1/.usage-cache.json"
+}
+
+write_usage_cache() {
+  local slug="$1" fraction="$2"
+  mkdir -p "$POOL_DIR/$slug"
+  local cache_file
+  cache_file=$(usage_cache_file "$slug")
+  printf '{"gemini_5h_remaining":%s,"checked_at":"%s"}\n' "$fraction" "$(date -Iseconds)" > "$cache_file.tmp"
+  mv -f "$cache_file.tmp" "$cache_file"
+}
+
+read_usage_cache() {
+  local slug="$1"
+  local cache_file
+  cache_file=$(usage_cache_file "$slug")
+  [[ -f "$cache_file" ]] || return 1
+  python3 -c '
+import json, sys
+try:
+    print(json.load(open(sys.argv[1]))["gemini_5h_remaining"])
+except Exception:
+    sys.exit(1)
+' "$cache_file"
+}
+
+cmd_init() {
+  ensure_pool_dir
+  if [[ -f "$POOL_CONF" ]]; then
+    echo "pool.conf ya existe, no se sobreescribe"
+    exit 0
+  fi
+  printf '%s\n' "${DEFAULT_ACCOUNTS[@]}" > "$POOL_CONF"
+  echo "Creado $POOL_CONF con ${#DEFAULT_ACCOUNTS[@]} cuentas"
+}
+
+cmd_add() {
+  local email="${1:-}"
+  if [[ -z "$email" ]]; then
+    echo "agy-pool add <email>" >&2
+    exit 1
+  fi
+  ensure_pool_dir
+  touch "$POOL_CONF"
+  if grep -qxF "$email" "$POOL_CONF"; then
+    echo "$email ya está en el pool"
+    exit 0
+  fi
+  echo "$email" >> "$POOL_CONF"
+  echo "Agregado $email a $POOL_CONF"
+}
+
+cmd_list() {
+  require_conf
+  local cur
+  cur=$(active_email)
+  while IFS= read -r email; do
+    local slug saved marker
+    slug=$(slug_of "$email")
+    if [[ -f "$POOL_DIR/$slug/antigravity-oauth-token" ]]; then
+      saved="guardado: sí"
+      local cached_fraction
+      if cached_fraction=$(read_usage_cache "$slug"); then
+        saved="$saved, 5h: $(python3 -c "print(f'{float(\"$cached_fraction\")*100:.0f}%')" 2>/dev/null || echo "?")"
+      fi
+    else
+      saved="guardado: no"
+    fi
+    if [[ "$email" == "$cur" ]]; then
+      marker="*"
+    else
+      marker=" "
+    fi
+    echo "$marker $email ($saved)"
+  done < <(pool_lines)
+}
+
+cmd_save() {
+  require_conf
+  local email="${1:-}"
+  local force="${2:-}"
+  if [[ -z "$email" ]]; then
+    echo "agy-pool save <email> [--force]" >&2
+    exit 1
+  fi
+  if ! grep -qxF "$email" "$POOL_CONF"; then
+    echo "agy-pool: $email no está en el pool — corré 'agy-pool add $email' primero" >&2
+    exit 1
+  fi
+  # Antigravity's token carries no email, so this only checks the pool's own
+  # bookkeeping (ACTIVE_FILE), not who is really logged into agy. Confirm you
+  # ran `agy` and logged in as $email before saving, or pass --force.
+  local cur
+  cur=$(active_email)
+  if [[ "$cur" != "$email" && "$force" != "--force" ]]; then
+    echo "agy-pool: la cuenta activa registrada por el pool es '$cur', no '$email' — si ya te logueaste como $email en agy, pasá --force" >&2
+    exit 1
+  fi
+  if [[ ! -f "$CREDS_FILE" ]]; then
+    echo "agy-pool: no existe $CREDS_FILE" >&2
+    exit 1
+  fi
+  local slug profile_dir
+  slug=$(slug_of "$email")
+  profile_dir="$POOL_DIR/$slug"
+  mkdir -p "$profile_dir"
+  install -m 600 "$CREDS_FILE" "$profile_dir/antigravity-oauth-token"
+  echo "$email" > "$ACTIVE_FILE"
+  log "save $email"
+  echo "Guardado perfil de $email en $profile_dir"
+
+  # Best-effort: this credential is already active, so a live usage reading
+  # is free to grab right now -- keeps the cache fresh without an extra
+  # manual step. Must never fail the save itself.
+  local fraction
+  fraction=$(agy_usage_json | extract_gemini_5h) || fraction=""
+  if [[ -n "$fraction" ]]; then
+    write_usage_cache "$slug" "$fraction"
+  fi
+}
+
+cmd_use() {
+  require_conf
+  local email="${1:-}"
+  if [[ -z "$email" ]]; then
+    echo "agy-pool use <email>" >&2
+    exit 1
+  fi
+  swap_in "$email"
+}
+
+cmd_current() {
+  active_email
+}
+
+cmd_next() {
+  require_conf
+  local emails=()
+  while IFS= read -r line; do
+    emails+=("$line")
+  done < <(pool_lines)
+  local count=${#emails[@]}
+  if [[ "$count" -eq 0 ]]; then
+    echo "agy-pool: el pool está vacío" >&2
+    exit 1
+  fi
+  local last=-1
+  if [[ -f "$STATE_FILE" ]]; then
+    last=$(cat "$STATE_FILE" 2>/dev/null || echo -1)
+    [[ "$last" =~ ^-?[0-9]+$ ]] || last=-1
+  fi
+  local idx=$(( (last + 1) % count ))
+  local next_email="${emails[$idx]}"
+  swap_in "$next_email" >/dev/null
+  echo "$next_email"
+}
+
+cmd_count() {
+  pool_count
+}
+
+# cmd_usage reports each pooled account's remaining gemini-5h quota fraction
+# as a JSON array. The account currently active gets a fresh live reading
+# every call (cheap: /usage is free). Every other saved account is read from
+# its own cache instead of being checked live -- checking it for real would
+# mean swapping its credential in, which is both slow (one extra agy
+# subprocess per account) and, in lucind-ai's concurrent-lane dispatch model,
+# unsafe to do casually (see swap_in). Pass --refresh to force a real check
+# of every account: this temporarily swaps each one in, in turn, and always
+# restores whichever account was active before the refresh, so a usage check
+# never leaves a different account active as a side effect.
+cmd_usage() {
+  require_conf
+  local refresh="${1:-}"
+  local original_active
+  original_active=$(active_email)
+
+  local results=()
+  while IFS= read -r email; do
+    local slug profile_dir cache_file
+    slug=$(slug_of "$email")
+    profile_dir="$POOL_DIR/$slug"
+    cache_file=$(usage_cache_file "$slug")
+
+    if [[ ! -f "$profile_dir/antigravity-oauth-token" ]]; then
+      results+=("{\"email\":\"$email\",\"gemini_5h_remaining\":null,\"source\":\"unsaved\"}")
+      continue
+    fi
+
+    # A prior iteration of this very loop may have swapped a different
+    # account's credential into CREDS_FILE (when refreshing it), so "this is
+    # the originally active account" is never sufficient to assume CREDS_FILE
+    # still holds its token -- swap_in is called explicitly below whenever a
+    # live read is needed, for every account including the active one, so
+    # the read is always against the right credential regardless of what
+    # happened earlier in this loop.
+    local need_live=false
+    if [[ "$email" == "$original_active" || "$refresh" == "--refresh" || ! -f "$cache_file" ]]; then
+      need_live=true
+    fi
+
+    local fraction="" source_label=""
+    if [[ "$need_live" == true ]]; then
+      swap_in "$email" >/dev/null
+      fraction=$(agy_usage_json | extract_gemini_5h) || fraction=""
+      if [[ -n "$fraction" ]]; then
+        write_usage_cache "$slug" "$fraction"
+        source_label="live"
+      fi
+    fi
+
+    if [[ -z "$fraction" ]]; then
+      fraction=$(read_usage_cache "$slug") || fraction=""
+      [[ -n "$fraction" ]] && source_label="cache"
+    fi
+
+    if [[ -n "$fraction" ]]; then
+      results+=("{\"email\":\"$email\",\"gemini_5h_remaining\":$fraction,\"source\":\"$source_label\"}")
+    else
+      results+=("{\"email\":\"$email\",\"gemini_5h_remaining\":null,\"source\":\"error\"}")
+    fi
+  done < <(pool_lines)
+
+  # A usage pass must never leave a different account active as a side
+  # effect, even when --refresh cycled through every saved profile.
+  if [[ -n "$original_active" && "$(active_email)" != "$original_active" ]]; then
+    swap_in "$original_active" >/dev/null
+  fi
+
+  local joined=""
+  if [[ ${#results[@]} -gt 0 ]]; then
+    joined=$(IFS=,; echo "${results[*]}")
+  fi
+  printf '[%s]\n' "$joined"
+}
+
+# cmd_best prints the email of whichever pooled account currently has the
+# most gemini-5h quota remaining, using the same live-active/cached-rest data
+# cmd_usage reports (no forced refresh). Exits 1 with nothing on stdout if no
+# account clears min-fraction (default 0.10).
+cmd_best() {
+  require_conf
+  local min_fraction="${1:-0.10}"
+  local usage_json
+  usage_json=$(cmd_usage)
+  python3 -c '
+import json, sys
+data = json.loads(sys.argv[1])
+min_fraction = float(sys.argv[2])
+candidates = [e for e in data if e.get("gemini_5h_remaining") is not None]
+if not candidates:
+    sys.exit(1)
+best = max(candidates, key=lambda e: e["gemini_5h_remaining"])
+if best["gemini_5h_remaining"] < min_fraction:
+    sys.exit(1)
+print(best["email"])
+' "$usage_json" "$min_fraction" || {
+    echo "agy-pool: ninguna cuenta del pool supera ${min_fraction} de cuota gemini-5h restante" >&2
+    exit 1
+  }
+}
+
+usage() {
+  cat >&2 <<EOF
+Uso: agy-pool <subcomando> [args]
+
+Subcomandos:
+  init                     crea pool.conf con las cuentas por defecto
+  add <email>              agrega una cuenta al pool
+  list                     lista las cuentas y cuál está activa
+  save <email> [--force]   guarda las credenciales activas como perfil de <email>
+  use <email>              activa el perfil guardado de <email>
+  current                  imprime la cuenta activa
+  next                     rota a la siguiente cuenta del pool
+  count                    imprime cuántas cuentas hay en el pool
+  usage [--refresh]        cuota 5h restante por cuenta (JSON) — activa en vivo, resto cacheado
+  best [min-fraction]      imprime el email con más cuota 5h restante (default min 0.10)
+EOF
+}
+
+main() {
+  local sub="${1:-}"
+  if [[ $# -gt 0 ]]; then
+    shift
+  fi
+  case "$sub" in
+    init) cmd_init "$@" ;;
+    add) cmd_add "$@" ;;
+    list) cmd_list "$@" ;;
+    save) cmd_save "$@" ;;
+    use) cmd_use "$@" ;;
+    current) cmd_current "$@" ;;
+    next) cmd_next "$@" ;;
+    count) cmd_count "$@" ;;
+    usage) cmd_usage "$@" ;;
+    best) cmd_best "$@" ;;
+    *) usage; exit 1 ;;
+  esac
+}
+
+main "$@"

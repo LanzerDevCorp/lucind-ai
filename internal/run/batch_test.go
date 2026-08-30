@@ -201,6 +201,9 @@ func newBatchTestDeps(t *testing.T, worktreeRoot func(laneID string) string, env
 			return fstest.MapFS{".lucind/result.json": {Data: data}}
 		},
 		Now: func() time.Time { return now },
+		ResolveCandidateIdentity: func(context.Context, string, string, string) (run.CandidateIdentity, error) {
+			return run.CandidateIdentity{BaseCommit: "base", BaseTree: "base-tree", CandidateCommit: "candidate", CandidateTree: "candidate-tree"}, nil
+		},
 		HasUniqueLaneCommits: func(context.Context, string, string) (bool, error) {
 			return true, nil
 		},
@@ -363,6 +366,45 @@ func TestExecuteBatchWorktreeCreationFailureStillRegistersLaneAsFailed(t *testin
 
 	if got := len(report.Outcome.Preserve); got != 1 || report.Outcome.Preserve[0] != "lane-fails-to-start" {
 		t.Errorf("report.Outcome.Preserve = %v, want [lane-fails-to-start]", report.Outcome.Preserve)
+	}
+}
+
+// TestExecuteBatchEnsureLaneFailedUpdatesLaneMetadata proves ensureLaneFailed
+// snapshots packet Skill/PacketPath (and sibling dispatch fields) when it
+// registers a never-started lane as failed.
+func TestExecuteBatchEnsureLaneFailedUpdatesLaneMetadata(t *testing.T) {
+	root := t.TempDir()
+	fe := newBatchFakeExecutor()
+	fe.outcomeFor[root+"/lane-b"] = executor.Outcome{ExitCode: 0}
+
+	deps := newBatchTestDeps(t, func(id string) string { return root + "/" + id }, func(id string) []byte {
+		return []byte(laneEnvelopeJSON(id, "done"))
+	}, fe, map[string]bool{"lane-fails-to-start": true})
+
+	failed := batchPacket("lane-fails-to-start")
+	failed.Model = "ensure-model"
+	failed.Agent = "ensure-agent"
+	failed.SDDPhase = "apply"
+	failed.FanoutGroup = "batch"
+	failed.Skill = "lucind-apply"
+	failed.Path = ".lucind/packets/lane-fails-to-start.md"
+	failed.AllowedPaths = []string{"internal/run/batch.go"}
+	ps := []packet.Packet{failed, batchPacket("lane-b")}
+
+	if _, err := run.ExecuteBatch(context.Background(), deps, ps); err != nil {
+		t.Fatalf("ExecuteBatch() error = %v, want nil", err)
+	}
+
+	got, err := deps.Ledger.GetLaneMetadata(context.Background(), "run-1", "lane-fails-to-start")
+	if err != nil {
+		t.Fatalf("GetLaneMetadata() error = %v", err)
+	}
+	if got.Skill != failed.Skill || got.PacketPath != failed.Path {
+		t.Fatalf("metadata skill/packet_path = (%q,%q), want (%q,%q)",
+			got.Skill, got.PacketPath, failed.Skill, failed.Path)
+	}
+	if got.Model != failed.Model || got.SDDPhase != failed.SDDPhase || got.FanoutGroup != failed.FanoutGroup {
+		t.Fatalf("metadata = %+v, want model/sdd_phase/fanout_group from failed packet", got)
 	}
 }
 
@@ -1005,6 +1047,8 @@ func TestExecuteBatchOutOfScopeUntrackedFileDeviatedExcludedFromIntegrate(t *tes
 
 	p1 := batchPacket("lane-a")
 	p1.AllowedPaths = []string{"internal/ledger/"}
+	// Declaring the changed file as an input must not turn it into write scope.
+	p1.ReadOnlyPaths = []string{"internal/serve/server.go"}
 
 	p2 := batchPacket("lane-b")
 	p2.AllowedPaths = []string{"internal/serve/"}
@@ -1019,7 +1063,7 @@ func TestExecuteBatchOutOfScopeUntrackedFileDeviatedExcludedFromIntegrate(t *tes
 	}
 
 	if len(report.Outcome.Integrate) != 1 || report.Outcome.Integrate[0] != "lane-b" {
-		t.Errorf("report.Outcome.Integrate = %v, want [lane-b]", report.Outcome.Integrate)
+		t.Errorf("report.Outcome.Integrate = %v, want [lane-b]; lanes=%+v", report.Outcome.Integrate, report.Lanes)
 	}
 	if len(report.Outcome.Preserve) != 1 || report.Outcome.Preserve[0] != "lane-a" {
 		t.Errorf("report.Outcome.Preserve = %v, want [lane-a]", report.Outcome.Preserve)

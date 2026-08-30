@@ -77,7 +77,7 @@ Honest, because a plan that claims to be finished is the same failure this proje
 | Review via RDD | never run |
 | Human lane | one packet, closed — it found two defects in its own instructions |
 | Packet templates, envelope schema | written — embedded and validated on every dispatch (`internal/result/`) |
-| Claude Code plugin / marketplace | to be removed — distribution machinery for an audience of one |
+| Claude Code plugin / OpenCode integration | written — separate Claude and OpenCode distributions |
 
 Installable via `go install ./cmd/lucind-ai`. [`docs/estado-real.html`](docs/estado-real.html) is the same picture,
 drawn, with the same distinction between what exists and what does not.
@@ -94,13 +94,26 @@ internal/                              barrier, ledger, executor, and run packag
 internal/result/result.schema.json     result envelope schema, embedded into the binary
 
 plugin/claude-code/skills/lucind-ai/
-├── SKILL.md                           to shrink to: how to write a packet, how to drive the binary
-├── references/runtime.md              verified CLI surface and verification traps
-├── assets/packet-template.md          agent packet
-└── assets/human-packet-template.md    human packet
+├── SKILL.md                           canonical Claude Code orchestrator skill
+├── references/ and assets/             complete skill support tree
+
+plugin/opencode/
+├── lucind-ai.ts                        native OpenCode custom tool
+├── process.mjs                         shell-free argv subprocess runner
+├── skills/lucind-ai/                   byte-for-byte copy of the Claude tree
+└── install.sh                           idempotent global installer
 
 templates/project-routing.md           superseded by the binary's routing
 ```
+
+## OpenCode integration
+
+Claude Code and OpenCode are separate runtimes: `/lucind-ai` in Claude Code is
+provided by the Claude plugin, while OpenCode loads the native plugin and skill
+globally. Install and verify with `make install-opencode-plugin` and `make
+verify-opencode-plugin`; the installer honors `XDG_CONFIG_HOME` and falls back
+to `$HOME/.config`. Restart OpenCode after installing or changing config,
+plugin, or skill files. See [`plugin/opencode/README.md`](plugin/opencode/README.md).
 
 ## Prior art
 

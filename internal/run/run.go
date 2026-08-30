@@ -11,21 +11,28 @@ package run
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/LanzerDevCorp/lucind-ai/internal/candidatechange"
 	"github.com/LanzerDevCorp/lucind-ai/internal/executor"
 	"github.com/LanzerDevCorp/lucind-ai/internal/lane"
 	"github.com/LanzerDevCorp/lucind-ai/internal/ledger"
 	"github.com/LanzerDevCorp/lucind-ai/internal/overlap"
 	"github.com/LanzerDevCorp/lucind-ai/internal/packet"
 	"github.com/LanzerDevCorp/lucind-ai/internal/result"
+	"github.com/LanzerDevCorp/lucind-ai/internal/skillset"
 	"github.com/LanzerDevCorp/lucind-ai/internal/worktree"
 )
 
@@ -99,6 +106,12 @@ const noStreamDetail = "(none captured)"
 // what they are looking at is a clipped tail, not the stream's complete
 // content.
 const streamTruncatedMarker = "...[truncated, showing last %d of %d bytes]"
+
+const (
+	progressBufferSize    = 32
+	progressBatchSize     = 32
+	progressFlushInterval = 250 * time.Millisecond
+)
 
 // diagnosisDetail formats the reason a lane failed together with its
 // captured stderr AND stdout, each independently bounded by
@@ -177,11 +190,28 @@ type Deps struct {
 	// rejection demotes the lane's status to lane.Blocked before terminal
 	// persistence. Zero disables approval waiting (immediate bypass).
 	ApprovalTimeout time.Duration
+	// AppendProgressBatch is an optional test seam. Production uses Ledger's
+	// atomic batch append when this is nil.
+	AppendProgressBatch func(context.Context, []ledger.LaneProgress) error
+	// ResolveCandidateIdentity freezes full commit/tree object IDs for a done lane.
+	// Production defaults to Git; tests inject deterministic identities.
+	ResolveCandidateIdentity func(ctx context.Context, primaryRoot, worktreePath, baseSHA string) (CandidateIdentity, error)
+	// CollectCandidateChanges freezes canonical WU2 change classifications for
+	// compiled authoring evidence. Production defaults to candidatechange.Collect.
+	CollectCandidateChanges func(context.Context, candidatechange.Request) ([]candidatechange.Change, error)
 
 	HasUniqueLaneCommits func(ctx context.Context, worktreePath, baseSHA string) (bool, error)
 	PorcelainEmpty       func(ctx context.Context, worktreePath string) (bool, error)
 
-	CombineTree        func(ctx context.Context, primaryRoot, runID string, branches []string) (worktreePath, branchName string, err error)
+	// CombineTree creates the integration worktree and merges branches into
+	// it. parentRef and baseSHA are the packet's declared feature target,
+	// and are empty for a legacy dispatch -- empty means "no start point",
+	// which branches the integration worktree from the primary checkout's
+	// current HEAD, exactly as before feature targets existed. A feature
+	// batch must instead start at its own base_sha, or the combined tree
+	// is built on top of whatever primaryRoot happens to have checked out
+	// rather than the feature's actual parent.
+	CombineTree        func(ctx context.Context, primaryRoot, runID, parentRef, baseSHA string, branches []string) (worktreePath, branchName string, err error)
 	RunChecks          func(ctx context.Context, worktreePath string) (passed bool, output string, err error)
 	PromoteTarget      func(ctx context.Context, primaryRoot, integrationBranch string) error
 	DiscardCombined    func(ctx context.Context, primaryRoot, worktreePath, branchName string) error
@@ -200,7 +230,20 @@ type Deps struct {
 	ResolveRefSHA       func(ctx context.Context, primaryRoot, ref string) (string, error)
 	ResolveCandidateSHA func(ctx context.Context, primaryRoot, worktreePath, branch string) (string, error)
 	EvaluateOverlap     func(ctx context.Context, repoDir, baseSHA, shaA, shaB string, opts ...overlap.EvaluateOption) (*overlap.Evidence, error)
-	FeatureLeaseTTL     time.Duration
+	// IsAncestorSHA reports whether ancestorSHA is an ancestor of (already
+	// contained within) descendantSHA. evaluateOverlapGate uses it to guard
+	// reuse of a previously approved+integrated reconciliation candidate: the
+	// candidate is only safe to promote when this attempt's own feature tip is
+	// still an ancestor of it. Without this guard, a candidate resolved for an
+	// EARLIER round -- already consumed by an earlier promotion, or simply
+	// stale relative to real new work landed since -- could be reused for a
+	// LATER attempt with genuinely different content, CAS'ing the branch
+	// backward and silently discarding everything since. nil means "not
+	// wired to verify," which preserves prior behavior (reuse allowed)
+	// unchanged; production always wires a real implementation (see
+	// cmd/lucind-ai/cli.go's productionDeps).
+	IsAncestorSHA   func(ctx context.Context, primaryRoot, ancestorSHA, descendantSHA string) (bool, error)
+	FeatureLeaseTTL time.Duration
 	// RenewInterval controls how often driveAttemptFromLeased renews the
 	// feature lease while checkFunc (integrate.Check) runs during the
 	// CHECKING phase -- see the lease-renewal loop there. Zero means the
@@ -209,6 +252,11 @@ type Deps struct {
 	// set it to a couple of milliseconds to observe renewal deterministically
 	// without waiting out a real multi-second lease TTL.
 	RenewInterval time.Duration
+}
+
+// CandidateIdentity is Git's immutable object identity for a lane and its base.
+type CandidateIdentity struct {
+	BaseCommit, BaseTree, CandidateCommit, CandidateTree string
 }
 
 // Report is the outcome of running exactly one lane through Execute.
@@ -240,12 +288,10 @@ type Report struct {
 	// dispatch's captured output to diagnose something, they may not be
 	// looking at the whole picture.
 	OutputCaptureIncomplete bool
-	// Diagnosis carries the same reason-plus-streams text recorded as the
-	// lane's ledger note (see diagnosisDetail) for any of the three
-	// non-success dispatch outcomes -- non-zero exit, timeout, or an
-	// exit-0 dispatch whose envelope could not be read. It is empty for a
-	// lane whose terminal status came from a readable envelope, since
-	// that already explains itself through Envelope. Diagnosis exists so
+	// Diagnosis carries diagnostic text also recorded as lane_note events.
+	// It covers non-success dispatch outcomes and best-effort progress
+	// persistence failures. Progress failures never change Status, which
+	// remains decided by the result envelope. Diagnosis exists so
 	// a caller that never touches the ledger -- e.g. cmd/lucind-ai's
 	// printReport -- can still see why a lane failed. It is not, by
 	// itself, proof of what specifically went wrong inside the
@@ -335,6 +381,27 @@ func Execute(ctx context.Context, deps Deps, p packet.Packet) (Report, error) {
 	}); err != nil {
 		return report, fmt.Errorf("run: register lane %q: %w", p.ID, err)
 	}
+	if err := deps.Ledger.UpdateLaneMetadata(ctx, ledger.LaneMetadata{
+		RunID:        deps.RunID,
+		LaneID:       p.ID,
+		Model:        p.Model,
+		Agent:        p.Agent,
+		SDDPhase:     p.SDDPhase,
+		FanoutGroup:  p.FanoutGroup,
+		Feature:      p.Feature,
+		Skill:        p.Skill,
+		PacketPath:   p.Path,
+		AllowedPaths: p.AllowedPaths,
+		// Captured verbatim from this packet's own dispatch-time target
+		// fields (empty for a legacy dispatch), not the feature row -- see
+		// ledger.LaneMetadata's doc comment and RetryFeatureTarget.
+		ParentRef:         p.ParentRef,
+		BaseSHA:           p.BaseSHA,
+		ExpectedParentSHA: p.ExpectedParentSHA,
+	}, now); err != nil {
+		cause := fmt.Errorf("run: update lane metadata for %q: %w", p.ID, err)
+		return report, recordLaneFailure(ctx, deps, p.ID, now, cause)
+	}
 	if err := deps.Ledger.AppendEvent(ctx, ledger.Event{
 		RunID:  deps.RunID,
 		LaneID: p.ID,
@@ -365,13 +432,28 @@ func Execute(ctx context.Context, deps Deps, p packet.Packet) (Report, error) {
 		model = exec.DefaultModel()
 	}
 
+	progress := make(chan executor.ProgressEvent, progressBufferSize)
+	progressDone := make(chan []error, 1)
+	appendProgressBatch := deps.AppendProgressBatch
+	if appendProgressBatch == nil {
+		appendProgressBatch = deps.Ledger.AppendProgressBatch
+	}
+	go func() {
+		progressDone <- writeLaneProgress(context.WithoutCancel(ctx), appendProgressBatch, deps.RunID, p.ID, progress)
+	}()
+
 	outcome, err := exec.Run(ctx, executor.Request{
-		Prompt:       p.Body,
-		WorktreePath: wt.Path,
-		Model:        model,
-		Agent:        p.Agent,
-		SchemaPath:   schemaPath,
+		Prompt:         p.Body,
+		WorktreePath:   wt.Path,
+		Model:          model,
+		Agent:          p.Agent,
+		ReadOnlyPaths:  append([]string(nil), p.ReadOnlyPaths...),
+		RequiredSkills: append([]string(nil), p.RequiredSkills...),
+		SchemaPath:     schemaPath,
+		Progress:       progress,
 	})
+	close(progress)
+	progressErrors := <-progressDone
 
 	// persistCtx carries ctx's values onward without its deadline or
 	// cancellation, for every ledger write from here on. A caller-owned
@@ -386,6 +468,8 @@ func Execute(ctx context.Context, deps Deps, p packet.Packet) (Report, error) {
 	// deadline returns Outcome{TimedOut: true} with a nil error
 	// precisely so the caller can still finish recording it normally.
 	persistCtx := context.WithoutCancel(ctx)
+	progressDiagnosis := reportProgressErrors(persistCtx, deps, p.ID, now, progressErrors)
+	report.Diagnosis = progressDiagnosis
 
 	if err != nil {
 		// executor.Executor.Run returns a non-nil error only for the
@@ -407,6 +491,10 @@ func Execute(ctx context.Context, deps Deps, p packet.Packet) (Report, error) {
 	// lanes and misses earlier commits in multi-commit lanes).
 	if status == lane.Done && len(p.AllowedPaths) > 0 {
 		status, reason = enforceAllowedPaths(ctx, deps, wt.Path, wt.BaseSHA, p)
+	}
+
+	if status == lane.Done {
+		status, reason = enforceRequiredSkills(p, envelope)
 	}
 
 	if status == lane.Done {
@@ -433,6 +521,7 @@ func Execute(ctx context.Context, deps Deps, p packet.Packet) (Report, error) {
 			return report, recordLaneFailure(persistCtx, deps, p.ID, now, cause)
 		}
 	}
+	diagnosis = joinDiagnostics(diagnosis, progressDiagnosis)
 
 	// If the lane computed status Done and approval wait is enabled (ApprovalTimeout > 0),
 	// pause the lane and request a human approval decision before persisting terminal status.
@@ -477,8 +566,17 @@ func Execute(ctx context.Context, deps Deps, p packet.Packet) (Report, error) {
 		}
 	}
 
-	if err := deps.Ledger.SetStatus(persistCtx, deps.RunID, p.ID, status, now); err != nil {
-		cause := fmt.Errorf("run: set lane %q terminal status: %w", p.ID, err)
+	var terminalErr error
+	if status == lane.Done {
+		terminalErr = setDoneCandidate(persistCtx, deps, p, wt.Path, wt.BaseSHA, envelope, now)
+	} else {
+		terminalErr = deps.Ledger.SetStatus(persistCtx, deps.RunID, p.ID, status, now)
+	}
+	if terminalErr != nil {
+		cause := fmt.Errorf("run: set lane %q terminal status: %w", p.ID, terminalErr)
+		if status == lane.Done {
+			cause = fmt.Errorf("run: set lane %q terminal status: freeze done candidate: %w", p.ID, terminalErr)
+		}
 		return report, recordLaneFailure(persistCtx, deps, p.ID, now, cause)
 	}
 
@@ -506,6 +604,227 @@ func Execute(ctx context.Context, deps Deps, p packet.Packet) (Report, error) {
 		OutputCaptureIncomplete: outcome.OutputTruncated,
 		Diagnosis:               diagnosis,
 	}, nil
+}
+
+func setDoneCandidate(ctx context.Context, deps Deps, p packet.Packet, worktreePath, recordedBaseSHA string, envelope *result.Envelope, at time.Time) error {
+	resolve := deps.ResolveCandidateIdentity
+	if resolve == nil {
+		resolve = ResolveCandidateIdentityFromGit
+	}
+	identity, err := resolve(ctx, deps.PrimaryRoot, worktreePath, recordedBaseSHA)
+	if err != nil {
+		return err
+	}
+	if identity.BaseCommit == "" || identity.BaseTree == "" || identity.CandidateCommit == "" || identity.CandidateTree == "" {
+		return errors.New("candidate identity is incomplete")
+	}
+	paths, err := normalizeAllowedPaths(p.AllowedPaths)
+	if err != nil {
+		return err
+	}
+	resultJSON, err := json.Marshal(envelope)
+	if err != nil {
+		return fmt.Errorf("encode frozen result: %w", err)
+	}
+	resultHash := versionedHash("result:v1", string(resultJSON))
+	digest := packetDigest(p, paths)
+	candidate := ledger.LaneCandidate{
+		RunID: deps.RunID, LaneID: p.ID, PacketID: p.ID, PacketDigest: digest,
+		PrimaryRoot: deps.PrimaryRoot, WorktreePath: worktreePath,
+		BaseCommit: identity.BaseCommit, BaseTree: identity.BaseTree,
+		CandidateCommit: identity.CandidateCommit, CandidateTree: identity.CandidateTree,
+		AllowedPaths: paths, ResultPath: resultEnvelopePath, ResultJSON: string(resultJSON),
+		ResultHash: resultHash, RecordedAt: at,
+	}
+	if p.Authoring != nil {
+		var contract struct {
+			Version       string                        `json:"version"`
+			Mode          string                        `json:"mode"`
+			WritePaths    []string                      `json:"write_paths"`
+			ReadOnlyPaths []string                      `json:"read_only_paths"`
+			DoneCriteria  []string                      `json:"done_criteria"`
+			HardStops     []string                      `json:"hard_stops"`
+			Result        struct{ Path, Schema string } `json:"result"`
+		}
+		if err := json.Unmarshal(p.Authoring.ContractJSON, &contract); err != nil {
+			return fmt.Errorf("decode compiled authoring contract: %w", err)
+		}
+		collect := deps.CollectCandidateChanges
+		if collect == nil {
+			collect = candidatechange.Collect
+		}
+		changes, err := collect(ctx, candidatechange.Request{Root: worktreePath, BaseCommit: identity.BaseCommit, CandidateCommit: identity.CandidateCommit})
+		if err != nil {
+			return fmt.Errorf("collect compiled candidate changes: %w", err)
+		}
+		commit := "required"
+		if contract.Mode == "read-only" {
+			commit = "forbidden"
+		}
+		digest = p.Authoring.Digest
+		encoded, hash, err := ledger.FreezeAuthoringEvidence(ledger.AuthoringEvidence{
+			PacketDigest: digest, AuthoringMode: "versioned", ContractVersion: contract.Version,
+			Contract: append(json.RawMessage(nil), p.Authoring.ContractJSON...), Binding: append(json.RawMessage(nil), p.Authoring.BindingJSON...),
+			Mode: contract.Mode, CommitObligation: commit, WritePaths: contract.WritePaths, ReadOnlyPaths: contract.ReadOnlyPaths,
+			DoneCriteria: contract.DoneCriteria, HardStops: contract.HardStops, ResultPath: contract.Result.Path, ResultSchema: contract.Result.Schema,
+			BaseCommit: identity.BaseCommit, BaseTree: identity.BaseTree, CandidateCommit: identity.CandidateCommit, CandidateTree: identity.CandidateTree,
+			Changes: changes, ResultHash: resultHash,
+		})
+		if err != nil {
+			return fmt.Errorf("freeze compiled authoring evidence: %w", err)
+		}
+		candidate.PacketDigest = digest
+		candidate.AuthoringEvidenceVersion = ledger.AuthoringEvidenceVersion
+		candidate.AuthoringEvidenceJSON = encoded
+		candidate.AuthoringEvidenceHash = hash
+	}
+	return deps.Ledger.SetDoneCandidate(ctx, candidate)
+}
+
+// ResolveCandidateIdentityFromGit reads complete object IDs for terminal identity persistence.
+func ResolveCandidateIdentityFromGit(ctx context.Context, primaryRoot, worktreePath, baseSHA string) (CandidateIdentity, error) {
+	resolve := func(dir, rev string) (string, error) {
+		out, err := exec.CommandContext(ctx, "git", "-C", dir, "rev-parse", "--verify", rev).CombinedOutput()
+		if err != nil {
+			return "", fmt.Errorf("git rev-parse %s: %w: %s", rev, err, strings.TrimSpace(string(out)))
+		}
+		return strings.TrimSpace(string(out)), nil
+	}
+	baseCommit, err := resolve(primaryRoot, baseSHA+"^{commit}")
+	if err != nil {
+		return CandidateIdentity{}, err
+	}
+	baseTree, err := resolve(primaryRoot, baseCommit+"^{tree}")
+	if err != nil {
+		return CandidateIdentity{}, err
+	}
+	candidateCommit, err := resolve(worktreePath, "HEAD^{commit}")
+	if err != nil {
+		return CandidateIdentity{}, err
+	}
+	candidateTree, err := resolve(worktreePath, candidateCommit+"^{tree}")
+	return CandidateIdentity{baseCommit, baseTree, candidateCommit, candidateTree}, err
+}
+
+func normalizeAllowedPaths(paths []string) ([]string, error) {
+	seen := make(map[string]struct{}, len(paths))
+	for _, raw := range paths {
+		if raw == "" || filepath.IsAbs(raw) || strings.Contains(raw, `\`) {
+			return nil, fmt.Errorf("invalid allowed path %q", raw)
+		}
+		clean := filepath.ToSlash(filepath.Clean(raw))
+		if clean == "." || clean == ".." || strings.HasPrefix(clean, "../") {
+			return nil, fmt.Errorf("invalid allowed path %q", raw)
+		}
+		seen[strings.TrimSuffix(clean, "/")] = struct{}{}
+	}
+	out := make([]string, 0, len(seen))
+	for path := range seen {
+		out = append(out, path)
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+func packetDigest(p packet.Packet, paths []string) string {
+	parts := []string{"packet:v1", p.ID, p.Executor, p.RoutedBy, p.Model, p.Agent,
+		fmt.Sprint(p.ReadOnly), p.Feature, p.ParentRef, p.BaseSHA, p.ExpectedParentSHA,
+		fmt.Sprint(p.LegacyMain), p.SDDPhase, p.FanoutGroup, p.Skill, skillset.DigestBody(p.Body)}
+	parts = append(parts, paths...)
+	parts = append(parts, p.ReadOnlyPaths...)
+	parts = append(parts, p.LaneRole)
+
+	requiredSkills := append([]string(nil), p.RequiredSkills...)
+	sort.Strings(requiredSkills)
+	parts = append(parts, strconv.Itoa(len(requiredSkills)))
+	parts = append(parts, requiredSkills...)
+
+	adhocSkills := append([]string(nil), p.AdhocSkills...)
+	sort.Strings(adhocSkills)
+	parts = append(parts, strconv.Itoa(len(adhocSkills)))
+	parts = append(parts, adhocSkills...)
+
+	return versionedHash(parts...)
+}
+
+func versionedHash(parts ...string) string {
+	h := sha256.New()
+	var size [8]byte
+	for _, part := range parts {
+		binary.BigEndian.PutUint64(size[:], uint64(len(part)))
+		_, _ = h.Write(size[:])
+		_, _ = h.Write([]byte(part))
+	}
+	return fmt.Sprintf("sha256:%x", h.Sum(nil))
+}
+
+func writeLaneProgress(
+	ctx context.Context,
+	appendBatch func(context.Context, []ledger.LaneProgress) error,
+	runID, laneID string,
+	progress <-chan executor.ProgressEvent,
+) []error {
+	ticker := time.NewTicker(progressFlushInterval)
+	defer ticker.Stop()
+
+	batch := make([]ledger.LaneProgress, 0, progressBatchSize)
+	var writeErrors []error
+	flush := func() {
+		if len(batch) == 0 {
+			return
+		}
+		if err := appendBatch(ctx, batch); err != nil {
+			writeErrors = append(writeErrors, err)
+		}
+		batch = batch[:0]
+	}
+
+	for {
+		select {
+		case event, ok := <-progress:
+			if !ok {
+				flush()
+				return writeErrors
+			}
+			batch = append(batch, ledger.LaneProgress{
+				RunID: runID, LaneID: laneID, Message: event.Message, At: event.At,
+				TotalTokens: event.TotalTokens, CostUSD: event.CostUSD, ToolCalls: event.ToolCalls,
+			})
+			if len(batch) == progressBatchSize {
+				flush()
+			}
+		case <-ticker.C:
+			flush()
+		}
+	}
+}
+
+func reportProgressErrors(ctx context.Context, deps Deps, laneID string, at time.Time, writeErrors []error) string {
+	if len(writeErrors) == 0 {
+		return ""
+	}
+
+	messages := make([]string, len(writeErrors))
+	for i, err := range writeErrors {
+		messages[i] = err.Error()
+	}
+	detail := fmt.Sprintf("progress persistence failed for lane %q: %s", laneID, strings.Join(messages, "; "))
+	if err := deps.Ledger.AppendEvent(ctx, ledger.Event{
+		RunID: deps.RunID, LaneID: laneID, Type: ledger.EventLaneNote, Detail: detail, At: at,
+	}); err != nil {
+		return fmt.Sprintf("%s (additionally, failed to record the progress error in the ledger: %v)", detail, err)
+	}
+	return detail
+}
+
+func joinDiagnostics(parts ...string) string {
+	var nonEmpty []string
+	for _, part := range parts {
+		if part != "" {
+			nonEmpty = append(nonEmpty, part)
+		}
+	}
+	return strings.Join(nonEmpty, "\n")
 }
 
 // recordLaneFailure is the last line of defense against a lane row that
@@ -584,74 +903,67 @@ func enforceAllowedPaths(ctx context.Context, deps Deps, worktreePath, baseSHA s
 		return lane.Blocked, "worktree missing recorded base SHA"
 	}
 
-	diffCmd := exec.CommandContext(ctx, "git", "-C", worktreePath, "diff", "--name-status", "-z", "--diff-filter=ACDMRT", "-M", baseSHA, "HEAD")
-	var diffStderr strings.Builder
-	diffCmd.Stderr = &diffStderr
-	diffOut, err := diffCmd.Output()
+	changes, err := candidatechange.Collect(ctx, candidatechange.Request{
+		Root:            worktreePath,
+		BaseCommit:      baseSHA,
+		CandidateCommit: "HEAD",
+		IncludeWorktree: true,
+	})
 	if err != nil {
-		return lane.Blocked, fmt.Sprintf("git diff %s HEAD in worktree failed: %v: %s", baseSHA, err, strings.TrimSpace(diffStderr.String()))
+		return lane.Blocked, fmt.Sprintf("collect actual git diff in worktree failed: %v", err)
 	}
 
-	unstagedCmd := exec.CommandContext(ctx, "git", "-C", worktreePath, "diff", "--name-status", "-z", "--diff-filter=ACDMRT", "-M")
-	var unstagedStderr strings.Builder
-	unstagedCmd.Stderr = &unstagedStderr
-	unstagedOut, err := unstagedCmd.Output()
-	if err != nil {
-		return lane.Blocked, fmt.Sprintf("git diff unstaged in worktree failed: %v: %s", err, strings.TrimSpace(unstagedStderr.String()))
-	}
-
-	stagedCmd := exec.CommandContext(ctx, "git", "-C", worktreePath, "diff", "--cached", "--name-status", "-z", "--diff-filter=ACDMRT", "-M")
-	var stagedStderr strings.Builder
-	stagedCmd.Stderr = &stagedStderr
-	stagedOut, err := stagedCmd.Output()
-	if err != nil {
-		return lane.Blocked, fmt.Sprintf("git diff --cached in worktree failed: %v: %s", err, strings.TrimSpace(stagedStderr.String()))
-	}
-
-	lsCmd := exec.CommandContext(ctx, "git", "-C", worktreePath, "ls-files", "-z", "-o", "--exclude-standard")
-	var lsStderr strings.Builder
-	lsCmd.Stderr = &lsStderr
-	lsOut, err := lsCmd.Output()
-	if err != nil {
-		return lane.Blocked, fmt.Sprintf("git ls-files in worktree failed: %v: %s", err, strings.TrimSpace(lsStderr.String()))
-	}
-
-	seen := make(map[string]bool)
-	var changedPaths []string
-
-	addPaths := func(paths []string) {
-		for _, path := range paths {
-			path = strings.TrimSpace(path)
-			if path == "" {
-				continue
-			}
-			if strings.HasPrefix(path, ".lucind/") || path == ".lucind" {
-				continue
-			}
-			if !seen[path] {
-				seen[path] = true
-				changedPaths = append(changedPaths, path)
-			}
-		}
-	}
-
-	addPaths(parseDiffNameStatusZ(diffOut))
-	addPaths(parseDiffNameStatusZ(unstagedOut))
-	addPaths(parseDiffNameStatusZ(stagedOut))
-	addPaths(parseLSFilesZ(lsOut))
-
-	var offending []string
-	for _, path := range changedPaths {
-		if !packet.PathInScope(path, p.AllowedPaths) {
-			offending = append(offending, path)
-		}
-	}
+	offending := candidatechange.OutOfScope(changes, p.AllowedPaths)
 
 	if len(offending) > 0 {
 		return lane.Deviated, fmt.Sprintf("actual diff touched paths outside declared allowed_paths: %s", strings.Join(offending, ", "))
 	}
 
 	return lane.Done, ""
+}
+
+// enforceRequiredSkills verifies that all skills declared in p.RequiredSkills
+// are present in the result envelope's SkillsLoaded. If any required skill is
+// omitted, the lane is demoted to lane.Deviated with an explanatory reason.
+func enforceRequiredSkills(p packet.Packet, envelope *result.Envelope) (lane.Status, string) {
+	if len(p.RequiredSkills) == 0 {
+		return lane.Done, ""
+	}
+	if envelope == nil {
+		return lane.Deviated, "result envelope is missing required skills declaration"
+	}
+	loaded := make(map[string]bool, len(envelope.SkillsLoaded))
+	for _, s := range envelope.SkillsLoaded {
+		loaded[strings.TrimSpace(s)] = true
+		loaded[canonicalSkillName(s)] = true
+	}
+	var missing []string
+	for _, req := range p.RequiredSkills {
+		reqName := strings.TrimSpace(req)
+		if !loaded[reqName] && !loaded[canonicalSkillName(reqName)] {
+			missing = append(missing, req)
+		}
+	}
+	if len(missing) > 0 {
+		return lane.Deviated, fmt.Sprintf("result envelope skills_loaded omitted required skills: %s", strings.Join(missing, ", "))
+	}
+	return lane.Done, ""
+}
+
+func canonicalSkillName(raw string) string {
+	s := strings.TrimSpace(raw)
+	s = strings.ReplaceAll(s, "\\", "/")
+	if strings.HasSuffix(s, "/SKILL.md") {
+		s = strings.TrimSuffix(s, "/SKILL.md")
+		if idx := strings.LastIndex(s, "/"); idx >= 0 {
+			return s[idx+1:]
+		}
+		return s
+	}
+	if idx := strings.LastIndex(s, "/"); idx >= 0 {
+		return s[idx+1:]
+	}
+	return s
 }
 
 // enforceCompletionMode verifies real git state after decideStatus mapped

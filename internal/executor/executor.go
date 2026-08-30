@@ -9,7 +9,52 @@
 // always the one that decides, never the child process.
 package executor
 
-import "context"
+import (
+	"context"
+	"encoding/json"
+	"os"
+	"strings"
+	"time"
+)
+
+const (
+	readOnlyPathsEnv  = "LUCIND_READ_ONLY_PATHS"
+	requiredSkillsEnv = "LUCIND_REQUIRED_SKILLS"
+)
+
+// requestEnv carries read-only inputs and required skills as JSON assignment
+// context. It never includes write paths, and removing inherited values
+// prevents a prior dispatch from leaking inputs or skills into a packet that
+// declares none.
+func requestEnv(req Request) []string {
+	readOnlyPrefix := readOnlyPathsEnv + "="
+	requiredSkillsPrefix := requiredSkillsEnv + "="
+	base := os.Environ()
+	env := make([]string, 0, len(base)+2)
+	for _, value := range base {
+		if !strings.HasPrefix(value, readOnlyPrefix) && !strings.HasPrefix(value, requiredSkillsPrefix) {
+			env = append(env, value)
+		}
+	}
+	if len(req.ReadOnlyPaths) > 0 {
+		paths, _ := json.Marshal(req.ReadOnlyPaths)
+		env = append(env, readOnlyPrefix+string(paths))
+	}
+	if len(req.RequiredSkills) > 0 {
+		skills, _ := json.Marshal(req.RequiredSkills)
+		env = append(env, requiredSkillsPrefix+string(skills))
+	}
+	return env
+}
+
+// ProgressEvent is one timestamped progress message emitted during a dispatch.
+type ProgressEvent struct {
+	Message     string
+	At          time.Time
+	TotalTokens int64
+	CostUSD     float64
+	ToolCalls   int64
+}
 
 // Request is one dispatch: a prompt to run, in a worktree, on a model.
 type Request struct {
@@ -34,6 +79,15 @@ type Request struct {
 	// omitted when empty (cursor-agent cannot be constrained at the
 	// source, so this is a belt, not the braces).
 	SchemaPath string
+	// ReadOnlyPaths are declared inputs visible to the agent. They never grant
+	// write authority; runtime scope enforcement still uses Packet.AllowedPaths.
+	ReadOnlyPaths []string
+	// RequiredSkills are skill identifiers or paths required by the lane.
+	// When non-empty, they are injected as JSON into LUCIND_REQUIRED_SKILLS.
+	RequiredSkills []string
+	// Progress optionally receives incremental dispatch progress. Executors
+	// that do not emit progress leave it unused; nil preserves existing behavior.
+	Progress chan<- ProgressEvent
 }
 
 // Outcome is what actually happened when the child process ran, nothing

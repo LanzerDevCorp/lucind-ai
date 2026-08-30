@@ -1,0 +1,74 @@
+{
+  "packet_id": "tasks-skill-anchoring-guardrails-lens-c",
+  "status": "done",
+  "summary": "Authored tasks-lens-c.md defining the proof and review workload forecast for skill-anchoring-guardrails. Derived RED test tasks from design threat matrix rows and paired every task with proving commands grounded in real repository tests.",
+  "hard_stops": [
+    {
+      "hard_stop": "The design has no threat matrix, so there is nothing to derive RED tests from.",
+      "fired": false
+    },
+    {
+      "hard_stop": "A behavior the specs require cannot be proven through any test this repository can run, and no new seam is identified.",
+      "fired": false
+    },
+    {
+      "hard_stop": "The changed-line estimate cannot be grounded in anything.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/skill-anchoring-guardrails/tasks-lens-c.md",
+      "change": "created",
+      "why": "Tasks Lens C specifying test proofs, threat matrix RED tests, and review workload forecast."
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "A `## Citation Manifest` section lists every unique citation, grouped by file, with the claim each one supports.",
+      "met": true,
+      "evidence": "openspec/changes/skill-anchoring-guardrails/tasks-lens-c.md:67-97 lists 30 unique citations grouped by file in alphabetical order with ascending line ranges and supported claims."
+    },
+    {
+      "criterion": "`lucind-lane-check.sh --verify-citations` was run before committing and reported no FAIL against this draft's own manifest.",
+      "met": true,
+      "evidence": "lucind-lane-check.sh report:\nPASS  word budget: 884 / 1000 words\nPASS  section present: ## Assumed decomposition\nPASS  section present: ## Review Workload Forecast\nPASS  section present: ## RED Tests from the Threat Matrix\nPASS  section present: ## Acceptance Evidence\nPASS  section present: ## Verification Gaps\nPASS  section present: ## Open Questions\nPASS  section present: ## Citation Manifest\nRESULT: PASS (30/30 citations passed)"
+    },
+    {
+      "criterion": "Every threat-matrix row in the design appears with the design's own verdict, and no row was invented.",
+      "met": true,
+      "evidence": "openspec/changes/skill-anchoring-guardrails/tasks-lens-c.md:24-31 copies all 5 rows verbatim from design.md:130-137 (Documentation-like paths [N/A], Git repository selection [Applicable], Commit state [Applicable], Push state [N/A], PR commands [N/A])."
+    },
+    {
+      "criterion": "Every applicable row names a RED test and the assertion that fires.",
+      "met": true,
+      "evidence": "openspec/changes/skill-anchoring-guardrails/tasks-lens-c.md:27-29 defines RED tests for Git repository selection (rejection inside linked worktree, invalid paths) and Commit state (staged/unstaged/untracked dirty fail-closed and unforced CLI exit 1)."
+    },
+    {
+      "criterion": "The changed-line estimate states the basis it was derived from.",
+      "met": true,
+      "evidence": "openspec/changes/skill-anchoring-guardrails/tasks-lens-c.md:16 estimates ~450 lines with explicit component breakdown: worktree.go (~25), worktree_test.go (~65), integrate/candidate/run call sites (~10), cli.go flag+banners (~75), cli_test.go (~120), dag/split (~35), docs (~120)."
+    },
+    {
+      "criterion": "Every proving command is derived from a real test file in this worktree, cited with file:line.",
+      "met": true,
+      "evidence": "openspec/changes/skill-anchoring-guardrails/tasks-lens-c.md:36-44 cites real tests in internal/worktree/worktree_test.go:240-266,536-595,1034-1069, cmd/lucind-ai/cli_test.go:685-724,729-777,2974-3024,4503-4545, internal/dag/split_test.go:13-111, and lucind-checks.sh:1-4."
+    },
+    {
+      "criterion": "`tasks-lens-c.md` exists, is under 1000 words excluding the Citation Manifest, and carries every skeleton section plus `## Citation Manifest`.",
+      "met": true,
+      "evidence": "openspec/changes/skill-anchoring-guardrails/tasks-lens-c.md exists with 884 words excluding Citation Manifest (under 1000 budget), verified by lucind-lane-check.sh."
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution, confirmed by the final `lucind-lane-check.sh` run reporting a clean `git status --porcelain` and a valid `.lucind/result.json`. Strip any injected `Co-authored-by:` trailer.",
+      "met": true,
+      "evidence": "Commit 2e09cb997a81cdd78b7965f6ea98cc647b392b5e committed with message 'docs(openspec): author tasks lens c for skill-anchoring-guardrails'. Final lucind-lane-check.sh output:\nPASS  git status --porcelain: clean\nPASS  result envelope: .lucind/result.json exists and parses as JSON\nRESULT: PASS"
+    }
+  ],
+  "commit": "2e09cb997a81cdd78b7965f6ea98cc647b392b5e",
+  "session_id": "194f0017-0e79-4d49-a00a-b70888f065d6"
+}

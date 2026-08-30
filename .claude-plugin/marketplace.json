@@ -9,7 +9,7 @@
     {
       "name": "lucind-ai",
       "description": "Supervisor pattern for CLI agents. Opus holds the ledger and dispatches surgical packets; agy executes in parallel, gpt-5.6-sol audits, the human runs whatever touches a secret.",
-      "version": "2.0.1",
+      "version": "2.0.11",
       "author": {
         "name": "LanzerDevCorp"
       },
