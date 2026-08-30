@@ -531,12 +531,12 @@ func TestRunOverlappingAllowedPathsFailsBeforeCreateWorktree(t *testing.T) {
 	createCalled := false
 	origFactory := depsFactory
 	defer func() { depsFactory = origFactory }()
-	depsFactory = func(runID, primaryRoot string, ledg *ledger.Ledger, timeout, approvalTimeout time.Duration) lucindrun.Deps {
-		deps := origFactory(runID, primaryRoot, ledg, timeout, approvalTimeout)
+	depsFactory = func(runID, primaryRoot string, ledg *ledger.Ledger, timeout time.Duration) lucindrun.Deps {
+		deps := origFactory(runID, primaryRoot, ledg, timeout)
 		deps.ResolveCandidateIdentity = stubCandidateIdentity
 		deps.CreateWorktree = func(ctx context.Context, primaryRoot, laneID, parentRef, baseSHA string) (worktree.Worktree, error) {
 			createCalled = true
-			return origFactory(runID, primaryRoot, ledg, timeout, approvalTimeout).CreateWorktree(ctx, primaryRoot, laneID, parentRef, baseSHA)
+			return origFactory(runID, primaryRoot, ledg, timeout).CreateWorktree(ctx, primaryRoot, laneID, parentRef, baseSHA)
 		}
 		deps.PersistEnvelope = func(ctx context.Context, primaryRoot, laneID string, envelope *result.Envelope) error {
 			return nil
@@ -887,7 +887,7 @@ func TestProductionDepsWiresGitBackedInspectionFuncs(t *testing.T) {
 	}
 
 	primaryRoot := initRepo(t)
-	deps := productionDeps("test-run-id", primaryRoot, nil, 10*time.Minute, 0)
+	deps := productionDeps("test-run-id", primaryRoot, nil, 10*time.Minute)
 
 	if deps.HasUniqueLaneCommits == nil {
 		t.Fatal("productionDeps.HasUniqueLaneCommits is nil, want non-nil git-backed func")
@@ -955,7 +955,7 @@ func TestProductionDepsGitInspectionErrorPropagation(t *testing.T) {
 	}
 
 	invalidDir := t.TempDir()
-	deps := productionDeps("test-run-id", invalidDir, nil, 10*time.Minute, 0)
+	deps := productionDeps("test-run-id", invalidDir, nil, 10*time.Minute)
 
 	if deps.HasUniqueLaneCommits == nil {
 		t.Fatal("productionDeps.HasUniqueLaneCommits is nil, want non-nil git-backed func")
@@ -1204,8 +1204,8 @@ func TestRunSequentialInvocationsProduceDistinctRunIDs(t *testing.T) {
 
 	origFactory := depsFactory
 	defer func() { depsFactory = origFactory }()
-	depsFactory = func(runID, primaryRoot string, ledg *ledger.Ledger, timeout, approvalTimeout time.Duration) lucindrun.Deps {
-		deps := origFactory(runID, primaryRoot, ledg, timeout, approvalTimeout)
+	depsFactory = func(runID, primaryRoot string, ledg *ledger.Ledger, timeout time.Duration) lucindrun.Deps {
+		deps := origFactory(runID, primaryRoot, ledg, timeout)
 		deps.ResolveCandidateIdentity = stubCandidateIdentity
 		deps.CreateWorktree = func(ctx context.Context, primaryRoot, laneID, parentRef, baseSHA string) (worktree.Worktree, error) {
 			return worktree.Worktree{Path: t.TempDir(), Branch: "branch-" + laneID}, nil
@@ -1498,7 +1498,7 @@ func TestWU6TypedAuthoringReachesAcceptanceWithShadowIsolation(t *testing.T) {
 	}
 
 	dispatcher := &typedIntegrationExecutor{t: t, path: "internal/typed-proof.txt", criterion: contract.DoneCriteria[0], stop: contract.HardStops[0]}
-	deps := productionDeps(runID, repo, l, time.Minute, 0)
+	deps := productionDeps(runID, repo, l, time.Minute)
 	deps.LookupExecutor = func(string) (executor.Executor, error) { return dispatcher, nil }
 	report, err := lucindrun.Execute(ctx, deps, admitted[0])
 	if err != nil || report.Status != lane.Done {
@@ -1763,8 +1763,8 @@ func TestRunDispatchRejectsWholeBatchBeforeQuotaAllocationAndExecutor(t *testing
 	origGate, origFactory := ensureAgyQuota, depsFactory
 	t.Cleanup(func() { ensureAgyQuota, depsFactory = origGate, origFactory })
 	ensureAgyQuota = func(context.Context, float64) error { quotaCalls++; return nil }
-	depsFactory = func(runID, primaryRoot string, ledg *ledger.Ledger, timeout, approvalTimeout time.Duration) lucindrun.Deps {
-		deps := origFactory(runID, primaryRoot, ledg, timeout, approvalTimeout)
+	depsFactory = func(runID, primaryRoot string, ledg *ledger.Ledger, timeout time.Duration) lucindrun.Deps {
+		deps := origFactory(runID, primaryRoot, ledg, timeout)
 		deps.CreateWorktree = func(context.Context, string, string, string, string) (worktree.Worktree, error) {
 			allocationCalls++
 			return worktree.Worktree{Path: t.TempDir(), Branch: "lucind/test", BaseSHA: head}, nil
@@ -1820,9 +1820,9 @@ func TestRunDispatchRejectsStaleCompiledBodyBeforeAllocation(t *testing.T) {
 	allocations := 0
 	origFactory := depsFactory
 	t.Cleanup(func() { depsFactory = origFactory })
-	depsFactory = func(runID, primaryRoot string, ledg *ledger.Ledger, timeout, approvalTimeout time.Duration) lucindrun.Deps {
+	depsFactory = func(runID, primaryRoot string, ledg *ledger.Ledger, timeout time.Duration) lucindrun.Deps {
 		allocations++
-		return origFactory(runID, primaryRoot, ledg, timeout, approvalTimeout)
+		return origFactory(runID, primaryRoot, ledg, timeout)
 	}
 	cwd, _ := os.Getwd()
 	_ = os.Chdir(repo)
@@ -2107,8 +2107,8 @@ func TestRunDispatchPersistsIntegratedLaneEnvelopeToPrimaryRoot(t *testing.T) {
 
 	origFactory := depsFactory
 	defer func() { depsFactory = origFactory }()
-	depsFactory = func(runID, primaryRoot string, ledg *ledger.Ledger, timeout, approvalTimeout time.Duration) lucindrun.Deps {
-		deps := origFactory(runID, primaryRoot, ledg, timeout, approvalTimeout)
+	depsFactory = func(runID, primaryRoot string, ledg *ledger.Ledger, timeout time.Duration) lucindrun.Deps {
+		deps := origFactory(runID, primaryRoot, ledg, timeout)
 		deps.ResolveCandidateIdentity = stubCandidateIdentity
 		deps.CreateWorktree = func(ctx context.Context, primaryRoot, laneID, parentRef, baseSHA string) (worktree.Worktree, error) {
 			return worktree.Worktree{Path: t.TempDir(), Branch: "branch-" + laneID}, nil
@@ -2348,10 +2348,10 @@ func overrideDispatchDeps(t *testing.T, exec executor.Executor) {
 	}
 	origFactory := depsFactory
 	t.Cleanup(func() { depsFactory = origFactory })
-	depsFactory = func(runID, primaryRoot string, ledg *ledger.Ledger, timeout, approvalTimeout time.Duration) lucindrun.Deps {
-		deps := origFactory(runID, primaryRoot, ledg, timeout, approvalTimeout)
+	depsFactory = func(runID, primaryRoot string, ledg *ledger.Ledger, timeout time.Duration) lucindrun.Deps {
+		deps := origFactory(runID, primaryRoot, ledg, timeout)
 		deps.ResolveCandidateIdentity = stubCandidateIdentity
-		deps.CreateWorktree = origFactory(runID, primaryRoot, ledg, timeout, approvalTimeout).CreateWorktree
+		deps.CreateWorktree = origFactory(runID, primaryRoot, ledg, timeout).CreateWorktree
 		deps.HasUniqueLaneCommits = func(ctx context.Context, worktreePath, baseSHA string) (bool, error) {
 			return true, nil
 		}
@@ -2880,10 +2880,45 @@ func TestDefaultApproverNotEmpty(t *testing.T) {
 	}
 }
 
-func TestRunAcceptsApprovalTimeoutFlag(t *testing.T) {
+// TestApprovalTimeoutFlagIsRemoved pins the removal of the per-lane approval
+// gate. The gate's only decision writer was the control room, decommissioned
+// in 751c6b1; the flag outlived it and became a footgun, because a positive
+// value parked every Done lane in WaitDecision until it timed out into
+// Blocked, with nothing in the process able to record a decision.
+//
+// The assertion is that the flag is now *unknown* to the flag set, not merely
+// ignored: an ignored flag would let an old command line keep running while
+// silently changing meaning. flag.ContinueOnError reports an unknown flag on
+// stderr and never reaches the "--packet is required" check below it, so
+// "flag provided but not defined" is the exact evidence that the surface is
+// gone rather than defaulted.
+func TestApprovalTimeoutFlagIsRemoved(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		args []string
+	}{
+		{"run", []string{"run", "--approval-timeout", "15m"}},
+		{"integrate retry", []string{"integrate", "retry", "--run", "r1", "--approval-timeout", "15m"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			code := run(context.Background(), tc.args, &stdout, &stderr)
+			if code == 0 {
+				t.Fatalf("exit code = 0, want non-zero for a removed flag")
+			}
+			if !strings.Contains(stderr.String(), "flag provided but not defined: -approval-timeout") {
+				t.Fatalf("stderr = %q, want an unknown-flag error for -approval-timeout", stderr.String())
+			}
+		})
+	}
+}
+
+// TestRunWithoutPacketStillReportsMissingPacket keeps the coverage the old
+// approval-timeout test carried incidentally: a run invoked with only valid
+// flags fails on the missing --packet, not on flag parsing.
+func TestRunWithoutPacketStillReportsMissingPacket(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	// Missing packet but valid flags should fail with --packet required, not flag parse error
-	code := run(context.Background(), []string{"run", "--approval-timeout", "15m"}, &stdout, &stderr)
+	code := run(context.Background(), []string{"run", "--timeout", "15m"}, &stdout, &stderr)
 	if code == 0 {
 		t.Fatalf("run without --packet exit code = 0, want non-zero")
 	}
@@ -4261,7 +4296,7 @@ func TestReconcileDeclineCancelRenewCLI(t *testing.T) {
 // featureDispatchDeps stubs the compare-and-swap promotion path so a
 // feature-targeted dispatch can be driven end to end without a second real
 // feature branch in the fixture repository.
-func featureDispatchDeps(t *testing.T, promoted *[]string) func(string, string, *ledger.Ledger, time.Duration, time.Duration) lucindrun.Deps {
+func featureDispatchDeps(t *testing.T, promoted *[]string) func(string, string, *ledger.Ledger, time.Duration) lucindrun.Deps {
 	t.Helper()
 	origResolver := resolveAdmissionRefSHA
 	t.Cleanup(func() { resolveAdmissionRefSHA = origResolver })
@@ -4269,8 +4304,8 @@ func featureDispatchDeps(t *testing.T, promoted *[]string) func(string, string, 
 		return "1111111111111111111111111111111111111111", nil
 	}
 	origFactory := depsFactory
-	return func(runID, primaryRoot string, ledg *ledger.Ledger, timeout, approvalTimeout time.Duration) lucindrun.Deps {
-		deps := origFactory(runID, primaryRoot, ledg, timeout, approvalTimeout)
+	return func(runID, primaryRoot string, ledg *ledger.Ledger, timeout time.Duration) lucindrun.Deps {
+		deps := origFactory(runID, primaryRoot, ledg, timeout)
 		deps.ResolveCandidateIdentity = stubCandidateIdentity
 		deps.CreateWorktree = func(ctx context.Context, primaryRoot, laneID, parentRef, baseSHA string) (worktree.Worktree, error) {
 			return worktree.Worktree{Path: t.TempDir(), Branch: "branch-" + laneID}, nil
@@ -4418,8 +4453,8 @@ func TestRunDispatchRejectsMixedFeatureTargets(t *testing.T) {
 
 	origFactory := depsFactory
 	t.Cleanup(func() { depsFactory = origFactory })
-	depsFactory = func(runID, primaryRoot string, ledg *ledger.Ledger, timeout, approvalTimeout time.Duration) lucindrun.Deps {
-		deps := origFactory(runID, primaryRoot, ledg, timeout, approvalTimeout)
+	depsFactory = func(runID, primaryRoot string, ledg *ledger.Ledger, timeout time.Duration) lucindrun.Deps {
+		deps := origFactory(runID, primaryRoot, ledg, timeout)
 		deps.ResolveCandidateIdentity = stubCandidateIdentity
 		deps.CreateWorktree = func(ctx context.Context, primaryRoot, laneID, parentRef, baseSHA string) (worktree.Worktree, error) {
 			t.Errorf("CreateWorktree called for lane %q; a mixed-target batch must be rejected before any lane dispatches", laneID)
@@ -4482,8 +4517,8 @@ func TestIntegrateRetryCLI(t *testing.T) {
 	}
 	origFactory := depsFactory
 	t.Cleanup(func() { depsFactory = origFactory })
-	depsFactory = func(runID, primaryRoot string, ledg *ledger.Ledger, timeout, approvalTimeout time.Duration) lucindrun.Deps {
-		deps := origFactory(runID, primaryRoot, ledg, timeout, approvalTimeout)
+	depsFactory = func(runID, primaryRoot string, ledg *ledger.Ledger, timeout time.Duration) lucindrun.Deps {
+		deps := origFactory(runID, primaryRoot, ledg, timeout)
 		deps.ResolveCandidateIdentity = stubCandidateIdentity
 		deps.CreateWorktree = func(ctx context.Context, primaryRoot, laneID, parentRef, baseSHA string) (worktree.Worktree, error) {
 			return worktree.Worktree{Path: t.TempDir(), Branch: "branch-" + laneID}, nil
@@ -6223,8 +6258,8 @@ func spyCreateWorktree(t *testing.T) *bool {
 	createCalled := false
 	origFactory := depsFactory
 	t.Cleanup(func() { depsFactory = origFactory })
-	depsFactory = func(runID, primaryRoot string, ledg *ledger.Ledger, timeout, approvalTimeout time.Duration) lucindrun.Deps {
-		deps := origFactory(runID, primaryRoot, ledg, timeout, approvalTimeout)
+	depsFactory = func(runID, primaryRoot string, ledg *ledger.Ledger, timeout time.Duration) lucindrun.Deps {
+		deps := origFactory(runID, primaryRoot, ledg, timeout)
 		deps.CreateWorktree = func(ctx context.Context, primaryRoot, laneID, parentRef, baseSHA string) (worktree.Worktree, error) {
 			createCalled = true
 			return worktree.Worktree{Path: t.TempDir(), Branch: "lucind/" + laneID}, nil

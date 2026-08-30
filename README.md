@@ -46,20 +46,56 @@ Never a metered API key. That constraint is the whole reason this exists.
 The orchestrator writes the packets and decides the lane split — that part is judgment, so it stays
 prose. Everything after it is the binary:
 
-one worktree per lane → parallel headless dispatch → each executor writes its envelope to
-`.lucind/result.json` → schema validation → **barrier** → merge → cleanup → stop.
+admission → one worktree per lane → parallel headless dispatch → each executor writes its envelope
+to `.lucind/result.json` → schema validation → **barrier** → integrate → cleanup → stop.
+
+Admission runs first and has zero side effects: unknown executor, a model outside that executor's
+closed list, overlapping `allowed_paths`, an incomplete or mixed feature target, exhausted `agy`
+quota, a dispatch launched from inside a linked worktree, or a skill tree that has drifted between
+the Claude and OpenCode distributions — any of these exits non-zero before a single worktree or
+ledger row exists.
 
 The barrier is the load-bearing piece. It releases only when **every** lane reaches a terminal state,
 not just `done` — otherwise one blocked lane hangs the run forever. And if any lane is not `done`,
 **nothing merges**: worktrees are preserved and the blocking question is relayed verbatim. Merging
 half of a parallel batch produces a repository state nobody designed.
 
+`done` is not something a lane can claim. The envelope's own `status` is only the entry to a ladder
+of runtime checks: exit code and wall clock, schema validity, **any declared hard stop with
+`fired: true`**, the real four-way git diff against the recorded `base_sha` versus `allowed_paths`,
+`skills_loaded` versus the lane's required skills, and commits-and-porcelain versus the packet's
+`read_only` mode. Each rung has its own demotion target — `blocked`, `deviated`, or `failed`.
+
+Integration takes one of two shapes. A **feature-targeted** batch runs a durable, recoverable
+attempt (`recorded → leased → combining → checking → cas_pending → promoted`) holding a fenced
+exclusive lease, evaluates cross-feature overlap, and promotes by compare-and-swap on the named
+parent ref — the primary checkout is never touched. A **legacy** batch merges into a temporary
+combined tree, runs the project's checks, bisects to the clean subset if red, and fast-forwards the
+currently checked-out branch.
+
 The binary stops at cleanup. It does not trigger review; RDD is driven separately from an `opencode`
 session, so the reviewer is not the same model family that orchestrated the work.
 
-Approvals live in a web UI the binary serves itself on localhost — no npm, no build step. It has no
-"approve all" button, it starts with nothing selected, it shows evidence inline, and it tracks your
-own rate of approvals that later went wrong.
+There is no approval pause inside a dispatch and no approvals UI — both were removed with the
+control room. Human judgment enters after the barrier: `lucind-ai accept` re-verifies a frozen
+candidate out of the ledger and issues a mechanical receipt, and Promotion stays a human decision.
+
+## The command surface
+
+| Command | What it does |
+|---|---|
+| `run` | Dispatches N packets as N concurrent lanes, joins at the barrier, integrates, promotes. |
+| `split` | Validates an `apply-dag.yaml`, emits one packet per node, prints one `run` command per wave. It does not schedule them. |
+| `check` | Runs `lucind-checks.sh` where you stand; `--out` freezes the transcript as evidence. |
+| `accept` | Re-verifies a frozen candidate from the ledger in a detached worktree and issues an immutable receipt. Never moves a ref. |
+| `feature` | `create · status · recover · renew · lease release · lease status · disable` — feature anchors, fenced leases, attempt recovery. |
+| `reconcile` | `approve · decline · cancel · renew · resolve` — the cross-feature overlap resolution cycle. |
+| `defect` | `record · list · resolve · decline · defer` — durable defect records, written by the ultrafixer protocol. |
+| `worktree` | `cleanup --lane <id> [--force]`. Removes the worktree; the `lucind/<id>` branch is a separate manual delete. |
+| `integrate` | `retry --run <run-id>` — rebuilds a reverted batch from the ledger and preserved worktrees, with no AI dispatch. |
+| `phase` | The SDD synthesis gate against `gentle-ai sdd-status`; generates the synthesis packet when none exists. |
+
+Run `lucind-ai` with no arguments for the live flag syntax rather than trusting this table.
 
 ## Status
 
@@ -67,20 +103,31 @@ Honest, because a plan that claims to be finished is the same failure this proje
 
 | Piece | State |
 |---|---|
-| Requirements | fixed — see `docs/prd.md` |
-| The `lucind-ai` binary | written — dispatches via `run --packet <path>` (repeatable) |
-| SQLite ledger | written (schema v2) — used by `internal/run` |
-| Approvals web UI | not written |
+| Requirements | see `docs/prd.md` |
+| The `lucind-ai` binary | written — ten subcommands; see the table above |
+| SQLite ledger | written (schema v10) — runs, lanes, events, progress, candidates, receipts, features, leases, attempts, overlap, reconciliation, defects |
 | Barrier / parallel dispatch | written — joins N lanes concurrently under one barrier |
-| Execution lane (`agy`) | written — dispatched headlessly by the binary; multiple end-to-end runs completed |
-| Execution lane (`cursor-agent`) | logged in 2026-08-17, has never executed |
+| Envelope schema + runtime enforcement ladder | written — embedded and enforced on every dispatch (`internal/result/`, `internal/run`) |
+| Execution lane (`agy`) | written — dispatched headlessly; many end-to-end runs completed |
+| Execution lane (`claude`, `opencode`) | written — admitted routes with closed model lists |
+| Execution lane (`cursor-agent`) | written and admitted; has never executed end to end |
+| Feature targets, fenced leases, CAS promotion | written — durable recoverable attempts (`internal/run/attempt.go`) |
+| Overlap classification and reconciliation | written — `internal/overlap`, `internal/reconcile` |
+| Mechanical acceptance receipts | written — `lucind-ai accept` (`internal/accept`) |
+| Apply-DAG split into waves | written — `lucind-ai split`; emits packets and prints wave commands, schedules nothing |
+| Defect records / ultrafixer triage | written — `lucind-ai defect`, dispatched via the ultrafixer packet template |
+| Approvals web UI / control room | **removed** — decommissioned in `751c6b1`; the per-lane approval gate went with it |
 | Review via RDD | never run |
 | Human lane | one packet, closed — it found two defects in its own instructions |
-| Packet templates, envelope schema | written — embedded and validated on every dispatch (`internal/result/`) |
-| Claude Code plugin / OpenCode integration | written — separate Claude and OpenCode distributions |
+| Claude Code plugin / OpenCode integration | written — two distributions, byte-identical skill trees enforced at dispatch |
+| Automated conflict resolution past 400 lines | not written — `internal/conflicttriage`'s production invoker is deliberately unwired |
 
-Installable via `go install ./cmd/lucind-ai`. [`docs/estado-real.html`](docs/estado-real.html) is the same picture,
-drawn, with the same distinction between what exists and what does not.
+Install with `make install` — never `go build` to an ad-hoc path. `make install` bakes a real
+`git describe` into the binary, so `lucind-ai -v` always reflects what was actually built. A stale
+binary silently lacks recent executors and flags; that cost one whole session once.
+
+[`docs/estado-real.html`](docs/estado-real.html) is the same picture, drawn, with the same
+distinction between what exists and what does not.
 
 ## What is in here
 
@@ -90,8 +137,17 @@ docs/estado-real.html                  the design, drawn, with an honesty legend
 docs/research/meta-harness-landscape.md  what already exists in the field
 
 cmd/lucind-ai/                         the binary CLI entry point
-internal/                              barrier, ledger, executor, and run packages
+internal/run/                          composition root: dispatch, enforcement ladder, barrier wiring
+internal/run/attempt.go                the durable feature-attempt state machine
+internal/barrier/                      pure in-memory join over lane states — no clock, no I/O
+internal/executor/                     one adapter + stream decoder per CLI, plus the agy quota gate
+internal/ledger/                       SQLite schema v10 and every durable table
+internal/{feature,reconcile,overlap}/  leases, cross-feature resolution, diff classification
+internal/{accept,integrate,dag}/       receipts, combined trees and CAS, apply-DAG waves
 internal/result/result.schema.json     result envelope schema, embedded into the binary
+
+lucind-checks.sh                       the full-tree gate: CGO_ENABLED=0 build + go test -race
+scripts/agy-pool                       Antigravity account pool behind --min-quota
 
 plugin/claude-code/skills/lucind-ai/
 ├── SKILL.md                           canonical Claude Code orchestrator skill

@@ -905,13 +905,17 @@ func TestSkillAssetContract(t *testing.T) {
 		t.Errorf("SKILL.md missing feature-branch lane immutability rule")
 	}
 
-	// Shipped subcommands and run flags (2.5-RED).
-	for _, cmd := range []string{"serve", "feature", "reconcile", "renew"} {
+	// Shipped subcommands and run flags (2.5-RED). "serve" is deliberately
+	// absent: the control room was decommissioned in 751c6b1, and asserting
+	// SKILL.md still names it would pin a subcommand the binary no longer
+	// has. (It never really asserted anything anyway -- the third Contains
+	// clause below matches the substring inside "preserve".)
+	for _, cmd := range []string{"feature", "reconcile", "renew"} {
 		if !strings.Contains(content, "lucind-ai "+cmd) && !strings.Contains(content, "`"+cmd+"`") && !strings.Contains(content, cmd) {
 			t.Errorf("SKILL.md invocation/CLI section missing subcommand %q", cmd)
 		}
 	}
-	for _, flag := range []string{"--approval-timeout", "--legacy-main", "--expected-parent-sha"} {
+	for _, flag := range []string{"--legacy-main", "--expected-parent-sha"} {
 		if !strings.Contains(content, flag) {
 			t.Errorf("SKILL.md invocation/CLI section missing run flag %q", flag)
 		}

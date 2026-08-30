@@ -196,7 +196,7 @@ legacy mode **and** the expected SHA of `main`.
 CLI flags on `run`:
 
 ```text
-lucind-ai run --packet <path> [--packet <path> ...] [--timeout <duration>] [--approval-timeout <duration>] [--legacy-main] [--expected-parent-sha <sha>]
+lucind-ai run --packet <path> [--packet <path> ...] [--timeout <duration>] [--legacy-main] [--expected-parent-sha <sha>] [--min-quota <fraction>]
 ```
 
 ```bash

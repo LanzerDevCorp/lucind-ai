@@ -183,13 +183,6 @@ type Deps struct {
 	// package already relies on and what a plain context.Context without a
 	// deadline continues to mean.
 	LaneTimeout time.Duration
-	// ApprovalTimeout is the wall-clock budget Execute waits for a human
-	// approval decision when a lane computes status Done. When non-zero and
-	// status is Done, Execute requests approval and blocks on persistCtx
-	// until an approval decision is recorded in the ledger. A timeout or
-	// rejection demotes the lane's status to lane.Blocked before terminal
-	// persistence. Zero disables approval waiting (immediate bypass).
-	ApprovalTimeout time.Duration
 	// AppendProgressBatch is an optional test seam. Production uses Ledger's
 	// atomic batch append when this is nil.
 	AppendProgressBatch func(context.Context, []ledger.LaneProgress) error
@@ -522,49 +515,6 @@ func Execute(ctx context.Context, deps Deps, p packet.Packet) (Report, error) {
 		}
 	}
 	diagnosis = joinDiagnostics(diagnosis, progressDiagnosis)
-
-	// If the lane computed status Done and approval wait is enabled (ApprovalTimeout > 0),
-	// pause the lane and request a human approval decision before persisting terminal status.
-	// This ensures that batch barrier Observe never sees the lane as terminal until the human
-	// approval decision resolves. A timeout or rejection forces status to Blocked.
-	if deps.ApprovalTimeout > 0 && status == lane.Done {
-		var evidenceStr string
-		if envelope != nil {
-			var evs []string
-			for _, dc := range envelope.DoneCriteria {
-				if dc.Evidence != "" {
-					evs = append(evs, dc.Evidence)
-				}
-			}
-			for _, f := range envelope.Findings {
-				if f.Evidence != "" {
-					evs = append(evs, f.Evidence)
-				}
-			}
-			if len(evs) > 0 {
-				evidenceStr = strings.Join(evs, "\n")
-			}
-		}
-		app := ledger.Approval{
-			RunID:       deps.RunID,
-			LaneID:      p.ID,
-			PacketID:    p.ID,
-			Evidence:    evidenceStr,
-			RequestedAt: now,
-		}
-		if err := deps.Ledger.RequestApproval(persistCtx, app); err != nil {
-			cause := fmt.Errorf("run: request approval for %q: %w", p.ID, err)
-			return report, recordLaneFailure(persistCtx, deps, p.ID, now, cause)
-		}
-
-		waitCtx, cancel := context.WithTimeout(persistCtx, deps.ApprovalTimeout)
-		defer cancel()
-
-		dec, err := deps.Ledger.WaitDecision(waitCtx, deps.RunID, p.ID)
-		if err != nil || dec.Decision != ledger.DecisionApproved {
-			status = lane.Blocked
-		}
-	}
 
 	var terminalErr error
 	if status == lane.Done {

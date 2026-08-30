@@ -59,7 +59,7 @@ const attemptOwner = "lucind-ai run"
 // error, so a person driving the binary from a terminal always sees the one
 // invocation that works rather than a stack trace. --packet is repeatable:
 // each occurrence adds one more lane to the batch.
-const usage = "usage: lucind-ai run --packet <path> [--packet <path> ...] [--timeout <duration>] [--approval-timeout <duration>] [--legacy-main --expected-parent-sha <sha>] [--min-quota <fraction>]\n       lucind-ai split --dag <path> --out <dir>\n       lucind-ai check [--out <path>]\n       lucind-ai accept --run <run-id> --lane <lane-id>\n       lucind-ai feature create --id <id> --parent <ref> --base-sha <sha> [--expected-parent-sha <sha>]\n       lucind-ai feature status [--id <id>]\n       lucind-ai feature recover --attempt <id>\n       lucind-ai feature renew --id <id> --owner <owner> --fence <fence> [--ttl <duration>]\n       lucind-ai feature lease release --id <id> [--owner <owner>] [--fence <fence>] [--pid <pid>] [--force]\n       lucind-ai feature lease status --id <id>\n       lucind-ai feature disable --id <id>\n       lucind-ai reconcile approve --request <id> --source <feature> --target <feature> [--actor <name>]\n       lucind-ai reconcile decline --request <id> [--actor <name>] [--reason <reason>]\n       lucind-ai reconcile cancel --request <id> [--actor <name>] [--reason <reason>]\n       lucind-ai reconcile renew --request <id> [--base-sha <sha>] [--source-sha <sha>] [--target-sha <sha>] [--wait-stable <duration>]\n       lucind-ai reconcile resolve --candidate <id> --sha <sha> [--actor <name>] [--wait-stable <duration>]\n       lucind-ai defect record --id <id> --feature <id> --signature <sig> [--evidence <ev>] [--disposition <disp>] [--run <run-id>] [--lane <lane-id>]\n       lucind-ai defect list --feature <id>\n       lucind-ai defect resolve --id <id>\n       lucind-ai defect decline --id <id>\n       lucind-ai defect defer --id <id>\n       lucind-ai worktree cleanup --lane <id> [--force]\n       lucind-ai integrate retry --run <run-id> [--lane <id> ...] [--timeout <duration>] [--approval-timeout <duration>]\n       lucind-ai phase <name> [--change <name>] [--force]\n       lucind-ai --version"
+const usage = "usage: lucind-ai run --packet <path> [--packet <path> ...] [--timeout <duration>] [--legacy-main --expected-parent-sha <sha>] [--min-quota <fraction>]\n       lucind-ai split --dag <path> --out <dir>\n       lucind-ai check [--out <path>]\n       lucind-ai accept --run <run-id> --lane <lane-id>\n       lucind-ai feature create --id <id> --parent <ref> --base-sha <sha> [--expected-parent-sha <sha>]\n       lucind-ai feature status [--id <id>]\n       lucind-ai feature recover --attempt <id>\n       lucind-ai feature renew --id <id> --owner <owner> --fence <fence> [--ttl <duration>]\n       lucind-ai feature lease release --id <id> [--owner <owner>] [--fence <fence>] [--pid <pid>] [--force]\n       lucind-ai feature lease status --id <id>\n       lucind-ai feature disable --id <id>\n       lucind-ai reconcile approve --request <id> --source <feature> --target <feature> [--actor <name>]\n       lucind-ai reconcile decline --request <id> [--actor <name>] [--reason <reason>]\n       lucind-ai reconcile cancel --request <id> [--actor <name>] [--reason <reason>]\n       lucind-ai reconcile renew --request <id> [--base-sha <sha>] [--source-sha <sha>] [--target-sha <sha>] [--wait-stable <duration>]\n       lucind-ai reconcile resolve --candidate <id> --sha <sha> [--actor <name>] [--wait-stable <duration>]\n       lucind-ai defect record --id <id> --feature <id> --signature <sig> [--evidence <ev>] [--disposition <disp>] [--run <run-id>] [--lane <lane-id>]\n       lucind-ai defect list --feature <id>\n       lucind-ai defect resolve --id <id>\n       lucind-ai defect decline --id <id>\n       lucind-ai defect defer --id <id>\n       lucind-ai worktree cleanup --lane <id> [--force]\n       lucind-ai integrate retry --run <run-id> [--lane <id> ...] [--timeout <duration>]\n       lucind-ai phase <name> [--change <name>] [--force]\n       lucind-ai --version"
 
 // depsFactory constructs run.Deps for runDispatch. In production it is
 // productionDeps; tests may override it to inject test doubles or observe dependency calls.
@@ -192,7 +192,6 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 	var packetFlags packetPaths
 	fs.Var(&packetFlags, "packet", "path to a dispatch packet (repeatable: one lane per occurrence)")
 	timeout := fs.Duration("timeout", defaultTimeout, "wall clock budget granted to each lane")
-	approvalTimeout := fs.Duration("approval-timeout", 0, "approval timeout budget granted to lane gates (0 = no wait / bypass)")
 	legacyMain := fs.Bool("legacy-main", false, "declare legacy mode (dispatches against main)")
 	expectedParentSHA := fs.String("expected-parent-sha", "", "expected parent commit SHA for legacy mode")
 	minQuota := fs.Float64("min-quota", defaultMinQuota, "minimum fraction of the active agy-pool account's 5h gemini quota required before dispatching an agy-executed batch; below it, auto-rotates to the pooled account with the most quota (0 disables the check)")
@@ -375,7 +374,7 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 	}
 	defer ledg.Close()
 
-	deps := depsFactory(runID, primaryRoot, ledg, *timeout, *approvalTimeout)
+	deps := depsFactory(runID, primaryRoot, ledg, *timeout)
 
 	// Register this run before anything else touches the ledger: every lane
 	// and event ExecuteBatch is about to write carries this runID, and the
@@ -950,7 +949,7 @@ func readSkillTree(root string) (map[string][]byte, error) {
 
 // productionDeps constructs the production run.Deps wiring real-world
 // dependencies (git, ledger, worktree, executors, clock).
-func productionDeps(runID, primaryRoot string, ledg *ledger.Ledger, timeout, approvalTimeout time.Duration) lucindrun.Deps {
+func productionDeps(runID, primaryRoot string, ledg *ledger.Ledger, timeout time.Duration) lucindrun.Deps {
 	return lucindrun.Deps{
 		RunID:       runID,
 		PrimaryRoot: primaryRoot,
@@ -971,7 +970,6 @@ func productionDeps(runID, primaryRoot string, ledg *ledger.Ledger, timeout, app
 		WorktreeFS:               os.DirFS,
 		Now:                      time.Now,
 		LaneTimeout:              timeout,
-		ApprovalTimeout:          approvalTimeout,
 		ResolveCandidateIdentity: lucindrun.ResolveCandidateIdentityFromGit,
 		HasUniqueLaneCommits: func(ctx context.Context, worktreePath, baseSHA string) (bool, error) {
 			return worktree.HasUniqueCommits(ctx, worktreePath, baseSHA)
@@ -1282,7 +1280,7 @@ func runFeatureRecover(ctx context.Context, args []string, stdout, stderr io.Wri
 	}
 	defer ledg.Close()
 
-	deps := depsFactory(uuid.NewString(), primaryRoot, ledg, defaultTimeout, 0)
+	deps := depsFactory(uuid.NewString(), primaryRoot, ledg, defaultTimeout)
 	att, err := lucindrun.RecoverAttempt(ctx, deps, *attemptID)
 	if err != nil {
 		fmt.Fprintf(stderr, "lucind-ai: recover attempt %q: %v\n", *attemptID, err)
@@ -1922,7 +1920,7 @@ func runReconcileRenew(ctx context.Context, args []string, stdout, stderr io.Wri
 	}
 	defer ledg.Close()
 
-	deps := depsFactory(uuid.NewString(), primaryRoot, ledg, defaultTimeout, 0)
+	deps := depsFactory(uuid.NewString(), primaryRoot, ledg, defaultTimeout)
 	var opts []reconcile.ServiceOption
 	if deps.EvaluateOverlap != nil {
 		opts = append(opts, reconcile.WithOverlapEvaluator(deps.EvaluateOverlap))
@@ -2193,7 +2191,7 @@ func runIntegrateRetry(ctx context.Context, args []string, stdout, stderr io.Wri
 	fs := flag.NewFlagSet("integrate retry", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
-		fmt.Fprintln(stderr, "usage: lucind-ai integrate retry --run <run-id> [--lane <id> ...] [--timeout <duration>] [--approval-timeout <duration>]")
+		fmt.Fprintln(stderr, "usage: lucind-ai integrate retry --run <run-id> [--lane <id> ...] [--timeout <duration>]")
 		fs.PrintDefaults()
 	}
 
@@ -2201,7 +2199,6 @@ func runIntegrateRetry(ctx context.Context, args []string, stdout, stderr io.Wri
 	var laneFlags packetPaths
 	fs.Var(&laneFlags, "lane", "lane id to retry (repeatable; omit to auto-select every done+preserved lane in the run)")
 	timeout := fs.Duration("timeout", defaultTimeout, "wall clock budget granted to the combine/check step")
-	approvalTimeout := fs.Duration("approval-timeout", 0, "approval timeout budget granted to lane gates (0 = no wait / bypass)")
 
 	if err := fs.Parse(args); err != nil {
 		return 1
@@ -2238,7 +2235,7 @@ func runIntegrateRetry(ctx context.Context, args []string, stdout, stderr io.Wri
 		return 1
 	}
 
-	deps := depsFactory(*runID, primaryRoot, ledg, *timeout, *approvalTimeout)
+	deps := depsFactory(*runID, primaryRoot, ledg, *timeout)
 
 	batch, err := lucindrun.RebuildBatchForRetry(ctx, deps, *runID, []string(laneFlags))
 	if err != nil {

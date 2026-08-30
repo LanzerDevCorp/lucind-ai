@@ -1,6 +1,6 @@
 # lucind-ai — PRD
 
-**Status:** core binary and dispatch built, integration and web UI pending. **Date:** 2026-08-17. **Audience:** the author only.
+**Status:** built and in use. Ten subcommands ship; the approvals web UI was built, then removed. **Date:** 2026-08-17, revised 2026-08-30. **Audience:** the author only.
 
 This document supersedes `handoff-2026-08-13.md` (deleted) and the orchestration model described in
 the pre-2026-08-14 README. Where it disagrees with anything older, it wins.
@@ -102,13 +102,18 @@ Still corrected when envelope data says otherwise.
 | `agy` | Sweeps and volume — exploring 4+ files, broad mechanical change, repetitive refactors | Fast and cheap, more error-prone; the envelope contains the risk |
 | `cursor-agent` | Single-piece precision — one file, non-trivial logic | Its repo context pays off on focused work |
 
-## 6. The v1 flow
+## 6. The dispatch flow
 
 1. **The orchestrator (Claude Code) writes the packets and decides the lane split.** This stays
    prose — it is judgment, not flow control.
 2. **The binary creates one worktree per lane** at `<repo-parent>/<repo-name>-worktrees/<name>`,
    never a temp dir. Each worktree needs its own `.codegraph` index; never copy or share one.
-3. **The binary dispatches both lanes in parallel**, headless (`-p`).
+3. **The binary dispatches every lane in parallel**, headless. Before the first side effect it
+   runs admission with zero side effects: supported executor, model inside that executor's closed
+   list, `agent` only on `opencode`, disjoint `allowed_paths` across the batch, a complete and
+   uniform feature target, sufficient `agy` quota for the whole wave, not launched from inside a
+   linked worktree, and byte-identical Claude/OpenCode skill trees with a fresh embedded schema.
+   Anything that fails here exits non-zero before a worktree or ledger row exists.
 4. **Each executor writes its envelope to `.lucind/result.json` inside its own worktree.** The
    binary reads it from disk and validates it against `internal/result/result.schema.json`, embedded into the binary.
    This is deliberate: `agy` has `--json-schema` (real enforcement) but `cursor-agent` has only
@@ -121,9 +126,17 @@ Still corrected when envelope data says otherwise.
    prompt itself** — raw JSON, no code fences — and the binary validates what lands on disk. This is
    the documented pattern for non-cooperative CLIs; result-to-known-file is documented too, in
    `openai/codex-action@v1` (`output-file`) and in Claude Code subagents (`outputFile`).
-5. **Barrier.** It releases when **every** lane reaches a terminal state — `done | blocked |
+5. **The envelope is a claim, not a verdict.** Its own `status` only enters a ladder of runtime
+   checks, each with its own demotion target: a non-zero exit or an expired clock, an unreadable or
+   schema-invalid envelope, and **any declared hard stop with `fired: true`** all force `blocked`;
+   a real four-way git diff against the recorded `base_sha` that leaves `allowed_paths`, or
+   `skills_loaded` missing a required skill, forces `deviated`; and git state that contradicts the
+   packet's `read_only` mode — a write packet with no commit or a dirty tree, a read-only packet
+   that committed — forces `failed`. Only a lane that clears every rung freezes a candidate.
+
+6. **Barrier.** It releases when **every** lane reaches a terminal state — `done | blocked |
    deviated | failed` — never on `done` alone, or one `blocked` lane hangs the run forever.
-6. **Integrate the `done` lanes through a temporary combined tree** — never straight into the target
+7. **Integrate the `done` lanes through a temporary combined tree** — never straight into the target
    branch. Merge them together first, resolve conflicts, then run the project's checks against that
    combined state.
    - **Green** → integrate the batch.
@@ -132,11 +145,11 @@ Still corrected when envelope data says otherwise.
 
    Conflicts go to `claude -p --model sonnet`, **bounded to 400 lines**; if it cannot close, it
    escalates to the human with both versions intact.
-7. **Lanes that were not `done` at the barrier never enter integration.** Their worktrees are
+8. **Lanes that were not `done` at the barrier never enter integration.** Their worktrees are
    preserved and their questions are relayed verbatim.
-8. **Remove only the worktrees of lanes that integrated.**
-9. **Stop.** The binary does not trigger RDD.
-10. **The human runs RDD from an `opencode` session** (`--agent opencode`) with `gpt-5.6-sol`.
+9. **Remove only the worktrees of lanes that integrated.**
+10. **Stop.** The binary does not trigger RDD.
+11. **The human runs RDD from an `opencode` session** (`--agent opencode`) with `gpt-5.6-sol`.
 
 ## 7. Behavioral rules
 
@@ -172,8 +185,9 @@ errors and imports that another lane is mid-way through changing. No lane ever r
 **A failed lane must not block a good one** — but nothing merges unverified either. That is what the
 combined tree in step 6 is for.
 
-**Blocked.** The binary exits **non-zero**. That exit code replaces the `UserPromptSubmit` hook that
-was designed and never built. An orchestrator that has to *remember* to read the approval queue is
+**Blocked.** The binary exits **non-zero**. Exit 0 requires every lane to have reached `done` and
+none to appear in `reverted_ids`. That exit code replaces the `UserPromptSubmit` hook that was
+designed and never built. An orchestrator that has to *remember* to go looking for a bad outcome is
 the most fragile possible arrangement; a binary that fails in your face is not.
 
 **The human lane.** Human packets run **serially, outside the parallel batch**. A human cannot be
@@ -187,9 +201,29 @@ because green criteria have twice concealed a violated hard stop.
 
 ### 8.1 The binary
 
-Go 1.24.2, module `github.com/LanzerDevCorp/lucind-ai`, one command: `lucind-ai`. Simple, fast,
-deterministic flow control. It owns worktrees, dispatch, envelope validation, the barrier, the
-merge, cleanup, and the ledger.
+Go 1.25.0, module `github.com/LanzerDevCorp/lucind-ai`, one command: `lucind-ai`. Simple, fast,
+deterministic flow control. It owns worktrees, dispatch, envelope validation and the enforcement
+ladder, the barrier, integration, cleanup, and the ledger.
+
+Ten subcommands ship today:
+
+| Command | Owns |
+|---|---|
+| `run` | The whole dispatch flow of §6, for N packets at once. |
+| `split` | `apply-dag.yaml` → validated waves → one packet file per node → one printed `run` command per wave. It never schedules. |
+| `check` | `lucind-checks.sh` where you stand, with an optional frozen transcript. |
+| `accept` | Mechanical re-verification of a frozen candidate out of the ledger, in a verifier-owned detached worktree, producing an immutable receipt. Never a ref change, never a semantic approval. |
+| `feature` | Feature anchors, their immutability while active, retire-and-recreate via `disable`, and fenced exclusive leases. |
+| `reconcile` | The cross-feature overlap resolution cycle: `approve · decline · cancel · renew · resolve`. |
+| `defect` | Durable defect records and their dispositions, written by the ultrafixer protocol. |
+| `worktree` | `cleanup` — removes a lane's worktree; the `lucind/<id>` branch stays. |
+| `integrate` | `retry` — rebuilds a reverted batch from the ledger and preserved worktrees, with no AI dispatch. |
+| `phase` | The SDD synthesis gate against `gentle-ai sdd-status`, generating a synthesis packet when none exists. |
+
+**Install with `make install`, never an ad-hoc `go build`.** The version string is baked at compile
+time, so `lucind-ai -v` is the only trustworthy statement about what is actually installed. A stale
+binary silently lacks recent executors and flags; that cost a full session once, chasing
+`unsupported executor "cursor-agent"` from a binary built before that executor landed.
 
 ### 8.2 The ledger — SQLite in the primary repo's `.lucind/`
 
@@ -203,7 +237,15 @@ jobs.
 
 It replaces both `state.json` and `approvals.md`. It stays **small**: it is a ledger, not a record
 of what happened — the narrative goes to engram. A routing decision is stored together with the
-condition that triggered it; there is no implicit routing.
+condition that triggered it; there is no implicit routing. Diagnosis notes are capped per stream and
+keep the **tail**, not the head — a process that dies says why in its last output.
+
+The schema is at **v10**, reached by a forward-only migration chain: runs, lanes, events,
+lane_progress, lane_candidates, acceptance_receipts, approvals, features, feature_leases,
+integration_attempts, integration_events, overlap_evidence, reconciliation_requests,
+reconciliation_candidates, defect_records, and the two packet-author shadow tables. The `approvals`
+table outlived the feature that wrote to it (§8.3) and stays only because the migration chain is
+never rewritten.
 
 Adopting Gas Town's convoy/bead model was considered and rejected, and the research settles it: its
 beads are prefixed 5-character work items (`gt-abc12`) bundled into labelled convoys, but **the
@@ -214,38 +256,55 @@ What is worth stealing is its *event list*, not its schema — Gas Town records 
 agent state changes, calls with duration, worker spawn and removal, and completion. Those are the
 right things to write down.
 
-### 8.3 The approvals web UI
+### 8.3 The approvals web UI — built, then removed
 
-Served by the binary itself — `lucind-ai serve`. Plain HTML/CSS/JS embedded with `embed`, stdlib
-`net/http`, reading the same SQLite. No npm, no build step, no dependency. **Bound to localhost
-only**, because this interface can approve work.
+This section described a localhost control room served by `lucind-ai serve`, with four hard rules
+against the stated habit *"it asks me several things and I always say yes to everything"*: no
+"approve all" button, every item decided individually, evidence inline, and a ledger that tracks
+your own rate of approvals that later went wrong.
 
-When a lane requests approval the binary **waits**, with a configurable timeout — blocking keeps the
-batch alive and the worktree warm, and the timeout prevents the infinite hang.
+It was built, and then **decommissioned in `751c6b1` (2026-08-26)**: the `internal/serve` package,
+the `serve` subcommand, and the UI are gone. The per-lane approval gate that fed it — the
+`--approval-timeout` flag on `run` and `integrate retry`, `Deps.ApprovalTimeout`, and the
+`RequestApproval`/`WaitDecision` pause inside `Execute` — outlived it by four days as a footgun: a
+positive value parked every `done` lane until it timed out into `blocked`, because nothing in the
+process could record a decision any more. It was removed on 2026-08-30. **There is no approval pause
+inside a dispatch.**
 
-It is also the control surface for the whole cycle: it shows a merged batch as ready for review,
-with the exact `opencode` command to run.
+The habit that motivated rule 4 is real and unaddressed by the current design. What replaced the UI
+is not a smaller UI but a different shape of the same intent, moved after the barrier instead of
+inside the dispatch:
 
-**Four hard rules, in response to a stated habit — "it asks me several things and I always say yes
-to everything":**
+- **`lucind-ai accept`** re-verifies a frozen candidate out of the ledger — not the live branch —
+  re-confirming the packet digest, base and candidate commit/tree, and `allowed_paths`, failing
+  closed on a fired hard stop or an unmet criterion, then running the repository checks in a
+  verifier-owned detached worktree. It emits an immutable receipt and never touches a ref. It is
+  mechanical evidence only, never qualitative approval.
+- **The ten-step acceptance protocol**, of which the receipt is only step 1. Two of its steps are
+  marked irreducible on purpose — reading the full diff, and judging whether changed tests assert
+  real behavior — precisely because those are the steps a habit of saying yes would skip.
+- **Promotion stays a human decision**, distinct from lane acceptance.
 
-1. **No "approve all" button.** Not anywhere, not hidden.
-2. **Every item is decided individually,** starting with nothing selected.
-3. **Evidence inline and visible** — command output or `file:line`, never a claim. You cannot
-   approve what you cannot see.
-4. **The ledger records who approved, when, and whether a defect later surfaced in that same
-   packet** — and the UI shows your own rate of approvals that went wrong.
-
-Rule 4 is the one that matters. It turns "I always say yes" from an invisible habit into a number
-you look at. Without it, the other three are friction you learn to route around in two weeks.
+Whether that actually beats the habit is untested. What is certain is that the version that asked a
+yes/no question in a browser is not coming back in that form; if approvals return, they return as
+something that cannot be satisfied by clicking.
 
 ### 8.4 What remains prose
 
 `SKILL.md` shrinks to two things: **how to write a good packet** (the prompt contract, done
 criteria, hard stops) and **how to drive the binary**. All flow control becomes Go.
 
-The Claude Code marketplace and `plugin.json` are removed — distribution machinery for an audience
-of one.
+That prediction did not hold. `SKILL.md` is now a 65-line entry point plus thirteen `references/`
+modules loaded by a decision-gate table and twenty-two packet templates under `assets/` — the
+orchestrator needs *more* prose than expected, not less, because judgment (which lens, which
+executor, when to propose SDD) resisted becoming Go exactly as predicted, and the flow control that
+did become Go grew a vocabulary that needs explaining.
+
+The Claude Code marketplace and `plugin.json` also came back: `.claude-plugin/marketplace.json` and
+`plugin/claude-code/.claude-plugin/plugin.json` both exist, alongside a second OpenCode
+distribution. Not for distribution — for **parity enforcement**. The two skill trees must be
+byte-identical, and `run` verifies that before allocating a worktree, so a drifted tree cannot
+silently change what a dispatched lane is told.
 
 ## 9. The boundary with gentle-ai
 
@@ -276,14 +335,27 @@ once", and it hides the real risk — concurrency and the ledger — until v2. E
 this project ran for the first time, it exposed a defect deliberation had not found. If parallelism
 is the point, it runs in v1.
 
+**Status: partially met, and the unmet half is the honest part.** Concurrent multi-lane dispatch,
+the barrier, envelope validation and per-lane independent clocks all work and have run many times.
+`cursor-agent` is a fully admitted route with a closed model list — but it has still never executed
+a packet end to end, so the specific claim "dispatched simultaneously to `agy` **and**
+`cursor-agent`" remains unproven. Every completed parallel run to date has been `agy` lanes.
+
 ## 11. Out of v1
 
-| Deferred | Why it is worth doing later |
+| Deferred | Status now |
 |---|---|
-| Cross-family parallel judges on `agy`/`cursor` | Real independence — today's `jd-judge-a/b` are both Opus, the orchestrator's own family |
-| Automated conflict resolution past 400 lines | Only if the data shows conflicts are frequent and boring |
-| Distribution / marketplace | Audience of one |
-| A third executor | Two lanes prove aptitude routing |
+| Cross-family parallel judges on `agy`/`cursor` | **Built.** The SDD verify stage dual-dispatches `agy` + `cursor-agent` as read-only judgment lanes over one frozen candidate, after the mechanical gate. |
+| A third executor | **Built.** `claude` and `opencode` both landed as admitted routes with closed model lists — four, not three. |
+| Distribution / marketplace | **Reversed, for a different reason.** Two plugin distributions exist to enforce byte-identical skill trees at dispatch, not to distribute (§8.4). |
+| Automated conflict resolution past 400 lines | Still deferred. `internal/conflicttriage` exists and is tested, but its production invoker is deliberately unwired so CI never places a live LLM call. |
+
+Built since, and never in this table because they were not foreseen: feature targets with immutable
+anchors, fenced exclusive leases, the durable recoverable integration attempt, compare-and-swap
+promotion that never touches the primary checkout, cross-feature overlap classification and its
+reconciliation cycle, mechanical acceptance receipts, apply-DAG splitting into validated waves, the
+ultrafixer defect protocol, and the SDD phase gate. §6's flow is still accurate; it is simply no
+longer the whole product.
 
 ## 12. Known operational hazards
 
@@ -335,7 +407,21 @@ Two claims from earlier research **did not survive**: Hermes Agent's "typed resu
 "telephone game" framing are not documented in the sources at all, and Omnigent/Polly turns out not
 to automate merging.
 
-## 15. Next step
+## 15. Where this stands
 
-Build the binary, TDD, starting with the ledger and the barrier — the two pieces every other part
-depends on.
+The binary was built TDD starting from the ledger and the barrier, as planned, and both are still
+the pieces everything else rests on. What the plan did not anticipate is how much grew *around*
+them: §11 lists the capabilities that arrived without ever appearing in a deferred-work table.
+
+The open work, honestly stated:
+
+1. **`cursor-agent` has never executed** (§10). Until it does, aptitude routing is a documented
+   intent, not an observed result, and the roster's "execution capacity is two subscriptions" is
+   really one.
+2. **RDD has never run** against a batch this binary produced. The boundary in §9 is designed, not
+   exercised.
+3. **The approvals problem is unsolved, not solved** (§8.3). The UI is gone; whether the acceptance
+   protocol actually beats the habit it was built against is untested.
+4. **Known timing-sensitive tests** under `internal/feature` and `internal/run` fail intermittently
+   in the full suite. Each must be reproduced in isolation before being called flaky — a new failing
+   test is never presumed flaky in a project whose founding defect was a false green.
