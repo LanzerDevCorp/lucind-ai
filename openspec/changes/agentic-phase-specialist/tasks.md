@@ -39,8 +39,8 @@ Same-wave disjointness does not apply (single packet). If a DAG is authored late
 
 ## Phase 2: Acceptance Verifier SDD-Phase Gating
 
-- [ ] 2.1-RED In `internal/accept/accept_test.go`, using `newVerifierFixture` (`:26-67`) and `UpdateLaneMetadata` (`internal/ledger/lanes_meta.go:49-60`), write failing `TestVerifier*` cases: `Verifier.Verify` (`accept.go:62`) runs `v.check` for `SDDPhase == "apply"`, `""`, or missing metadata; skips `CheckPolicySnapshot` and `v.check` for declared non-apply planning phases; still enforces schema, hard stops, done criteria, and `allowed_paths` (`:214-261`); failing checks reject apply/unlabeled (existing `:320`). Must fail today: checks always run (`:120-137`).
-- [ ] 2.2 GREEN: Lift `GetLaneMetadata` out of the `AuthoringEvidenceVersion` branch (`accept.go:84-96`). Gate `CheckPolicySnapshot` and `v.check` (`:120-137`) per Decision 2 (`design.md:21-27`). Do not modify `integrate.Check` (`internal/integrate/integrate.go:159-200`).
+- [x] 2.1-RED In `internal/accept/accept_test.go`, using `newVerifierFixture` (`:26-67`) and `UpdateLaneMetadata` (`internal/ledger/lanes_meta.go:49-60`), write failing `TestVerifier*` cases: `Verifier.Verify` (`accept.go:62`) runs `v.check` for `SDDPhase == "apply"`, `""`, or missing metadata; skips `CheckPolicySnapshot` and `v.check` for declared non-apply planning phases; still enforces schema, hard stops, done criteria, and `allowed_paths` (`:214-261`); failing checks reject apply/unlabeled (existing `:320`). Must fail today: checks always run (`:120-137`).
+- [x] 2.2 GREEN: Lift `GetLaneMetadata` out of the `AuthoringEvidenceVersion` branch (`accept.go:84-96`). Gate `CheckPolicySnapshot` and `v.check` (`:120-137`) per Decision 2 (`design.md:21-27`). Do not modify `integrate.Check` (`internal/integrate/integrate.go:159-200`).
 
 ## Phase 3: Attempt Execution SDD-Phase Gating
 

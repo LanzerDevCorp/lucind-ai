@@ -359,6 +359,51 @@ func TestVerifierCleanupMarkerMismatchRejectsAndPreservesIsolation(t *testing.T)
 	}
 }
 
+func TestVerifierSkipsChecksForDeclaredNonApplyPhase(t *testing.T) {
+	f := newVerifierFixture(t, validResult("allowed.txt"), "#!/bin/sh\nexit 7\n", map[string]string{"allowed.txt": "candidate\n"}, []string{"allowed.txt"})
+	if err := f.ledger.UpdateLaneMetadata(context.Background(), ledger.LaneMetadata{RunID: "run-1", LaneID: "lane-1", SDDPhase: "propose"}, time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.verifier.Verify(context.Background(), AcceptanceRequest{"run-1", "lane-1"}); err != nil {
+		t.Fatalf("Verify() with declared non-apply sdd_phase should skip the failing checks script: %v", err)
+	}
+}
+
+func TestVerifierRunsChecksForApplyEmptyOrMissingSDDPhase(t *testing.T) {
+	tests := []struct {
+		name     string
+		setPhase bool
+		phase    string
+	}{
+		{name: "declared apply", setPhase: true, phase: "apply"},
+		{name: "explicit empty sdd_phase", setPhase: true, phase: ""},
+		{name: "missing lane metadata", setPhase: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := newVerifierFixture(t, validResult("allowed.txt"), "#!/bin/sh\nexit 7\n", map[string]string{"allowed.txt": "candidate\n"}, []string{"allowed.txt"})
+			if tt.setPhase {
+				if err := f.ledger.UpdateLaneMetadata(context.Background(), ledger.LaneMetadata{RunID: "run-1", LaneID: "lane-1", SDDPhase: tt.phase}, time.Now().UTC()); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if _, err := f.verifier.Verify(context.Background(), AcceptanceRequest{"run-1", "lane-1"}); err == nil {
+				t.Fatalf("Verify() should still run checks and reject a failing script for %s", tt.name)
+			}
+		})
+	}
+}
+
+func TestVerifierNonApplyPhaseStillEnforcesScope(t *testing.T) {
+	f := newVerifierFixture(t, validResult("allowed.txt"), "#!/bin/sh\necho checks-ok\n", map[string]string{"allowed.txt": "candidate\n"}, []string{"other.txt"})
+	if err := f.ledger.UpdateLaneMetadata(context.Background(), ledger.LaneMetadata{RunID: "run-1", LaneID: "lane-1", SDDPhase: "propose"}, time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.verifier.Verify(context.Background(), AcceptanceRequest{"run-1", "lane-1"}); err == nil {
+		t.Fatal("Verify() with a declared non-apply sdd_phase still accepted an out-of-scope change")
+	}
+}
+
 func bindingHashForCandidate(t *testing.T, f verifierFixture) string {
 	t.Helper()
 	binding, err := f.verifier.binding(f.candidateRow)
