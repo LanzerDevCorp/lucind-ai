@@ -4,7 +4,7 @@
 
 ### Requirement: Specialist sequencing and canonical artifact generation
 
-The phase specialist MUST ingest `gentle-ai sdd-status` JSON, dispatch child lanes through lucind-ai, MUST NOT start synthesis until all required planning lenses are accepted and merged, and MUST land canonical phase artifacts at `openspec/changes/<change>/<phase>.md`.
+The phase specialist MUST ingest `gentle-ai sdd-status` JSON, dispatch child lanes through lucind-ai, MUST NOT start synthesis until all required planning lenses are accepted and merged, and MUST land canonical phase artifacts at `openspec/changes/<change>/` under the canonical per-phase filename (`proposal.md`, `spec.md`, `design.md`, `tasks.md`, `apply.md`, `verify.md`, `remediate.md`, `archive.md`).
 
 #### Scenario: Fan-out lenses merged before synthesis dispatch
 

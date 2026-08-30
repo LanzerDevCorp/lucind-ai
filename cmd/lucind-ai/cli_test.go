@@ -5651,7 +5651,7 @@ func TestPhaseSubcommandGatesPrematureSynthesis(t *testing.T) {
 	}
 
 	// Verify no artifact was created
-	artifactPath := filepath.Join(primaryRoot, "openspec", "changes", change, "propose.md")
+	artifactPath := filepath.Join(primaryRoot, "openspec", "changes", change, "proposal.md")
 	if _, err := os.Stat(artifactPath); err == nil {
 		t.Fatalf("expected artifact %s to NOT exist, but it was created", artifactPath)
 	}
