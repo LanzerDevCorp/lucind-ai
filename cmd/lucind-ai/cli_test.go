@@ -6030,6 +6030,49 @@ func TestRunPreflight_SkillParity(t *testing.T) {
 	})
 }
 
+// TestPreflightOrchestratorContract_SkipsWhenTargetHasNoSkillTreeOrSchema
+// covers a target repo that never had plugin/claude-code/skills/lucind-ai/
+// or internal/result/result.schema.json in the first place -- any project
+// other than lucind-ai's own source tree, since a real plugin install never
+// places either file inside the target repo's own working directory (the
+// Claude Code plugin cache lives under the user's home directory, and it
+// never ships internal/result/result.schema.json at all -- that file is a
+// Go source artifact, not something the plugin distributes). Preflight must
+// skip cleanly rather than fail closed on a check that cannot apply here.
+func TestPreflightOrchestratorContract_SkipsWhenTargetHasNoSkillTreeOrSchema(t *testing.T) {
+	primaryRoot := t.TempDir()
+
+	if err := preflightOrchestratorContract(primaryRoot); err != nil {
+		t.Fatalf("preflightOrchestratorContract(%q) error = %v, want nil: a target repo with neither the canonical skill tree nor the on-disk schema file does not participate in this self-check", primaryRoot, err)
+	}
+}
+
+// TestPreflightOrchestratorContract_SkillTreePresentStillFailsClosed pins
+// the self-hosting case: once the canonical Claude skill tree exists at
+// primaryRoot, a missing or mismatched OpenCode replica must still halt --
+// the new "skip when absent" behavior above must not weaken this.
+func TestPreflightOrchestratorContract_SkillTreePresentStillFailsClosed(t *testing.T) {
+	primaryRoot := t.TempDir()
+	plantOrchestratorSkillFile(t, primaryRoot, "claude-code", "SKILL.md", "canonical\n")
+	// No OpenCode replica planted at all.
+
+	if err := preflightOrchestratorContract(primaryRoot); err == nil {
+		t.Fatal("preflightOrchestratorContract() error = nil, want non-nil: canonical tree present with no replica must still fail closed")
+	}
+}
+
+// TestPreflightOrchestratorContract_SchemaPresentStillFailsClosed pins the
+// self-hosting case for the schema half: once an on-disk schema file exists
+// at primaryRoot, a stale copy must still halt.
+func TestPreflightOrchestratorContract_SchemaPresentStillFailsClosed(t *testing.T) {
+	primaryRoot := t.TempDir()
+	plantResultSchema(t, primaryRoot, []byte(`{"stale":true}`))
+
+	if err := preflightOrchestratorContract(primaryRoot); err == nil {
+		t.Fatal("preflightOrchestratorContract() error = nil, want non-nil: on-disk schema present and stale must still fail closed")
+	}
+}
+
 func TestRunDispatch_RejectsLinkedWorktree(t *testing.T) {
 	if testing.Short() {
 		t.Skip("shells out to real git")

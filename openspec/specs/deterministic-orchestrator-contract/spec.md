@@ -27,3 +27,9 @@ The orchestrator MUST execute deterministic preflight verification across Claude
 - GIVEN the OpenCode skill copy differs from the canonical Claude skill or the binary schema is outdated
 - WHEN orchestrator preflight executes
 - THEN preflight MUST exit non-zero and halt execution before any worktree allocation
+
+#### Scenario: Target repository without its own skill tree or schema file skips preflight cleanly
+
+- GIVEN the repository root has neither the canonical Claude skill tree nor an on-disk result schema file (any project other than the orchestrator's own source tree, since a real plugin install never places either artifact inside a consumer project's own working directory)
+- WHEN orchestrator preflight executes
+- THEN preflight MUST exit 0 without treating the absence as drift, and MUST still enforce the full fail-closed comparison for whichever artifact is present

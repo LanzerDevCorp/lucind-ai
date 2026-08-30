@@ -851,14 +851,35 @@ var embeddedResultSchema = result.SchemaJSON
 // preflightOrchestratorContract fails closed if the Claude and OpenCode
 // skill trees are not byte-identical or the embedded result schema does not
 // match the on-disk file. It must run before any worktree allocation.
+//
+// Both checks are self-referential: they only make sense when primaryRoot is
+// lucind-ai's own source tree (self-hosting, or a fork of it). A real plugin
+// install never places either artifact inside a consumer project's own
+// working directory -- the Claude Code plugin cache lives under the user's
+// home directory and carries only the Claude-runtime skill tree (no
+// OpenCode replica), and it never ships internal/result/result.schema.json
+// at all, since that file is a Go source artifact, not something the plugin
+// distributes. So a target repo that never had the canonical skill tree or
+// the on-disk schema file to begin with does not participate in this
+// self-check, and preflight must skip that half cleanly rather than treat
+// absence as drift. Once either artifact is present, the check stays fully
+// fail-closed exactly as before.
 func preflightOrchestratorContract(primaryRoot string) error {
 	canonical, replica := orchestratorSkillTrees(primaryRoot)
-	if err := skillTreesByteIdentical(canonical, replica); err != nil {
-		return err
+	if _, err := os.Stat(canonical); err == nil {
+		if err := skillTreesByteIdentical(canonical, replica); err != nil {
+			return err
+		}
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("skill parity: stat canonical %s: %w", canonical, err)
 	}
+
 	path := onDiskResultSchemaPath(primaryRoot)
 	onDisk, err := os.ReadFile(path)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
 		return fmt.Errorf("embedded schema freshness: read %s: %w", path, err)
 	}
 	if !bytes.Equal(onDisk, embeddedResultSchema()) {
