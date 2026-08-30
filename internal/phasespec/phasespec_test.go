@@ -277,7 +277,7 @@ func TestSynthesisGatedUntilLensesAcceptedAndMerged(t *testing.T) {
 				if !res.Written {
 					t.Fatal("expected artifact to be written")
 				}
-				expectedFile := filepath.Join(tempDir, "openspec", "changes", "test-change", "propose.md")
+				expectedFile := filepath.Join(tempDir, "openspec", "changes", "test-change", "proposal.md")
 				content, readErr := os.ReadFile(expectedFile)
 				if readErr != nil {
 					t.Fatalf("failed to read written file: %v", readErr)
@@ -307,8 +307,8 @@ func TestConsumesStatusAndWritesCanonicalArtifact(t *testing.T) {
 		expectedFilename string
 	}{
 		{"explore", "explore.md"},
-		{"propose", "propose.md"},
-		{"proposal", "propose.md"},
+		{"propose", "proposal.md"},
+		{"proposal", "proposal.md"},
 		{"spec", "spec.md"},
 		{"specs", "spec.md"},
 		{"design", "design.md"},
@@ -382,7 +382,7 @@ func TestPhaseAlreadyCompleteNoRedundantDispatch(t *testing.T) {
   },
   "changeRoot": "/workspace/openspec/changes/` + change + `",
   "artifactPaths": {
-    "proposal": ["/workspace/openspec/changes/` + change + `/propose.md"]
+    "proposal": ["/workspace/openspec/changes/` + change + `/proposal.md"]
   },
   "artifacts": {
     "proposal": "done",
@@ -598,5 +598,79 @@ func TestPathTraversalAndSecurityGuards(t *testing.T) {
 				t.Fatalf("filesystem mutation detected: %d files created in tempDir", files)
 			}
 		})
+	}
+}
+
+func TestCanonicalArtifactFilenamePropose(t *testing.T) {
+	for _, phase := range []string{"propose", "proposal", "PROPOSE", " PROPOSAL "} {
+		filename, err := phasespec.CanonicalArtifactFilename(phase)
+		if err != nil {
+			t.Fatalf("CanonicalArtifactFilename(%q) failed: %v", phase, err)
+		}
+		if filename != "proposal.md" {
+			t.Fatalf("CanonicalArtifactFilename(%q) = %q, want %q", phase, filename, "proposal.md")
+		}
+	}
+}
+
+func TestProposePhaseCompletenessRecognizesProposalMD(t *testing.T) {
+	tempDir := t.TempDir()
+	change := "test-change"
+
+	statusJSON := []byte(`{
+  "schemaName": "gentle-ai.sdd-status",
+  "schemaVersion": 1,
+  "changeName": "` + change + `",
+  "artifactPaths": {
+    "proposal": ["/workspace/openspec/changes/` + change + `/proposal.md"]
+  },
+  "artifacts": {
+    "proposal": "done"
+  },
+  "dependencies": {
+    "proposal": "all_done"
+  },
+  "nextRecommended": "spec"
+}`)
+
+	querier := &mockStatusQuerier{output: statusJSON}
+	adapter := phasespec.NewAdapter(querier, tempDir)
+
+	// Before proposal.md exists on disk, synthesize should report not complete (written=true when content provided)
+	content := []byte("# Canonical Proposal\n")
+	res, err := adapter.Synthesize(context.Background(), phasespec.SynthesizeRequest{
+		ChangeName: change,
+		Phase:      "propose",
+		LensStates: map[string]phasespec.LensState{
+			"lens-a": {ID: "lens-a", Accepted: true, Merged: true},
+			"lens-b": {ID: "lens-b", Accepted: true, Merged: true},
+			"lens-c": {ID: "lens-c", Accepted: true, Merged: true},
+		},
+		Content: content,
+	})
+	if err != nil {
+		t.Fatalf("Synthesize failed: %v", err)
+	}
+	if !res.Written {
+		t.Fatal("expected Written=true when proposal.md was not yet on disk")
+	}
+	if res.ArtifactPath != filepath.Join("openspec", "changes", change, "proposal.md") {
+		t.Fatalf("res.ArtifactPath = %q, want %q", res.ArtifactPath, filepath.Join("openspec", "changes", change, "proposal.md"))
+	}
+
+	// Now that proposal.md is on disk, synthesize without force should recognize it as complete
+	res2, err := adapter.Synthesize(context.Background(), phasespec.SynthesizeRequest{
+		ChangeName: change,
+		Phase:      "propose",
+		Content:    []byte("# Overwrite attempt\n"),
+	})
+	if err != nil {
+		t.Fatalf("Synthesize failed: %v", err)
+	}
+	if res2.Written {
+		t.Fatal("expected Written=false because proposal.md is on disk and status is done")
+	}
+	if res2.ArtifactPath != filepath.Join("openspec", "changes", change, "proposal.md") {
+		t.Fatalf("res2.ArtifactPath = %q, want %q", res2.ArtifactPath, filepath.Join("openspec", "changes", change, "proposal.md"))
 	}
 }

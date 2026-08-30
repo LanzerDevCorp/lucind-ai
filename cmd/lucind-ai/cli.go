@@ -27,11 +27,14 @@ import (
 	"github.com/LanzerDevCorp/lucind-ai/internal/integrate"
 	"github.com/LanzerDevCorp/lucind-ai/internal/lane"
 	"github.com/LanzerDevCorp/lucind-ai/internal/ledger"
+	"github.com/LanzerDevCorp/lucind-ai/internal/lucindconfig"
 	"github.com/LanzerDevCorp/lucind-ai/internal/packet"
 	"github.com/LanzerDevCorp/lucind-ai/internal/phasespec"
 	"github.com/LanzerDevCorp/lucind-ai/internal/reconcile"
 	"github.com/LanzerDevCorp/lucind-ai/internal/result"
 	lucindrun "github.com/LanzerDevCorp/lucind-ai/internal/run"
+	"github.com/LanzerDevCorp/lucind-ai/internal/skillroots"
+	"github.com/LanzerDevCorp/lucind-ai/internal/skillset"
 	"github.com/LanzerDevCorp/lucind-ai/internal/worktree"
 )
 
@@ -2458,6 +2461,17 @@ func phaseDispatch(ctx context.Context, args []string, stdout, stderr io.Writer)
 				if err != nil {
 					return err
 				}
+				skillPaths, err := resolveSynthesisSkillPaths(primaryRoot, normPhase)
+				if err != nil {
+					return fmt.Errorf("resolve synthesis skills: %w", err)
+				}
+				var skillsSection strings.Builder
+				if len(skillPaths) > 0 {
+					skillsSection.WriteString("\n## Required skills\n")
+					for _, sp := range skillPaths {
+						fmt.Fprintf(&skillsSection, "- %s\n", sp)
+					}
+				}
 				packetDir := filepath.Join(primaryRoot, ".lucind", "packets")
 				if err := os.MkdirAll(packetDir, 0755); err != nil {
 					return fmt.Errorf("create packets dir: %w", err)
@@ -2488,13 +2502,14 @@ Synthesize canonical %s artifact for change %s.
 
 ## Hard stops
 - Required lenses are missing or unmerged.
-
+%s
 ## Return
 Write the result envelope to .lucind/result.json in this worktree.
 Validate it against .lucind/result.schema.json before writing.
 After you commit, report success.
 `, normPhase, changeName, normPhase, headSHA, changeName, canonicalFilename, changeName, normPhase,
-					normPhase, changeName, normPhase, changeName, changeName, canonicalFilename)
+					normPhase, changeName, normPhase, changeName, changeName, canonicalFilename,
+					skillsSection.String())
 				if err := os.WriteFile(packetPath, []byte(packetContent), 0644); err != nil {
 					return fmt.Errorf("write synthesis packet: %w", err)
 				}
@@ -2541,4 +2556,41 @@ After you commit, report success.
 		fmt.Fprintf(stdout, "phase %s is already complete: %s\n", res.Phase, res.ArtifactPath)
 	}
 	return 0
+}
+
+func resolveSynthesisSkillPaths(primaryRoot, phase string) ([]string, error) {
+	cfg, err := lucindconfig.Load(primaryRoot)
+	if err != nil {
+		return nil, fmt.Errorf("load repository config: %w", err)
+	}
+
+	budget := skillset.DefaultSkillBudget
+	if cfg.SkillBudget != nil {
+		budget = *cfg.SkillBudget
+	}
+
+	var resolver *skillroots.Resolver
+	rootsCfg, err := skillroots.LoadConfig(filepath.Join(primaryRoot, skillroots.DefaultConfigRelPath))
+	if err != nil {
+		if errors.Is(err, skillroots.ErrMissingConfig) {
+			resolver = skillroots.NewResolver(nil)
+		} else {
+			return nil, fmt.Errorf("load skill roots config: %w", err)
+		}
+	} else {
+		resolver = skillroots.NewResolver(rootsCfg.Roots)
+	}
+
+	stackSkills := cfg.StackSkills("synthesis")
+	derived, err := skillset.Derive(phase, "synthesis", stackSkills, nil)
+	if err != nil {
+		return nil, fmt.Errorf("derive synthesis skills: %w", err)
+	}
+
+	if len(derived) > budget {
+		return nil, fmt.Errorf("lucind-ai: synthesis required skills count %d exceeds budget %d (skills: %s)",
+			len(derived), budget, strings.Join(derived, ", "))
+	}
+
+	return resolver.ResolvePaths(derived)
 }

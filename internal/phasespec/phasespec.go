@@ -232,7 +232,7 @@ func CanonicalArtifactFilename(phase string) (string, error) {
 	case "explore":
 		return "explore.md", nil
 	case "propose", "proposal":
-		return "propose.md", nil
+		return "proposal.md", nil
 	case "spec", "specs":
 		return "spec.md", nil
 	case "design":

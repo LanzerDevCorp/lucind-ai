@@ -10,7 +10,7 @@ The phase specialist MUST ingest `gentle-ai sdd-status` JSON, dispatch child lan
 
 - GIVEN an active propose phase with all required lenses (`lens-a`, `lens-b`, `lens-c`) accepted and merged
 - WHEN the phase specialist checks `gentle-ai sdd-status`
-- THEN the specialist MUST dispatch the propose synthesis lane for `openspec/changes/<change>/propose.md`.
+- THEN the specialist MUST dispatch the propose synthesis lane for `openspec/changes/<change>/proposal.md`.
 
 #### Scenario: Unchanged phase state generates no dispatches
 

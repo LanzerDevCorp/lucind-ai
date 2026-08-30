@@ -2333,6 +2333,11 @@ func packetPathFromWaveLine(t *testing.T, line string) string {
 // Block as a git failure once emitted packets carry allowed_paths.
 func overrideDispatchDeps(t *testing.T, exec executor.Executor) {
 	t.Helper()
+	origQuota := ensureAgyQuota
+	t.Cleanup(func() { ensureAgyQuota = origQuota })
+	ensureAgyQuota = func(context.Context, float64) error {
+		return nil
+	}
 	origResolver := resolveAdmissionRefSHA
 	t.Cleanup(func() { resolveAdmissionRefSHA = origResolver })
 	resolveAdmissionRefSHA = func(context.Context, string, string) (string, error) {
@@ -5714,8 +5719,8 @@ func TestPhaseSubcommandPhaseAlreadyComplete(t *testing.T) {
 	if err := os.MkdirAll(artifactDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	artifactPath := filepath.Join(artifactDir, "propose.md")
-	if err := os.WriteFile(artifactPath, []byte("# Propose\n"), 0644); err != nil {
+	artifactPath := filepath.Join(artifactDir, "proposal.md")
+	if err := os.WriteFile(artifactPath, []byte("# Proposal\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -5822,6 +5827,90 @@ func TestPhaseSubcommandDispatchesSynthesisWhenLensesMerged(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "synthesis dispatched") {
 		t.Fatalf("expected stdout to report synthesis dispatched, got %q", stdout.String())
+	}
+}
+
+func TestPhaseSubcommandSpecialistPacketHasRequiredSkills(t *testing.T) {
+	primaryRoot := initRepo(t)
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(primaryRoot); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(cwd)
+
+	change := "test-skills-change"
+	statusJSON := []byte(`{
+  "schemaName": "gentle-ai.sdd-status",
+  "schemaVersion": 1,
+  "changeName": "` + change + `",
+  "lenses": {
+    "lens-a": {"id": "lens-a", "accepted": true, "merged": true},
+    "lens-b": {"id": "lens-b", "accepted": true, "merged": true},
+    "lens-c": {"id": "lens-c", "accepted": true, "merged": true}
+  },
+  "artifacts": {
+    "proposal": "missing"
+  },
+  "dependencies": {
+    "proposal": "ready"
+  },
+  "nextRecommended": "propose"
+}`)
+
+	origQuerier := defaultStatusQuerier
+	defer func() { defaultStatusQuerier = origQuerier }()
+	defaultStatusQuerier = func(string) phasespec.StatusQuerier {
+		return &mockCLIStatusQuerier{output: statusJSON}
+	}
+
+	overrideDispatchDeps(t, testDoneExecutor{
+		envelope: fmt.Sprintf(`{"packet_id": "propose-%s-synthesis", "status": "done", "summary": "done", "hard_stops": [], "skills_loaded": ["lucind-executor", "lucind-fan-out-lens", "sdd-propose"]}`, change),
+	})
+
+	ctx := context.Background()
+	var stdout, stderr bytes.Buffer
+	code := run(ctx, []string{"phase", "propose", "--change", change}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("expected run(phase propose) to exit 0, got %d; stderr=%s, stdout=%s", code, stderr.String(), stdout.String())
+	}
+
+	packetPath := filepath.Join(primaryRoot, ".lucind", "packets", fmt.Sprintf("propose-%s-synthesis.md", change))
+	packetBytes, err := os.ReadFile(packetPath)
+	if err != nil {
+		t.Fatalf("failed to read generated packet at %s: %v", packetPath, err)
+	}
+	packetContent := string(packetBytes)
+
+	// 1. Verify ## Required skills heading exists
+	if !strings.Contains(packetContent, "\n## Required skills\n") {
+		t.Fatalf("expected generated packet to contain '## Required skills' section, got:\n%s", packetContent)
+	}
+
+	// 2. Verify all expected resolved skill paths are listed
+	expectedSkills := []string{
+		filepath.Join(primaryRoot, ".agents", "skills", "lucind-executor", "SKILL.md"),
+		filepath.Join(primaryRoot, ".agents", "skills", "lucind-fan-out-lens", "SKILL.md"),
+		filepath.Join(primaryRoot, ".agents", "skills", "sdd-propose", "SKILL.md"),
+	}
+	for _, expectedSkill := range expectedSkills {
+		expectedLine := "- " + expectedSkill
+		if !strings.Contains(packetContent, expectedLine) {
+			t.Errorf("expected packet to contain %q, but was missing from:\n%s", expectedLine, packetContent)
+		}
+	}
+
+	// 3. Verify ordering: ## Hard stops comes before ## Required skills, which comes before ## Return
+	hardStopsIdx := strings.Index(packetContent, "## Hard stops")
+	reqSkillsIdx := strings.Index(packetContent, "## Required skills")
+	returnIdx := strings.Index(packetContent, "## Return")
+	if hardStopsIdx == -1 || reqSkillsIdx == -1 || returnIdx == -1 {
+		t.Fatalf("missing section headings: hardStops=%d, reqSkills=%d, return=%d", hardStopsIdx, reqSkillsIdx, returnIdx)
+	}
+	if !(hardStopsIdx < reqSkillsIdx && reqSkillsIdx < returnIdx) {
+		t.Fatalf("incorrect section order: hardStops=%d, reqSkills=%d, return=%d", hardStopsIdx, reqSkillsIdx, returnIdx)
 	}
 }
 
