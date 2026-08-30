@@ -1,0 +1,48 @@
+{
+  "packet_id": "design-control-room-telemetry-lens-b",
+  "status": "done",
+  "summary": "Produced openspec/changes/control-room-telemetry/design-lens-b.md defining assumed architecture, data flow, invariants, backward-compatible surface deltas, and file changes with terminal consumers under the 1000-word budget.",
+  "hard_stops": [
+    {
+      "hard_stop": "The specs do not determine whether a format delta is additive or breaking.",
+      "fired": false
+    },
+    {
+      "hard_stop": "A file change cannot name any terminal consumer.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Two reasonable architectures produce incompatible surface tables and the proposal does not choose between them.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/control-room-telemetry/design-lens-b.md",
+      "change": "created",
+      "why": "Design Lens B for Control Room Telemetry specifying surface and flow"
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every `Surface Deltas` and `File Changes` row carries a `file:line` citation that points at real code in this worktree, and every `File Changes` row names a terminal consumer.",
+      "met": true,
+      "evidence": "Every row in openspec/changes/control-room-telemetry/design-lens-b.md carries precise worktree file:line citations (e.g. internal/executor/executor.go:15-37, internal/run/run.go:368-375) and each file change row specifies a concrete terminal consumer."
+    },
+    {
+      "criterion": "`design-lens-b.md` exists, is under 1000 words, and carries every skeleton section including `## Assumed architecture`.",
+      "met": true,
+      "evidence": "File openspec/changes/control-room-telemetry/design-lens-b.md created with 927 words (verified with `wc -w`) containing all required skeleton sections."
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (`git status --porcelain` empty and `git log --oneline -1`).",
+      "met": true,
+      "evidence": "Commit f42cade 'docs(telemetry): produce design lens b for control room telemetry' recorded with clean git status."
+    }
+  ],
+  "commit": "f42cade"
+}

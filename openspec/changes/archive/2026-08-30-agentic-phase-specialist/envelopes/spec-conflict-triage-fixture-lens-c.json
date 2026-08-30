@@ -1,0 +1,63 @@
+{
+  "packet_id": "spec-conflict-triage-fixture-lens-c",
+  "status": "done",
+  "summary": "Authored spec-lens-c.md analyzing live-spec conflicts and migration impact for the conflict-triage-fixture change against openspec/specs/reconciliation-approval/spec.md. Copied the verbatim full block for Requirement: One Bounded Candidate with its two live scenarios and documented the candidate lifecycle modification alongside a sorted 55-row citation manifest.",
+  "hard_stops": [
+    {
+      "hard_stop": "A capability the proposal lists as modified has no live spec to read.",
+      "fired": false
+    },
+    {
+      "hard_stop": "A requirement being removed has consumers the proposal never mentions, so removing it breaks behavior nobody agreed to break.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Copying a MODIFIED block whole would exceed what you can write, so the copy would have to be partial. Report which requirement forces it; never write a partial block.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/conflict-triage-fixture/spec-lens-c.md",
+      "change": "created",
+      "why": "Live-spec conflicts, verbatim MODIFIED block, removals/renames, open questions, and citation manifest for conflict-triage-fixture"
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "A ## Citation Manifest section lists every unique citation, grouped by file, with the claim each one supports.",
+      "met": true,
+      "evidence": "openspec/changes/conflict-triage-fixture/spec-lens-c.md:65-117 contains 55 unique citations across 19 files, sorted alphabetically by file and ascending by line number."
+    },
+    {
+      "criterion": "Every capability listed as modified was opened in full, and its inventory row's requirement and scenario counts came from the file rather than an estimate.",
+      "met": true,
+      "evidence": "openspec/specs/reconciliation-approval/spec.md:1-74 was opened in full, confirming exactly 5 requirements and 10 scenarios."
+    },
+    {
+      "criterion": "Every ## MODIFIED Full Blocks entry is the complete live block, scenario for scenario, with nothing summarized or elided.",
+      "met": true,
+      "evidence": "openspec/changes/conflict-triage-fixture/spec-lens-c.md:37-53 contains the complete unedited block for Requirement: One Bounded Candidate with both live scenarios (Authorized candidate passes, Candidate is unsafe)."
+    },
+    {
+      "criterion": "Every removal or rename names its consumers with file:line and carries a Reason.",
+      "met": true,
+      "evidence": "openspec/changes/conflict-triage-fixture/spec-lens-c.md:57-61 lists consumers across cli.go, cli_test.go, reconcile.go, attempt.go, integrate.go, and schema.go with Reason and Migration path."
+    },
+    {
+      "criterion": "spec-lens-c.md exists, is under 1000 words excluding the verbatim blocks, and carries ## Assumed requirements and ## Live Spec Inventory.",
+      "met": true,
+      "evidence": "openspec/changes/conflict-triage-fixture/spec-lens-c.md exists with 874 non-verbatim words (under 1000 word cap) and contains ## Assumed requirements and ## Live Spec Inventory."
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (git status --porcelain empty and git log --oneline -1).",
+      "met": true,
+      "evidence": "commit 9ddd479 docs(openspec): add spec lens c for conflict triage fixture with empty git status --porcelain."
+    }
+  ],
+  "commit": "9ddd479"
+}

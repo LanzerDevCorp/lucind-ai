@@ -1,0 +1,48 @@
+{
+  "packet_id": "design-control-room-ui-shell-lens-a",
+  "status": "done",
+  "summary": "Authored design lens A (openspec/changes/control-room-ui-shell/design-lens-a.md) establishing the technical approach and seven architectural decisions for the control room UI shell. All decisions cite real terminal consumers in the codebase, cover zero-build ES module embedding, client hash routing, view lifecycle, centralized store, DOM patching, and read-only Model REST endpoints within an 877-word budget.",
+  "hard_stops": [
+    {
+      "hard_stop": "The proposal or specs do not determine an architectural choice, and two reasonable shapes are equally supported.",
+      "fired": false
+    },
+    {
+      "hard_stop": "A decision cannot name any terminal consumer.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Making this decision would require designing the file-change surface or the test strategy, which this packet forbids.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/control-room-ui-shell/design-lens-a.md",
+      "change": "created",
+      "why": "Design Lens A architectural decisions and technical approach document"
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every decision names a terminal consumer with a file:line citation, and that citation points at real code in this worktree.",
+      "met": true,
+      "evidence": "All seven decisions in openspec/changes/control-room-ui-shell/design-lens-a.md include terminal consumers with real worktree citations (internal/serve/handlers.go:41-55, internal/serve/static.go:8-18, internal/serve/handlers.go:39-55, internal/serve/static/index.html:142-158, internal/serve/static/app.js:96-98, internal/serve/handlers.go:79-85, internal/serve/static/app.js:1-10, internal/serve/static/app.js:45-70, internal/serve/handlers.go:36-118, internal/serve/model.go:128-149, internal/serve/handlers.go:87-115, internal/serve/static_test.go:11-39)."
+    },
+    {
+      "criterion": "design-lens-a.md exists, is under 1000 words, and carries every skeleton section including ## Assumed architecture.",
+      "met": true,
+      "evidence": "File openspec/changes/control-room-ui-shell/design-lens-a.md exists, contains all required skeleton sections (including ## Assumed architecture, ## Technical Approach, 7 decisions, and ## Open Questions), and wc -w reports 877 words."
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (git status --porcelain empty and git log --oneline -1).",
+      "met": true,
+      "evidence": "Commit c544dfb docs(control-room-ui-shell): author design lens A technical approach and architecture decisions committed with clean git status --porcelain."
+    }
+  ],
+  "commit": "c544dfb"
+}

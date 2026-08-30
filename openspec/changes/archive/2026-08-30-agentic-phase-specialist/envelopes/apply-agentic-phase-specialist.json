@@ -1,0 +1,126 @@
+{
+  "packet_id": "apply-agentic-phase-specialist",
+  "status": "done",
+  "summary": "Implemented agentic phase specialist gating across both skill trees, internal/accept, and internal/run as three sequential work-unit commits. Gated repository mechanical checks in Verifier.Verify and ExecuteAttempt to run only for apply or empty/missing SDD phases while maintaining strict fail-closed criteria and isolated worktree execution. Both skill tree mirrors remain byte-identical and the full test suite is green.",
+  "hard_stops": [
+    {
+      "hard_stop": "Stop `blocked` if the two skill trees cannot be kept byte-identical.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Stop `blocked` if gating `v.check`/`checkFunc` cannot be done without touching `integrate.Check` itself.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Stop `blocked` for out-of-scope edits, impossible criteria, unresolved alternatives, or conflicting instructions between this packet and `design.md`/`tasks.md` (cite the conflict).",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "change": "modified",
+      "path": "plugin/claude-code/skills/lucind-ai/SKILL.md",
+      "why": "Hard Rule carve-out for named sdd-* specialist"
+    },
+    {
+      "change": "modified",
+      "path": "plugin/opencode/skills/lucind-ai/SKILL.md",
+      "why": "Hard Rule carve-out for named sdd-* specialist"
+    },
+    {
+      "change": "modified",
+      "path": "plugin/claude-code/skills/lucind-ai/references/strategies/fan-out.md",
+      "why": "Fan-out synthesis review and arbitration assigned to Specialist"
+    },
+    {
+      "change": "modified",
+      "path": "plugin/opencode/skills/lucind-ai/references/strategies/fan-out.md",
+      "why": "Fan-out synthesis review and arbitration assigned to Specialist"
+    },
+    {
+      "change": "modified",
+      "path": "plugin/claude-code/skills/lucind-ai/references/contracts/acceptance-promotion.md",
+      "why": "Specialist decision-bearing acceptance and sdd_phase check caveats in steps 1 and 8"
+    },
+    {
+      "change": "modified",
+      "path": "plugin/opencode/skills/lucind-ai/references/contracts/acceptance-promotion.md",
+      "why": "Specialist decision-bearing acceptance and sdd_phase check caveats in steps 1 and 8"
+    },
+    {
+      "change": "modified",
+      "path": "internal/accept/accept.go",
+      "why": "Gate CheckPolicySnapshot and v.check on SDDPhase in Verifier.Verify"
+    },
+    {
+      "change": "modified",
+      "path": "internal/accept/accept_test.go",
+      "why": "Tests for Verifier SDDPhase gating"
+    },
+    {
+      "change": "modified",
+      "path": "internal/run/attempt.go",
+      "why": "Gate checkFunc on combined lane SDDPhase in ExecuteAttempt CHECKING phase"
+    },
+    {
+      "change": "modified",
+      "path": "internal/run/attempt_test.go",
+      "why": "Tests for ExecuteAttempt SDDPhase gating"
+    },
+    {
+      "change": "modified",
+      "path": "openspec/changes/agentic-phase-specialist/tasks.md",
+      "why": "Tick tasks 1.1-1.4, 2.1-RED, 2.2, 3.1-RED, 3.2"
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Both skill trees (`plugin/claude-code/skills/lucind-ai/` and `plugin/opencode/skills/lucind-ai/`) carry identical Hard Rule, fan-out, and acceptance-promotion edits; `diff` them to confirm.",
+      "met": true,
+      "evidence": "diff -r plugin/claude-code/skills/lucind-ai plugin/opencode/skills/lucind-ai exited 0 with no differences"
+    },
+    {
+      "criterion": "`go test ./internal/packet -run 'TestSkillTreesByteIdentical|TestSkillAssetContract' -count=1` passes.",
+      "met": true,
+      "evidence": "ok github.com/LanzerDevCorp/lucind-ai/internal/packet 0.004s"
+    },
+    {
+      "criterion": "`go test ./internal/accept -race -count=1` passes, including the three new tests.",
+      "met": true,
+      "evidence": "ok github.com/LanzerDevCorp/lucind-ai/internal/accept 13.613s (TestVerifierSkipsChecksForDeclaredNonApplyPhase, TestVerifierRunsChecksForApplyEmptyOrMissingSDDPhase, TestVerifierNonApplyPhaseStillEnforcesScope passed)"
+    },
+    {
+      "criterion": "`go test ./internal/run -race -count=1` passes, including the two new tests.",
+      "met": true,
+      "evidence": "ok github.com/LanzerDevCorp/lucind-ai/internal/run 93.874s (TestExecuteAttemptSkipsChecksForDeclaredNonApplyLanes, TestExecuteAttemptRunsChecksForApplyEmptyOrMissingCombinedLane passed)"
+    },
+    {
+      "criterion": "`go build ./...` and `go test ./... -race -count=1` (the full suite) both pass on the final combined tree.",
+      "met": true,
+      "evidence": "./lucind-checks.sh exited 0 on final tree (commit 8dc595b)"
+    },
+    {
+      "criterion": "Three conventional commits exist, one per unit, no AI attribution. Evidence: `git log --oneline -3` and `git status --porcelain` empty.",
+      "met": true,
+      "evidence": "git log --oneline -3: 8dc595b feat(run): gate attempt checking phase on combined lane sdd phase; 2080528 feat(accept): gate mechanical checks on lane sdd phase; 6723b77 docs(skills): carve out sdd-* specialist acceptance and checklist caveat. git status --porcelain is empty."
+    },
+    {
+      "criterion": "Tasks `1.1`, `1.2`, `1.3`, `1.4`, `2.1-RED`, `2.2`, `3.1-RED`, `3.2` are ticked `[x]` in `openspec/changes/agentic-phase-specialist/tasks.md`; no other content in that file changed.",
+      "met": true,
+      "evidence": "openspec/changes/agentic-phase-specialist/tasks.md lines 35-48: checkboxes 1.1, 1.2, 1.3, 1.4, 2.1-RED, 2.2, 3.1-RED, 3.2 are [x]"
+    },
+    {
+      "criterion": "For each RED task, name the focused test command and the exact failure you observed before writing the GREEN code.",
+      "met": true,
+      "evidence": "2.1-RED command: 'go test ./internal/accept -race -count=1', observed failure: '--- FAIL: TestVerifierSkipsChecksForDeclaredNonApplyPhase (0.55s)\\n accept_test.go:368: Verify() with declared non-apply sdd_phase should skip the failing checks script: accept: required mechanical checks failed:'. 3.1-RED command: 'go test ./internal/run -run TestExecuteAttempt -count=1', observed failure: '--- FAIL: TestExecuteAttemptSkipsChecksForDeclaredNonApplyLanes (0.06s)\\n attempt_test.go:1290: checkFunc called 1 times, want 0 for a declared non-apply combined lane'."
+    }
+  ],
+  "commit": "8dc595b8dbe2b65074ec6f5e3e260907d727b138",
+  "skills_loaded": [
+    "lucind-apply",
+    "lucind-executor",
+    "work-unit-commits",
+    "go-testing"
+  ],
+  "session_id": "2d818ea2-9d7a-4d86-87a3-899d5f5029b8"
+}

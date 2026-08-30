@@ -1,0 +1,83 @@
+{
+  "packet_id": "propose-control-room-ledger-synthesis",
+  "status": "done",
+  "summary": "Verified all three propose-lens drafts against this worktree, kept Candidate 1, and wrote a 1558-word canonical proposal plus synthesis notes. Seventeen unsupported citation claims were dropped; one WAL-versus-contention contradiction was escalated unpicked.",
+  "hard_stops": [
+    {
+      "hard_stop": "The proposed approaches across drafts are mutually irreconcilable. Write the notes file, leave proposal.md uncreated, and block.",
+      "fired": false
+    },
+    {
+      "hard_stop": "One or more lens drafts is missing from this worktree.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Covering the proposal spine honestly would require exceeding 1800 words. Report which item forces it rather than silently overrunning or silently cutting.",
+      "fired": false,
+      "note": "proposal.md is 1558 words (wc -w) and covers all nine spine items."
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false,
+      "note": "The packet explicitly sets the 1800-word budget over the sdd-propose skill's 450-word default. .lucind/result.json is required by Return and is gitignored, so it is not a tracked allowed_paths violation."
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/control-room-ledger/proposal.md",
+      "change": "created",
+      "why": "Canonical proposal after citation verification and lens-A approach arbitration."
+    },
+    {
+      "path": "openspec/changes/control-room-ledger/proposal-synthesis-notes.md",
+      "change": "created",
+      "why": "Orchestrator-facing notes: contradictions, coverage, dropped citations, scope divergence."
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every file:line citation surviving into proposal.md was opened and confirmed in this worktree, and every dropped claim is listed under ## Dropped Citations.",
+      "met": true,
+      "evidence": "71 unique draft citation strings opened in this worktree. 17 dropped claims recorded in openspec/changes/control-room-ledger/proposal-synthesis-notes.md ## Dropped Citations. Surviving proposal citations (e.g. schema.go:10, ledger.go:255-282, cli.go:282-290) were re-read before writing proposal.md."
+    },
+    {
+      "criterion": "proposal.md exists, is under 1800 words, and substantively covers the proposal spine, with anything missing reported under ## Coverage Gaps.",
+      "met": true,
+      "evidence": "wc -w openspec/changes/control-room-ledger/proposal.md =\u003e 1558. Headings cover intent/problem, Candidate 1 approach, conceptual changes, capability table, delta specs, risks, rollback/additivity, test impact, out of scope, open questions. Coverage Gaps section states none of the nine spine items were missing."
+    },
+    {
+      "criterion": "proposal-synthesis-notes.md exists with exactly the four required sections, each either populated or explicitly None.",
+      "met": true,
+      "evidence": "Headings are exactly Unresolved Contradictions, Coverage Gaps, Dropped Citations, Scope Divergence. Unresolved has the WAL/contention escalation; Coverage Gaps is none for spine; Dropped Citations has 17 items; Scope Divergence records B/C vs A and independent convergence."
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (git status --porcelain empty and git log --oneline -1).",
+      "met": true,
+      "evidence": "git status --porcelain empty. git log --oneline -1 =\u003e 7018005 docs(propose): synthesize control-room-ledger proposal. Full hash 701800589cbab993a1fd4c7c3c096668e301cc49. Message has no AI attribution."
+    }
+  ],
+  "commit": "701800589cbab993a1fd4c7c3c096668e301cc49",
+  "findings": [
+    {
+      "finding": "Citations verified: 71 unique file:line strings from the three lens drafts were opened in this worktree.",
+      "evidence": "Extraction from propose-lens-a.md, propose-lens-b.md, propose-lens-c.md; each range read under internal/, cmd/, or the external skill path.",
+      "affects": "proposal.md citation set"
+    },
+    {
+      "finding": "Citations dropped: 17 claims (wrong lines, proposed APIs cited as existing, missing handlers_test.go, result schema path, process-only SKILL.md question).",
+      "evidence": "openspec/changes/control-room-ledger/proposal-synthesis-notes.md ## Dropped Citations items 1-17",
+      "affects": "proposal-synthesis-notes.md; spec/design lanes must not revive those line numbers as current APIs"
+    },
+    {
+      "finding": "Contradictions escalated: 1 (Candidate 1 SQLite progress store vs High SQLITE_BUSY/lease-renew contention; unmeasured).",
+      "evidence": "proposal-synthesis-notes.md ## Unresolved Contradictions; internal/ledger/ledger.go:162-185; internal/run/attempt.go:434-441",
+      "affects": "design spike 1; do not lock high-Hz ingest without numbers"
+    },
+    {
+      "finding": "Coverage gaps: 0 packet-spine items. No draft sized exact v6 SQL types or Go signatures (design, not spine).",
+      "evidence": "proposal-synthesis-notes.md ## Coverage Gaps",
+      "affects": "sdd-design"
+    }
+  ],
+  "session_id": "propose-control-room-ledger-synthesis"
+}

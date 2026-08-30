@@ -1,0 +1,44 @@
+{
+  "packet_id": "propose-control-room-ui-views-lens-a",
+  "status": "done",
+  "summary": "Authored propose-lens-a.md for the control-room-ui-views proposal, selecting Candidate 2 (Modular REST endpoints with lazy-loaded vanilla JS panels) grounded in existing serve.Model query interfaces and standard library embedded SPA patterns.",
+  "hard_stops": [
+    {
+      "hard_stop": "The technical approach cannot be grounded in existing codebase patterns or proposal context.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Candidate selection contradicts frozen exploration conclusions without justification.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/control-room-ui-views/propose-lens-a.md",
+      "change": "created",
+      "why": "Proposal Lens A document containing candidate selection, technical approach, conceptual changes, and rejected alternatives."
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every candidate and approach claim carries `file:line` citations to real code in this worktree.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-ui-views/propose-lens-a.md:5-61"
+    },
+    {
+      "criterion": "`propose-lens-a.md` exists, is under 1000 words, and carries every skeleton section.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-ui-views/propose-lens-a.md word count is 812 words; carries all 4 skeleton sections"
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (`git status --porcelain` empty and `git log --oneline -1`).",
+      "met": true,
+      "evidence": "commit f164dbeb98e500d76e2700c0d581509bf8b2369d docs(propose): add propose-lens-a for control-room-ui-views"
+    }
+  ],
+  "commit": "f164dbeb98e500d76e2700c0d581509bf8b2369d"
+}

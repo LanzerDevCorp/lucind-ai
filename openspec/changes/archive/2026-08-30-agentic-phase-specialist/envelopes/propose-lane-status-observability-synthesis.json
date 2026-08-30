@@ -1,0 +1,90 @@
+{
+  "packet_id": "propose-lane-status-observability-synthesis",
+  "status": "done",
+  "summary": "Verified every file:line citation in the three propose lenses against this worktree, kept Lens A's Candidate 1, and wrote a 1798-word canonical proposal plus four-section synthesis notes. Ten citations were dropped as unresolved or unrelated; no contradictions were escalated; the five explore open questions remain open.",
+  "hard_stops": [
+    {
+      "hard_stop": "The proposed approaches across drafts are mutually irreconcilable. Write the notes file, leave proposal.md uncreated, and block.",
+      "fired": false,
+      "note": "All three drafts assume Candidate 1 (wire metadata + PID sweep + structured telemetry, one PR, size:exception). B and C did not propose a competing candidate."
+    },
+    {
+      "hard_stop": "One or more lens drafts is missing from this worktree.",
+      "fired": false,
+      "note": "propose-lens-a.md, propose-lens-b.md, and propose-lens-c.md are all present under openspec/changes/lane-status-observability/."
+    },
+    {
+      "hard_stop": "Covering the proposal spine honestly would require exceeding 1800 words. Report which item forces it rather than silently overrunning or silently cutting.",
+      "fired": false,
+      "note": "proposal.md is 1798 words (wc -w) and covers all nine spine items."
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false,
+      "note": "Packet 1800-word budget and spine take precedence over the sdd-propose skill's 450-word cap; recorded in Coverage Gaps as packet precedence, not a conflict. Result envelope is written to .lucind/result.json as required by Return."
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/lane-status-observability/proposal.md",
+      "change": "created",
+      "why": "Canonical synthesized proposal for lane-status-observability."
+    },
+    {
+      "path": "openspec/changes/lane-status-observability/proposal-synthesis-notes.md",
+      "change": "created",
+      "why": "Four-section notes for the orchestrator: contradictions, gaps, dropped citations, scope divergence."
+    },
+    {
+      "path": ".lucind/result.json",
+      "change": "created",
+      "why": "Packet result envelope."
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every file:line citation surviving into proposal.md was opened and confirmed in this worktree, and every dropped claim is listed under ## Dropped Citations.",
+      "met": true,
+      "evidence": "Verification pass opened lanes_meta.go, schema.go, packet.go, cli.go, run.go, batch.go, executor.go, *_stream.go, cursor_agent.go, progress.go, runs.go, serve/model.go, handlers.go, server.go, app.js, dag/parse.go, dag/emit.go, and cited tests. Surviving citations in proposal.md match those files. Dropped Citations in proposal-synthesis-notes.md lists 10 failed file:line claims plus the lane-envelope-inspector remapping."
+    },
+    {
+      "criterion": "proposal.md exists, is under 1800 words, and substantively covers the proposal spine, with anything missing reported under ## Coverage Gaps.",
+      "met": true,
+      "evidence": "wc -w openspec/changes/lane-status-observability/proposal.md =\u003e 1798. Spine items 1-9 are present (Intent through Open Questions). Coverage Gaps section is 'None' plus skill-vs-packet budget note."
+    },
+    {
+      "criterion": "proposal-synthesis-notes.md exists with exactly the four required sections, each either populated or explicitly None.",
+      "met": true,
+      "evidence": "File has # Synthesis Notes plus Unresolved Contradictions (None), Coverage Gaps (None + packet-precedence note), Dropped Citations (11 entries), Scope Divergence (A authoritative, B/C corroboration, five divergences)."
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (git status --porcelain empty and git log --oneline -1).",
+      "met": true,
+      "evidence": "git log --oneline -1 = dc3646e docs(openspec): propose lane-status-observability from three verified lenses. git status --porcelain empty. Body has no Co-authored-by."
+    }
+  ],
+  "commit": "dc3646e7bca377dbe57d5f99db21131ddd5e88e0",
+  "findings": [
+    {
+      "finding": "Citations verified against this worktree: 79 unique file:line citations survive in proposal.md; every one was opened.",
+      "evidence": "proposal.md citation inventory after wc/python pass; source reads of schema.go:10-409, lanes_meta.go:12-128, packet.go:33-167, run.go:334-358, batch.go:184-217, handlers.go:33-190, server.go:19-53, app.js:525-544.",
+      "affects": "proposal.md"
+    },
+    {
+      "finding": "Citations dropped: 10 file:line claims plus one capability mis-map (lane-envelope-inspector).",
+      "evidence": "openspec/changes/lane-status-observability/proposal-synthesis-notes.md ## Dropped Citations",
+      "affects": "proposal-synthesis-notes.md"
+    },
+    {
+      "finding": "Contradictions escalated: 0. Coverage gaps: 0 spine items.",
+      "evidence": "proposal-synthesis-notes.md ## Unresolved Contradictions (None); ## Coverage Gaps (None).",
+      "affects": "proposal-synthesis-notes.md"
+    },
+    {
+      "finding": "app.js already displays total_tokens, cost_usd, and tool_rate; cursor_agent_stream.go parses tools but has no usage struct.",
+      "evidence": "internal/serve/static/app.js:542-544; internal/executor/cursor_agent_stream.go (grep usage/token/cost: no matches).",
+      "affects": "lane-progress-telemetry design"
+    }
+  ],
+  "session_id": "propose-lane-status-obs-synthesis"
+}

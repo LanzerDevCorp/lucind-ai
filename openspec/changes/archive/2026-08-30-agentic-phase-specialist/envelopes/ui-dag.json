@@ -1,0 +1,37 @@
+{
+  "packet_id": "ui-dag",
+  "status": "done",
+  "summary": "Rendered API-provided apply DAG waves, packet nodes, dependency edges, live statuses, and overlap violations without deriving topology in the browser. Added focused view contract coverage and committed the two allowed source paths.",
+  "hard_stops": [],
+  "files_changed": [
+    {
+      "path": "internal/serve/static/app.js",
+      "change": "modified",
+      "why": "Render the API-owned apply DAG and its live execution state."
+    },
+    {
+      "path": "internal/serve/static_test.go",
+      "change": "modified",
+      "why": "Cover multiple waves, dependencies, terminal statuses, overlap-error styling, and no browser topology recomputation."
+    },
+    {
+      "path": ".lucind/result.json",
+      "change": "created",
+      "why": "Record the schema-validated packet result required by the task."
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "View tests cover multiple waves, dependencies, terminal statuses, and overlap-error styling.",
+      "met": true,
+      "evidence": "go test -race ./internal/serve -count=1: ok github.com/LanzerDevCorp/lucind-ai/internal/serve 15.794s; terminal consumer internal/serve/static/app.js renderApplyDAG reads state.apply_dag and renders waves, dependencies, packet.status, and overlap_violations."
+    },
+    {
+      "criterion": "Only the two allowed paths change and the commit is recorded.",
+      "met": true,
+      "evidence": "git show --name-only --format='%H%n%s' HEAD records commit 41a5b46c5fa91a2c73a17ad3a351ffbc3d04db48 with only internal/serve/static/app.js and internal/serve/static_test.go; .lucind/result.json is the required ignored result artifact."
+    }
+  ],
+  "commit": "41a5b46c5fa91a2c73a17ad3a351ffbc3d04db48",
+  "session_id": "ui-dag-20260822"
+}

@@ -1,0 +1,60 @@
+{
+  "packet_id": "spec-lane-status-observability-lens-a",
+  "status": "done",
+  "summary": "Drafted openspec/changes/lane-status-observability/spec-lens-a.md containing delta specifications for lane metadata dispatch persistence and extended packet frontmatter parsing. Verified all code and spec citations against the current worktree and established observable Given/When/Then scenarios with terminal consumer mapping.",
+  "hard_stops": [
+    {
+      "hard_stop": "Either requirement cannot be stated without deciding an implementation detail the design phase has not decided (e.g. the exact frontmatter key names — Open Question 1 stays open).",
+      "fired": false
+    },
+    {
+      "hard_stop": "A capability-map citation does not resolve in this worktree.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/lane-status-observability/spec-lens-a.md",
+      "change": "created",
+      "why": "Spec lens A delta requirements, scenarios, coverage table, open questions, and citation manifest."
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "A `## Citation Manifest` section lists every unique citation, grouped by file, with the claim it supports.",
+      "met": true,
+      "evidence": "openspec/changes/lane-status-observability/spec-lens-a.md:73-97 lists 17 verified citations grouped across 7 files in ascending line order."
+    },
+    {
+      "criterion": "Both capability-map rows cite the live spec's existence with `file:line` that resolves in this worktree (existence check only — full content is lens C's job).",
+      "met": true,
+      "evidence": "openspec/changes/lane-status-observability/spec-lens-a.md:11-16 cites openspec/specs/lane-execution/spec.md:1 and openspec/specs/read-only-packet-schema/spec.md:1, verified to exist via wc -l."
+    },
+    {
+      "criterion": "Both requirements carry an RFC 2119 keyword, state observable behavior, and are independently classified ADDED with reasoning (not merely copied from proposal.md's classification).",
+      "met": true,
+      "evidence": "openspec/changes/lane-status-observability/spec-lens-a.md:18-71 uses MUST and SHALL NOT keywords for Lane metadata dispatch persistence and Extended packet frontmatter parsing, with ADDED rationale stated in ## Assumed requirements."
+    },
+    {
+      "criterion": "Every scenario's THEN is observable; the coverage table names the seam or marks \"new seam required\".",
+      "met": true,
+      "evidence": "openspec/changes/lane-status-observability/spec-lens-a.md:27-71 defines 6 Given/When/Then scenarios with observable THEN assertions, mapped to existing and new test seams in lines 66-70."
+    },
+    {
+      "criterion": "`spec-lens-a.md` exists, is under 1000 words, and carries `## Assumed requirements` and `## Capability Map`.",
+      "met": true,
+      "evidence": "wc -w openspec/changes/lane-status-observability/spec-lens-a.md reports 912 words total; both required sections are present at lines 3 and 10."
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (`git status --porcelain` empty and `git log --oneline -1`).",
+      "met": true,
+      "evidence": "Commit 328d216 docs(openspec): draft lens a for lane status observability metadata and frontmatter with empty git status --porcelain."
+    }
+  ],
+  "commit": "328d216",
+  "session_id": "dceedf0e-b307-4a5d-96a4-a957ffa3700a"
+}

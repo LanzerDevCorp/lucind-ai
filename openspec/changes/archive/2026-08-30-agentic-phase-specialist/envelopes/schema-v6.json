@@ -1,0 +1,50 @@
+{
+  "packet_id": "schema-v6",
+  "status": "done",
+  "summary": "Migrated the ledger schema transactionally from v5 to v6 while preserving v5 lanes, events, and approvals. Added STRICT runs and lane_progress tables, nullable lane metadata, run_status_changed validation, declared indexes, and focused migration coverage; all ledger tests pass.",
+  "hard_stops": [],
+  "files_changed": [
+    {
+      "path": "internal/ledger/schema.go",
+      "change": "modified",
+      "why": "Bump schemaVersion to 6 and apply the transactional v5-to-v6 DDL."
+    },
+    {
+      "path": "internal/ledger/schema_test.go",
+      "change": "created",
+      "why": "Cover v5 preservation, v6 constraints and indexes, event validation, and idempotent reopen."
+    },
+    {
+      "path": ".lucind/result.json",
+      "change": "created",
+      "why": "Required packet result envelope; ignored by git and not part of the implementation diff."
+    }
+  ],
+  "external_changes": [
+    {
+      "path": "/home/lanzerdev/go/bin/lucind-ai",
+      "change": "modified",
+      "why": "Project instructions require make install after binary source changes so the installed version identifies the applied commit.",
+      "revert": "Build and install lucind-ai from parent commit 25a520e98217ee911c5f77286cc4c2ccb984f344; the schema commit itself can be reverted independently with git revert e5abc8929e03e64873200264a07478fb4dcee126."
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Focused migration tests cover v5-to-v6, idempotent reopen, preservation, constraints, and indexes.",
+      "met": true,
+      "evidence": "go test ./internal/ledger -run 'Test(MigrateV5ToV6PreservesRowsAndAddsSchema|SchemaV6ConstraintsAndIndexes|SchemaV6ReopenIsIdempotent)$' -count=1 -v: 3 tests PASS; internal/ledger/schema_test.go."
+    },
+    {
+      "criterion": "go test ./internal/ledger passes and the worktree contains only the two allowed paths.",
+      "met": true,
+      "evidence": "go test ./internal/ledger -count=1: ok in 2.725s; git diff HEAD^..HEAD --name-only lists only internal/ledger/schema.go and internal/ledger/schema_test.go. The required ignored .lucind/result.json is the packet envelope, not an implementation path."
+    },
+    {
+      "criterion": "The implementation is committed with a conventional commit and no AI attribution.",
+      "met": true,
+      "evidence": "Commit e5abc8929e03e64873200264a07478fb4dcee126 is titled feat(ledger): migrate schema to v6 and has no commit body or AI attribution."
+    }
+  ],
+  "commit": "e5abc8929e03e64873200264a07478fb4dcee126",
+  "session_id": "schema-v6-apply-20260822"
+}

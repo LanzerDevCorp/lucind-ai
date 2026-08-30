@@ -1,0 +1,45 @@
+{
+  "packet_id": "explore-conflict-triage-fixture-lens-c",
+  "status": "done",
+  "summary": "Authored explore-lens-c.md documenting technical risks, trade-offs matrix, potential spikes, out of scope boundaries, and open questions with precise file:line citations.",
+  "hard_stops": [
+    {
+      "hard_stop": "Critical unknown cannot be framed as a risk or spike with available codebase knowledge.",
+      "fired": false
+    },
+    {
+      "hard_stop": "The change requires touching fundamental invariant boundaries without possible mitigation.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/conflict-triage-fixture/explore-lens-c.md",
+      "change": "created",
+      "why": "Feedstock for synthesis lane containing Lens C technical risks, trade-offs, spikes, out of scope boundaries, and open questions."
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every risk and spike proposal carries file:line citations to real code in this worktree.",
+      "met": true,
+      "evidence": "openspec/changes/conflict-triage-fixture/explore-lens-c.md:5-11,24-34 cites candidate.go:26,303-312, attempt.go:743-747,821-828, overlap.go:622-660, cli.go:1430-1433, integrate.go:151-173, etc."
+    },
+    {
+      "criterion": "explore-lens-c.md exists, is under 1000 words, and carries every skeleton section.",
+      "met": true,
+      "evidence": "openspec/changes/conflict-triage-fixture/explore-lens-c.md verified at 836 words with all required headers: Technical Risks \u0026 Unknowns, Trade-offs Matrix, Potential Spikes / Proof of Concepts, Out of Scope, Open Questions."
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (git status --porcelain empty and git log --oneline -1).",
+      "met": true,
+      "evidence": "Commit c84d638: \"docs(openspec): add conflict triage fixture explore lens c\", git status --porcelain is clean."
+    }
+  ],
+  "commit": "c84d638d43a7e0d159d934e8cff03bdbdf5b082d",
+  "session_id": "107bab17-6382-4373-ba7f-5ada3bf64589"
+}

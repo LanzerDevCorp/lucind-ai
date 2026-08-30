@@ -1,0 +1,44 @@
+{
+  "packet_id": "propose-lane-status-observability-lens-b",
+  "status": "done",
+  "summary": "Authored propose-lens-b.md specifying user capability impacts, delta specifications with RFC 2119 requirements and scenarios, and open questions for lane status observability with real file:line citations.",
+  "hard_stops": [
+    {
+      "hard_stop": "Delta requirements conflict with existing base specs without explicit migration path.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Capability impacts cannot be determined from packet context or code inspection.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/lane-status-observability/propose-lens-b.md",
+      "change": "created",
+      "why": "Capability impact and delta specifications for lane status observability proposal."
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every capability impact and delta spec requirement carries `file:line` citations to real code in this worktree.",
+      "met": true,
+      "evidence": "openspec/changes/lane-status-observability/propose-lens-b.md lines 7-12 and 18, 30, 42, 54, 66 cite internal/run/run.go:334-355, internal/run/batch.go:184-200, internal/ledger/lanes_meta.go:20-83, internal/packet/packet.go:33-75,78-167, cmd/lucind-ai/cli.go:141-174, internal/serve/model.go:163-184, internal/serve/handlers.go:33-60, internal/executor/executor.go:17-21, internal/executor/agy_stream.go:12-39, internal/executor/claude_stream.go:17-36, internal/executor/opencode_stream.go:100-125, internal/executor/cursor_agent.go:35-60, internal/ledger/progress.go:14-45, internal/ledger/schema.go:298-308, internal/ledger/runs.go:16-41, internal/serve/server.go:1-60, and internal/serve/static/app.js:525-545."
+    },
+    {
+      "criterion": "`propose-lens-b.md` exists, is under 1000 words, and carries every skeleton section.",
+      "met": true,
+      "evidence": "openspec/changes/lane-status-observability/propose-lens-b.md exists (913 words via wc -w) and contains '# Proposal Lens B — Capability Impact \u0026 Specs: Lane Status Observability', '## User \u0026 Capability Impact', '## Delta Specifications', and '## Open Questions'."
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (`git status --porcelain` empty and `git log --oneline -1`).",
+      "met": true,
+      "evidence": "git log --oneline -1 shows 'b2da013 docs(openspec): add propose-lens-b for lane-status-observability' and git status --porcelain is empty."
+    }
+  ],
+  "commit": "b2da013"
+}

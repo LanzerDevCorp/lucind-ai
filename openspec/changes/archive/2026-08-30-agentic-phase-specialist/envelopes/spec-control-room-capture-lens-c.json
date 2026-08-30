@@ -1,0 +1,58 @@
+{
+  "packet_id": "spec-control-room-capture-lens-c",
+  "status": "done",
+  "summary": "Generated spec-lens-c.md containing assumed requirements, live spec inventories for lane-execution and approvals-web-ui, conflict analysis confirming purely additive extension, and open questions.",
+  "hard_stops": [
+    {
+      "hard_stop": "A capability the proposal lists as modified has no live spec to read.",
+      "fired": false
+    },
+    {
+      "hard_stop": "A requirement being removed has consumers the proposal never mentions, so removing it breaks behavior nobody agreed to break.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Copying a MODIFIED block whole would exceed what you can write, so the copy would have to be partial. Report which requirement forces it; never write a partial block.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/control-room-capture/spec-lens-c.md",
+      "change": "created",
+      "why": "Spec Lens C live-spec conflicts and migration analysis"
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every capability listed as modified was opened in full, and its inventory row's requirement and scenario counts came from the file rather than an estimate.",
+      "met": true,
+      "evidence": "openspec/specs/lane-execution/spec.md:1 (3 reqs, 6 scenarios) and openspec/specs/approvals-web-ui/spec.md:1 (4 reqs, 9 scenarios) opened and read in full."
+    },
+    {
+      "criterion": "Every ## MODIFIED Full Blocks entry is the complete live block, scenario for scenario, with nothing summarized or elided.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-capture/spec-lens-c.md:33 reports None because all 4 delta requirements are ADDED, not MODIFIED."
+    },
+    {
+      "criterion": "Every removal or rename names its consumers with file:line and carries a Reason.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-capture/spec-lens-c.md:37 reports None because no requirements are removed or renamed."
+    },
+    {
+      "criterion": "spec-lens-c.md exists, is under 1000 words excluding the verbatim blocks, and carries ## Assumed requirements and ## Live Spec Inventory.",
+      "met": true,
+      "evidence": "wc -w openspec/changes/control-room-capture/spec-lens-c.md reports 566 words; sections verified at lines 3 and 7."
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (git status --porcelain empty and git log --oneline -1).",
+      "met": true,
+      "evidence": "Commit bc11dfd: docs(openspec): add spec lens c for control-room-capture; git status --porcelain is empty."
+    }
+  ],
+  "commit": "bc11dfde070352c00b2a6b3091a37a10f211d7dc"
+}

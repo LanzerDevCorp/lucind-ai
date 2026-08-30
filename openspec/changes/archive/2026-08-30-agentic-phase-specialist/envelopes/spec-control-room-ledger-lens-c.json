@@ -1,0 +1,58 @@
+{
+  "packet_id": "spec-control-room-ledger-lens-c",
+  "status": "done",
+  "summary": "Authored openspec/changes/control-room-ledger/spec-lens-c.md analyzing live-spec inventory, conflicts, verbatim blocks, and migration guidance for control-room-ledger. Confirmed that lane-execution and approvals-web-ui live requirements remain intact with zero conflicts, removals, or renames.",
+  "hard_stops": [
+    {
+      "hard_stop": "A capability the proposal lists as modified has no live spec to read.",
+      "fired": false
+    },
+    {
+      "hard_stop": "A requirement being removed has consumers the proposal never mentions, so removing it breaks behavior nobody agreed to break.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Copying a MODIFIED block whole would exceed what you can write, so the copy would have to be partial. Report which requirement forces it; never write a partial block.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/control-room-ledger/spec-lens-c.md",
+      "change": "created",
+      "why": "Live-spec conflicts and migration analysis for spec lens C."
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every capability listed as modified was opened in full, and its inventory row's requirement and scenario counts came from the file rather than an estimate.",
+      "met": true,
+      "evidence": "openspec/specs/lane-execution/spec.md:1-62 (3 requirements, 6 scenarios) and openspec/specs/approvals-web-ui/spec.md:1-83 (4 requirements, 9 scenarios)"
+    },
+    {
+      "criterion": "Every ## MODIFIED Full Blocks entry is the complete live block, scenario for scenario, with nothing summarized or elided.",
+      "met": true,
+      "evidence": "No live requirements modified; all existing requirements are unchanged and extended with ADDED requirements."
+    },
+    {
+      "criterion": "Every removal or rename names its consumers with file:line and carries a Reason.",
+      "met": true,
+      "evidence": "No requirements removed or renamed; table declared with None."
+    },
+    {
+      "criterion": "spec-lens-c.md exists, is under 1000 words excluding the verbatim blocks, and carries ## Assumed requirements and ## Live Spec Inventory.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-ledger/spec-lens-c.md exists, 532 words with ## Assumed requirements and ## Live Spec Inventory."
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (git status --porcelain empty and git log --oneline -1).",
+      "met": true,
+      "evidence": "git log -1: d986633 docs(control-room-ledger): create spec-lens-c for live-spec conflicts and migration; git status --porcelain is clean."
+    }
+  ],
+  "commit": "d986633"
+}

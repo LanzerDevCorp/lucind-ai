@@ -1,0 +1,86 @@
+{
+  "packet_id": "archive-skill-provisioning-and-phase-specialist",
+  "status": "done",
+  "summary": "Closed the SDD cycle for skill-provisioning-and-phase-specialist mechanically: preserved 40 dispatch packets and 26 result envelopes under the change folder, synced 8 delta specifications into live openspec/specs/, authored archive-report.md, and moved the change tree into openspec/changes/archive/2026-08-29-skill-provisioning-and-phase-specialist/.",
+  "hard_stops": [
+    {
+      "hard_stop": "An implementation task in tasks.md is unchecked.",
+      "fired": false
+    },
+    {
+      "hard_stop": "verify.md's final verdict is not PASS, or records a CRITICAL issue.",
+      "fired": false
+    },
+    {
+      "hard_stop": "A diff -r readback is non-empty. Report the difference verbatim; never retry the copy over it.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Shell access for the mechanical copy is unavailable. Never fall back to Read/Write copying.",
+      "fired": false
+    },
+    {
+      "hard_stop": "A MODIFIED delta block cannot be matched to a live requirement.",
+      "fired": false
+    },
+    {
+      "hard_stop": "The archive destination already exists.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every whole-file copy and every folder move ran through the shell, with the verbatim diff -r output for each one in the result envelope, empty.",
+      "met": true,
+      "evidence": "diff -r between pre-move snapshot .lucind/archive-premove-snapshot/skill-provisioning-and-phase-specialist and destination openspec/changes/archive/2026-08-29-skill-provisioning-and-phase-specialist produced empty output (exit 0)."
+    },
+    {
+      "criterion": "Every packet and result envelope from this change's dispatch is preserved under the change folder, frontmatter included, or its absence is recorded in the report.",
+      "met": true,
+      "evidence": "Preserved 40 packet files in openspec/changes/archive/2026-08-29-skill-provisioning-and-phase-specialist/packets/ and 26 result envelopes in openspec/changes/archive/2026-08-29-skill-provisioning-and-phase-specialist/envelopes/."
+    },
+    {
+      "criterion": "Every delta requirement reached the live spec with its classification honored, and every MODIFIED block replaced the whole live block rather than part of it.",
+      "met": true,
+      "evidence": "openspec/specs/ updated across 8 capabilities: acceptance-verifier (1 added), lane-execution (1 added), packet-authoring-contract (1 added), read-only-packet-schema (1 modified, replacing full block), phase-specialist-dispatch (created, 1 added), skill-derivation (created, 1 added), skill-load-correspondence (created, 1 added), skill-root-resolution (created, 1 added)."
+    },
+    {
+      "criterion": "archive-report.md exists with every section populated, and every follow-up is named there (should be \"None\").",
+      "met": true,
+      "evidence": "openspec/changes/archive/2026-08-29-skill-provisioning-and-phase-specialist/archive-report.md populated per gentle-ai.sdd-archive-report/v1 template with Follow-ups: None outstanding."
+    },
+    {
+      "criterion": "The change folder is at openspec/changes/archive/\u003carchive-date\u003e-skill-provisioning-and-phase-specialist/ and no longer at its original path.",
+      "met": true,
+      "evidence": "openspec/changes/skill-provisioning-and-phase-specialist is absent; openspec/changes/archive/2026-08-29-skill-provisioning-and-phase-specialist exists."
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution.",
+      "met": true,
+      "evidence": "commit a4b809f65fdeff20d06e7dd9c84d51e35f3f257f carries the work (chore(openspec): archive skill-provisioning-and-phase-specialist) with no co-author or AI attribution."
+    }
+  ],
+  "commit": "a4b809f65fdeff20d06e7dd9c84d51e35f3f257f",
+  "findings": [
+    {
+      "finding": "Verbatim diff -r readback for mechanical copy and folder move was empty (exit code 0).",
+      "evidence": "diff -r .lucind/archive-premove-snapshot/skill-provisioning-and-phase-specialist openspec/changes/archive/2026-08-29-skill-provisioning-and-phase-specialist (empty output, exit 0)"
+    },
+    {
+      "finding": "Preserved 40 dispatch packets and 26 result envelopes from the primary repository working directory.",
+      "evidence": "ls openspec/changes/archive/2026-08-29-skill-provisioning-and-phase-specialist/packets | wc -l -\u003e 40; ls openspec/changes/archive/2026-08-29-skill-provisioning-and-phase-specialist/envelopes | wc -l -\u003e 26"
+    },
+    {
+      "finding": "Follow-ups: None outstanding. All cosmetic items from tasks.md 7.1-7.3 were fixed and verified prior to archival.",
+      "evidence": "openspec/changes/archive/2026-08-29-skill-provisioning-and-phase-specialist/archive-report.md:58-60"
+    }
+  ],
+  "skills_loaded": [
+    "lucind-executor",
+    "sdd-archive"
+  ]
+}

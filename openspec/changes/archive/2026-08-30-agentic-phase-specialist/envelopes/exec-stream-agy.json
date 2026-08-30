@@ -1,0 +1,49 @@
+{
+  "packet_id": "exec-stream-agy",
+  "status": "done",
+  "summary": "Captured authentic agy 1.1.18 stream-json records and added normalized text, tool, edit, and usage progress behind the common executor interface. Malformed or unsupported incomplete streams retry the blocking JSON path, while terminal stream results preserve Outcome semantics without replaying completed turns.",
+  "hard_stops": [],
+  "files_changed": [
+    {
+      "path": "internal/executor/agy.go",
+      "change": "modified",
+      "why": "Select stream-json when progress is requested and retain the blocking JSON fallback and Outcome behavior."
+    },
+    {
+      "path": "internal/executor/agy_stream.go",
+      "change": "created",
+      "why": "Decode empirical agy NDJSON records into normalized best-effort progress events."
+    },
+    {
+      "path": "internal/executor/agy_stream_test.go",
+      "change": "created",
+      "why": "Prove text, tool, edit, usage, malformed input, fallback, and terminal replay behavior with subprocess stubs."
+    },
+    {
+      "path": ".lucind/result.json",
+      "change": "created",
+      "why": "Record the packet result and evidence required by the result contract."
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Real stream probe evidence and focused stub tests cover tool calls, text, edits, usage, malformed input, and fallback.",
+      "met": true,
+      "evidence": "Real `agy 1.1.18 --output-format stream-json` probe exited 0 with 20 records including agent_response text_delta, run_command, write_to_file, replace_file_content, and usage payloads. `go test ./internal/executor -race -count=1 -run '^TestAgyRun(StreamsNormalizedProgressAndPreservesFinalResult|FallsBackToBlockingJSONForInvalidStream|DoesNotReplayCompletedTurnAfterTrailingMalformedData)$' -v` passed all 3 tests and 2 fallback subcases; `go test ./... -race -count=1` passed all packages."
+    },
+    {
+      "criterion": "Only the three allowed paths change and the commit is recorded.",
+      "met": true,
+      "evidence": "Commit d3d1fcf7b67a761217c7e7d7fb6d06dfd69c72e3 (`feat(executor): stream agy progress`) contains exactly internal/executor/agy.go, internal/executor/agy_stream.go, and internal/executor/agy_stream_test.go; `git show --stat --oneline --summary HEAD` reports 3 files changed, 384 insertions, and 5 deletions."
+    }
+  ],
+  "commit": "d3d1fcf7b67a761217c7e7d7fb6d06dfd69c72e3",
+  "findings": [
+    {
+      "finding": "Agy file tools constrain probe writes to conversation artifact directories rather than the process working directory.",
+      "evidence": "The live probe's first requested worktree write produced a terminal error, while subsequent write_to_file and replace_file_content records targeted agy's permitted artifact directory.",
+      "affects": "Future agy runtime probes should request disposable writes without assuming cwd is writable."
+    }
+  ],
+  "session_id": "exec-stream-agy-20260822"
+}

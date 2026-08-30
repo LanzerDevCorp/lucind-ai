@@ -1,0 +1,54 @@
+{
+  "packet_id": "spec-control-room-ui-shell-lens-a",
+  "status": "done",
+  "summary": "Drafted spec-lens-a.md for control-room-ui-shell mapping 6 capabilities (5 new, 1 existing) and defining 6 ADDED requirement statements with RFC 2119 keywords and terminal consumers. Verified live spec citations and word budget under 1000 words.",
+  "hard_stops": [
+    {
+      "hard_stop": "The proposal has no Capabilities section and no Affected Areas section to infer one from.",
+      "fired": false
+    },
+    {
+      "hard_stop": "A capability the proposal names as Modified has no live spec in openspec/specs/, so it is really new and the proposal is wrong about which.",
+      "fired": false
+    },
+    {
+      "hard_stop": "A requirement cannot be stated without deciding an implementation detail the design phase has not decided.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/control-room-ui-shell/spec-lens-a.md",
+      "change": "created",
+      "why": "Spec lens A capabilities and requirements draft"
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every capability-map row is classified new or existing, and every \"existing\" row cites the live spec with file:line that resolves in this worktree.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-ui-shell/spec-lens-a.md:12-20 capability map with approvals-web-ui citing openspec/specs/approvals-web-ui/spec.md:1-83"
+    },
+    {
+      "criterion": "Every requirement carries an RFC 2119 keyword and states observable behavior rather than implementation.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-ui-shell/spec-lens-a.md:24,32,40,48,56,64 all 6 requirements use MUST keyword"
+    },
+    {
+      "criterion": "`spec-lens-a.md` exists, is under 1000 words, and carries `## Assumed requirements` and `## Capability Map`.",
+      "met": true,
+      "evidence": "wc -w openspec/changes/control-room-ui-shell/spec-lens-a.md reports 622 words (\u003c1000 words), with both sections present"
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (`git status --porcelain` empty and `git log --oneline -1`).",
+      "met": true,
+      "evidence": "git log --oneline -1 shows '5f0e2a0 docs(spec): add spec lens a for control-room-ui-shell' and git status --porcelain is clean"
+    }
+  ],
+  "commit": "5f0e2a00d36bb6f783c1bbd86e59e9402c651fce",
+  "session_id": "f36f2917-0cae-4233-8b5f-d21d8a5446fd"
+}

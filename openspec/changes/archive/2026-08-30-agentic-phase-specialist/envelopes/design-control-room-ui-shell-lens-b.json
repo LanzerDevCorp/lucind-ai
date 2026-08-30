@@ -1,0 +1,48 @@
+{
+  "packet_id": "design-control-room-ui-shell-lens-b",
+  "status": "done",
+  "summary": "Authored design lens B for control-room-ui-shell detailing surface deltas, invariants, and file changes with file:line citations and terminal consumers. Document is under 1000 words, adheres strictly to the required skeleton, and has been committed cleanly.",
+  "hard_stops": [
+    {
+      "hard_stop": "The specs do not determine whether a format delta is additive or breaking.",
+      "fired": false
+    },
+    {
+      "hard_stop": "A file change cannot name any terminal consumer.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Two reasonable architectures produce incompatible surface tables and the proposal does not choose between them.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/control-room-ui-shell/design-lens-b.md",
+      "change": "created",
+      "why": "Design Lens B document detailing surface deltas, invariants, data flow, and file changes for control-room-ui-shell"
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every Surface Deltas and File Changes row carries a file:line citation that points at real code in this worktree, and every File Changes row names a terminal consumer.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-ui-shell/design-lens-b.md:29-50 (Surface Deltas table citing internal/serve/handlers.go:36, model.go:22-343, static.go:8-18, cli.go:683-694) and lines 53-64 (File Changes table citing terminal consumers cmd/lucind-ai/cli.go:715, internal/serve/handlers.go:69-76, index.html:7, index.html:160, shell.js, router.js, store.js, views/approvals.js, views/features.js)"
+    },
+    {
+      "criterion": "design-lens-b.md exists, is under 1000 words, and carries every skeleton section including ## Assumed architecture.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-ui-shell/design-lens-b.md:1-71 (word count 977 words via wc -w; contains ## Assumed architecture, ## Flow and Invariants, ## Surface Deltas, ## File Changes, ## Open Questions)"
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (git status --porcelain empty and git log --oneline -1).",
+      "met": true,
+      "evidence": "Commit 2b89abd (docs(control-room-ui-shell): add design lens b for surface and flow), git status --porcelain empty"
+    }
+  ],
+  "commit": "2b89abd275b4f9b9e43728f63a55c80219f8fda8"
+}

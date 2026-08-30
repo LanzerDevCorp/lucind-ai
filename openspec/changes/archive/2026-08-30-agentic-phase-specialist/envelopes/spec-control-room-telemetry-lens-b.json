@@ -1,0 +1,49 @@
+{
+  "packet_id": "spec-control-room-telemetry-lens-b",
+  "status": "done",
+  "summary": "Authored Given/When/Then scenario sets and coverage matrix for control-room-telemetry spec lens B across all four proposal requirements and five capabilities.",
+  "hard_stops": [
+    {
+      "hard_stop": "The proposal does not determine what the system should do in a case, so the scenario would assert an outcome nobody chose.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Every scenario for a requirement would be untestable, meaning the requirement as proposed is unobservable.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/control-room-telemetry/spec-lens-b.md",
+      "change": "created",
+      "why": "Given/When/Then scenarios and coverage matrix for control-room-telemetry spec lens B"
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every requirement named in `## Assumed requirements` has at least one scenario, and every scenario is in GIVEN / WHEN / THEN form.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-telemetry/spec-lens-b.md:8-66"
+    },
+    {
+      "criterion": "Every scenario's THEN names an observable outcome, and the coverage table cites the seam it is observable through or marks it \"new seam required\".",
+      "met": true,
+      "evidence": "openspec/changes/control-room-telemetry/spec-lens-b.md:68-75"
+    },
+    {
+      "criterion": "`spec-lens-b.md` exists, is under 1000 words, and carries `## Assumed requirements`, `## Coverage`, and `## Untestable Assertions`.",
+      "met": true,
+      "evidence": "wc -w reports 855 words; sections confirmed in openspec/changes/control-room-telemetry/spec-lens-b.md"
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (`git status --porcelain` empty and `git log --oneline -1`).",
+      "met": true,
+      "evidence": "commit c577279, git status --porcelain empty"
+    }
+  ],
+  "commit": "c5772796c6a111e4b388289da45d1da141cb346c"
+}

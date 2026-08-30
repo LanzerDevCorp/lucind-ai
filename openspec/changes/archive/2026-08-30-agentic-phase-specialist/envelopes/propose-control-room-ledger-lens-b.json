@@ -1,0 +1,44 @@
+{
+  "packet_id": "propose-control-room-ledger-lens-b",
+  "status": "done",
+  "summary": "Produced propose-lens-b.md defining capability impacts, delta specifications, and RFC 2119 requirements with code citations for the control-room-ledger change.",
+  "hard_stops": [
+    {
+      "hard_stop": "Delta requirements conflict with existing base specs without explicit migration path.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Capability impacts cannot be determined from packet context or code inspection.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/control-room-ledger/propose-lens-b.md",
+      "change": "created",
+      "why": "Proposal Lens B document for control room ledger capability impacts and delta specifications"
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every capability impact and delta spec requirement carries `file:line` citations to real code in this worktree.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-ledger/propose-lens-b.md lines 7-11, 21, 37, 43-44, 53, 70, 80, 90, 96 citing schema.go:10-57, cli.go:282-290, run.go:422-435, ledger.go:162-185, ledger.go:255-282, ledger.go:877-890, model.go:14-25, handlers.go:79-85, and ledgerpath.go:36-38."
+    },
+    {
+      "criterion": "`propose-lens-b.md` exists, is under 1000 words, and carries every skeleton section.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-ledger/propose-lens-b.md is 858 words (verified with `wc -w`) and contains ## User \u0026 Capability Impact, ## Delta Specifications, and ## Open Questions sections."
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (`git status --porcelain` empty and `git log --oneline -1`).",
+      "met": true,
+      "evidence": "Commit 830d2001af64b0b5f93d3976247c58a0c0160a39 ('docs(openspec): add propose-lens-b for control-room-ledger') created; `git status --porcelain` output is empty."
+    }
+  ],
+  "commit": "830d2001af64b0b5f93d3976247c58a0c0160a39"
+}

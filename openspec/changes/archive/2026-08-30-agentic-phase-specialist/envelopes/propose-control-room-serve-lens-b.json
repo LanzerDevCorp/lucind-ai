@@ -1,0 +1,44 @@
+{
+  "packet_id": "propose-control-room-serve-lens-b",
+  "status": "done",
+  "summary": "Authored Proposal Lens B for control-room-serve covering capability impact, REST/SSE delta specifications with file:line citations, and open questions under the 1000-word budget.",
+  "hard_stops": [
+    {
+      "hard_stop": "Delta requirements conflict with existing base specs without explicit migration path.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Capability impacts cannot be determined from packet context or code inspection.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/control-room-serve/propose-lens-b.md",
+      "change": "created",
+      "why": "Feedstock for synthesis lane containing capability impact and delta specifications for control-room-serve."
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every capability impact and delta spec requirement carries file:line citations to real code in this worktree.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-serve/propose-lens-b.md lines 7-12, 18, 25, 33, 41, 49, 58, 67, 75, 84, 93 cite real files and line numbers in cmd/lucind-ai/cli.go, internal/serve/, and internal/ledger/."
+    },
+    {
+      "criterion": "propose-lens-b.md exists, is under 1000 words, and carries every skeleton section.",
+      "met": true,
+      "evidence": "wc -w openspec/changes/control-room-serve/propose-lens-b.md reports 974 words and contains # Proposal Lens B, ## User \u0026 Capability Impact, ## Delta Specifications, and ## Open Questions."
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (git status --porcelain empty and git log --oneline -1).",
+      "met": true,
+      "evidence": "git log --oneline -1 shows commit 6dd8528 docs(openspec): add propose-lens-b for control-room-serve with empty git status --porcelain."
+    }
+  ],
+  "commit": "6dd8528"
+}

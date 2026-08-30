@@ -1,0 +1,172 @@
+{
+  "packet_id": "archive-control-room-ui-views",
+  "status": "done",
+  "summary": "Mechanically archived the control-room-ui-views change by preserving 7 packets and 3 result envelopes, merging delta specs into live specs across 5 capabilities, writing archive-report.md, moving the change folder to openspec/changes/archive/2026-08-22-control-room-ui-views/, and committing the result.",
+  "hard_stops": [
+    {
+      "hard_stop": "An implementation task in tasks.md is unchecked and ## Context grants no explicit reconciliation.",
+      "fired": false
+    },
+    {
+      "hard_stop": "verify.md records a CRITICAL issue.",
+      "fired": false
+    },
+    {
+      "hard_stop": "A diff -r readback is non-empty. Report the difference verbatim; never retry the copy over it.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Shell access for the mechanical copy is unavailable. Never fall back to Read/Write copying.",
+      "fired": false
+    },
+    {
+      "hard_stop": "A MODIFIED delta block cannot be matched to a live requirement, so merging it would either duplicate a requirement or delete the wrong one.",
+      "fired": false
+    },
+    {
+      "hard_stop": "The archive destination already exists.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/specs/approvals-web-ui/spec.md",
+      "change": "modified",
+      "why": "Merged modified requirement Individual Decisions Without Bulk Approval from delta spec"
+    },
+    {
+      "path": "openspec/specs/batch-wave-view/spec.md",
+      "change": "created",
+      "why": "Created live capability spec with Purpose and Requirement from delta spec"
+    },
+    {
+      "path": "openspec/specs/feature-lease-monitor/spec.md",
+      "change": "created",
+      "why": "Created live capability spec with Purpose and Requirement from delta spec"
+    },
+    {
+      "path": "openspec/specs/lane-envelope-inspector/spec.md",
+      "change": "created",
+      "why": "Created live capability spec with Purpose and Requirement from delta spec"
+    },
+    {
+      "path": "openspec/specs/reconciliation-workspace/spec.md",
+      "change": "created",
+      "why": "Created live capability spec with Purpose and Requirement from delta spec"
+    },
+    {
+      "path": "openspec/changes/archive/2026-08-22-control-room-ui-views/archive-report.md",
+      "change": "created",
+      "why": "Authored terminal archive report for control-room-ui-views"
+    },
+    {
+      "path": "openspec/changes/archive/2026-08-22-control-room-ui-views/envelopes/api-gaps.json",
+      "change": "created",
+      "why": "Preserved result envelope for api-gaps lane"
+    },
+    {
+      "path": "openspec/changes/archive/2026-08-22-control-room-ui-views/envelopes/ui-features.json",
+      "change": "created",
+      "why": "Preserved result envelope for ui-features lane"
+    },
+    {
+      "path": "openspec/changes/archive/2026-08-22-control-room-ui-views/envelopes/ui-timeline.json",
+      "change": "created",
+      "why": "Preserved result envelope for ui-timeline lane"
+    },
+    {
+      "path": "openspec/changes/archive/2026-08-22-control-room-ui-views/packets/api-gaps.md",
+      "change": "created",
+      "why": "Preserved dispatch packet for api-gaps"
+    },
+    {
+      "path": "openspec/changes/archive/2026-08-22-control-room-ui-views/packets/archive.md",
+      "change": "created",
+      "why": "Preserved dispatch packet for archive"
+    },
+    {
+      "path": "openspec/changes/archive/2026-08-22-control-room-ui-views/packets/cli-wiring.md",
+      "change": "created",
+      "why": "Preserved dispatch packet for cli-wiring"
+    },
+    {
+      "path": "openspec/changes/archive/2026-08-22-control-room-ui-views/packets/ui-approvals.md",
+      "change": "created",
+      "why": "Preserved dispatch packet for ui-approvals"
+    },
+    {
+      "path": "openspec/changes/archive/2026-08-22-control-room-ui-views/packets/ui-features.md",
+      "change": "created",
+      "why": "Preserved dispatch packet for ui-features"
+    },
+    {
+      "path": "openspec/changes/archive/2026-08-22-control-room-ui-views/packets/ui-timeline.md",
+      "change": "created",
+      "why": "Preserved dispatch packet for ui-timeline"
+    },
+    {
+      "path": "openspec/changes/archive/2026-08-22-control-room-ui-views/packets/verify.md",
+      "change": "created",
+      "why": "Preserved dispatch packet for verify"
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every whole-file copy and every folder move ran through the shell, with the verbatim diff -r output for each one in the result envelope, empty. Spec merges — ADDED/MODIFIED/REMOVED/RENAMED, and a new-capability spec authored from an ADDED-style delta — are the named exception in ## Procedure step 3 and go through Read/Write instead.",
+      "met": true,
+      "evidence": "Mechanical shell copy and diff validation executed: cp -R openspec/plans/control-room/control-room-ui-views/packets/. -\u003e packets/ (diff -r exit 0, empty output); cp envelopes api-gaps.json, ui-features.json, ui-timeline.json -\u003e envelopes/ (diff exit 0, empty output); git mv openspec/changes/control-room-ui-views -\u003e openspec/changes/archive/2026-08-22-control-room-ui-views (diff -r against pre-move snapshot exit 0, empty output)."
+    },
+    {
+      "criterion": "Every packet and result envelope from this change's dispatch is preserved under the change folder, frontmatter included, or its absence is recorded in the report.",
+      "met": true,
+      "evidence": "7 packet files preserved under openspec/changes/archive/2026-08-22-control-room-ui-views/packets/; 3 result envelopes preserved under openspec/changes/archive/2026-08-22-control-room-ui-views/envelopes/; absence of .lucind/packets/ and unpromoted apply envelopes recorded in archive-report.md."
+    },
+    {
+      "criterion": "Every delta requirement reached the live spec with its classification honored, and every MODIFIED block replaced the whole live block rather than part of it.",
+      "met": true,
+      "evidence": "openspec/specs/approvals-web-ui/spec.md:26-55 replaced with modified requirement block and 4 scenarios; openspec/specs/{batch-wave-view,feature-lease-monitor,lane-envelope-inspector,reconciliation-workspace}/spec.md created with Purpose and verbatim delta requirements/scenarios."
+    },
+    {
+      "criterion": "archive-report.md exists with every section populated, and every follow-up is named there.",
+      "met": true,
+      "evidence": "openspec/changes/archive/2026-08-22-control-room-ui-views/archive-report.md contains Verdict, What Shipped, Dispatch Record, Follow-ups (6 items), and Gaps and Contradictions."
+    },
+    {
+      "criterion": "The change folder is at openspec/changes/archive/2026-08-22-control-room-ui-views/ and no longer at its original path.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-ui-views removed; openspec/changes/archive/2026-08-22-control-room-ui-views populated with all 42 change artifacts."
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (git status --porcelain empty and git log --oneline -1).",
+      "met": true,
+      "evidence": "Commit de736b0 ('docs(openspec): archive control-room-ui-views change and sync specs'); git status --porcelain is empty."
+    }
+  ],
+  "commit": "de736b0",
+  "findings": [
+    {
+      "finding": "Verbatim diff -r output for packets directory copy",
+      "evidence": "Command: diff -r /home/lanzerdev/git_root/lucind-ai/openspec/plans/control-room/control-room-ui-views/packets openspec/changes/control-room-ui-views/packets -\u003e Output: '' (exit 0)"
+    },
+    {
+      "finding": "Verbatim diff output for result envelopes copy",
+      "evidence": "Commands: diff /home/lanzerdev/git_root/lucind-ai/.lucind/results/ui-features.json openspec/changes/control-room-ui-views/envelopes/ui-features.json; diff /home/lanzerdev/git_root/lucind-ai/.lucind/results/ui-timeline.json openspec/changes/control-room-ui-views/envelopes/ui-timeline.json; diff /home/lanzerdev/git_root/lucind-ai/.lucind/results/api-gaps.json openspec/changes/control-room-ui-views/envelopes/api-gaps.json -\u003e Outputs: '' (exit 0 for all)"
+    },
+    {
+      "finding": "Verbatim diff -r output for change folder archive move",
+      "evidence": "Command: diff -r .lucind/archive-premove-snapshot/control-room-ui-views openspec/changes/archive/2026-08-22-control-room-ui-views -\u003e Output: '' (exit 0)"
+    },
+    {
+      "finding": "Preserved dispatch artifact counts",
+      "evidence": "7 packet files in packets/ (api-gaps.md, archive.md, cli-wiring.md, ui-approvals.md, ui-features.md, ui-timeline.md, verify.md); 3 result envelopes in envelopes/ (api-gaps.json, ui-features.json, ui-timeline.json)"
+    },
+    {
+      "finding": "Follow-ups preserved in archive report",
+      "evidence": "archive-report.md records 6 follow-ups: (1) Reconcile UI POST surface vs copy-paste CLI, (2) Lease countdown source remaining_seconds vs expires_at, (3) Overlap evidence_json pre/escapeHtml vs tokenizer, (4) NewHandler *Model parameter injection, (5) Apply DAG sidecar paths consolidation, (6) Dual verification dispatch for catching dead code."
+    }
+  ]
+}

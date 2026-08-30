@@ -1,0 +1,58 @@
+{
+  "packet_id": "tasks-control-room-capture-lens-a",
+  "status": "done",
+  "summary": "Produced tasks-lens-a.md with 4-phase implementation breakdown, dependency ordering, and spec requirement traceability for control-room-capture. The breakdown establishes critical path ordering across foundation types, executor multiwriters, runner file spooling, and loopback HTTP endpoints.",
+  "hard_stops": [
+    {
+      "hard_stop": "A requirement in specs/ cannot be decomposed into tasks because the design does not say how it is built.",
+      "fired": false
+    },
+    {
+      "hard_stop": "The design's file-changes table and the specs disagree about what this change does.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Two tasks are mutually circular: each needs the other to land first.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/control-room-capture/tasks-lens-a.md",
+      "change": "created",
+      "why": "Decomposition and ordering tasks lens for control-room-capture"
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every task names a concrete path, and every \"modify\" task's path resolves in this worktree.",
+      "met": true,
+      "evidence": "All 14 tasks in openspec/changes/control-room-capture/tasks-lens-a.md cite resolved file:line locations in the worktree (e.g. internal/executor/executor.go:15-37, internal/ledgerpath/ledgerpath.go:34-58, internal/executor/agy.go:169-173, internal/run/run.go:220-258,368-374, internal/serve/handlers.go:36-118, cmd/lucind-ai/cli.go:674-725)."
+    },
+    {
+      "criterion": "Every requirement in  appears in the traceability table with at least one task, and every gap in either direction is reported rather than hidden.",
+      "met": true,
+      "evidence": "The Requirement Traceability table maps all 4 requirements from openspec/changes/control-room-capture/specs/ (Continuous primary-root stream spooling, Bounded SQLite diagnostics, Non-interfering WaitDelay drain, Loopback HTTP stream access) to specific tasks with zero gaps."
+    },
+    {
+      "criterion": "Every dependency row states why it is a real ordering constraint, not a preference.",
+      "met": true,
+      "evidence": "The Dependency Order table lists explicit compilation, interface, or test dependency constraints for all tasks, and marks independent tasks (1.1, 1.2, 4.1) with an em dash."
+    },
+    {
+      "criterion": " exists, is under 1000 words, and carries , , and .",
+      "met": true,
+      "evidence": "openspec/changes/control-room-capture/tasks-lens-a.md exists, contains 839 words verified by wc -w, and includes ## Assumed decomposition, ## Phase 1-4, ## Dependency Order, ## Requirement Traceability, and ## Open Questions."
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution ( empty and cbb9d73 docs(control-room-capture): add tasks lens a decomposition and ordering).",
+      "met": true,
+      "evidence": "Commit cbb9d73 \"docs(control-room-capture): add tasks lens a decomposition and ordering\" recorded with clean git status."
+    }
+  ],
+  "commit": "cbb9d7375d6e1f012a3e5a9140417d50e1fc9de3"
+}

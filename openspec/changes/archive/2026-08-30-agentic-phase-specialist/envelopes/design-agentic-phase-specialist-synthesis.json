@@ -1,0 +1,99 @@
+{
+  "packet_id": "design-agentic-phase-specialist-synthesis",
+  "status": "done",
+  "summary": "Synthesized three design lens drafts into canonical design.md (1227/1800 words) covering all eight spine items, with Lens A's architecture authoritative and Phase Verdict resolved as structured markdown. Citation verification opened the union of manifests; eight citations were dropped or retargeted. Two conventional commits, no AI attribution.",
+  "hard_stops": [
+    {
+      "hard_stop": "The three `## Assumed architecture` blocks are mutually irreconcilable and the proposal/specs do not choose.",
+      "fired": false,
+      "note": "All three independently converged on Lens A: agentic sdd-* Specialist, own-phase Acceptance, compressed Phase Verdict, caller-side check gating, Adapter retained, human-only Promotion."
+    },
+    {
+      "hard_stop": "Lens A's architecture is refuted by code you verified.",
+      "fired": false,
+      "note": "Verified code matches A's description of current behavior (conditional metadata load at accept.go:84-96, unconditional checks at accept.go:120-137, ungated integrate.Check) and does not refute the proposed target."
+    },
+    {
+      "hard_stop": "One or more lens drafts is missing.",
+      "fired": false,
+      "note": "design-lens-a.md, design-lens-b.md, and design-lens-c.md are all present."
+    },
+    {
+      "hard_stop": "Covering all eight spine items honestly would require exceeding 1800 words.",
+      "fired": false,
+      "note": "design.md is 1227 words and covers all eight spine items plus skill-required Interfaces/Contracts."
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false,
+      "note": "Packet Context supplied the out-of-repo sdd-* strategy and the empty/missing extension label; those are recorded as coverage items filled from Context, not invented."
+    }
+  ],
+  "files_changed": [
+    {
+      "change": "created",
+      "path": "openspec/changes/agentic-phase-specialist/design.md",
+      "why": "Canonical design for agentic-phase-specialist"
+    },
+    {
+      "change": "created",
+      "path": "openspec/changes/agentic-phase-specialist/design-synthesis-notes.md",
+      "why": "Synthesis notes for the Orchestrator and phase-Specialist"
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "design.md was committed as its own commit before design-synthesis-notes.md was started.",
+      "met": true,
+      "evidence": "Commit 3bdd3f6 docs(sdd): synthesize canonical design for agentic-phase-specialist contains only design.md. Mid-flow ./lucind-lane-check.sh --file openspec/changes/agentic-phase-specialist/design.md --budget 1800 --skip-result: PASS  word budget: 1227 / 1800 words; PASS  git status --porcelain: clean; RESULT: PASS. Notes file did not exist at that commit."
+    },
+    {
+      "criterion": "Every file:line citation surviving into design.md was opened and confirmed, dropped claims listed.",
+      "met": true,
+      "evidence": "45 unique citations in design.md opened in this worktree. Eight dropped/retargeted claims listed in design-synthesis-notes.md ## Dropped Citations (CheckPolicySnapshot 120-148, TestSkillDocumentsLanguageGlossary, BindingVersion at authoring.go:26, integrate_test.go:21-50 as Check tests, accept.go:80-100 as receipt site, SKILL.md:21-22 byte-identity, accept_test.go:80-125 as skip tests, attempt_test.go:80-100 as skip tests)."
+    },
+    {
+      "criterion": "design.md exists, is under 1800 words, and substantively covers all eight spine items.",
+      "met": true,
+      "evidence": "Mid-flow lucind-lane-check.sh: PASS  word budget: 1227 / 1800 words. Spine: Technical Approach; five Architecture Decisions with Choice/Alternatives/Rationale; Flow and Invariants; File Changes with terminal consumers; Testing Strategy and Test Seams; Threat Matrix five rows all N/A; Rollback and Additivity; Open Questions and Out of Scope. Skill Interfaces/Contracts included for Phase Verdict markdown."
+    },
+    {
+      "criterion": "The Phase Verdict shape is explicitly resolved in design.md.",
+      "met": true,
+      "evidence": "design.md Decision 1: structured markdown (Outcome, Canonical Artifact, Unresolved Divergence), not JSON under internal/result/. design-synthesis-notes.md ## Architecture Divergence records that Lens A made this call; synthesis confirmed result.go:1-12 models worktree envelopes and did not substitute."
+    },
+    {
+      "criterion": "design-synthesis-notes.md exists with exactly the four required sections.",
+      "met": true,
+      "evidence": "Final lucind-lane-check.sh: PASS  section present: ## Unresolved Contradictions; PASS  section present: ## Coverage Gaps; PASS  section present: ## Dropped Citations; PASS  section present: ## Architecture Divergence; PASS  git status --porcelain: clean; PASS  result envelope: .lucind/result.json exists and parses as JSON; RESULT: PASS."
+    },
+    {
+      "criterion": "The work is committed with two conventional commits and no AI attribution.",
+      "met": true,
+      "evidence": "3bdd3f6 docs(sdd): synthesize canonical design for agentic-phase-specialist; 84e6fe7 docs(sdd): record design synthesis notes for agentic-phase-specialist. git log -1 --format=%B has no Co-authored-by. Final lucind-lane-check.sh: PASS  git status --porcelain: clean; RESULT: PASS."
+    }
+  ],
+  "commit": "84e6fe7b54b293502338727b28cb977147c52ea7",
+  "findings": [
+    {
+      "finding": "114 unique file:line tokens across three lens drafts; 45 unique citations survived into design.md; 8 dropped or retargeted; 0 unresolved contradictions; 2 packet-Context coverage items (out-of-repo sdd-* strategy; empty/missing sdd_phase labeled as extension of ADR decision 9).",
+      "evidence": "design-synthesis-notes.md ## Dropped Citations and ## Coverage Gaps",
+      "affects": "sdd-tasks for agentic-phase-specialist; Orchestrator reading only the notes file"
+    },
+    {
+      "finding": "Empty/missing sdd_phase fail-safe is a conservative extension of docs/sdd-phase-specialist.md:29 and ADR-0002:7, which named only apply + explicit exception. design.md Decision 2 records it as an extension.",
+      "evidence": "docs/sdd-phase-specialist.md:29; docs/adr/0002-phase-specialist-authority-and-scoped-checks.md:7",
+      "affects": "acceptance-verifier implementation and tests"
+    },
+    {
+      "finding": "openspec/changes/agentic-phase-specialist/specs/ is not present; spec-lens drafts exist and live specs exist for three modified capabilities. Design proceeded in parallel with spec synthesis per fan-out.md:22.",
+      "evidence": "openspec/changes/agentic-phase-specialist/ listing; openspec/specs/phase-specialist-dispatch, acceptance-verifier, sdd-planning-fan-out",
+      "affects": "spec-synthesis lane; tasks should wait for both synthesizers"
+    }
+  ],
+  "skills_loaded": [
+    "lucind-executor",
+    "lucind-fan-out-lens",
+    "sdd-design"
+  ]
+}

@@ -1,0 +1,99 @@
+{
+  "packet_id": "tasks-control-room-ledger-synthesis",
+  "status": "done",
+  "summary": "Synthesized canonical openspec/changes/control-room-ledger/tasks.md (1113 words) plus tasks-synthesis-notes.md after verifying every file:line citation against this worktree. Lens A decomposition stands; single packet with no apply-dag.yaml; zero waves merged; 19 citations dropped; no unresolved contradictions.",
+  "hard_stops": [
+    {
+      "hard_stop": "The three ## Assumed decomposition blocks are mutually irreconcilable and the spec and design do not choose between them. Write the notes file, leave tasks.md uncreated, and block.",
+      "fired": false,
+      "note": "All three independently converged on schema/domain then CLI+run writes parallel serve Model reads. Spec and design match that split."
+    },
+    {
+      "hard_stop": "Lens A's decomposition is refuted by code you verified. Do not substitute your own.",
+      "fired": false,
+      "note": "Cited insertion points exist (schema.go:10,293-307; Lane at ledger.go:233-245; RegisterLane at run.go:327 and batch.go:184; Model at model.go:14-25). New domain files are correctly absent. Task 2.2 production already exists; that does not refute the phase."
+    },
+    {
+      "hard_stop": "No partition exists in which every wave is green on its own and every same-wave pair is disjoint. Report it; the correct answer may be a single packet, but say so rather than shipping a plan Integrate will revert.",
+      "fired": false,
+      "note": "Unit 1 is green alone (additive). Units 2 and 3 are each green after Unit 1 and path-disjoint. Shipped as a single packet because sidecar overhead is not justified."
+    },
+    {
+      "hard_stop": "One or more lens drafts is missing from this worktree.",
+      "fired": false,
+      "note": "tasks-lens-a.md, tasks-lens-b.md, and tasks-lens-c.md are all present under openspec/changes/control-room-ledger/."
+    },
+    {
+      "hard_stop": "Covering all eight spine items honestly would require exceeding 1800 words. Report which item forces it rather than silently overrunning or silently cutting.",
+      "fired": false,
+      "note": "tasks.md is 1113 words and covers all eight spine items."
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false,
+      "note": "Skill 530-word budget vs packet 1800 is packet-vs-skill; the packet says the skill does not win on execution. Recorded under Coverage Gaps."
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/control-room-ledger/tasks.md",
+      "change": "created",
+      "why": "Canonical tasks checklist after citation verification and decomposition arbitration."
+    },
+    {
+      "path": "openspec/changes/control-room-ledger/tasks-synthesis-notes.md",
+      "change": "created",
+      "why": "Orchestrator-facing notes: contradictions, coverage gaps, dropped citations, decomposition divergence."
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every file:line citation surviving into tasks.md was opened and confirmed in this worktree, and every dropped claim is listed under ## Dropped Citations.",
+      "met": true,
+      "evidence": "Surviving citations opened: schema.go:10,38-39,190-219,293-307; ledger.go:127-130,146-191,162-184,217-218,233-245,269-276,366-381,439-446,488-525,816-818; ledger_test.go:367,934,1584; cli.go:58-60,277-280,282-311,674-725,702-705,715; cli_test.go:1074; run.go:327-335; batch.go:184-191; packet.go:43-64; model.go:14-25,128-149; model_test.go:595; handlers.go:79-85,120-146; disjoint.go:8-22; integrate.go:50-59; ledgerpath.go:36-38; ledgerpath_test.go:9; lucind-checks.sh; all five specs/*.md requirement headings. 19 dropped claims in tasks-synthesis-notes.md ## Dropped Citations."
+    },
+    {
+      "criterion": "Every wave was independently judged green-on-its-own, and every wave that was not is merged and reported under ## Coverage Gaps.",
+      "met": true,
+      "evidence": "Wave 1 (Unit 1) additive schema+methods; existing RegisterLane callers compile with zero-value Lane metadata. Wave 2 Unit 2 and Unit 3 each green after Wave 1; NewHandler at cli.go:715 unchanged. Zero waves merged. Coverage Gaps records the judgment."
+    },
+    {
+      "criterion": "Every same-wave unit pair was re-checked against the component-boundary prefix rule rather than taken from lens B's table.",
+      "met": true,
+      "evidence": "PathInScope in internal/packet/disjoint.go:8-22: cmd/lucind-ai/cli.go and internal/run/run.go vs internal/serve/model.go share no component prefix. Directory internal/ledger/ is Unit 1 only. Single packet ships sequential units so no same-wave pair is dispatched."
+    },
+    {
+      "criterion": "tasks.md exists, is under 1800 words, and substantively covers all eight spine items, with anything missing reported under ## Coverage Gaps.",
+      "met": true,
+      "evidence": "wc -w = 1113. Spine: forecast table+guard lines; work units with rollback/executor/focused test/harness; phased checklist; threat RED 2.2-RED before 2.2 (N/A rows omitted); dependency order table; waves green+disjoint stated; executors named; seven requirements traced."
+    },
+    {
+      "criterion": "tasks-synthesis-notes.md exists with exactly the four required sections, each either populated or explicitly None.",
+      "met": true,
+      "evidence": "Sections in order: Unresolved Contradictions (None); Coverage Gaps (populated); Dropped Citations (19 items); Decomposition Divergence (convergence plus B handlers.go and C 2.1 mislabel)."
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (git status --porcelain empty and git log --oneline -1).",
+      "met": true,
+      "evidence": "git status --porcelain empty. git log --oneline -1: fc13c91 docs(openspec): synthesize canonical control-room-ledger tasks"
+    }
+  ],
+  "commit": "fc13c91",
+  "findings": [
+    {
+      "finding": "Citations verified (kept in tasks.md): 32+. Citations dropped: 19. Waves merged for viability: 0. Contradictions escalated: 0. Coverage gaps: 7 (skill 530-word budget; worktree already implemented; TestResolve exists; prune trigger/message open; C SIGKILL/UI gaps; handlers.go omitted; no CLI emit of run_status_changed).",
+      "evidence": "openspec/changes/control-room-ledger/tasks-synthesis-notes.md; wc -w tasks.md = 1113",
+      "affects": "apply phase for control-room-ledger; do not treat C -run names as currently passing commands"
+    },
+    {
+      "finding": "Linked-worktree refusal is already implemented. A 2.2-RED that expects a failing test on HEAD will not fail.",
+      "evidence": "cmd/lucind-ai/cli.go:277-280,702-705",
+      "affects": "apply Unit 2: pin via tests, do not rewrite the guard"
+    },
+    {
+      "finding": "go test -run of a missing test name exits 0. Lens C proving filters name tests that do not exist.",
+      "evidence": "grep func Test(MigrateV5ToV6|RegisterAndGetRun|...) found no matches in *_test.go",
+      "affects": "apply verification: use package-level go test ./internal/ledger ./cmd/lucind-ai ./internal/run ./internal/serve"
+    }
+  ]
+}

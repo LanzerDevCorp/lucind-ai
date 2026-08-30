@@ -1,0 +1,84 @@
+{
+  "packet_id": "explore-control-room-capture-synthesis",
+  "status": "done",
+  "summary": "Verified every file:line citation in the three control-room-capture lens drafts against this worktree, then wrote canonical explore.md (1377 words, eight-item spine, verified citations only) and explore-synthesis-notes.md. Committed as adaaa17 with no AI attribution.",
+  "hard_stops": [
+    {
+      "hard_stop": "The problem space or candidate approaches across drafts are mutually irreconcilable. Write the notes file, leave explore.md uncreated, and block.",
+      "fired": false,
+      "note": "All three drafts agree on in-flight blindness, success-path stream loss, clipped SQLite notes, approvals-only serve, file-backed primary-root logs, stdlib HTTP/SSE, and no daemon. Candidate 2 is medium/wrong-store and candidate 3 is low/reject; that is arbitration, not irreconcilable problem space."
+    },
+    {
+      "hard_stop": "One or more lens drafts is missing from this worktree.",
+      "fired": false,
+      "note": "explore-lens-a.md, explore-lens-b.md, and explore-lens-c.md are all present under openspec/changes/control-room-capture/."
+    },
+    {
+      "hard_stop": "Covering the exploration spine honestly would require exceeding 1800 words. Report which item forces it rather than silently overrunning or silently cutting.",
+      "fired": false,
+      "note": "explore.md is 1377 words and covers all eight spine items."
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false,
+      "note": "Allowed-path writes are the two explore artifacts; .lucind/result.json is required by the packet Return section. Skill exploration.md vs packet explore.md is resolved by the packet. Unpicked contradictions were escalated, not chosen."
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/control-room-capture/explore.md",
+      "change": "created",
+      "why": "Canonical exploration after citation verification, approach arbitration, and compression under 1800 words."
+    },
+    {
+      "path": "openspec/changes/control-room-capture/explore-synthesis-notes.md",
+      "change": "created",
+      "why": "Orchestrator-facing record of unpicked contradictions, dropped citations, coverage, and approach divergence."
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every file:line citation surviving into explore.md was opened and confirmed in this worktree, and every dropped claim is listed under ## Dropped Citations.",
+      "met": true,
+      "evidence": "explore.md citations were opened at the surviving spans (e.g. agy.go:165-171, run.go:422-435,501-508,549-555, ledger.go:126-128,162-163, handlers.go:36-118, integrate.go:159-163). Dropped Citations in explore-synthesis-notes.md lists the failed draft spans (agy.go:133-138, cursor_agent.go:102-106, opencode.go:117-121, run.go:408-415, ledger.go:67-75, prd.md:50, ledger.go:180-210 as chunk writer, run.go:390-403, cli.go:99-107, cli.go:118-119, run.go:71-89 as unbounded memory) and what those lines actually contain."
+    },
+    {
+      "criterion": "explore.md exists, is under 1800 words, and substantively covers the exploration spine, with anything missing reported under ## Coverage Gaps.",
+      "met": true,
+      "evidence": "wc -w openspec/changes/control-room-capture/explore.md → 1377. Headings: Problem statement and background; Candidate approaches; User and capability impact; Scenarios and use cases; Technical risks and trade-offs; Potential spikes; Success criteria; Out of scope and open questions. Coverage Gaps section is 'None'."
+    },
+    {
+      "criterion": "explore-synthesis-notes.md exists with exactly the four required sections, each either populated or explicitly None.",
+      "met": true,
+      "evidence": "Headings are Unresolved Contradictions (two items), Coverage Gaps (None), Dropped Citations (populated), Approach Divergence (populated). No extra sections."
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (git status --porcelain empty and git log --oneline -1).",
+      "met": true,
+      "evidence": "git status --porcelain empty. git log --oneline -1 → adaaa17 docs(explore): synthesize control-room-capture exploration. Full SHA adaaa1779315e98fc32faace19da02a2ee08b867."
+    }
+  ],
+  "commit": "adaaa1779315e98fc32faace19da02a2ee08b867",
+  "findings": [
+    {
+      "finding": "Citations verified into explore.md: 78 file:line spans (plus one false-positive match on 127.0.0.1:7433). All surviving spans were opened in this worktree and support their claims.",
+      "evidence": "python citation scan of openspec/changes/control-room-capture/explore.md; opened sources include internal/executor/agy.go:165-171, internal/run/run.go:422-435, cmd/lucind-ai/cli.go:715,852.",
+      "affects": "proposal phase may trust explore.md citations without re-reading the three lens drafts"
+    },
+    {
+      "finding": "Citations dropped: 11 failed draft file:line supports, recorded under Dropped Citations with what the code actually says. Additional wording overclaims (non-terminal failure, 4-lane width, heartbeat/envelope-parse event types, Setpgid as present) were removed or restated.",
+      "evidence": "openspec/changes/control-room-capture/explore-synthesis-notes.md ## Dropped Citations",
+      "affects": "lens drafts remain the historical record; do not copy their line numbers forward"
+    },
+    {
+      "finding": "Contradictions escalated: 2. Path prefix .lucind/runs/ vs .lucind/logs/; whether this change or control-room-serve registers HTTP log routes. Code settles primary-root vs worktree location only.",
+      "evidence": "explore-synthesis-notes.md ## Unresolved Contradictions; internal/run/integrate.go:159-163 deletes the worktree after PersistEnvelope",
+      "affects": "proposal must decide both before implementation"
+    },
+    {
+      "finding": "Coverage gaps: 0 spine items. Optional product choices not in any draft (retention TTL, max bytes per lane, secret redaction) were not invented.",
+      "evidence": "explore-synthesis-notes.md ## Coverage Gaps",
+      "affects": "proposal may still need to set retention and redaction; they are not explore-spine holes"
+    }
+  ]
+}

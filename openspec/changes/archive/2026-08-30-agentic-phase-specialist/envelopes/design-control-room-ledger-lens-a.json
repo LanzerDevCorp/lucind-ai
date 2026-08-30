@@ -1,0 +1,48 @@
+{
+  "packet_id": "design-control-room-ledger-lens-a",
+  "status": "done",
+  "summary": "Authored Design Lens A for control-room-ledger in openspec/changes/control-room-ledger/design-lens-a.md. Formulated technical strategy and six architectural decisions with alternatives and terminal consumer citations. All sections follow required skeletons under word budget and are committed cleanly.",
+  "hard_stops": [
+    {
+      "hard_stop": "The proposal or specs do not determine an architectural choice, and two reasonable shapes are equally supported.",
+      "fired": false
+    },
+    {
+      "hard_stop": "A decision cannot name any terminal consumer.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Making this decision would require designing the file-change surface or the test strategy, which this packet forbids.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/control-room-ledger/design-lens-a.md",
+      "change": "created",
+      "why": "Design Lens A technical approach and architecture decisions"
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every decision names a terminal consumer with a `file:line` citation, and that citation points at real code in this worktree.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-ledger/design-lens-a.md cites internal/ledger/ledger.go:186, cmd/lucind-ai/cli.go:282-292, internal/serve/model.go:14-25, internal/run/run.go:422-435, internal/ledger/ledger.go:877-890, internal/packet/disjoint.go:29-48, internal/serve/handlers.go:79-85"
+    },
+    {
+      "criterion": "`design-lens-a.md` exists, is under 1000 words, and carries every skeleton section including `## Assumed architecture`.",
+      "met": true,
+      "evidence": "wc -w openspec/changes/control-room-ledger/design-lens-a.md returns 949 words and file contains Assumed architecture, Technical Approach, Decisions 1-6, and Open Questions"
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (`git status --porcelain` empty and `git log --oneline -1`).",
+      "met": true,
+      "evidence": "git status --porcelain is empty; git log --oneline -1 shows ba6f412 docs(control-room-ledger): author design lens A technical approach and architecture decisions"
+    }
+  ],
+  "commit": "ba6f412"
+}

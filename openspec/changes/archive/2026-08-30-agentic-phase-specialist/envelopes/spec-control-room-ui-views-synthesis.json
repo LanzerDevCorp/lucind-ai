@@ -1,0 +1,119 @@
+{
+  "packet_id": "spec-control-room-ui-views-synthesis",
+  "status": "done",
+  "summary": "Synthesized the control-room-ui-views delta spec tree from three verified lens drafts. Four new capabilities are ADDED; approvals-web-ui has one complete MODIFIED block. Five failed citations were dropped. Authored delta content is 818 words.",
+  "hard_stops": [
+    {
+      "hard_stop": "The three ## Assumed requirements blocks are mutually irreconcilable and the proposal does not choose between them. Write the notes file, leave specs/ uncreated, and block.",
+      "fired": false,
+      "note": "Lens A's set is authoritative and reconcilable with B/C via the packet arbitration rule. Divergence recorded; specs/ written."
+    },
+    {
+      "hard_stop": "Lens A's requirement set is refuted by a live spec you verified. Do not substitute your own.",
+      "fired": false,
+      "note": "Live openspec/specs/approvals-web-ui/spec.md:10-83 does not refute A's four ADDED plus one MODIFIED. Loopback Binding remains untouched."
+    },
+    {
+      "hard_stop": "A MODIFIED requirement's live block cannot be recovered from lens C or from openspec/specs/, so the block would have to be partial. Never write a partial block.",
+      "fired": false,
+      "note": "Live block recovered from openspec/specs/approvals-web-ui/spec.md:26-48, matching lens C. All three live scenarios kept; HTTP 400 and a single-item success scenario added."
+    },
+    {
+      "hard_stop": "One or more lens drafts is missing from this worktree.",
+      "fired": false,
+      "note": "spec-lens-a.md, spec-lens-b.md, and spec-lens-c.md are all present under openspec/changes/control-room-ui-views/."
+    },
+    {
+      "hard_stop": "Satisfying the spine honestly would require exceeding the authored budget. Report which requirement forces it rather than silently overrunning or silently cutting.",
+      "fired": false,
+      "note": "Authored delta content is 818 words excluding two verbatim live scenarios in the MODIFIED block. Budget is 1800."
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false,
+      "note": "sdd-spec new-domain path (openspec/specs/ full specs) conflicts with packet allowed paths. Packet execution wins; drift is in Coverage Gaps. Envelope path is required by Return."
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/control-room-ui-views/spec-synthesis-notes.md",
+      "change": "created"
+    },
+    {
+      "path": "openspec/changes/control-room-ui-views/specs/approvals-web-ui/spec.md",
+      "change": "created"
+    },
+    {
+      "path": "openspec/changes/control-room-ui-views/specs/batch-wave-view/spec.md",
+      "change": "created"
+    },
+    {
+      "path": "openspec/changes/control-room-ui-views/specs/feature-lease-monitor/spec.md",
+      "change": "created"
+    },
+    {
+      "path": "openspec/changes/control-room-ui-views/specs/reconciliation-workspace/spec.md",
+      "change": "created"
+    },
+    {
+      "path": "openspec/changes/control-room-ui-views/specs/lane-envelope-inspector/spec.md",
+      "change": "created"
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every file:line citation surviving into the delta tree was opened and confirmed in this worktree, and every dropped claim is listed under ## Dropped Citations.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-ui-views/spec-synthesis-notes.md Dropped Citations lists five failed claims. Surviving requirement evidence opened at openspec/specs/approvals-web-ui/spec.md:26-48, internal/lane/status.go:10-16, internal/barrier/barrier.go:21-60, internal/dag/waves.go:41-70, internal/run/batch.go:19-27, internal/run/run.go:423-430 and 650-652, internal/serve/model.go:27-70 and 128-266 and 74-125 and 278-343, internal/serve/handlers.go:36-118 and 161-176, internal/serve/static/app.js:12-70."
+    },
+    {
+      "criterion": "Every MODIFIED block matches the live requirement scenario for scenario, with only the intended edits applied — verified by opening the live spec, not by trusting lens C.",
+      "met": true,
+      "evidence": "Live openspec/specs/approvals-web-ui/spec.md:26-48 compared to openspec/changes/control-room-ui-views/specs/approvals-web-ui/spec.md. Fresh load and Unselected scenarios copied verbatim. Bulk THEN edited to HTTP 400 and no ledger write. Requirement text names the multi-panel dashboard. One scenario added: Single-item decision recorded."
+    },
+    {
+      "criterion": "Every requirement carries an RFC 2119 keyword and at least one GIVEN / WHEN / THEN scenario.",
+      "met": true,
+      "evidence": "Five requirements across five spec.md files each use MUST and carry two to four GIVEN/WHEN/THEN scenarios."
+    },
+    {
+      "criterion": "The delta tree's authored content is under 1800 words excluding verbatim copied blocks, and every spine item is satisfied or reported under ## Coverage Gaps.",
+      "met": true,
+      "evidence": "Word count of openspec/changes/control-room-ui-views/specs/: 818 authored words excluding two verbatim live scenarios. Spine gaps (skill new-domain path, dropped error-state scenarios, unspecified hard_stops and open questions) are in spec-synthesis-notes.md Coverage Gaps."
+    },
+    {
+      "criterion": "spec-synthesis-notes.md exists with exactly the four required sections, each either populated or explicitly None.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-ui-views/spec-synthesis-notes.md sections: Unresolved Contradictions (None), Coverage Gaps (populated), Dropped Citations (five items), Requirement Divergence (populated)."
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (git status --porcelain empty and git log --oneline -1).",
+      "met": true,
+      "evidence": "git status --porcelain empty. git log --oneline -1: 833d651 docs(spec): synthesize control-room-ui-views delta tree"
+    }
+  ],
+  "commit": "833d6513ae9a44d166a2bddfe4262e247ce2df95",
+  "findings": [
+    {
+      "finding": "Citations verified that support surviving claims: 27 unique file:line ranges opened in this worktree, including the live approvals-web-ui spec and the Model/handler/static/run/barrier/DAG seams.",
+      "evidence": "openspec/specs/approvals-web-ui/spec.md:1-83; internal/serve/model.go:14-343; internal/serve/handlers.go:16-211; internal/serve/static/app.js:12-97",
+      "affects": "delta tree evidence"
+    },
+    {
+      "finding": "Citations dropped: 5. ListBatchLanes and DemotionNote at model.go:26-125; waves_test.go:41-70 as cycle coverage; run_test.go:643-653 as demotion coverage; server_test.go:196-236 as reconcile 404.",
+      "evidence": "openspec/changes/control-room-ui-views/spec-synthesis-notes.md Dropped Citations",
+      "affects": "spec-synthesis-notes.md"
+    },
+    {
+      "finding": "MODIFIED blocks confirmed complete: 1 shipped (Individual Decisions Without Bulk Approval) matching live spec.md:26-48 scenario for scenario. Lens C's other two live blocks were verified complete and left unmodified.",
+      "evidence": "openspec/specs/approvals-web-ui/spec.md:26-48 vs openspec/changes/control-room-ui-views/specs/approvals-web-ui/spec.md",
+      "affects": "approvals-web-ui delta"
+    },
+    {
+      "finding": "Contradictions escalated: 0. Coverage gaps: 5 (skill new-domain path, batch-wave error state after dropped cycle scenario, reconciliation unknown-id 404, envelope hard_stops unspecified, three shared open questions).",
+      "evidence": "openspec/changes/control-room-ui-views/spec-synthesis-notes.md Unresolved Contradictions and Coverage Gaps",
+      "affects": "orchestrator notes"
+    }
+  ],
+  "session_id": "spec-control-room-ui-views-synthesis"
+}

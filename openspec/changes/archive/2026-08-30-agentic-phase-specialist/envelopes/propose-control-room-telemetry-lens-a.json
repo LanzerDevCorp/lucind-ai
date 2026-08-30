@@ -1,0 +1,44 @@
+{
+  "packet_id": "propose-control-room-telemetry-lens-a",
+  "status": "done",
+  "summary": "Authored proposal lens A for control-room-telemetry selecting worktree-local log files and loopback SSE streaming (Candidate 2). Documented technical approach, conceptual changes, architecture rationale, and rejected alternatives with verified file:line citations.",
+  "hard_stops": [
+    {
+      "hard_stop": "The technical approach cannot be grounded in existing codebase patterns or proposal context.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Candidate selection contradicts frozen exploration conclusions without justification.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/control-room-telemetry/propose-lens-a.md",
+      "change": "created",
+      "why": "Proposal Lens A document defining candidate selection, core approach, conceptual architecture changes, and rejected alternatives for control room telemetry."
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every candidate and approach claim carries file:line citations to real code in this worktree.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-telemetry/propose-lens-a.md lines 1-53 cite verified lines in internal/executor/agy.go, internal/executor/cursor_agent.go, internal/executor/opencode.go, internal/run/run.go, internal/run/batch.go, internal/ledger/schema.go, internal/ledger/ledger.go, internal/serve/server.go, internal/serve/handlers.go, internal/serve/model.go, internal/lane/status.go, and cmd/lucind-ai/cli.go."
+    },
+    {
+      "criterion": "propose-lens-a.md exists, is under 1000 words, and carries every skeleton section.",
+      "met": true,
+      "evidence": "wc -w reports 776 words; openspec/changes/control-room-telemetry/propose-lens-a.md contains '# Proposal Lens A — Candidate \u0026 Approach: Control Room Telemetry', '## Selected Candidate \u0026 Approach', '## Conceptual Changes \u0026 Architecture Rationale', '## Alternatives Considered \u0026 Rejected', and '## Open Questions'."
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (git status --porcelain empty and git log --oneline -1).",
+      "met": true,
+      "evidence": "git status --porcelain is empty; git log -1 --format='%h %s' is 'a5c0498 docs(openspec): add propose-lens-a for control-room-telemetry' with no Co-Authored-By or AI attribution."
+    }
+  ],
+  "commit": "a5c0498"
+}

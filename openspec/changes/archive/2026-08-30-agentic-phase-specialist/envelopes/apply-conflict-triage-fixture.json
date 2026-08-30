@@ -1,0 +1,179 @@
+{
+  "packet_id": "apply-conflict-triage-fixture",
+  "status": "done",
+  "summary": "Implemented the advisory conflict-triage agent, a three-hunk fixture that forces ClassRequired through existing overlap thresholds, and an offline dual-judge rubric. Four sequential work-unit commits are on lucind/apply-conflict-triage-fixture; ./lucind-checks.sh is green and every tasks.md checkbox is ticked.",
+  "hard_stops": [
+    {
+      "hard_stop": "Any credential value would need to be chosen, generated, or written.",
+      "fired": false
+    },
+    {
+      "hard_stop": "A done-criterion turns out to be impossible, or already true for a reason the packet did not anticipate.",
+      "fired": false,
+      "note": "Tasks 2.1 and 3.4 include regression tests that passed without production edits; the packet anticipated that (existing ScanConflictMarkers/EnforceAllowedPaths, existing runReconcileResolve linked-worktree refusal, existing CAS adopt path)."
+    },
+    {
+      "hard_stop": "The change would break something outside allowed_paths.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Two reasonable implementations exist and tasks.md does not say which.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    },
+    {
+      "hard_stop": "The fixture cannot be made to reach ClassRequired without altering internal/overlap/overlap.go thresholds.",
+      "fired": false
+    },
+    {
+      "hard_stop": "A task would require closing one of the two open design questions.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "internal/conflicttriage/types.go",
+      "change": "created",
+      "why": "TriagePayload, HunkDecision, risk bands, verify-budget shape"
+    },
+    {
+      "path": "internal/conflicttriage/invoker.go",
+      "change": "created",
+      "why": "TriageInvoker func type"
+    },
+    {
+      "path": "internal/conflicttriage/triage.go",
+      "change": "created",
+      "why": "fail-open RunTriage"
+    },
+    {
+      "path": "internal/conflicttriage/triage_test.go",
+      "change": "created",
+      "why": "agent RED/GREEN tests"
+    },
+    {
+      "path": "internal/conflicttriage/fixture/fixture.go",
+      "change": "created",
+      "why": "GenerateFixture three-hunk toy"
+    },
+    {
+      "path": "internal/conflicttriage/fixture/fixture_test.go",
+      "change": "created",
+      "why": "Classify ClassRequired and packet disjointness tests"
+    },
+    {
+      "path": "internal/conflicttriage/fixture/rubric.go",
+      "change": "created",
+      "why": "offline EvaluateRubric"
+    },
+    {
+      "path": "internal/conflicttriage/fixture/rubric_test.go",
+      "change": "created",
+      "why": "distinct vs uniform rubric tests"
+    },
+    {
+      "path": "internal/conflicttriage/fixture/packets/feat_a.md",
+      "change": "created",
+      "why": "sequential disjoint build packet A"
+    },
+    {
+      "path": "internal/conflicttriage/fixture/packets/feat_b.md",
+      "change": "created",
+      "why": "sequential disjoint build packet B"
+    },
+    {
+      "path": "internal/conflicttriage/fixture/packets/claude_judge.md",
+      "change": "created",
+      "why": "pinned claude-opus-5 judge packet"
+    },
+    {
+      "path": "internal/conflicttriage/fixture/packets/opencode_judge.md",
+      "change": "created",
+      "why": "pinned openai/gpt-5.6-sol judge packet"
+    },
+    {
+      "path": "internal/reconcile/reconcile.go",
+      "change": "modified",
+      "why": "UpdateCandidateOutput"
+    },
+    {
+      "path": "internal/reconcile/reconcile_test.go",
+      "change": "modified",
+      "why": "TestUpdateCandidateOutputOnly"
+    },
+    {
+      "path": "internal/resolve/candidate_test.go",
+      "change": "modified",
+      "why": "threat-matrix regression tests"
+    },
+    {
+      "path": "internal/run/attempt_test.go",
+      "change": "modified",
+      "why": "fixture-driven CAS retry and tip-drift tests"
+    },
+    {
+      "path": "cmd/lucind-ai/cli_test.go",
+      "change": "modified",
+      "why": "TestReconcileResolve_RejectsLinkedWorktree"
+    },
+    {
+      "path": "openspec/changes/conflict-triage-fixture/tasks.md",
+      "change": "modified",
+      "why": "checkboxes only"
+    },
+    {
+      "path": ".lucind/result.json",
+      "change": "created",
+      "why": "packet result envelope"
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every indirection introduced is demonstrably consumed by a terminal consumer.",
+      "met": true,
+      "evidence": "TriageInvoker is called by RunTriage (internal/conflicttriage/triage.go:42 opts.Invoker(...)); terminal consumer TestTriageAgent_BusinessHunkPinsHighRisk PASS — stub ProposedSHA proposed-not-candidate-sha persisted in Candidate.Output. TriagePayload is marshaled by RunTriage (triage.go:49) into Candidate.Output and parsed by EvaluateRubric.parsePayload (internal/conflicttriage/fixture/rubric.go:84,98); terminal consumers TestTriageAgent_BusinessHunkPinsHighRisk and TestRubric_GradesDistinctThreeHunkClassification both PASS. UpdateCandidateOutput is called by RunTriage (triage.go:54) and TestUpdateCandidateOutputOnly PASS. GenerateFixture is called by TestFixtureGenerator_ForcesClassRequired (PASS, ClassRequired) and TestFixtureRetryAdoptsSHAAndCASOnMatchingTip (PASS). EvaluateRubric is called by TestRubric_GradesDistinctThreeHunkClassification PASS. JudgeClaudeModel/JudgeOpencodeModel are set on executor.Request.Model in runJudge and appear in stub argv (test asserts claude-opus-5 and openai/gpt-5.6-sol with no cross-provider leak)."
+    },
+    {
+      "criterion": "The work is committed. git status --porcelain empty and git log --oneline -4. Four conventional commits, one per work unit, no AI attribution.",
+      "met": true,
+      "evidence": "git status --porcelain: empty. git log --oneline -4:\n70c3abe feat(conflicttriage): add offline dual-judge triage rubric\n8267f43 feat(conflicttriage): add three-hunk fixture that forces ClassRequired\ne949c95 feat(conflicttriage): add fail-open advisory triage agent\ncc6d5bb feat(conflicttriage): add payload types and output-only persist\nBodies contain no Co-authored-by or other AI attribution (stripped after the commit wrapper injected Cursor trailers)."
+    },
+    {
+      "criterion": "./lucind-checks.sh exits 0 on the combined tree.",
+      "met": true,
+      "evidence": "exit 0. Tail:\nok  \tgithub.com/LanzerDevCorp/lucind-ai/internal/reconcile\t5.629s\nok  \tgithub.com/LanzerDevCorp/lucind-ai/internal/resolve\t1.882s\nok  \tgithub.com/LanzerDevCorp/lucind-ai/internal/result\t1.062s\nok  \tgithub.com/LanzerDevCorp/lucind-ai/internal/run\t35.339s\nok  \tgithub.com/LanzerDevCorp/lucind-ai/internal/serve\t9.226s\nok  \tgithub.com/LanzerDevCorp/lucind-ai/internal/worktree\t1.666s"
+    },
+    {
+      "criterion": "Every RED task was observed failing before its GREEN.",
+      "met": true,
+      "evidence": "1.3 go test ./internal/reconcile -run '^TestUpdateCandidateOutputOnly$' — FAIL build: UpdateCandidateOutput undefined. 2.1 regression tests PASS immediately without production edits (packet-expected). 2.2 go test ./internal/conflicttriage -run '^TestTriageAgent_BusinessHunkPinsHighRisk$' — FAIL build: undefined: conflicttriage.RunTriage / RunOptions. 3.1 go test ./internal/conflicttriage/fixture -run '^TestFixtureGenerator_ForcesClassRequired$' — FAIL: no non-test Go files in internal/conflicttriage/fixture. 3.3 TestFixturePackets_DisjointAndValidParentRef — FAIL: open packets: no such file or directory. 3.4 TestReconcileResolve_RejectsLinkedWorktree and fixture CAS tests PASS without production edits (existing CLI refuse + existing gate CAS). 4.1 go test ./internal/conflicttriage/fixture -run '^TestRubric_GradesDistinctThreeHunkClassification$' — FAIL build: undefined: fixture.EvaluateRubric / RubricOptions."
+    },
+    {
+      "criterion": "The fixture forces ClassRequired.",
+      "met": true,
+      "evidence": "go test ./internal/conflicttriage/fixture -run '^TestFixtureGenerator_ForcesClassRequired$' -count=1 -v\n=== RUN   TestFixtureGenerator_ForcesClassRequired\n--- PASS: TestFixtureGenerator_ForcesClassRequired (0.08s)\nPASS\nok  \tgithub.com/LanzerDevCorp/lucind-ai/internal/conflicttriage/fixture\t0.087s"
+    },
+    {
+      "criterion": "Every checkbox in openspec/changes/conflict-triage-fixture/tasks.md is ticked, and no other line of that file changed.",
+      "met": true,
+      "evidence": "git diff a502606 -- openspec/changes/conflict-triage-fixture/tasks.md shows only - [ ] to - [x] on tasks 1.1–1.4, 2.1–2.3, 3.1–3.4, 4.1–4.2. No other lines changed."
+    },
+    {
+      "criterion": "Both open design questions are still open. No task closed the risk formula or named a production triage executor/model.",
+      "met": true,
+      "evidence": "design.md:120-123 still: '[ ] Exact non-decreasing risk formula...' and '[ ] Which executor/model runs **production** triage (judges are pinned; production is separate).' RunTriage requires an injected TriageInvoker and names no production executor. EvaluateRubric pins only the two judges."
+    }
+  ],
+  "commit": "70c3abe51220fba32dfd0c6fa9a2bc9d0c6d76ac",
+  "findings": [
+    {
+      "finding": "The environment's git commit wrapper appends Co-authored-by: Cursor \u003ccursoragent@cursor.com\u003e even when the commit message does not. This packet forbids AI attribution; the four work-unit commit messages were rewritten to drop those trailers. Content hashes of the trees were unchanged.",
+      "evidence": "Original 70c3abe-predecessor be81b76 body contained Co-authored-by; git log -4 after filter-branch shows no trailer.",
+      "affects": "Any apply packet that forbids Co-authored-by trailers."
+    }
+  ],
+  "session_id": "apply-conflict-triage-fixture"
+}

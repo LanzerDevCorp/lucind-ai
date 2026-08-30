@@ -1,0 +1,53 @@
+{
+  "packet_id": "design-control-room-serve-lens-c",
+  "status": "done",
+  "summary": "Authored openspec/changes/control-room-serve/design-lens-c.md covering the assumed architecture, test strategy with existing/new seams, threat matrix applicability, and additive rollback plan under 1000 words.",
+  "hard_stops": [
+    {
+      "hard_stop": "A behavior the specs require cannot be tested through any existing or proposed seam.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Whether a format delta is additive cannot be determined from the specs, so the rollback decision would be a guess.",
+      "fired": false
+    },
+    {
+      "hard_stop": "The threat matrix is missing from both ## Context and the skill reference.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/control-room-serve/design-lens-c.md",
+      "change": "created",
+      "why": "Design lens C artifact covering failure, test, and rollback for control-room-serve"
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every named test seam carries a file:line citation that points at real code in this worktree, or is explicitly marked \"new seam required\".",
+      "met": true,
+      "evidence": "openspec/changes/control-room-serve/design-lens-c.md:10-44"
+    },
+    {
+      "criterion": "Every threat-matrix row is marked Applicable or N/A with a reason, and every applicable row names a planned RED test.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-serve/design-lens-c.md:46-56"
+    },
+    {
+      "criterion": "design-lens-c.md exists, is under 1000 words, and carries every skeleton section including ## Assumed architecture.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-serve/design-lens-c.md (959 words, 72 lines)"
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (git status --porcelain empty and git log --oneline -1).",
+      "met": true,
+      "evidence": "commit d9babb2: docs(control-room-serve): create design-lens-c for failure, test, and rollback; git status --porcelain empty"
+    }
+  ],
+  "commit": "d9babb2"
+}

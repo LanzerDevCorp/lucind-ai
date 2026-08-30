@@ -1,0 +1,48 @@
+{
+  "packet_id": "design-control-room-capture-lens-a",
+  "status": "done",
+  "summary": "Authored Design Lens A for control-room-capture defining assumed architecture, technical approach, six architecture decisions with terminal consumers and file:line citations, and open questions. All word budget, citation, and skeleton constraints were verified and committed.",
+  "hard_stops": [
+    {
+      "hard_stop": "The proposal or specs do not determine an architectural choice, and two reasonable shapes are equally supported.",
+      "fired": false
+    },
+    {
+      "hard_stop": "A decision cannot name any terminal consumer.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Making this decision would require designing the file-change surface or the test strategy, which this packet forbids.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/control-room-capture/design-lens-a.md",
+      "change": "created",
+      "why": "Design Lens A for control-room-capture change"
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every decision names a terminal consumer with a `file:line` citation, and that citation points at real code in this worktree.",
+      "met": true,
+      "evidence": "Decisions 1-6 cite real symbols and terminal consumers: internal/run/run.go:368-374, internal/executor/agy.go:169-175, internal/executor/executor.go:15-37, internal/executor/agy.go:182-197, internal/run/run.go:89,125-144, internal/serve/handlers.go:36-118, internal/serve/model.go:21-24, and cmd/lucind-ai/cli.go:674-725."
+    },
+    {
+      "criterion": "`design-lens-a.md` exists, is under 1000 words, and carries every skeleton section including `## Assumed architecture`.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-capture/design-lens-a.md exists (898 words by wc -w) and includes ## Assumed architecture, ## Technical Approach, ## Decision 1..6, and ## Open Questions."
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (`git status --porcelain` empty and `git log --oneline -1`).",
+      "met": true,
+      "evidence": "git status --porcelain is empty; git log --oneline -1 outputs e870d0d docs(openspec): add design lens A for control-room-capture with no AI attribution."
+    }
+  ],
+  "commit": "e870d0d"
+}

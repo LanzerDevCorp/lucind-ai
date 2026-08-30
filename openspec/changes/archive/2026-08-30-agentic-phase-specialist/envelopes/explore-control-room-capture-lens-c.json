@@ -1,0 +1,44 @@
+{
+  "packet_id": "explore-control-room-capture-lens-c",
+  "status": "done",
+  "summary": "Authored explore-lens-c.md detailing technical risks, trade-offs, spikes, and out-of-scope boundaries for control-room-capture. Grounded every risk and spike in exact file:line citations to worktree code within the 1000-word limit.",
+  "hard_stops": [
+    {
+      "hard_stop": "Critical unknown cannot be framed as a risk or spike with available codebase knowledge.",
+      "fired": false
+    },
+    {
+      "hard_stop": "The change requires touching fundamental invariant boundaries without possible mitigation.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/control-room-capture/explore-lens-c.md",
+      "change": "created",
+      "why": "Authored explore lens C document for control-room-capture"
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every risk and spike proposal carries file:line citations to real code in this worktree.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-capture/explore-lens-c.md:7-12,26-40 cites internal/executor/agy.go:15-39,182-197, internal/executor/cursor_agent.go:104-118, internal/executor/opencode.go:143-160, internal/run/run.go:71-89,103-144,189-196,220-242,368-375,422-435, internal/run/batch.go:80-89, internal/run/integrate.go:159-165, cmd/lucind-ai/cli.go:647-660, internal/ledgerpath/ledgerpath.go:23-58, internal/serve/server.go:19-53, internal/serve/handlers.go:36-60, internal/serve/model.go:14-25"
+    },
+    {
+      "criterion": "explore-lens-c.md exists, is under 1000 words, and carries every skeleton section.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-capture/explore-lens-c.md exists with 940 words (checked via wc -w) and contains all required skeleton sections."
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (git status --porcelain empty and git log --oneline -1).",
+      "met": true,
+      "evidence": "commit efbd641 docs(explore): author explore lens c for control room capture; git status --porcelain is empty"
+    }
+  ],
+  "commit": "efbd6412b01bc323d86a254a9aa51b1d2c9e8fb1"
+}

@@ -1,0 +1,135 @@
+{
+  "packet_id": "spec-agentic-phase-specialist-synthesis",
+  "status": "done",
+  "summary": "Verified three spec lens drafts against this worktree, reclassified three of Lens A's ADDED requirements as MODIFIED of live blocks, and wrote four change-folder specs plus synthesis notes. Specialist Acceptance is decision authority; the Orchestrator executes lucind-ai accept/run mechanically. Two conventional commits, no AI attribution.",
+  "hard_stops": [
+    {
+      "hard_stop": "The three ## Assumed requirements blocks are mutually irreconcilable and the proposal does not choose between them. Write the notes file, leave specs/ uncreated, and block.",
+      "fired": false,
+      "note": "All three describe the same four behaviors. ADDED versus MODIFIED is classification; C's live-spec evidence wins per the packet."
+    },
+    {
+      "hard_stop": "Lens A's requirement set is refuted by a live spec you verified. Do not substitute your own.",
+      "fired": false,
+      "note": "Live specs describe current sequencer, unconditional checks, and Orchestrator-owned synthesis review. A's four statements are the desired change, joined onto those live headings as MODIFIED plus one new capability."
+    },
+    {
+      "hard_stop": "A MODIFIED requirement's live block cannot be recovered from lens C or from openspec/specs/, so the block would have to be partial. Never write a partial block.",
+      "fired": false,
+      "note": "Recovered Specialist sequencing (3 scenarios), Fail-Closed Mechanical Criteria (6), and Two-Wave Planning Fan-Out Protocol (2) from openspec/specs/."
+    },
+    {
+      "hard_stop": "One or more lens drafts is missing from this worktree.",
+      "fired": false,
+      "note": "spec-lens-a.md, spec-lens-b.md, and spec-lens-c.md are present under openspec/changes/agentic-phase-specialist/."
+    },
+    {
+      "hard_stop": "Satisfying the spine honestly would require exceeding the authored budget. Report which requirement forces it rather than silently overrunning or silently cutting.",
+      "fired": false,
+      "note": "Authored tree 1187 words excluding 11 verbatim live scenarios; budget 1800."
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false,
+      "note": "sdd-spec full-spec for new domains versus packet delta headers: used Purpose+Requirements for phase-verdict-reporting and MODIFIED deltas for the three existing capabilities; drift recorded under Coverage Gaps."
+    }
+  ],
+  "files_changed": [
+    {
+      "change": "created",
+      "path": "openspec/changes/agentic-phase-specialist/specs/phase-verdict-reporting/spec.md",
+      "why": "New capability full spec: Structured Phase Verdict Reporting."
+    },
+    {
+      "change": "created",
+      "path": "openspec/changes/agentic-phase-specialist/specs/phase-specialist-dispatch/spec.md",
+      "why": "MODIFIED complete live Specialist sequencing block, plus Acceptance-authority scenarios."
+    },
+    {
+      "change": "created",
+      "path": "openspec/changes/agentic-phase-specialist/specs/acceptance-verifier/spec.md",
+      "why": "MODIFIED complete live Fail-Closed Mechanical Criteria block with SDD-phase check gate."
+    },
+    {
+      "change": "created",
+      "path": "openspec/changes/agentic-phase-specialist/specs/sdd-planning-fan-out/spec.md",
+      "why": "MODIFIED complete live Two-Wave Planning Fan-Out Protocol block with Specialist arbitration."
+    },
+    {
+      "change": "created",
+      "path": "openspec/changes/agentic-phase-specialist/spec-synthesis-notes.md",
+      "why": "Four required synthesis sections for the phase-Specialist and Orchestrator."
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "The delta spec tree was committed as its own commit before spec-synthesis-notes.md was started, confirmed by the mid-flow lucind-lane-check.sh run reporting a clean git status --porcelain.",
+      "met": true,
+      "evidence": "Mid-flow ./lucind-lane-check.sh --file openspec/changes/agentic-phase-specialist/specs/phase-verdict-reporting/spec.md --skip-result: PASS  git status --porcelain: clean; RESULT: PASS. First commit fa8dd2c docs(specs): add canonical delta specs for agentic-phase-specialist; notes commit 015c195 followed."
+    },
+    {
+      "criterion": "Every file:line citation surviving into the delta tree was opened and confirmed in this worktree, and every dropped claim is listed under ## Dropped Citations.",
+      "met": true,
+      "evidence": "69 unique manifest ranges opened. Three inherited live Two-Wave parentheticals stripped from authored requirement text; B's attempt.go:431-435 retargeted. Listed in spec-synthesis-notes.md ## Dropped Citations."
+    },
+    {
+      "criterion": "Every MODIFIED block matches the live requirement scenario for scenario, with only the intended edits applied — verified by opening the live spec, not by trusting lens C.",
+      "met": true,
+      "evidence": "Opened openspec/specs/phase-specialist-dispatch/spec.md:9-29 (3 scenarios kept, 4 added), openspec/specs/acceptance-verifier/spec.md:30-63 (6 kept, 3 added), openspec/specs/sdd-planning-fan-out/spec.md:9-23 (2 kept, 2 added)."
+    },
+    {
+      "criterion": "Every requirement carries an RFC 2119 keyword and at least one GIVEN / WHEN / THEN scenario.",
+      "met": true,
+      "evidence": "Four requirements, each with MUST or SHALL and at least three GIVEN/WHEN/THEN scenarios (new capability 3; modified 7, 9, and 4)."
+    },
+    {
+      "criterion": "The Specialist Acceptance requirement is phrased as decision authority, not literal command execution, in the canonical spec.",
+      "met": true,
+      "evidence": "openspec/changes/agentic-phase-specialist/specs/phase-specialist-dispatch/spec.md: Specialists MUST independently decide Acceptance and MUST direct the Orchestrator to execute lucind-ai run and lucind-ai accept. Scenario WHEN is decides Acceptance, not executes lucind-ai accept."
+    },
+    {
+      "criterion": "The delta tree's authored content is under 1800 words excluding verbatim copied blocks, and every spine item is satisfied or reported under ## Coverage Gaps.",
+      "met": true,
+      "evidence": "Authored word count 1187 / 1800 (11 verbatim live scenarios excluded). Spine and leftover proposal questions are in ## Coverage Gaps."
+    },
+    {
+      "criterion": "spec-synthesis-notes.md exists with exactly the four required sections, each either populated or explicitly None, confirmed by the final lucind-lane-check.sh run.",
+      "met": true,
+      "evidence": "Final ./lucind-lane-check.sh --file openspec/changes/agentic-phase-specialist/spec-synthesis-notes.md --require-section Unresolved Contradictions --require-section Coverage Gaps --require-section Dropped Citations --require-section Requirement Divergence: PASS  section present for all four; PASS  git status --porcelain: clean; PASS  result envelope: .lucind/result.json exists and parses as JSON; RESULT: PASS."
+    },
+    {
+      "criterion": "The work is committed with two conventional commits and no AI attribution, confirmed by the final lucind-lane-check.sh run reporting a clean git status --porcelain and a valid .lucind/result.json.",
+      "met": true,
+      "evidence": "git log -2: 015c195 docs(specs): add spec synthesis notes for agentic-phase-specialist; fa8dd2c docs(specs): add canonical delta specs for agentic-phase-specialist. git log -2 --format=%B has 0 Co-authored-by matches. Final check: PASS  git status --porcelain: clean; PASS  result envelope: .lucind/result.json exists and parses as JSON; RESULT: PASS."
+    }
+  ],
+  "commit": "015c195ec387dfe223f05220846e8b5ab946acd8",
+  "findings": [
+    {
+      "finding": "Citation verification: 69 unique manifest ranges opened; 0 requirement claims dropped; 3 live Two-Wave parentheticals stripped as unresolved; 1 attempt.go range retargeted.",
+      "evidence": "openspec/changes/agentic-phase-specialist/spec-synthesis-notes.md ## Dropped Citations",
+      "affects": "spec-synthesis-notes"
+    },
+    {
+      "finding": "MODIFIED blocks confirmed complete: 3 (Specialist sequencing, 3 scenarios; Fail-Closed Mechanical Criteria, 6; Two-Wave Planning Fan-Out Protocol, 2).",
+      "evidence": "openspec/specs/phase-specialist-dispatch/spec.md:9-29; openspec/specs/acceptance-verifier/spec.md:30-63; openspec/specs/sdd-planning-fan-out/spec.md:9-23",
+      "affects": "phase-specialist-dispatch, acceptance-verifier, sdd-planning-fan-out"
+    },
+    {
+      "finding": "Contradictions escalated: 0. Classification corrections: 3 ADDED→MODIFIED. Coverage gaps: skill vs packet new-domain format, untouched No Promotion Authority, four leftover proposal open questions.",
+      "evidence": "openspec/changes/agentic-phase-specialist/spec-synthesis-notes.md ## Unresolved Contradictions, ## Coverage Gaps, ## Requirement Divergence",
+      "affects": "design phase"
+    },
+    {
+      "finding": "Specialist Acceptance canonical phrasing is authority, not execution. Authored tree 1187 words.",
+      "evidence": "openspec/changes/agentic-phase-specialist/specs/phase-specialist-dispatch/spec.md requirement paragraph and Specialist independently accepts scenario",
+      "affects": "phase-specialist-dispatch, sdd-* Specialist runtime"
+    }
+  ],
+  "skills_loaded": [
+    "lucind-executor",
+    "lucind-fan-out-lens",
+    "sdd-spec",
+    "engram-memory"
+  ]
+}

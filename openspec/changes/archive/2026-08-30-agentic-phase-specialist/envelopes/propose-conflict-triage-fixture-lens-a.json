@@ -1,0 +1,44 @@
+{
+  "packet_id": "propose-conflict-triage-fixture-lens-a",
+  "status": "done",
+  "summary": "Authored proposal lens A for the conflict-triage-fixture change, establishing Candidate 1 (two disjoint features and dual-judge rubric) with complete file:line citations. Documented conceptual architectural changes and rejected alternatives while keeping unresolved calibration questions open.",
+  "hard_stops": [
+    {
+      "hard_stop": "The technical approach cannot be grounded in existing codebase patterns or proposal context.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Candidate selection contradicts frozen exploration conclusions without justification.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/conflict-triage-fixture/propose-lens-a.md",
+      "change": "created",
+      "why": "Proposal Lens A document defining candidate selection, technical approach, conceptual changes, and architectural rationale."
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every candidate and approach claim carries file:line citations to real code in this worktree.",
+      "met": true,
+      "evidence": "openspec/changes/conflict-triage-fixture/propose-lens-a.md lines 5-30 cite internal/packet/disjoint.go:29-48, internal/run/integrate_feature.go:17,41, internal/run/attempt.go:685,687,743-747,821-828,848-856,870, internal/overlap/overlap.go:93-98,622-660, internal/reconcile/reconcile.go:105,266,280-300,406-535, internal/resolve/candidate.go:26,303-312, internal/feature/feature.go:101-140, cmd/lucind-ai/cli.go:56,65-70,1090-1120,1398-1463, internal/executor/claude.go:35, internal/executor/opencode.go:53-54, internal/ledger/schema.go:131-169, and internal/integrate/integrate.go:151-173."
+    },
+    {
+      "criterion": "propose-lens-a.md exists, is under 1000 words, and carries every skeleton section.",
+      "met": true,
+      "evidence": "openspec/changes/conflict-triage-fixture/propose-lens-a.md exists at 675 words and contains all required sections: Selected Candidate \u0026 Approach, Conceptual Changes \u0026 Architecture Rationale, Alternatives Considered \u0026 Rejected, and Open Questions."
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (git status --porcelain empty and git log --oneline -1).",
+      "met": true,
+      "evidence": "Commit aa8cd0b docs(conflict-triage-fixture): author proposal lens a candidate and approach; git status --porcelain is clean."
+    }
+  ],
+  "commit": "aa8cd0b"
+}

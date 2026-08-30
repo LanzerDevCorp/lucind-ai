@@ -1,0 +1,49 @@
+{
+  "packet_id": "spec-control-room-ui-views-lens-b",
+  "status": "done",
+  "summary": "Generated spec-lens-b.md with Given/When/Then scenarios and coverage analysis for all five requirements in control-room-ui-views under the 1000-word budget. Committed the change cleanly without AI attribution.",
+  "hard_stops": [
+    {
+      "hard_stop": "The proposal does not determine what the system should do in a case, so the scenario would assert an outcome nobody chose.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Every scenario for a requirement would be untestable, meaning the requirement as proposed is unobservable.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/control-room-ui-views/spec-lens-b.md",
+      "change": "created",
+      "why": "Spec lens B scenarios and coverage mapping for control-room-ui-views"
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every requirement named in `## Assumed requirements` has at least one scenario, and every scenario is in GIVEN / WHEN / THEN form.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-ui-views/spec-lens-b.md:9-106 specifies 15 scenarios across all 5 assumed requirements, each structured in GIVEN / WHEN / THEN form."
+    },
+    {
+      "criterion": "Every scenario's THEN names an observable outcome, and the coverage table cites the seam it is observable through or marks it \"new seam required\".",
+      "met": true,
+      "evidence": "openspec/changes/control-room-ui-views/spec-lens-b.md:108-116 includes a full coverage table citing concrete test seams across internal/serve, internal/dag, internal/barrier, and internal/run."
+    },
+    {
+      "criterion": "`spec-lens-b.md` exists, is under 1000 words, and carries `## Assumed requirements`, `## Coverage`, and `## Untestable Assertions`.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-ui-views/spec-lens-b.md exists with 984 words (verified via wc -w) and includes all required sections."
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (`git status --porcelain` empty and `git log --oneline -1`).",
+      "met": true,
+      "evidence": "Commit 85a6ab6 (docs(openspec): add spec lens b for control-room-ui-views) with empty git status --porcelain."
+    }
+  ],
+  "commit": "85a6ab63932ae235f7ff6d21a90585c35a3fbb48"
+}

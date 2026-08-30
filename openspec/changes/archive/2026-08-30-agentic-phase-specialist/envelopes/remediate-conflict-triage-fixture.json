@@ -1,0 +1,118 @@
+{
+  "packet_id": "remediate-conflict-triage-fixture",
+  "status": "done",
+  "summary": "Closed both confirmed gaps: feat packets are now explicit build-scope templates that do not grant toy.go, and overlapping build scopes are refused through packet.DisjointAllowedPaths. Of the six claims, 2 and 6 were confirmed and fixed (rubric now presents GenerateFixture evidence; both toy sides compile and pass their own tests); 1, 4, and 5 were refuted with file:line citations; 3 was a coverage gap whose production path already worked. lucind-checks.sh exits 0. Both design questions remain open.",
+  "hard_stops": [
+    {
+      "hard_stop": "A fix would require editing a path outside allowed_paths.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Closing gap 1 would require choosing between the two readings on grounds the tree does not settle.",
+      "fired": false
+    },
+    {
+      "hard_stop": "A claim can be neither confirmed nor refuted from the code, and deciding it needs a product call.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Any credential value would need to be chosen, generated, or written.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction here would require violating another.",
+      "fired": false
+    },
+    {
+      "hard_stop": "A fix would require closing one of the two open design questions.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "internal/conflicttriage/fixture/packets/feat_a.md",
+      "change": "modified",
+      "why": "State that this packet is a build-scope template and does not grant toy.go."
+    },
+    {
+      "path": "internal/conflicttriage/fixture/packets/feat_b.md",
+      "change": "modified",
+      "why": "State that this packet is a build-scope template and does not grant toy.go."
+    },
+    {
+      "path": "internal/conflicttriage/fixture/fixture.go",
+      "change": "modified",
+      "why": "Write go.mod and per-side toy_test.go so both toy sides compile and pass their own tests."
+    },
+    {
+      "path": "internal/conflicttriage/fixture/fixture_test.go",
+      "change": "modified",
+      "why": "Lock packet/ToyPath relationship, overlapping admission refusal, and both-sides go test."
+    },
+    {
+      "path": "internal/conflicttriage/fixture/rubric.go",
+      "change": "modified",
+      "why": "Attach both sides of toy.go from the fixture worktree to the rubric prompt."
+    },
+    {
+      "path": "internal/conflicttriage/fixture/rubric_test.go",
+      "change": "modified",
+      "why": "Assert EvaluateRubric presents GenerateFixture evidence to both judges."
+    },
+    {
+      "path": "internal/conflicttriage/triage_test.go",
+      "change": "modified",
+      "why": "Cover out-of-scope RunTriage and empty verify-command replacement."
+    },
+    {
+      "path": "openspec/changes/conflict-triage-fixture/remediation.md",
+      "change": "created",
+      "why": "Record every gap and claim verdict with file:line evidence."
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Both CONFIRMED gaps are closed, each with a test that fails without the fix.",
+      "met": true,
+      "evidence": "Gap 1 RED: feat_a.md want a # comment before frontmatter keys, got \"id: fixture-feat-a\"; TestFixturePackets_AreBuildScopeTemplatesNotToyWriters now passes. Gap 2: TestFixturePackets_OverlappingBuildScopesRefused drives packet.DisjointAllowedPaths and passed immediately because production already refuses overlap — reported, not weakened."
+    },
+    {
+      "criterion": "All six carried-forward claims carry a verdict in remediation.md, each CONFIRMED with a fix and test, or REFUTED with a file:line citation to what already covers it.",
+      "met": true,
+      "evidence": "openspec/changes/conflict-triage-fixture/remediation.md: claims 1 REFUTED (triage.go:112-123,135; triage_test.go:131-147), 2 CONFIRMED (rubric.go:155-184; rubric_test.go:136), 3 CONFIRMED coverage (triage.go:70-74; triage_test.go:306), 4 REFUTED (fixture_test.go:90; attempt.go:745-747; tasks.md:58), 5 REFUTED (triage.go:125-131; triage_test.go:205), 6 CONFIRMED (fixture.go:78-130; fixture_test.go:227)."
+    },
+    {
+      "criterion": "./lucind-checks.sh exits 0 on the combined tree. Attach the tail.",
+      "met": true,
+      "evidence": "lucind-checks.sh exit 0 in 49.3s. Tail: ok github.com/LanzerDevCorp/lucind-ai/internal/conflicttriage 2.528s; ok .../conflicttriage/fixture 3.150s; ok .../internal/run 39.540s; ok .../internal/serve 13.084s; ok .../internal/worktree 1.691s."
+    },
+    {
+      "criterion": "Every RED was observed failing before its GREEN, with the failure message named.",
+      "met": true,
+      "evidence": "Gap 1 RED: want a # comment before frontmatter keys, got \"id: fixture-feat-a\". Claim 2 RED: claude prompt missing fixture evidence \"tier A\". Claim 6 RED: go: cannot find main module, but found .git/config. Gap 2, claim 3, and claim 5 tests passed the moment they were written; named in remediation.md rather than weakened."
+    },
+    {
+      "criterion": "Both open design questions are still open. No change encoded a risk formula or named a production triage executor.",
+      "met": true,
+      "evidence": "design.md:120-123 still unchecked. git log -- openspec/changes/conflict-triage-fixture/design.md is empty. No risk-formula or production-executor identifiers added under internal/conflicttriage/."
+    },
+    {
+      "criterion": "The work is committed, git status --porcelain empty, no AI attribution in any message.",
+      "met": true,
+      "evidence": "HEAD fe00a9f. git status --porcelain empty. git log 22405f7..HEAD has six conventional commits and no Co-authored-by trailer."
+    }
+  ],
+  "commit": "fe00a9f27b3558e4e5ef8b9b4b5c69045f0038dc",
+  "findings": [
+    {
+      "finding": "Gap 2's negative admission test passed the moment it was written. packet.DisjointAllowedPaths already refuses overlapping allowed_paths; the spec's MUST-fail was untested, not unimplemented.",
+      "evidence": "go test ./internal/conflicttriage/fixture -run TestFixturePackets_OverlappingBuildScopesRefused — ok. disjoint.go:29.",
+      "affects": "conflict-triage-fixture archive; no further production change needed for the refusal scenario."
+    },
+    {
+      "finding": "Claim 5 as stated is false: validVerifyBudget TrimSpaces first, so \"~4 min: \" becomes \"~4 min:\" and fails the \" min: \" substring. Empty-command replacement already worked.",
+      "evidence": "triage.go:125-131; TestTriageAgent_EmptyVerifyCommandIsReplaced passed immediately.",
+      "affects": "Do not treat verify-budget validation as a live defect."
+    }
+  ]
+}

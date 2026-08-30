@@ -1,0 +1,51 @@
+{
+  "packet_id": "explore-control-room-ui-shell-lens-c",
+  "status": "done",
+  "summary": "Authored explore-lens-c.md covering technical risks, trade-offs matrix, prototype spikes, and out-of-scope boundaries for the control-room-ui-shell change with file:line citations.",
+  "hard_stops": [
+    {
+      "hard_stop": "Critical unknown cannot be framed as a risk or spike with available codebase knowledge.",
+      "fired": false
+    },
+    {
+      "hard_stop": "The change requires touching fundamental invariant boundaries without possible mitigation.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/control-room-ui-shell/explore-lens-c.md",
+      "change": "created",
+      "why": "Explore Lens C document covering technical risks, trade-offs, spikes, out-of-scope boundaries, and open questions."
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every risk and spike proposal carries file:line citations to real code in this worktree.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-ui-shell/explore-lens-c.md lines 7-12 and 24-26 cite internal/ledger/ledger.go:162-185, internal/serve/model.go:128-250, internal/serve/static/app.js:22-70, internal/serve/server.go:16-22, internal/feature/feature.go:89-135, and internal/reconcile/reconcile.go:116-168."
+    },
+    {
+      "criterion": "explore-lens-c.md exists, is under 1000 words, and carries every skeleton section.",
+      "met": true,
+      "evidence": "wc -w openspec/changes/control-room-ui-shell/explore-lens-c.md reports 781 words, containing all skeleton sections (Technical Risks \u0026 Unknowns, Trade-offs Matrix, Potential Spikes / Proof of Concepts, Out of Scope, Open Questions)."
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (git status --porcelain empty and git log --oneline -1).",
+      "met": true,
+      "evidence": "git log -1 output: 960deb9 docs(openspec): add explore lens c for control-room-ui-shell, git status --porcelain is empty."
+    }
+  ],
+  "commit": "960deb945372d3547b90ac3827c2b5f79ebb88ca",
+  "findings": [
+    {
+      "finding": "TestExecuteBatchAppliesPerLaneDeadlineIndependently in internal/run/batch_test.go fails when running go test ./internal/run -race -count=1 due to mock timing constraints.",
+      "evidence": "batch_test.go:785: lane-fast status = failed, want done",
+      "affects": "internal/run/batch_test.go"
+    }
+  ]
+}

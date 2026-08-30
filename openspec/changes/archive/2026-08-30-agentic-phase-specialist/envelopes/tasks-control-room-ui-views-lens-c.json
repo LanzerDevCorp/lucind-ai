@@ -1,0 +1,63 @@
+{
+  "packet_id": "tasks-control-room-ui-views-lens-c",
+  "status": "done",
+  "summary": "Generated tasks-lens-c.md with proof strategy, threat-matrix RED test mappings, acceptance evidence commands citing real seams, and review workload forecast recommending a 3-PR feature branch chain. Committed changes under conventional commit.",
+  "hard_stops": [
+    {
+      "hard_stop": "The design has no threat matrix, so there is nothing to derive RED tests from.",
+      "fired": false
+    },
+    {
+      "hard_stop": "A behavior the specs require cannot be proven through any test this repository can run, and no new seam is identified in the design.",
+      "fired": false
+    },
+    {
+      "hard_stop": "The changed-line estimate cannot be grounded in anything — no comparable file, no archived change of similar shape.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/control-room-ui-views/tasks-lens-c.md",
+      "change": "created",
+      "why": "Lens C proof and review workload forecast artifact for control-room-ui-views"
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every threat-matrix row in the design appears in `## RED Tests from the Threat Matrix` with the design's own `Applicable` / `N/A` verdict, and no row was invented.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-ui-views/tasks-lens-c.md:27-33 lists all 5 boundaries (Documentation-like paths, Git repository selection, Commit state, Push state, PR commands) with N/A matching openspec/changes/control-room-ui-views/design.md:115-121."
+    },
+    {
+      "criterion": "Every applicable row names a RED test and the assertion that fires.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-ui-views/tasks-lens-c.md:27-33 documents N/A for all 5 rows with 'None' for RED tests as no threat-matrix rows in design.md are Applicable."
+    },
+    {
+      "criterion": "The changed-line estimate states the basis it was derived from, not a bare number.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-ui-views/tasks-lens-c.md:21-25 details line count basis of 690-1000 lines across 7 files in internal/serve/."
+    },
+    {
+      "criterion": "Every proving command is derived from a real test file in this worktree, cited with `file:line`.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-ui-views/tasks-lens-c.md:37-42 cites internal/serve/model_test.go:22,595, internal/serve/server_test.go:42,70,196, and internal/serve/static_test.go:11,41,69,83."
+    },
+    {
+      "criterion": "`tasks-lens-c.md` exists, is under 1000 words, and carries `## Assumed decomposition`, `## Review Workload Forecast`, `## Acceptance Evidence`, and `## Verification Gaps`.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-ui-views/tasks-lens-c.md has 780 words and contains all required sections."
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (`git status --porcelain` empty and `git log --oneline -1`).",
+      "met": true,
+      "evidence": "commit 26b089ea0f6d0d26da971d4e457d54419228a22f ('docs(control-room-ui-views): add tasks lens c proof and review burden') and git status --porcelain is empty."
+    }
+  ],
+  "commit": "26b089ea0f6d0d26da971d4e457d54419228a22f"
+}

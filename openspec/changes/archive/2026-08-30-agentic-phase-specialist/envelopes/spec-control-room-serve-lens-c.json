@@ -1,0 +1,58 @@
+{
+  "packet_id": "spec-control-room-serve-lens-c",
+  "status": "done",
+  "summary": "Analyzed live specifications against the accepted control-room-serve proposal and produced spec-lens-c.md. Documented the inventory, zero conflict status, and verbatim live blocks for modified requirements in approvals-web-ui.",
+  "hard_stops": [
+    {
+      "hard_stop": "A capability the proposal lists as modified has no live spec to read.",
+      "fired": false
+    },
+    {
+      "hard_stop": "A requirement being removed has consumers the proposal never mentions, so removing it breaks behavior nobody agreed to break.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Copying a MODIFIED block whole would exceed what you can write, so the copy would have to be partial. Report which requirement forces it; never write a partial block.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/control-room-serve/spec-lens-c.md",
+      "change": "created",
+      "why": "Spec Lens C feedstock containing assumed requirements, live spec inventory, conflict analysis, and verbatim modified requirement blocks."
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every capability listed as modified was opened in full, and its inventory row's requirement and scenario counts came from the file rather than an estimate.",
+      "met": true,
+      "evidence": "openspec/specs/approvals-web-ui/spec.md:1-83 was read in full, confirming exactly 4 requirements and 9 scenarios."
+    },
+    {
+      "criterion": "Every ## MODIFIED Full Blocks entry is the complete live block, scenario for scenario, with nothing summarized or elided.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-serve/spec-lens-c.md:21-61 contains verbatim copies of Requirement: Loopback Binding (2 scenarios) and Requirement: Individual Decisions Without Bulk Approval (3 scenarios) matching openspec/specs/approvals-web-ui/spec.md:10-48."
+    },
+    {
+      "criterion": "Every removal or rename names its consumers with file:line and carries a Reason.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-serve/spec-lens-c.md:63-68 records that no requirements are removed or renamed by this change."
+    },
+    {
+      "criterion": "spec-lens-c.md exists, is under 1000 words excluding the verbatim blocks, and carries ## Assumed requirements and ## Live Spec Inventory.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-serve/spec-lens-c.md contains ## Assumed requirements and ## Live Spec Inventory; authored text is ~285 words (well below the 1000-word limit)."
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (git status --porcelain empty and git log --oneline -1).",
+      "met": true,
+      "evidence": "git log --oneline -1 output: '72145d3 docs(spec): add spec lens c for control-room-serve'; git status --porcelain is empty."
+    }
+  ],
+  "commit": "72145d3f65be6ce3e359f81aa614e7ef458c2aeb"
+}

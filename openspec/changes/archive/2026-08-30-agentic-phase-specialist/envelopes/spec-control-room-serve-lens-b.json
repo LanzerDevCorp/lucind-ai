@@ -1,0 +1,49 @@
+{
+  "packet_id": "spec-control-room-serve-lens-b",
+  "status": "done",
+  "summary": "Authored Given/When/Then scenarios and coverage analysis for control-room-serve in spec-lens-b.md. Mapped 9 assumed requirements across REST reads, SSE streaming, loopback/worktree isolation, and anti-bulk decision validation. Verified observable seams and constrained the document to 970 words under the budget.",
+  "hard_stops": [
+    {
+      "hard_stop": "The proposal does not determine what the system should do in a case, so the scenario would assert an outcome nobody chose.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Every scenario for a requirement would be untestable, meaning the requirement as proposed is unobservable.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/control-room-serve/spec-lens-b.md",
+      "change": "created",
+      "why": "Spec Lens B scenarios and coverage mapping for control-room-serve"
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every requirement named in ## Assumed requirements has at least one scenario, and every scenario is in GIVEN / WHEN / THEN form.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-serve/spec-lens-b.md:9-122"
+    },
+    {
+      "criterion": "Every scenario's THEN names an observable outcome, and the coverage table cites the seam it is observable through or marks it \"new seam required\".",
+      "met": true,
+      "evidence": "openspec/changes/control-room-serve/spec-lens-b.md:124-138"
+    },
+    {
+      "criterion": "spec-lens-b.md exists, is under 1000 words, and carries ## Assumed requirements, ## Coverage, and ## Untestable Assertions.",
+      "met": true,
+      "evidence": "wc -w openspec/changes/control-room-serve/spec-lens-b.md reports 970 words; sections at lines 3, 124, 140"
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (git status --porcelain empty and git log --oneline -1).",
+      "met": true,
+      "evidence": "git log -1 --oneline reports cefdc27 spec(serve): add spec lens b scenarios and coverage for control room serve; git status --porcelain is empty"
+    }
+  ],
+  "commit": "cefdc27e4f4d42ef2ff5b65bb23ed231c9fcbad3"
+}

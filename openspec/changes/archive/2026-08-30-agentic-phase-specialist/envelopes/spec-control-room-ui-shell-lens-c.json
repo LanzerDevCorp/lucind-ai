@@ -1,0 +1,58 @@
+{
+  "packet_id": "spec-control-room-ui-shell-lens-c",
+  "status": "done",
+  "summary": "Produced Lens C analysis for control-room-ui-shell in openspec/changes/control-room-ui-shell/spec-lens-c.md. Verified live capability approvals-web-ui in full, copied all 4 requirement blocks and 9 scenarios verbatim, and documented conflict/migration details with zero removals or renames.",
+  "hard_stops": [
+    {
+      "hard_stop": "A capability the proposal lists as modified has no live spec to read.",
+      "fired": false
+    },
+    {
+      "hard_stop": "A requirement being removed has consumers the proposal never mentions, so removing it breaks behavior nobody agreed to break.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Copying a MODIFIED block whole would exceed what you can write, so the copy would have to be partial. Report which requirement forces it; never write a partial block.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/control-room-ui-shell/spec-lens-c.md",
+      "change": "created",
+      "why": "Feedstock for spec synthesis lane containing live spec inventory, conflicts analysis, full verbatim requirement blocks, and migration guidance."
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every capability listed as modified was opened in full, and its inventory row's requirement and scenario counts came from the file rather than an estimate.",
+      "met": true,
+      "evidence": "openspec/specs/approvals-web-ui/spec.md:1-83 opened in full; verified 4 requirements and 9 scenarios."
+    },
+    {
+      "criterion": "Every `## MODIFIED Full Blocks` entry is the complete live block, scenario for scenario, with nothing summarized or elided.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-ui-shell/spec-lens-c.md:30-108 contains all 4 complete requirement blocks (Loopback Binding, Individual Decisions Without Bulk Approval, Inline Evidence and Batch Review Command, Approver Wrong-Approval Rate) and all 9 scenarios copied verbatim from openspec/specs/approvals-web-ui/spec.md:10-83."
+    },
+    {
+      "criterion": "Every removal or rename names its consumers with `file:line` and carries a Reason.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-ui-shell/spec-lens-c.md:110-128 states zero removals or renames, gives reasons, and lists live consumer file:line references (internal/serve/server.go:12-22, internal/serve/handlers.go:36-118, internal/serve/server_test.go:17-236, internal/serve/static_test.go:11-102, docs/prd.md:217-241, cmd/lucind-ai/cli.go:674-725)."
+    },
+    {
+      "criterion": "`spec-lens-c.md` exists, is under 1000 words excluding the verbatim blocks, and carries `## Assumed requirements` and `## Live Spec Inventory`.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-ui-shell/spec-lens-c.md exists with required sections; non-verbatim word count is 577 words (verified via python word counter script)."
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (`git status --porcelain` empty and `git log --oneline -1`).",
+      "met": true,
+      "evidence": "Commit 5e860b1 'docs(spec): add control-room-ui-shell live spec lens c'; git status --porcelain is empty."
+    }
+  ],
+  "commit": "5e860b1"
+}

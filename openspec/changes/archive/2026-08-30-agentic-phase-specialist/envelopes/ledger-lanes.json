@@ -1,0 +1,81 @@
+{
+  "packet_id": "ledger-lanes",
+  "status": "done",
+  "summary": "Added separate v6 lane metadata write/query APIs without replacing Lane or RegisterLane. Metadata updates preserve the existing composite lane identity, update model/agent/feature columns atomically, and append versioned full snapshots for audit history.",
+  "hard_stops": [
+    {
+      "hard_stop": "Never alter unrelated changes.",
+      "fired": false
+    },
+    {
+      "hard_stop": "No other authored source/docs/config edits.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Do not launch reviewers or other agents.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Do not redefine or duplicate existing Lane/RegisterLane APIs unless the task explicitly calls for separate metadata methods in the new file.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "internal/ledger/lanes_meta.go",
+      "change": "created",
+      "why": "Adds LaneMetadata, UpdateLaneMetadata, and GetLaneMetadata."
+    },
+    {
+      "path": "internal/ledger/lanes_meta_test.go",
+      "change": "created",
+      "why": "Proves full metadata persistence, identity preservation, audit history, fallback reads, and unknown-lane behavior."
+    },
+    {
+      "path": ".lucind/result.json",
+      "change": "created",
+      "why": "Records the validated packet execution result; intentionally excluded from the implementation commit."
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "NEW-FILE ledger methods write and query model, agent, SDD phase, fanout group, change, feature, allowed paths, dependencies, and body digest.",
+      "met": true,
+      "evidence": "internal/ledger/lanes_meta.go:20-127; focused four-test run PASS, package ok in 0.315s."
+    },
+    {
+      "criterion": "Preserve existing lane identity and make updates auditable.",
+      "met": true,
+      "evidence": "TestUpdateAndGetLaneMetadata and TestUpdateLaneMetadataKeepsAuditHistoryAndReturnsLatestSnapshot PASS; one lane row remains and two ordered audit snapshots remain queryable through Ledger.Events."
+    },
+    {
+      "criterion": "internal/ledger/lanes_meta.go and internal/ledger/lanes_meta_test.go are the only authored paths.",
+      "met": true,
+      "evidence": "git show --stat 59e26d0 reports exactly those two created files, 369 insertions; result.json is an uncommitted execution artifact."
+    },
+    {
+      "criterion": "go test ./internal/ledger -run Lane passes.",
+      "met": true,
+      "evidence": "Exact command exit 0: ok github.com/LanzerDevCorp/lucind-ai/internal/ledger (cached)."
+    },
+    {
+      "criterion": "Commit is recorded.",
+      "met": true,
+      "evidence": "59e26d09a2ef556dac0bbcc7911006b03a17a3d0 feat(ledger): persist lane metadata audit."
+    },
+    {
+      "criterion": "Validate result object against .lucind/result.schema.json before writing .lucind/result.json.",
+      "met": true,
+      "evidence": "python3 jsonschema Draft 7 validation of this exact in-memory object: PASS before apply_patch write."
+    }
+  ],
+  "commit": "59e26d09a2ef556dac0bbcc7911006b03a17a3d0",
+  "findings": [
+    {
+      "finding": "Schema v6 has direct lane columns only for model, agent, and feature; the remaining packet/SDD fields require the existing append-only events store under the two-file boundary.",
+      "evidence": "internal/ledger/schema.go:236-253 and openspec/changes/control-room-ledger/design.md:91-98.",
+      "affects": "Future dispatcher wiring should call UpdateLaneMetadata with the DAG/packet context and body digest."
+    }
+  ],
+  "session_id": "sdd-apply-ledger-lanes-20260822"
+}

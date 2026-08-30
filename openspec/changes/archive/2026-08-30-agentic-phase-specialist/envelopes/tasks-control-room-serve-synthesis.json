@@ -1,0 +1,100 @@
+{
+  "packet_id": "tasks-control-room-serve-synthesis",
+  "status": "done",
+  "summary": "Verified every file:line citation in the three tasks lens drafts against this worktree, then assembled canonical openspec/changes/control-room-serve/tasks.md (982 words) and tasks-synthesis-notes.md. Lens A's five-phase checklist is the human order; Integrate-green dispatch is a single packet with two sequential work-unit commits and no apply-dag.yaml sidecar.",
+  "hard_stops": [
+    {
+      "hard_stop": "The three `## Assumed decomposition` blocks are mutually irreconcilable and the spec and design do not choose between them. Write the notes file, leave `tasks.md` uncreated, and block.",
+      "fired": false,
+      "note": "A (5 phases), B (2 units), and C (3 units) are the same critical path at different grouping. A is authoritative; B's two units are A's phases grouped for Integrate."
+    },
+    {
+      "hard_stop": "Lens A's decomposition is refuted by code you verified. Do not substitute your own.",
+      "fired": false,
+      "note": "A's files exist. False line numbers (Runs at ledger.go:285, SSE at handlers.go:87) were dropped as citations; the tasks remain as new neighbors of the cited code."
+    },
+    {
+      "hard_stop": "No partition exists in which every wave is green on its own and every same-wave pair is disjoint. Report it; the correct answer may be a single packet, but say so rather than shipping a plan `Integrate` will revert.",
+      "fired": false,
+      "note": "Wave 1 (ledger queries) is additive and green alone. Wave 2 (handlers+CLI+tests) is green after Wave 1. Same-wave pairs: one unit per wave. Single packet with two sequential commits; no sidecar."
+    },
+    {
+      "hard_stop": "One or more lens drafts is missing from this worktree.",
+      "fired": false,
+      "note": "tasks-lens-a.md, tasks-lens-b.md, and tasks-lens-c.md are all present under openspec/changes/control-room-serve/."
+    },
+    {
+      "hard_stop": "Covering all eight spine items honestly would require exceeding 1800 words. Report which item forces it rather than silently overrunning or silently cutting.",
+      "fired": false,
+      "note": "tasks.md is 982 words and covers all eight spine items."
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false,
+      "note": "Skill 530-word cap vs packet 1800: packet wins on execution and is recorded as skill drift in Coverage Gaps. Skill Work Units columns were assembled from B+C without inventing runtime harnesses."
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/control-room-serve/tasks.md",
+      "change": "created",
+      "why": "Canonical tasks checklist after citation verification and decomposition arbitration."
+    },
+    {
+      "path": "openspec/changes/control-room-serve/tasks-synthesis-notes.md",
+      "change": "created",
+      "why": "Orchestrator-facing notes: dropped citations, wave merge, coverage gaps, decomposition divergence."
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every file:line citation surviving into tasks.md was opened and confirmed in this worktree, and every dropped claim is listed under ## Dropped Citations.",
+      "met": true,
+      "evidence": "Opened handlers.go:36,39-77,53,87-115,126-128; model.go:17-24,128,152,278; ledger.go:162-185,285-330,490-525,705-717,892-925; schema.go:10,18-32,34-43,171-180; cli.go:683-685,702-707,715,852; server_test.go:17-40,42-236,70,114,155,215; cli_test.go:1908-1917,1919; disjoint.go:8-22; integrate.go:50-59; lucind-checks.sh; design.md:113-119,135-137. Eleven dropped claims in tasks-synthesis-notes.md ## Dropped Citations."
+    },
+    {
+      "criterion": "Every wave was independently judged green-on-its-own, and every wave that was not is merged and reported under ## Coverage Gaps.",
+      "met": true,
+      "evidence": "Wave 1 additive ledger methods compile without callers. Wave 2 requires Wave 1 plus lockstep NewHandler at handlers.go:36, cli.go:715, server_test.go:70,114,155,215. A's phases 2–5 merged into Unit 2; recorded under Coverage Gaps. Reading judgment only; lucind-checks.sh was not executed."
+    },
+    {
+      "criterion": "Every same-wave unit pair was re-checked against the component-boundary prefix rule rather than taken from lens B's table.",
+      "met": true,
+      "evidence": "PathInScope in internal/packet/disjoint.go:8-22. One unit per wave, so no same-wave pair. Unit 1 files under internal/ledger/ vs Unit 2 files under internal/serve/ and cmd/lucind-ai/ are not prefix-overlapping. Handlers vs CLI would be disjoint at file granularity but fail go build."
+    },
+    {
+      "criterion": "tasks.md exists, is under 1800 words, and substantively covers all eight spine items, with anything missing reported under ## Coverage Gaps.",
+      "met": true,
+      "evidence": "wc -w = 982. Spine: forecast table + plain-text guard lines; work units with rollback, proving commands, executor, allowed_paths; 14-task phased checklist; threat matrix all N/A so no RED tasks; dependency order; waves green; all eight spec requirements traced. Spec feature nested attempts/leases/overlap untasked (design.md:139) reported in Coverage Gaps."
+    },
+    {
+      "criterion": "tasks-synthesis-notes.md exists with exactly the four required sections, each either populated or explicitly None.",
+      "met": true,
+      "evidence": "Sections in order: Unresolved Contradictions (None); Coverage Gaps (populated); Dropped Citations (11 claims); Decomposition Divergence (populated, not 'all three converged')."
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (git status --porcelain empty and git log --oneline -1).",
+      "met": true,
+      "evidence": "git status --porcelain empty. git log --oneline -1: 1de01aa docs(openspec): synthesize canonical control-room-serve tasks. Full hash 1de01aaa56b12789f2a5fe352a923eb032b2839a."
+    }
+  ],
+  "commit": "1de01aaa56b12789f2a5fe352a923eb032b2839a",
+  "findings": [
+    {
+      "finding": "citations_verified=31 unique file:line sites opened across the three drafts; citations_dropped=11; waves_merged=1 (A phases 2–5 into Unit 2); contradictions_escalated=0; coverage_gaps=4.",
+      "evidence": "openspec/changes/control-room-serve/tasks-synthesis-notes.md sections Coverage Gaps and Dropped Citations.",
+      "affects": "apply phase executes only tasks.md; orchestrator reads only the notes file."
+    },
+    {
+      "finding": "Lens C proving -run filters name tests that do not exist. go test -run with zero matches exits 0, so those commands cannot be the focused proving commands.",
+      "evidence": "No TestLedgerRuns, TestV1RESTEndpoints, TestUnmatchedAPIJSON404, TestEventsStreamSSE, TestServeLinkedWorktreeRefusal, or TestConcurrentServeReadsAndBatchWrite in this worktree. Unit proving commands are package-level go test ./internal/ledger and go test ./internal/serve ./cmd/lucind-ai.",
+      "affects": "apply-lane verification; same trap as prior control-room-telemetry and control-room-ledger synthesis."
+    },
+    {
+      "finding": "NewHandler is still (l, defaultApprover, opencodeCmd) at handlers.go:36. Call sites that must lockstep: cli.go:715 and server_test.go:70,114,155,215.",
+      "evidence": "internal/serve/handlers.go:36; cmd/lucind-ai/cli.go:715; internal/serve/server_test.go:70,114,155,215.",
+      "affects": "Cannot dispatch handlers.go without cli.go and server_test.go in the same Integrate unit."
+    }
+  ],
+  "session_id": "tasks-control-room-serve-synthesis"
+}

@@ -1,0 +1,128 @@
+{
+  "packet_id": "spec-control-room-ui-shell-synthesis",
+  "status": "done",
+  "summary": "Verified all three spec-lens drafts against this worktree and the live approvals-web-ui spec, then wrote six capability specs (1036 authored words) plus spec-synthesis-notes.md. All three lenses independently named the same six ADDED requirements; lens C found no live-spec conflicts, so nothing was reclassified to MODIFIED. One contradiction is escalated: whether #/features ships in this change.",
+  "hard_stops": [
+    {
+      "hard_stop": "The three ## Assumed requirements blocks are mutually irreconcilable and the proposal does not choose between them. Write the notes file, leave specs/ uncreated, and block.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Lens A's requirement set is refuted by a live spec you verified. Do not substitute your own.",
+      "fired": false
+    },
+    {
+      "hard_stop": "A MODIFIED requirement's live block cannot be recovered from lens C or from openspec/specs/, so the block would have to be partial. Never write a partial block.",
+      "fired": false
+    },
+    {
+      "hard_stop": "One or more lens drafts is missing from this worktree.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying the spine honestly would require exceeding the authored budget. Report which requirement forces it rather than silently overrunning or silently cutting.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/control-room-ui-shell/spec-synthesis-notes.md",
+      "change": "created",
+      "why": "Orchestrator-facing synthesis notes with the four required sections."
+    },
+    {
+      "path": "openspec/changes/control-room-ui-shell/specs/approvals-web-ui/spec.md",
+      "change": "created",
+      "why": "ADDED Approvals Inbox View Integration on the existing capability."
+    },
+    {
+      "path": "openspec/changes/control-room-ui-shell/specs/control-room-asset-embed/spec.md",
+      "change": "created",
+      "why": "New capability full spec: Zero-Build Embedded ES Module Delivery."
+    },
+    {
+      "path": "openspec/changes/control-room-ui-shell/specs/control-room-client-routing/spec.md",
+      "change": "created",
+      "why": "New capability full spec: Client-Side Routing and View Lifecycle."
+    },
+    {
+      "path": "openspec/changes/control-room-ui-shell/specs/control-room-model-queries/spec.md",
+      "change": "created",
+      "why": "New capability full spec: Read-Only Model Inspection Endpoints."
+    },
+    {
+      "path": "openspec/changes/control-room-ui-shell/specs/control-room-shared-store/spec.md",
+      "change": "created",
+      "why": "New capability full spec: Centralized Reactive Client Store."
+    },
+    {
+      "path": "openspec/changes/control-room-ui-shell/specs/control-room-ui-shell/spec.md",
+      "change": "created",
+      "why": "New capability full spec: Layout Shell and Global Chrome."
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every file:line citation surviving into the delta tree was opened and confirmed in this worktree, and every dropped claim is listed under ## Dropped Citations.",
+      "met": true,
+      "evidence": "Opened live spec openspec/specs/approvals-web-ui/spec.md:1-83, handlers.go:36-230, app.js:1-98, index.html:142-160, static.go:8-18, model.go:14-343, server.go:12-73, server_test.go:17-236, static_test.go:11-102, model_test.go:74, cli.go:674-725, docs/prd.md:217-241. Dropped mislabels recorded at spec-synthesis-notes.md ## Dropped Citations (app.js:96-98 is setInterval not hashchange; app.js:1-10 is fetchState not subscribers; index.html:142-158 is #approvals-container not #view-outlet; handlers.go:36-118 has no Model GET routes)."
+    },
+    {
+      "criterion": "Every MODIFIED block matches the live requirement scenario for scenario, with only the intended edits applied — verified by opening the live spec, not by trusting lens C.",
+      "met": true,
+      "evidence": "No MODIFIED section shipped. Lens C copies at spec-lens-c.md:25-105 match openspec/specs/approvals-web-ui/spec.md:10-83 scenario-for-scenario (Loopback Binding 2, Individual Decisions 3, Inline Evidence 2, Approver Wrong-Approval Rate 2). Conflicts: None, so those blocks were omitted rather than archived as identical replacements."
+    },
+    {
+      "criterion": "Every requirement carries an RFC 2119 keyword and at least one GIVEN / WHEN / THEN scenario.",
+      "met": true,
+      "evidence": "Six requirements, each with MUST in the statement and three GIVEN/WHEN/THEN scenarios (18 total). wc/rg: 3 scenarios per file under openspec/changes/control-room-ui-shell/specs/."
+    },
+    {
+      "criterion": "The delta tree's authored content is under 1800 words excluding verbatim copied blocks, and every spine item is satisfied or reported under ## Coverage Gaps.",
+      "met": true,
+      "evidence": "wc -w openspec/changes/control-room-ui-shell/specs/*/spec.md = 1036 total. No verbatim live-spec copies. Coverage Gaps in spec-synthesis-notes.md cover store-slice granularity, full-spec vs ADDED headers for new domains, and the skill 650 vs packet 1800 budget."
+    },
+    {
+      "criterion": "spec-synthesis-notes.md exists with exactly the four required sections, each either populated or explicitly None.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-ui-shell/spec-synthesis-notes.md headings: Unresolved Contradictions (line 3), Coverage Gaps (line 14), Dropped Citations (line 24), Requirement Divergence (line 38). Each populated."
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (git status --porcelain empty and git log --oneline -1).",
+      "met": true,
+      "evidence": "git status --porcelain empty. git log --oneline -1: 903eeb8 docs(spec): synthesize control-room-ui-shell delta specs. git rev-parse HEAD 903eeb82f32ee852cbdf1f248300b3f137119f59."
+    }
+  ],
+  "commit": "903eeb82f32ee852cbdf1f248300b3f137119f59",
+  "findings": [
+    {
+      "finding": "Citations verified: 50 unique file:line ranges opened across the three lens drafts, the live approvals-web-ui spec, and the cited Go/HTML/JS/test/PRD/CLI consumers.",
+      "evidence": "Read openspec/specs/approvals-web-ui/spec.md:1-83; internal/serve/handlers.go:36-230; internal/serve/static/app.js:1-98; internal/serve/static/index.html:142-160; internal/serve/static.go:8-18; internal/serve/model.go:14-343; internal/serve/server.go:12-73; internal/serve/server_test.go:17-236; internal/serve/static_test.go:11-102; internal/serve/model_test.go:74; cmd/lucind-ai/cli.go:674-725; docs/prd.md:217-241.",
+      "affects": "spec-synthesis-notes.md ## Dropped Citations counts"
+    },
+    {
+      "finding": "Citations dropped: 5 mislabels (hash listener, subscriber callbacks, existing #view-outlet, existing Model GET mux, static_test.go:41 as Layout Shell seam). One additional omit: four live MODIFIED copies verified complete but not shipped.",
+      "evidence": "openspec/changes/control-room-ui-shell/spec-synthesis-notes.md ## Dropped Citations; app.js:96-98 is fetchState/setInterval; handlers.go:36-118 has no ListFeatures route.",
+      "affects": "delta tree (requirements kept as ADDED; mislabels not used as evidence of existing behavior)"
+    },
+    {
+      "finding": "MODIFIED blocks confirmed complete: 4 of 4 live approvals-web-ui requirements recovered from openspec/specs/approvals-web-ui/spec.md:10-83. MODIFIED blocks shipped: 0 (lens C Conflicts: None).",
+      "evidence": "spec-lens-c.md:17-21 Conflicts None; spec.md:10-83 compared to spec-lens-c.md:25-105.",
+      "affects": "archive (live four requirements will not be replaced)"
+    },
+    {
+      "finding": "Contradictions escalated: 1 — whether this change ships a Features view at #/features.",
+      "evidence": "proposal.md:170; spec-lens-b.md Client-Side Routing scenarios name #/features; spec-lens-a.md Open Questions; grep of internal/serve found no view-outlet or hashchange.",
+      "affects": "control-room-ui-views and tasks for this change"
+    },
+    {
+      "finding": "Coverage gaps: 4 (store slice vs snapshot; full-spec format for new capabilities; skill 650 vs packet 1800; History/SSE already out of scope).",
+      "evidence": "openspec/changes/control-room-ui-shell/spec-synthesis-notes.md ## Coverage Gaps",
+      "affects": "tasks/design follow-up; not a missing capability file"
+    }
+  ]
+}

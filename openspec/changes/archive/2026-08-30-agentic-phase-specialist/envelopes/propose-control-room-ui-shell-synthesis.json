@@ -1,0 +1,90 @@
+{
+  "packet_id": "propose-control-room-ui-shell-synthesis",
+  "status": "done",
+  "summary": "Synthesized three propose-lens drafts into canonical openspec/changes/control-room-ui-shell/proposal.md (1785 words) plus proposal-synthesis-notes.md. Candidate 1 (vanilla ES-module SPA, hash router, shared store, read-only Model REST, embed-only) is the approach. Five citations were dropped after code checks; no contradictions were escalated.",
+  "hard_stops": [
+    {
+      "hard_stop": "The proposed approaches across drafts are mutually irreconcilable. Write the notes file, leave proposal.md uncreated, and block.",
+      "fired": false,
+      "note": "All three drafts converge on Candidate 1 (vanilla ES-module SPA + Model REST + loopback + individual decide). Differences are open questions (Features view inventory, hash vs later History, poll vs later SSE), not irreconcilable approaches."
+    },
+    {
+      "hard_stop": "One or more lens drafts is missing from this worktree.",
+      "fired": false,
+      "note": "propose-lens-a.md, propose-lens-b.md, and propose-lens-c.md are all present under openspec/changes/control-room-ui-shell/."
+    },
+    {
+      "hard_stop": "Covering the proposal spine honestly would require exceeding 1800 words. Report which item forces it rather than silently overrunning or silently cutting.",
+      "fired": false,
+      "note": "proposal.md is 1785 words (wc -w) and covers all nine spine items."
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false,
+      "note": "Packet 1800-word budget governs this synthesis lane; the sdd-propose skill's 450-word budget is outside the packet and was not treated as a packet-internal conflict. Return-required .lucind/result.json is gitignored and was not added to the proposal allowed-path commit."
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/control-room-ui-shell/proposal.md",
+      "change": "created",
+      "why": "Canonical proposal covering the nine-item spine under the 1800-word budget."
+    },
+    {
+      "path": "openspec/changes/control-room-ui-shell/proposal-synthesis-notes.md",
+      "change": "created",
+      "why": "Orchestrator-facing notes: dropped citations, scope divergence, empty contradiction and coverage-gap sections."
+    },
+    {
+      "path": ".lucind/result.json",
+      "change": "created",
+      "why": "Packet return envelope."
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every file:line citation surviving into proposal.md was opened and confirmed in this worktree, and every dropped claim is listed under ## Dropped Citations.",
+      "met": true,
+      "evidence": "Opened serve handlers/model/server/static, app.js, index.html, cli.go, schema.go, ledger.go, batch.go, feature.go, reconcile.go, worktree.go, result/schema.go, static_test.go, server_test.go, model_test.go, approvals-web-ui spec, Makefile, lucind-checks.sh, docs/prd.md. Five drops recorded in proposal-synthesis-notes.md ## Dropped Citations: model.go:95-99, feature.go:89-135, reconcile.go:116-168, .lucind/result.schema.json:1-160, worktree.go:1-35."
+    },
+    {
+      "criterion": "proposal.md exists, is under 1800 words, and substantively covers the proposal spine, with anything missing reported under ## Coverage Gaps.",
+      "met": true,
+      "evidence": "wc -w openspec/changes/control-room-ui-shell/proposal.md =\u003e 1785. Headings cover intent, candidate/approach, conceptual changes, capabilities, delta specs, risks, rollback, test impact, scope, open questions. Coverage Gaps in notes: None."
+    },
+    {
+      "criterion": "proposal-synthesis-notes.md exists with exactly the four required sections, each either populated or explicitly None.",
+      "met": true,
+      "evidence": "Headings: Unresolved Contradictions (None), Coverage Gaps (None), Dropped Citations (five entries), Scope Divergence (B Features-view MUST vs A open question; C hash-vs-History vs A hash; independent convergence on Candidate 1)."
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (git status --porcelain empty and git log --oneline -1).",
+      "met": true,
+      "evidence": "git log --oneline -1 =\u003e 8f4cc39 docs(control-room-ui-shell): synthesize canonical proposal from three lenses; git status --porcelain empty (result.json is gitignored under .lucind/)."
+    }
+  ],
+  "commit": "8f4cc39b881eeb772d68d84b0fc32748d75061ba",
+  "findings": [
+    {
+      "finding": "Citation verification counts: 79 unique file:line tokens in the three drafts (excluding listen-address literals); 74 opened and supporting; 5 dropped.",
+      "evidence": "openspec/changes/control-room-ui-shell/proposal-synthesis-notes.md ## Dropped Citations (5); drafts propose-lens-a.md, propose-lens-b.md, propose-lens-c.md",
+      "affects": "specs/design readers should not revive the five dropped seams"
+    },
+    {
+      "finding": "Unresolved contradictions escalated: 0. Coverage gaps vs packet spine: 0.",
+      "evidence": "proposal-synthesis-notes.md ## Unresolved Contradictions and ## Coverage Gaps both None",
+      "affects": "orchestrator can proceed to sdd-spec without a synthesis block"
+    },
+    {
+      "finding": "No HTTP Host header check exists on serve; DNS-rebinding mitigation today is listen-address IsLoopback only. Not added as a delta requirement.",
+      "evidence": "internal/serve/server.go:14-22,57-73; grep of Host in internal/serve returned no matches",
+      "affects": "security review of serve; optional follow-up, not this change's MUST list"
+    },
+    {
+      "finding": "Packet 1800-word budget used; sdd-propose skill still states a 450-word artifact budget. Canonical proposal is 1785 words to cover the nine-item spine.",
+      "evidence": "~/.claude/skills/sdd-propose/SKILL.md size budget vs packet 1800-word instruction; wc -w proposal.md =\u003e 1785",
+      "affects": "future propose-synthesis packets vs the skill template"
+    }
+  ],
+  "session_id": "propose-control-room-ui-shell-synthesis"
+}

@@ -1,0 +1,45 @@
+{
+  "packet_id": "propose-conflict-triage-fixture-lens-b",
+  "status": "done",
+  "summary": "Authored proposal lens B capability impact and delta specifications for the conflict triage fixture change with real codebase citations across all requirements and scenarios. Verified file word count is under 1000 words and committed the artifact cleanly.",
+  "hard_stops": [
+    {
+      "hard_stop": "Delta requirements conflict with existing base specs without explicit migration path.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Capability impacts cannot be determined from packet context or code inspection.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/conflict-triage-fixture/propose-lens-b.md",
+      "change": "created",
+      "why": "Deliver proposal lens B capability impact and delta specs for conflict triage fixture"
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every capability impact and delta spec requirement carries file:line citations to real code in this worktree.",
+      "met": true,
+      "evidence": "openspec/changes/conflict-triage-fixture/propose-lens-b.md contains citations to internal/overlap/overlap.go:622-660, internal/run/attempt.go:687-752, internal/reconcile/reconcile.go:98-111,213-295,406-535,848-910, cmd/lucind-ai/cli.go:65-70,1090-1195,1398-1463, internal/resolve/candidate.go:26,303-326, internal/integrate/integrate.go:151-173, and executor packages."
+    },
+    {
+      "criterion": "propose-lens-b.md exists, is under 1000 words, and carries every skeleton section.",
+      "met": true,
+      "evidence": "wc -w openspec/changes/conflict-triage-fixture/propose-lens-b.md reports 928 words; all required skeleton sections (User \u0026 Capability Impact, Delta Specifications, Open Questions) are present."
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (git status --porcelain empty and git log --oneline -1).",
+      "met": true,
+      "evidence": "commit 6ff358c: docs(propose): add conflict triage fixture lens b specs; git status --porcelain is empty."
+    }
+  ],
+  "commit": "6ff358c",
+  "session_id": "c8871fe6-4356-4fe2-a69d-b6a3df09da5d"
+}

@@ -1,0 +1,90 @@
+{
+  "packet_id": "design-control-room-serve-synthesis",
+  "status": "done",
+  "summary": "Verified every file:line citation in the three control-room-serve design lenses against this worktree, kept Lens A's architecture (all three independently converged), and wrote a 1522-word canonical design plus synthesis notes. Eight citation claims were dropped; specs are absent; SSE cadence and attempts/leases/overlap HTTP paths remain open questions.",
+  "hard_stops": [
+    {
+      "hard_stop": "The three `## Assumed architecture` blocks are mutually irreconcilable and the proposal and specs do not choose between them. Write the notes file, leave `design.md` uncreated, and block.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Lens A's architecture is refuted by code you verified. Do not substitute your own.",
+      "fired": false
+    },
+    {
+      "hard_stop": "One or more lens drafts is missing from this worktree.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Covering all eight spine items honestly would require exceeding 1800 words. Report which item forces it rather than silently overrunning or silently cutting.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/control-room-serve/design.md",
+      "change": "created",
+      "why": "Canonical design after citation verification and Lens A architecture arbitration."
+    },
+    {
+      "path": "openspec/changes/control-room-serve/design-synthesis-notes.md",
+      "change": "created",
+      "why": "Orchestrator-facing notes: dropped citations, coverage gaps, architecture convergence."
+    },
+    {
+      "path": ".lucind/result.json",
+      "change": "created",
+      "why": "Packet return envelope required by the Return section."
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every `file:line` citation surviving into `design.md` was opened and confirmed in this worktree, and every dropped claim is listed under `## Dropped Citations`.",
+      "met": true,
+      "evidence": "146 citation tokens across design-lens-{a,b,c}.md opened in this worktree. design.md retains only verified locations (e.g. Ledger type at internal/ledger/ledger.go:132-134, http.NotFound at internal/serve/handlers.go:53, Decide at 615-640). Eight dropped claims are listed in openspec/changes/control-room-serve/design-synthesis-notes.md under ## Dropped Citations."
+    },
+    {
+      "criterion": "`design.md` exists, is under 1800 words, and substantively covers all eight spine items, with anything missing reported under `## Coverage Gaps`.",
+      "met": true,
+      "evidence": "wc -w openspec/changes/control-room-serve/design.md → 1522. Headings: Technical Approach; Architecture Decisions (Choice/Alternatives/Rationale); Flow and Invariants; File Changes with terminal consumers; Testing Strategy and Test Seams; Threat Matrix (five rows N/A: reason); Rollback and Additivity; Open Questions and Out of Scope. Coverage Gaps in notes: missing specs/, unspecified attempts/leases/overlap HTTP paths, skill heading mapping."
+    },
+    {
+      "criterion": "`design-synthesis-notes.md` exists with exactly the four required sections, each either populated or explicitly \"None\".",
+      "met": true,
+      "evidence": "Headings: ## Unresolved Contradictions (None); ## Coverage Gaps (populated); ## Dropped Citations (eight items); ## Architecture Divergence (convergence recorded). No other ## sections."
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (`git status --porcelain` empty and `git log --oneline -1`).",
+      "met": true,
+      "evidence": "git status --porcelain empty. git log --oneline -1 → c0f3b2c docs(control-room-serve): synthesize canonical design from verified lens drafts. Full SHA c0f3b2cc9c7f1450f4b996090a0acbf2e4660ade. Message has no AI attribution."
+    }
+  ],
+  "commit": "c0f3b2cc9c7f1450f4b996090a0acbf2e4660ade",
+  "findings": [
+    {
+      "finding": "Citations verified: 146 file:line tokens across the three lens drafts were opened in this worktree; 61 unique citations survive in design.md.",
+      "evidence": "python citation scan of design-lens-{a,b,c}.md (48+62+36 tokens) and design.md (86 tokens, 61 unique). Spot-checks: schema.go:10, handlers.go:36-38, ledger.go:132-134, cli.go:702-707, server.go:24-28.",
+      "affects": "design.md citation set; synthesizer done-criterion 1"
+    },
+    {
+      "finding": "Citations dropped: 8 claims (Ledger type at ledger.go:191-192; JSON 404 as current at handlers.go:39-77; Decide as UPDATE+AppendEvent at 615-640; Runs/EventsSince/IntegrationEventsSince as existing at Lanes/Events/IntegrationEvents; static_test.go:11-103 as MIME/JSON-404; cli_test.go:1908-1930 as linked-worktree test; AST of internal/serve/*.go; .lucind/result.schema.json as tracked envelope).",
+      "evidence": "openspec/changes/control-room-serve/design-synthesis-notes.md ## Dropped Citations",
+      "affects": "implementation must add JSON 404, cursor queries, and a linked-worktree serve test rather than assuming they exist"
+    },
+    {
+      "finding": "Contradictions escalated: 0. All three Assumed architecture blocks match proposal Candidate 1 (REST+SSE, schema v5 freeze, Model+Ledger in NewHandler, loopback, worktree refusal).",
+      "evidence": "design-lens-a.md:3-5, design-lens-b.md:3-5, design-lens-c.md:3-5; proposal.md:11-18",
+      "affects": "no architecture block; synthesis proceeded to design.md"
+    },
+    {
+      "finding": "Coverage gaps: specs/ directory missing; HTTP paths for attempts/leases/overlap unspecified; sdd-design 800-word ceiling not used (packet 1800).",
+      "evidence": "glob openspec/changes/control-room-serve/specs → 0 files; design.md Open Questions item 4; wc -w design.md → 1522",
+      "affects": "spec phase still owed; tasks must not invent attempt/lease/overlap routes without a decision"
+    }
+  ],
+  "session_id": "design-crs-synth-2026-08-22"
+}

@@ -1,0 +1,54 @@
+{
+  "packet_id": "remediate-design-carveout-2-agentic-phase-specialist",
+  "status": "done",
+  "summary": "Rewrote the Decision 3 New: replacement for SKILL.md:19 so the prohibition list stays closed (scope, priorities, Dependencies, Acceptance, or Promotion) and the named sdd-* phase-Specialist Acceptance right is an explicit exception, not a deletion. Promotion remains forbidden to every Agent, Specialist included. The commit is a single-line edit of openspec/changes/agentic-phase-specialist/design.md.",
+  "hard_stops": [
+    {
+      "hard_stop": "The `New:` replacement block described above no longer exists in `design.md` in a form you can locate by content.",
+      "fired": false,
+      "note": "Located by content under Decision 3's copy-ready Hard Rule replacement fence: Old: at design.md:43 and New: at design.md:46."
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "change": "modified",
+      "path": "openspec/changes/agentic-phase-specialist/design.md",
+      "why": "Single-clause rewrite of the New: Hard Rule replacement so Acceptance stays in the closed prohibition list and the Specialist carve-out is an exception."
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "The `New:` replacement text keeps the prohibition list closed (`scope, priorities, Dependencies, Acceptance, or Promotion` — same five items, in that order or a natural equivalent), with the Specialist carve-out expressed as an explicit exception to `Acceptance` specifically, not a deletion of it from the list.",
+      "met": true,
+      "evidence": "openspec/changes/agentic-phase-specialist/design.md:46 reads: \"Agents own Lanes, not scope, priorities, Dependencies, Acceptance, or Promotion — except that a named `sdd-*` phase-Specialist may independently Accept its own phase's Lanes\". The five-item list matches Old: at design.md:43; the carve-out is the exception clause after the em dash, not a dropped list item."
+    },
+    {
+      "criterion": "Promotion remains stated as unconditionally forbidden to every Agent, Specialist included, unchanged from the prior correction's intent.",
+      "met": true,
+      "evidence": "design.md:46 still ends with \"Promotion remains forbidden to every Agent, Specialist included.\" The same clause was present in the prior New: text and was not weakened."
+    },
+    {
+      "criterion": "No other line, section, or word of `design.md` was modified beyond this one clause.",
+      "met": true,
+      "evidence": "`git diff HEAD^ HEAD --stat` reports \"1 file changed, 1 insertion(+), 1 deletion(-)\" on openspec/changes/agentic-phase-specialist/design.md only. The hunk is @@ -43,7 +43,7 @@ and changes only the New: sentence (Acceptance and Promotion restored to the list; \"; a named\" became \"— except that a named\")."
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution, confirmed by `lucind-lane-check.sh` reporting a clean `git status --porcelain` and a valid `.lucind/result.json`. Check `git log -1 --format=%B` after committing and strip any injected `Co-authored-by:` trailer.",
+      "met": true,
+      "evidence": "Commit 8ad22cc3315bc522a1168947b38a2614c9fea4df. `git log -1 --format=%B` is \"docs(sdd): keep Acceptance in Hard Rule prohibition list\" with no Co-authored-by trailer (Cursor's git-commit wrapper injected one; stripped via git commit-tree). Before commit: `./lucind-lane-check.sh --file openspec/changes/agentic-phase-specialist/design.md --skip-result` → PASS git status --porcelain: clean / RESULT: PASS. After commit (same command): PASS git status --porcelain: clean / RESULT: PASS. After writing this envelope: `./lucind-lane-check.sh --file openspec/changes/agentic-phase-specialist/design.md` → PASS git status --porcelain: clean / PASS result envelope: .lucind/result.json exists and parses as JSON / RESULT: PASS. Schema validation: python3 json.load against .lucind/result.schema.json (draft-07 required keys and enums)."
+    }
+  ],
+  "commit": "8ad22cc3315bc522a1168947b38a2614c9fea4df",
+  "skills_loaded": [
+    "lucind-executor",
+    "lucind-apply",
+    "lucind-ai",
+    "work-unit-commits",
+    "engram-memory"
+  ],
+  "session_id": "remediate-design-carveout-2-agentic-phase-specialist"
+}

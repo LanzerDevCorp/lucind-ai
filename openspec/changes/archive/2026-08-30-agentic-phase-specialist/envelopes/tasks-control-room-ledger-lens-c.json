@@ -1,0 +1,63 @@
+{
+  "packet_id": "tasks-control-room-ledger-lens-c",
+  "status": "done",
+  "summary": "Authored tasks-lens-c.md for control-room-ledger defining the proof strategy, RED test tasks from the threat matrix, acceptance evidence with cited test seams, review workload forecast, and verification gaps.",
+  "hard_stops": [
+    {
+      "hard_stop": "The design has no threat matrix, so there is nothing to derive RED tests from.",
+      "fired": false
+    },
+    {
+      "hard_stop": "A behavior the specs require cannot be proven through any test this repository can run, and no new seam is identified in the design.",
+      "fired": false
+    },
+    {
+      "hard_stop": "The changed-line estimate cannot be grounded in anything — no comparable file, no archived change of similar shape.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/control-room-ledger/tasks-lens-c.md",
+      "change": "created",
+      "why": "Tasks Lens C artifact defining proof burden, threat matrix RED tests, acceptance evidence, and review workload forecast."
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every threat-matrix row in the design appears in `## RED Tests from the Threat Matrix` with the design's own `Applicable` / `N/A` verdict, and no row was invented.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-ledger/tasks-lens-c.md:20-28 mirrors all 5 rows from openspec/changes/control-room-ledger/design.md:127-136."
+    },
+    {
+      "criterion": "Every applicable row names a RED test and the assertion that fires.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-ledger/tasks-lens-c.md:25 names TestRunRefusesLinkedWorktree and TestServeRefusesLinkedWorktree in cmd/lucind-ai/cli_test.go asserting exit code 1 and stderr message."
+    },
+    {
+      "criterion": "The changed-line estimate states the basis it was derived from, not a bare number.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-ledger/tasks-lens-c.md:18 details 1,200–1,600 lines breakdown based on internal/ledger/schema.go:190-219, internal/ledger/ledger_test.go:934-970, and internal/ledger/ledger.go:816-930."
+    },
+    {
+      "criterion": "Every proving command is derived from a real test file in this worktree, cited with file:line.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-ledger/tasks-lens-c.md:32-42 cites real test files: internal/ledger/ledger_test.go:24,43,360,571,579,608,934,957,1584, cmd/lucind-ai/cli_test.go:212,1060, and internal/serve/model_test.go:585."
+    },
+    {
+      "criterion": "`tasks-lens-c.md` exists, is under 1000 words, and carries `## Assumed decomposition`, `## Review Workload Forecast`, `## Acceptance Evidence`, and `## Verification Gaps`.",
+      "met": true,
+      "evidence": "File openspec/changes/control-room-ledger/tasks-lens-c.md is 896 words (measured by `wc -w`) and contains all required sections."
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (`git status --porcelain` empty and `git log --oneline -1`).",
+      "met": true,
+      "evidence": "git log --oneline -1 shows 'c7b66cb docs(openspec): add tasks lens c for control room ledger' and git status --porcelain is empty."
+    }
+  ],
+  "commit": "c7b66cb"
+}

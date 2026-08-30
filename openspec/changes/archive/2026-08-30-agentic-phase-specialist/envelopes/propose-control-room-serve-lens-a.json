@@ -1,0 +1,45 @@
+{
+  "packet_id": "propose-control-room-serve-lens-a",
+  "status": "done",
+  "summary": "Authored propose-lens-a.md selecting Candidate 1 (granular REST API + SSE stream) with architectural rationale, rejected alternatives analysis, and precise file:line citations.",
+  "hard_stops": [
+    {
+      "hard_stop": "The technical approach cannot be grounded in existing codebase patterns or proposal context.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Candidate selection contradicts frozen exploration conclusions without justification.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/control-room-serve/propose-lens-a.md",
+      "change": "created",
+      "why": "Candidate selection, approach, and architectural rationale lens for control-room-serve."
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every candidate and approach claim carries file:line citations to real code in this worktree.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-serve/propose-lens-a.md:1-37 cites cmd/lucind-ai/cli.go:285,683-705,852,1166-1176, internal/serve/handlers.go:15-21,36-118,148-211, internal/serve/model.go:14-24,128-343, internal/serve/server.go:14,19-28,41-52,55-73, internal/serve/static.go:8-18, internal/serve/static/app.js:96-97, internal/ledger/ledger.go:162-185,285-358,366-384,490-525,705-717, internal/ledger/schema.go:18-57,171-180, internal/run/batch.go:29-53, docs/prd.md:53."
+    },
+    {
+      "criterion": "propose-lens-a.md exists, is under 1000 words, and carries every skeleton section.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-serve/propose-lens-a.md contains 722 words and all 4 skeleton sections: Selected Candidate \u0026 Approach, Conceptual Changes \u0026 Architecture Rationale, Alternatives Considered \u0026 Rejected, Open Questions."
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (git status --porcelain empty and git log --oneline -1).",
+      "met": true,
+      "evidence": "git log -1 --oneline shows '1cc6d4d docs(openspec): add propose-lens-a for control-room-serve' and git status --porcelain is empty for tracked/committed files."
+    }
+  ],
+  "commit": "1cc6d4d85753d6bf894a50a15b10d365f3868809",
+  "session_id": "22cfa960-448e-4fef-b6c9-72bca16b24cc"
+}

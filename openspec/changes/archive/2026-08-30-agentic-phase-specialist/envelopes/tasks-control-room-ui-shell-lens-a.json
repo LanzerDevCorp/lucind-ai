@@ -1,0 +1,58 @@
+{
+  "packet_id": "tasks-control-room-ui-shell-lens-a",
+  "status": "done",
+  "summary": "Produced tasks-lens-a.md with a 4-phase decomposition across 10 concrete tasks, ordering constraints, and complete bidirectional requirement traceability.",
+  "hard_stops": [
+    {
+      "hard_stop": "A requirement in `specs/` cannot be decomposed into tasks because the design does not say how it is built.",
+      "fired": false
+    },
+    {
+      "hard_stop": "The design's file-changes table and the specs disagree about what this change does.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Two tasks are mutually circular: each needs the other to land first.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/control-room-ui-shell/tasks-lens-a.md",
+      "change": "created",
+      "why": "Phased implementation checklist and dependency ordering for control-room-ui-shell (Lens A)."
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every task names a concrete path, and every \"modify\" task's path resolves in this worktree.",
+      "met": true,
+      "evidence": "All 10 tasks in openspec/changes/control-room-ui-shell/tasks-lens-a.md name explicit paths (e.g. internal/serve/handlers.go:36-38, internal/serve/static/index.html:1-163, internal/serve/static_test.go:11-102), and all modified paths exist in the repository."
+    },
+    {
+      "criterion": "Every requirement in `specs/` appears in the traceability table with at least one task, and every gap in either direction is reported rather than hidden.",
+      "met": true,
+      "evidence": "All 6 spec requirements across the 6 files in openspec/changes/control-room-ui-shell/specs/ are mapped to tasks in the Requirement Traceability table (openspec/changes/control-room-ui-shell/tasks-lens-a.md:46-54)."
+    },
+    {
+      "criterion": "Every dependency row states why it is a real ordering constraint, not a preference.",
+      "met": true,
+      "evidence": "Dependency Order table in openspec/changes/control-room-ui-shell/tasks-lens-a.md:31-43 specifies concrete technical reasons (compilation, module imports, route registrations, DOM element bindings) for each dependency."
+    },
+    {
+      "criterion": "`tasks-lens-a.md` exists, is under 1000 words, and carries `## Assumed decomposition`, `## Dependency Order`, and `## Requirement Traceability`.",
+      "met": true,
+      "evidence": "wc -w openspec/changes/control-room-ui-shell/tasks-lens-a.md reports 760 words, containing ## Assumed decomposition at line 3, ## Dependency Order at line 29, and ## Requirement Traceability at line 44."
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (`git status --porcelain` empty and `git log --oneline -1`).",
+      "met": true,
+      "evidence": "Commit 7cfdb73 'docs(openspec): add tasks lens a decomposition and ordering for control-room-ui-shell' with clean git status --porcelain."
+    }
+  ],
+  "commit": "7cfdb738a3fc8797c0ade985771006a70d48d59e"
+}

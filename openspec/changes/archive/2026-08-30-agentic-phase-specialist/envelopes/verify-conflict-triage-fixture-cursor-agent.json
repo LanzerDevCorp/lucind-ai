@@ -1,0 +1,98 @@
+{
+  "packet_id": "verify-conflict-triage-fixture-cursor-agent",
+  "status": "done",
+  "summary": "Qualitative verify of conflict-triage-fixture is complete. Spec intent is largely met (fail-open triage, output-only persist, three-hunk ClassRequired fixture, two-step CAS retry, pinned judges) and the two design questions stay open. Weighting edge cases and test quality: mechanical hunk resolutions are prompt-only, fixture packets cannot edit toy.go, and the rubric grades canned JSON rather than fixture evidence; tasks 2.1 and 3.4 do lock real git/gate behavior rather than restating it.",
+  "hard_stops": [
+    {
+      "hard_stop": "Executing mechanical test/build commands when mechanical results are already provided.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Any credential value would need to be chosen, generated, or written.",
+      "fired": false
+    },
+    {
+      "hard_stop": "A done-criterion turns out to be impossible, or already true for a reason the packet did not anticipate.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Two reasonable interpretations exist for a spec requirement and the specification does not say which.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": ".lucind/result.json",
+      "change": "created",
+      "why": "Read-only judgment envelope required by the packet."
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every indirection introduced is demonstrably consumed by a terminal consumer.",
+      "met": true,
+      "evidence": "TriageInvoker is required by RunTriage (internal/conflicttriage/triage.go:38-42,54) which persists via Service.UpdateCandidateOutput (reconcile.go:910-945) into the ledger row; tests are the design's designated invoker consumer (triage_test.go:149-156). GenerateFixture is consumed by fixture_test.go:34 (overlap.Evaluate/Classify) and attempt_test.go:899,999 (ExecuteAttempt → evaluateOverlapGate with nil EvaluateOverlap, so overlap.Evaluate at attempt.go:693-696). EvaluateRubric is consumed by rubric_test.go:78,123 and calls executor.Claude.Run / Opencode.Run (rubric.go:75-80). Packet templates are parsed by fixture_test.go:122-155 (packet.Parse, feature.ValidateParentRef, run.FeatureTarget, packet.DisjointAllowedPaths)."
+    },
+    {
+      "criterion": "The worktree carries no unique commits and no working-tree changes relative to the lane's birth point (git status --porcelain empty AND HEAD equals git merge-base HEAD \u003cprimary HEAD\u003e).",
+      "met": true,
+      "evidence": "git status --porcelain empty. HEAD=cf7bca364d32abf2dbcb2b56f12b1923ed1345c5 equals feature/conflict-triage-fixture and equals git merge-base HEAD feature/conflict-triage-fixture (feature parent is this verify lane's primary). Unique commits vs that parent: 0."
+    },
+    {
+      "criterion": "Qualitative evaluation completed (.lucind/result.json populated with status, summary, and structured findings).",
+      "met": true,
+      "evidence": "This envelope. Spec, edge, and test-quality review of conflict-triage, conflict-fixture, triage-evaluation-rubric, and reconciliation-approval against the implementation and tests; mechanical log used frozen (ab478b7, exit 0)."
+    }
+  ],
+  "findings": [
+    {
+      "finding": "RunTriage does not enforce deterministic mechanical resolutions. pinBusinessHigh only overwrites business hunks to ARBITRARY and pins RiskBand high; slice_union / rename_vs_edit resolutions are whatever the invoker returned. The prompt asks for deterministic mechanical resolution, but Go never checks it. TestTriageAgent_BusinessHunkPinsHighRisk includes a slice_union hunk with Resolution union and never asserts that field after RunTriage; there is no rename_vs_edit coverage on the RunTriage path.",
+      "evidence": "internal/conflicttriage/triage.go:112-123; internal/conflicttriage/triage.go:133-138; internal/conflicttriage/triage_test.go:131-136,164-178; openspec/changes/conflict-triage-fixture/specs/conflict-triage/spec.md:19-23",
+      "affects": "conflict-triage mechanical-hunk scenario; triage_test.go"
+    },
+    {
+      "finding": "Fixture packet templates cannot produce the three-hunk ClassRequired toy. GenerateFixture conflicts on toy.go for both features; feat_a.md / feat_b.md grant only fixture/feat-a/ and fixture/feat-b/. Dispatching those packets cannot edit toy.go. Tests only parse the four packets and assert DisjointAllowedPaths success — they never dispatch, and they never prove the spec's overlapping combined-dispatch refusal.",
+      "evidence": "internal/conflicttriage/fixture/fixture.go:18,245-257; internal/conflicttriage/fixture/packets/feat_a.md:9; internal/conflicttriage/fixture/packets/feat_b.md:9; internal/conflicttriage/fixture/fixture_test.go:122-155; openspec/changes/conflict-triage-fixture/specs/conflict-fixture/spec.md:25-30",
+      "affects": "conflict-fixture packets and combined-dispatch scenario"
+    },
+    {
+      "finding": "EvaluateRubric grades canned TriagePayload JSON from stub binaries with an empty temp WorktreePath. It never presents GenerateFixture evidence to a judge. Isolation (model argv, no cross-provider strings) is a real executor.Run check and is the strongest rubric test. gradePayload requires three hunks, non-uniform kind/resolution, a business hunk flagged ARBITRARY, and two mechanical kinds — it does not require RiskBand high, and it does not score cause quality. Uniform rejection is locked. ProposedSHA is correctly ignored.",
+      "evidence": "internal/conflicttriage/fixture/rubric.go:46-47,75-80,112-138; internal/conflicttriage/fixture/rubric_test.go:27-44,66-111,113-134; openspec/changes/conflict-triage-fixture/specs/triage-evaluation-rubric/spec.md:9-23",
+      "affects": "triage-evaluation-rubric; rubric_test.go"
+    },
+    {
+      "finding": "Invariant coverage through RunTriage is markers-only. Spec requires residual conflict markers or edits outside allowed paths to fail candidate validation. TestTriageAgent_InvariantViolationsFailCandidate writes leftover markers in toy.go and checks CandidateStatusFailed with Output retained — that locks the marker path and audit retention. Out-of-scope edits are locked on the helpers (task 2.1) but not through RunTriage. failOpenPayload omits ProposedSHA.",
+      "evidence": "internal/conflicttriage/triage.go:63-74,98-109; internal/conflicttriage/triage_test.go:205-261; openspec/changes/conflict-triage-fixture/specs/conflict-triage/spec.md:25-29",
+      "affects": "conflict-triage invariant scenario; triage_test.go"
+    },
+    {
+      "finding": "Missing/divergent base SHA skipping ClassRequired is proven at overlap.Evaluate, not through evaluateOverlapGate. fixture_test.go:113-119 calls Evaluate with an empty common base and expects ErrNoMergeBase. The gate's continue on that error is attempt.go:745-747 (pre-existing). There is no ExecuteAttempt test that a missing/divergent registered base_sha yields no awaiting request and no promotion block. Task 3.1 discloses this; the spec scenario is still the gate path.",
+      "evidence": "internal/conflicttriage/fixture/fixture_test.go:88-120; internal/run/attempt.go:738-747; openspec/changes/conflict-triage-fixture/specs/conflict-fixture/spec.md:19-23",
+      "affects": "conflict-fixture missing-base scenario"
+    },
+    {
+      "finding": "validVerifyBudget is a weak format check: prefix ~ and substring ' min: '. Spec requires wall-clock duration plus a concrete command. '~4 min: ' with an empty command would pass; the business test only asserts the prefix/substring after an empty invoker budget is replaced with VerifyBudgetExample.",
+      "evidence": "internal/conflicttriage/triage.go:45-47,125-131; internal/conflicttriage/types.go:24-25; internal/conflicttriage/triage_test.go:139,179-181; openspec/changes/conflict-triage-fixture/specs/conflict-triage/spec.md:15-17",
+      "affects": "conflict-triage verify-budget contract"
+    },
+    {
+      "finding": "The business-hunk fixture property 'both sides compile and pass their own tests' is not locked. toy.go is a snippet (Price 100 vs 200, Tags literals, Helper vs HelperRenamed) with pad(25) so hunks stay farther apart than NearbyHunkLines=3. Tests assert Classify ClassRequired and hunk count 3; they never go-build or go-test the toy.",
+      "evidence": "internal/conflicttriage/fixture/fixture.go:237-257; internal/conflicttriage/fixture/fixture_test.go:56-85; internal/overlap/overlap.go:93-98; openspec/changes/conflict-triage-fixture/specs/conflict-fixture/spec.md:10-11",
+      "affects": "conflict-fixture business-hunk scenario"
+    },
+    {
+      "finding": "Apply-lane claim check: tasks 2.1 and 3.4 lock real terminal behavior, not tautologies. e949c95 added candidate_test.go without modifying candidate.go. TestScanConflictMarkers_DocumentationAndScriptPaths scans docs/README.md and script.sh as text, skips a NUL binary, and asserts the script was not exec'd (sentinel absent). TestEnforceAllowedPaths_ExplicitWorktreeCwd chdirs away and uses git -C. TestEnforceAllowedPaths_StagedAndUntrackedDisjoint asserts the 4-way union (committed/unstaged/staged/untracked) against base_sha. attempt_test.go GenerateFixture + ExecuteAttempt uses real overlap.Evaluate (EvaluateOverlap unset); matching-tip retry adopts the integrated SHA and PromoteCAS once; tip-drift commits on branch B and asserts no stale SHA and PromoteCAS count 0. TestReconcileResolve_RejectsLinkedWorktree creates a linked worktree, chdirs into it, and expects CLI refusal (cli.go:1478-1480).",
+      "evidence": "git show --name-only e949c95 (no candidate.go); internal/resolve/candidate_test.go:95-232; internal/resolve/candidate.go:48-95,100-133; internal/run/attempt_test.go:894-1109; internal/run/attempt.go:693-696; cmd/lucind-ai/cli_test.go:3307-3334; cmd/lucind-ai/cli.go:1478-1480",
+      "affects": "verify claim for tasks 2.1 and 3.4"
+    },
+    {
+      "finding": "The two design questions remain open. types.go states there is no numeric mapping; task 1.1 did not encode a formula; pinBusinessHigh is the spec ratchet (any business hunk → payload high), not thresholds for mixed composition. Rubric pins claude/claude-opus-5 and opencode/openai/gpt-5.6-sol only; RunTriage requires an injected TriageInvoker and names no production executor. No task closed either question.",
+      "evidence": "internal/conflicttriage/types.go:1-11; internal/conflicttriage/triage.go:14-15,38-40,112-123; internal/conflicttriage/fixture/rubric.go:14-19,46-47; openspec/changes/conflict-triage-fixture/design.md:118-123; openspec/changes/conflict-triage-fixture/tasks.md:96-101",
+      "affects": "open questions (must stay open)"
+    }
+  ]
+}

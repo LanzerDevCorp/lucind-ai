@@ -1,0 +1,58 @@
+{
+  "packet_id": "tasks-control-room-telemetry-lens-a",
+  "status": "done",
+  "summary": "Produced tasks-lens-a.md with phased implementation checklist across four phases (Foundation \u0026 Core Interfaces, Executor MultiWriter Streaming, Execution Runtime \u0026 Server Integration, and Testing \u0026 Verification). Defined strictly ordered task dependencies and mapped all five specification requirements into the traceability matrix.",
+  "hard_stops": [
+    {
+      "hard_stop": "A requirement in `specs/` cannot be decomposed into tasks because the design does not say how it is built.",
+      "fired": false
+    },
+    {
+      "hard_stop": "The design's file-changes table and the specs disagree about what this change does.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Two tasks are mutually circular: each needs the other to land first.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/control-room-telemetry/tasks-lens-a.md",
+      "change": "created",
+      "why": "Phased implementation checklist and dependency ordering for control-room-telemetry change"
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every task names a concrete path, and every \"modify\" task's path resolves in this worktree.",
+      "met": true,
+      "evidence": "All 14 tasks name concrete paths (internal/executor/executor.go:15-37, internal/serve/hub.go, internal/serve/model.go:17-24, internal/executor/agy.go:169-175, internal/executor/cursor_agent.go:91-97, internal/executor/opencode.go:130-136, internal/serve/handlers.go:36-118, internal/run/run.go:368-375, cmd/lucind-ai/cli.go:641-660, internal/executor/agy_test.go:18-26, internal/serve/hub_test.go, internal/serve/model_test.go:595-627, internal/ledger/ledger_test.go:733, internal/run/run_test.go:29-56), and all existing paths resolve in the repository."
+    },
+    {
+      "criterion": "Every requirement in `specs/` appears in the traceability table with at least one task, and every gap in either direction is reported rather than hidden.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-telemetry/tasks-lens-a.md:52-58 maps all 5 requirements across specs/ (Worktree-Local Log Teeing and Process Invariants, High-Frequency SQLite Ledger Isolation, Loopback Server-Sent Events Telemetry Stream, Feature Attempt Audit Preservation, Shell-Free Run Lifecycle Query) with no gaps."
+    },
+    {
+      "criterion": "Every dependency row states why it is a real ordering constraint, not a preference.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-telemetry/tasks-lens-a.md:34-49 specifies structural compilation/import/runtime ordering constraints for every task."
+    },
+    {
+      "criterion": "`tasks-lens-a.md` exists, is under 1000 words, and carries `## Assumed decomposition`, `## Dependency Order`, and `## Requirement Traceability`.",
+      "met": true,
+      "evidence": "wc -w openspec/changes/control-room-telemetry/tasks-lens-a.md output is 761 words, and contains all required sections."
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (`git status --porcelain` empty and `git log --oneline -1`).",
+      "met": true,
+      "evidence": "git log -1 shows commit a11b562 'docs(control-room-telemetry): add tasks decomposition and dependency ordering lens a' without AI attribution, and git status --porcelain is empty prior to writing .lucind/result.json."
+    }
+  ],
+  "commit": "a11b56229bab5cd1abfbb352c8ad450a3074a5f3"
+}

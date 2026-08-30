@@ -1,0 +1,63 @@
+{
+  "packet_id": "design-lane-status-observability-lens-c",
+  "status": "done",
+  "summary": "Produced technical design for orphan-lane reconciliation in design-lens-c.md covering PID recording on RegisterRun, serve sweeper lifecycle, 10s ticker interval, and POSIX signal liveness detection.",
+  "hard_stops": [
+    {
+      "hard_stop": "The specs do not determine whether the sweep must be conservative (favor leaving a lane `running`) or aggressive (favor marking it `failed`) on ambiguous liveness evidence.",
+      "fired": false
+    },
+    {
+      "hard_stop": "A decision cannot name any terminal consumer.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Deciding this lens's scope would require designing lens A's or lens B's slice.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/lane-status-observability/design-lens-c.md",
+      "change": "created",
+      "why": "Technical design artifact for orphan-lane reconciliation (Lens C)"
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "A `## Citation Manifest` section lists every unique citation, grouped by file.",
+      "met": true,
+      "evidence": "openspec/changes/lane-status-observability/design-lens-c.md:82-96 contains Citation Manifest with 15 unique citations grouped alphabetically by file."
+    },
+    {
+      "criterion": "Decisions 1-5 each state a FINAL choice, including the exact ticker interval and the exact liveness mechanism — no \"either could work.\"",
+      "met": true,
+      "evidence": "openspec/changes/lane-status-observability/design-lens-c.md:7-46 documents final choices for PID capture, Sweeper type/hook, 10s interval, kill(pid, 0) probe, and zero-PID skip."
+    },
+    {
+      "criterion": "Every applicable threat-matrix row names the expected safe/failure behavior and a planned RED test; every `N/A` row states a reason.",
+      "met": true,
+      "evidence": "openspec/changes/lane-status-observability/design-lens-c.md:64-73 includes applicability matrix marking 5 N/A rows with reasons and Process Integration with safe/failure behavior and 3 planned RED tests."
+    },
+    {
+      "criterion": "Every decision and file-change row names a terminal consumer with a `file:line` citation that points at real code in this worktree.",
+      "met": true,
+      "evidence": "openspec/changes/lane-status-observability/design-lens-c.md:12,24,31,39,46,52-54 cites terminal consumers in internal/ledger/runs.go:29-41, internal/ledger/ledger.go:452-484, internal/serve/hub.go:213-235, and cmd/lucind-ai/cli.go:770-774."
+    },
+    {
+      "criterion": "`design-lens-c.md` exists, is under 1000 words, and carries every skeleton section.",
+      "met": true,
+      "evidence": "openspec/changes/lane-status-observability/design-lens-c.md exists, word count before manifest is 875 words (under 1000 limit), and includes all skeleton sections."
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (`git status --porcelain` empty and `git log --oneline -1`).",
+      "met": true,
+      "evidence": "Commit a62f2a2 (docs(design): design lens c orphan-lane reconciliation) created with no AI attribution; git status --porcelain is clean."
+    }
+  ],
+  "commit": "a62f2a2478402a38bbfd22a65d208b2c06d42c07"
+}

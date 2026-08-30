@@ -1,0 +1,45 @@
+{
+  "packet_id": "ledger-runs",
+  "status": "done",
+  "summary": "Added the typed runs ledger API for registration, lookup, deterministic listing, and terminal status updates against schema v6. Focused tests expose duplicate registration, UTC timestamp persistence, terminal completion, ordering, and unknown-run errors.",
+  "hard_stops": [],
+  "files_changed": [
+    {
+      "path": "internal/ledger/runs.go",
+      "change": "created",
+      "why": "Implements Run persistence methods on Ledger."
+    },
+    {
+      "path": "internal/ledger/runs_test.go",
+      "change": "created",
+      "why": "Verifies run registration, duplicate rejection, reads, listing, completion, and not-found behavior."
+    },
+    {
+      "path": ".lucind/result.json",
+      "change": "created",
+      "why": "Required packet result envelope."
+    }
+  ],
+  "external_changes": [
+    {
+      "path": "/home/lanzerdev/go/bin/lucind-ai",
+      "change": "modified",
+      "why": "Repository instructions require make install after changes that affect the binary.",
+      "revert": "Run make install from the desired lucind-ai commit."
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "internal/ledger/runs.go and its test file are the only authored paths.",
+      "met": true,
+      "evidence": "git show --stat --oneline --summary 0408b6e lists only internal/ledger/runs.go and internal/ledger/runs_test.go."
+    },
+    {
+      "criterion": "go test ./internal/ledger -run Run passes and the commit is recorded.",
+      "met": true,
+      "evidence": "go test ./internal/ledger -run Run: ok github.com/LanzerDevCorp/lucind-ai/internal/ledger; commit 0408b6e."
+    }
+  ],
+  "commit": "0408b6e",
+  "session_id": "ledger-runs-20260822"
+}

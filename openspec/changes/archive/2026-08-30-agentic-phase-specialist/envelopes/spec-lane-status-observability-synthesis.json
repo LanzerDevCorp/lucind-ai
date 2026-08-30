@@ -1,0 +1,147 @@
+{
+  "packet_id": "spec-lane-status-observability-synthesis",
+  "status": "done",
+  "summary": "Verified every lens citation against this worktree, then wrote six change-folder spec files and four-section synthesis notes. Lens A/C ADDED classifications stand; schema v7 is stated once under orphan-lane-reconciliation; five proposal open questions remain unanswered. Two conventional commits, no AI attribution.",
+  "hard_stops": [
+    {
+      "hard_stop": "The three ## Assumed requirements blocks are mutually irreconcilable and the proposal does not choose among them. Write the notes file, leave specs/ uncreated, and block.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Lens A's classification is refuted by a live spec you verified, but its requirement text is also wrong in a way you cannot fix by editing the classification alone.",
+      "fired": false
+    },
+    {
+      "hard_stop": "A MODIFIED requirement's live block cannot be recovered from Lens C or from openspec/specs/, so the block would have to be partial. Never write a partial block.",
+      "fired": false
+    },
+    {
+      "hard_stop": "One or more lens drafts is missing from this worktree.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying the spine honestly would require exceeding the authored budget. Report which requirement forces it rather than silently overrunning or silently cutting.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/lane-status-observability/specs/lane-execution/spec.md",
+      "change": "created",
+      "why": "ADDED Lane metadata dispatch persistence"
+    },
+    {
+      "path": "openspec/changes/lane-status-observability/specs/read-only-packet-schema/spec.md",
+      "change": "created",
+      "why": "ADDED Extended packet frontmatter parsing"
+    },
+    {
+      "path": "openspec/changes/lane-status-observability/specs/dispatched-packet-body/spec.md",
+      "change": "created",
+      "why": "New full spec for packet body inspection"
+    },
+    {
+      "path": "openspec/changes/lane-status-observability/specs/lane-progress-telemetry/spec.md",
+      "change": "created",
+      "why": "New full spec for structured telemetry"
+    },
+    {
+      "path": "openspec/changes/lane-status-observability/specs/orphan-lane-reconciliation/spec.md",
+      "change": "created",
+      "why": "New full spec including the single schema v7 migration"
+    },
+    {
+      "path": "openspec/changes/lane-status-observability/specs/batch-wave-view/spec.md",
+      "change": "created",
+      "why": "MODIFIED Batch and DAG Wave Inspection, full live block plus two scenarios"
+    },
+    {
+      "path": "openspec/changes/lane-status-observability/spec-synthesis-notes.md",
+      "change": "created",
+      "why": "Four-section synthesis notes for the orchestrator"
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "The canonical document was committed BEFORE the notes file was started, as its own commit.",
+      "met": true,
+      "evidence": "c8c3be5 docs(openspec): add canonical lane-status-observability spec delta (6 spec files only). Notes file created after that commit as a4fa930."
+    },
+    {
+      "criterion": "Every citation in every lens manifest was opened and checked in this worktree, and its outcome recorded.",
+      "met": true,
+      "evidence": "openspec/changes/lane-status-observability/spec-synthesis-notes.md Dropped Citations: 80 manifest rows, 65 unique ranges, 63 verified / 1 dropped / 1 retargeted."
+    },
+    {
+      "criterion": "Every file:line citation surviving into the delta tree was opened and confirmed in this worktree, and every dropped claim is listed under ## Dropped Citations.",
+      "met": true,
+      "evidence": "Delta specs contain no file:line citations. Dropped claim app.js:200-249 and retarget packet_test.go:15-67 are in spec-synthesis-notes.md Dropped Citations."
+    },
+    {
+      "criterion": "Every MODIFIED block (if any) matches the live requirement scenario for scenario, with only the intended edits applied — verified by opening the live spec, not by trusting Lens C.",
+      "met": true,
+      "evidence": "Compared openspec/specs/batch-wave-view/spec.md:9-29 to the MODIFIED block. Both live scenarios copied verbatim; requirement text extended; Previously line added; two new scenarios appended."
+    },
+    {
+      "criterion": "Every requirement carries an RFC 2119 keyword and at least one GIVEN / WHEN / THEN scenario.",
+      "met": true,
+      "evidence": "Six requirements, each with MUST and at least two GIVEN/WHEN/THEN scenarios in the six spec.md files."
+    },
+    {
+      "criterion": "batch-wave-view has a verified requirement, checked against its live spec by you, not merely copied from Lens C.",
+      "met": true,
+      "evidence": "Live requirement Batch and DAG Wave Inspection at openspec/specs/batch-wave-view/spec.md:9 confirmed present with two scenarios; delta is MODIFIED of that full block."
+    },
+    {
+      "criterion": "None of the five still-open proposal questions is answered as if decided anywhere in the delta tree.",
+      "met": true,
+      "evidence": "Frontmatter names, packet-path persistence, ticker interval, PID syscall, and DAG Node/EmitPacketContent scope are called out as open or omitted. Lens B URL path stripped. Notes Coverage Gaps records the corrections."
+    },
+    {
+      "criterion": "The delta tree's authored content is under 1800 words excluding verbatim copied blocks, and every spine item is satisfied or reported under ## Coverage Gaps.",
+      "met": true,
+      "evidence": "python word count: 1289 authored, 91 copied MODIFIED-scenario words excluded, 1380 total. Spine coverage in spec-synthesis-notes.md Coverage Gaps."
+    },
+    {
+      "criterion": "spec-synthesis-notes.md exists with exactly the four required sections, each either populated or explicitly None.",
+      "met": true,
+      "evidence": "openspec/changes/lane-status-observability/spec-synthesis-notes.md sections Unresolved Contradictions, Coverage Gaps, Dropped Citations, Requirement Divergence. First section is None."
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (git status --porcelain empty and git log --oneline -1).",
+      "met": true,
+      "evidence": "git status --porcelain empty. git log --oneline -1: a4fa930 docs(openspec): record lane-status-observability spec synthesis notes. Parent c8c3be5 is the spec-tree commit. Neither message has Co-authored-by."
+    }
+  ],
+  "commit": "a4fa930788c3c13e720e2eba73c4f14d84cd93a6",
+  "findings": [
+    {
+      "finding": "citations_verified",
+      "evidence": "63 unique ranges verified; 80 manifest rows opened"
+    },
+    {
+      "finding": "citations_dropped",
+      "evidence": "1 dropped (app.js:200-249 approval-card, not lane packet link); 1 retargeted (packet_test.go:15-67 absent-key at :69+)"
+    },
+    {
+      "finding": "classification_corrections",
+      "evidence": "0. Lens C confirmed Lens A ADDED for lane-execution and read-only-packet-schema against live specs."
+    },
+    {
+      "finding": "modified_blocks_confirmed_complete",
+      "evidence": "1. batch-wave-view Batch and DAG Wave Inspection, live scenarios copied verbatim from openspec/specs/batch-wave-view/spec.md:17-29"
+    },
+    {
+      "finding": "contradictions_escalated",
+      "evidence": "0. Unresolved Contradictions is None."
+    },
+    {
+      "finding": "coverage_gaps",
+      "evidence": "Quiet OQ corrections (frontmatter names, URL path); batch-wave-view single-author; skill 650 vs packet 1800 noted as packet-wins; DAG packet routing not invented."
+    }
+  ]
+}

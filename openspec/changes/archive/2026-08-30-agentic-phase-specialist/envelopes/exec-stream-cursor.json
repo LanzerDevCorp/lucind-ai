@@ -1,0 +1,57 @@
+{
+  "packet_id": "exec-stream-cursor",
+  "status": "done",
+  "summary": "A fresh authenticated cursor-agent 2026.08.11-e8db854 probe confirmed newline-delimited system, user, thinking, assistant, and result records, including partial timestamps and a terminal assistant record without timestamp_ms. The empirically grounded decoder from fc30ab0 was cherry-picked onto the actual current HEAD, verified with focused, race, and full tests, committed, and installed as lucind-ai 01e11c1.",
+  "hard_stops": [],
+  "files_changed": [
+    {
+      "path": "internal/executor/cursor_agent.go",
+      "change": "modified",
+      "why": "Select stream-json only when progress is requested, normalize observed records, ignore unknown valid records, and fall back to blocking JSON for absent or malformed streams."
+    },
+    {
+      "path": "internal/executor/cursor_agent_test.go",
+      "change": "modified",
+      "why": "Cover observed known records, unknown valid records, and empty or unparseable stream fallback."
+    },
+    {
+      "path": ".lucind/result.json",
+      "change": "created",
+      "why": "Record schema-validated packet evidence after the implementation commit existed."
+    }
+  ],
+  "external_changes": [
+    {
+      "path": "/home/lanzerdev/go/bin/lucind-ai",
+      "change": "modified",
+      "why": "The packet explicitly required make install after changing binary code; lucind-ai -v now reports commit 01e11c1.",
+      "revert": "Reinstall lucind-ai from the prior worktree commit b4fb53205a710cb25f1b559563d618d5caff6eef using make install."
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Empirical output capture is attached to result evidence and decoder tests cover known and unknown records.",
+      "met": true,
+      "evidence": "Probe command: cursor-agent --print 'Reply with exactly PONG.' --output-format stream-json --stream-partial-output --trust --force --approve-mcps --model cursor-grok-4.6-high --workspace \"$PWD\"\nExact stdout:\n{\"type\":\"system\",\"subtype\":\"init\",\"apiKeySource\":\"login\",\"cwd\":\"/home/lanzerdev/git_root/lucind-ai-worktrees/exec-stream-cursor\",\"session_id\":\"347a8548-a55b-4b37-afae-22175d575d20\",\"model\":\"Cursor Grok 4.6 High\",\"permissionMode\":\"default\"}\n{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"Reply with exactly PONG.\"}]},\"session_id\":\"347a8548-a55b-4b37-afae-22175d575d20\"}\n{\"type\":\"thinking\",\"subtype\":\"delta\",\"text\":\"The user requested a\",\"session_id\":\"347a8548-a55b-4b37-afae-22175d575d20\",\"timestamp_ms\":1787413378593}\n{\"type\":\"thinking\",\"subtype\":\"delta\",\"text\":\" response containing\",\"session_id\":\"347a8548-a55b-4b37-afae-22175d575d20\",\"timestamp_ms\":1787413378730}\n{\"type\":\"thinking\",\"subtype\":\"delta\",\"text\":\" exactly \\\"PONG\\\".\",\"session_id\":\"347a8548-a55b-4b37-afae-22175d575d20\",\"timestamp_ms\":1787413378836}\n{\"type\":\"thinking\",\"subtype\":\"completed\",\"session_id\":\"347a8548-a55b-4b37-afae-22175d575d20\",\"timestamp_ms\":1787413380218}\n{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"P\"}]},\"session_id\":\"347a8548-a55b-4b37-afae-22175d575d20\",\"timestamp_ms\":1787413380219}\n{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"ONG\"}]},\"session_id\":\"347a8548-a55b-4b37-afae-22175d575d20\",\"timestamp_ms\":1787413380220}\n{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"PONG\"}]},\"session_id\":\"347a8548-a55b-4b37-afae-22175d575d20\"}\n{\"type\":\"result\",\"subtype\":\"success\",\"duration_ms\":6924,\"duration_api_ms\":6924,\"is_error\":false,\"result\":\"PONG\",\"session_id\":\"347a8548-a55b-4b37-afae-22175d575d20\",\"request_id\":\"8f784345-1763-4389-accd-3ae24e93bb22\",\"usage\":{\"inputTokens\":18443,\"outputTokens\":119,\"cacheReadTokens\":384,\"cacheWriteTokens\":0}}\nFocused command: go test ./internal/executor -run '^TestCursorAgentRun(StreamsObservedRecordsAndIgnoresUnknownRecords|FallsBackToBlockingJSONWhenStreamIs(Empty|Unparseable))$' -count=1 -v. Result: PASS; 3/3 named tests passed in 0.017s. Race command: go test -race ./internal/executor -count=1. Result: PASS in 16.876s. Final full command: go test ./... -count=1. Result: PASS for all 19 packages."
+    },
+    {
+      "criterion": "Only the three allowed paths change and the commit is recorded.",
+      "met": true,
+      "evidence": "Commit 01e11c1571dbf90e50ea244949a4eba7e48aad1a. git diff HEAD^ HEAD --name-only listed exactly internal/executor/cursor_agent.go and internal/executor/cursor_agent_test.go; numstat was 119/3 and 120/0 (239 tracked changed lines). .lucind/result.json is the only ignored packet artifact and is intentionally not committed. make install succeeded, and lucind-ai -v reported 'lucind-ai 01e11c1 (go1.25.0, linux/amd64)'."
+    }
+  ],
+  "commit": "01e11c1571dbf90e50ea244949a4eba7e48aad1a",
+  "findings": [
+    {
+      "finding": "The supplied fc30ab0 commit was not directly based on the current HEAD, so a fast-forward was impossible; its parent was 64b6b2c while current HEAD was b4fb532.",
+      "evidence": "git rev-parse fc30ab0^ =\u003e 64b6b2cc7539d4432457cc082bb6a82c8b599ae5; git rev-parse HEAD before apply =\u003e b4fb53205a710cb25f1b559563d618d5caff6eef. The exact patch cherry-picked cleanly as 01e11c1.",
+      "affects": "Branch-topology assumptions for packet reuse; implementation behavior and allowed-path scope were unchanged."
+    },
+    {
+      "finding": "The first full-suite run, launched concurrently with the race suite and installation, hit transient unrelated SQLITE_BUSY and per-lane deadline failures; both failed tests passed individually and the complete suite passed on a clean rerun.",
+      "evidence": "Initial failures: internal/ledger TestConcurrentProgressAndSetStatus and internal/run TestExecuteBatchAppliesPerLaneDeadlineIndependently. Individual reruns passed in 0.143s and 0.274s; subsequent go test ./... -count=1 passed all 19 packages.",
+      "affects": "Test execution should avoid unnecessary concurrent heavyweight suites when collecting deterministic full-suite evidence."
+    }
+  ],
+  "session_id": "sdd-apply-exec-stream-cursor-20260822"
+}

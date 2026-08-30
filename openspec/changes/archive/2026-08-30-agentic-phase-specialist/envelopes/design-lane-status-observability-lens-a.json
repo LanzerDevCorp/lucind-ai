@@ -1,0 +1,58 @@
+{
+  "packet_id": "design-lane-status-observability-lens-a",
+  "status": "done",
+  "summary": "Authored design-lens-a.md covering lane dispatch metadata wiring, extended packet frontmatter parsing, packet-path JSON persistence on LaneMetadata, and the GET /api/packets/{runID}/{laneID} route. Decided Open Questions 1, 2, and 5 with final choices and named terminal consumers for all decisions and file changes.",
+  "hard_stops": [
+    {
+      "hard_stop": "The proposal or specs contradict each other on a point this lens must decide, with no way to reconcile from the code.",
+      "fired": false
+    },
+    {
+      "hard_stop": "A decision cannot name any terminal consumer.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Deciding Open Question 5 would require designing lens B's or lens C's slice.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/lane-status-observability/design-lens-a.md",
+      "change": "created",
+      "why": "Architecture design draft for Lens A covering metadata, frontmatter, and packet body"
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "A ## Citation Manifest section lists every unique citation, grouped by file.",
+      "met": true,
+      "evidence": "openspec/changes/lane-status-observability/design-lens-a.md:73-103 lists all 29 unique citations grouped by file, files alphabetical, lines ascending."
+    },
+    {
+      "criterion": "Decisions 1, 2, and 5 each state a FINAL choice — no \"still open,\" no \"either could work.\"",
+      "met": true,
+      "evidence": "openspec/changes/lane-status-observability/design-lens-a.md:7-14 (Decision 1 chooses sdd_phase, fanout_group, skill), openspec/changes/lane-status-observability/design-lens-a.md:15-22 (Decision 2 chooses JSON audit-event field on LaneMetadata), openspec/changes/lane-status-observability/design-lens-a.md:31-38 (Decision 4 resolves Open Question 5 choosing explicit follow-up)."
+    },
+    {
+      "criterion": "Every decision and file-change row names a terminal consumer with a file:line citation that points at real code in this worktree.",
+      "met": true,
+      "evidence": "openspec/changes/lane-status-observability/design-lens-a.md:7-38 (Decisions 1-4 cite internal/packet/packet.go:94-138, internal/serve/static/app.js:534-536, internal/serve/handlers.go:190-357, internal/serve/model.go:322-333, internal/serve/static/app.js:520-560, internal/dag/emit.go:26-76) and openspec/changes/lane-status-observability/design-lens-a.md:52-62 (File Changes table lines 54-60 cite real code line ranges)."
+    },
+    {
+      "criterion": "design-lens-a.md exists, is under 1000 words, and carries every skeleton section.",
+      "met": true,
+      "evidence": "openspec/changes/lane-status-observability/design-lens-a.md exists with 924 body words (under 1000 words) and contains all required skeleton sections."
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (git status --porcelain empty and git log --oneline -1).",
+      "met": true,
+      "evidence": "commit c5d8d34 docs(lane-status-observability): author design lens a metadata frontmatter and packet body; git status --porcelain is empty."
+    }
+  ],
+  "commit": "c5d8d34148a9d7b58e6f85019e0c904788182b9f"
+}

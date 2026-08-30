@@ -1,0 +1,44 @@
+{
+  "packet_id": "propose-control-room-ledger-lens-a",
+  "status": "done",
+  "summary": "Drafted proposal lens A for control-room-ledger selecting Candidate 1 (relational schema expansion and modular domain files). Detailed the technical approach, conceptual changes, architecture rationale, rejected alternatives, and open questions with verified codebase citations.",
+  "hard_stops": [
+    {
+      "hard_stop": "The technical approach cannot be grounded in existing codebase patterns or proposal context.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Candidate selection contradicts frozen exploration conclusions without justification.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/control-room-ledger/propose-lens-a.md",
+      "change": "created",
+      "why": "Proposal Lens A document defining candidate selection, technical approach, conceptual changes, architecture rationale, rejected alternatives, and open questions for control-room-ledger."
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every candidate and approach claim carries file:line citations to real code in this worktree.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-ledger/propose-lens-a.md:7-23 cites internal/ledger/schema.go:10,221-307, internal/ledger/ledger.go:127-130,162-192,255-330,490-525, internal/packet/packet.go:33-75, internal/dag/parse.go:22-37, internal/executor/executor.go:42-61, internal/run/run.go:422-434,488-499, and internal/ledgerpath/ledgerpath.go:36-38"
+    },
+    {
+      "criterion": "propose-lens-a.md exists, is under 1000 words, and carries every skeleton section.",
+      "met": true,
+      "evidence": "wc -w openspec/changes/control-room-ledger/propose-lens-a.md output is 776 words; contains ## Selected Candidate \u0026 Approach, ## Conceptual Changes \u0026 Architecture Rationale, ## Alternatives Considered \u0026 Rejected, and ## Open Questions"
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (git status --porcelain empty and git log --oneline -1).",
+      "met": true,
+      "evidence": "git status --porcelain is empty; git log --oneline -1 shows dc151ed docs(openspec): draft propose-lens-a for control-room-ledger"
+    }
+  ],
+  "commit": "dc151ed4802dcb48cc6ed7b9098d0b5efb63b03b"
+}

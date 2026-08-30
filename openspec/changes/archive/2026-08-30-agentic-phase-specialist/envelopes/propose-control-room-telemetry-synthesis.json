@@ -1,0 +1,95 @@
+{
+  "packet_id": "propose-control-room-telemetry-synthesis",
+  "status": "done",
+  "summary": "Verified every file:line citation in the three propose lens drafts against this worktree, then wrote a compressed canonical proposal selecting Candidate 2 (worktree-local logs plus in-memory SSE hub). Dropped 15 unsupported citations into proposal-synthesis-notes.md. Committed as ebc5e1c.",
+  "hard_stops": [
+    {
+      "hard_stop": "The proposed approaches across drafts are mutually irreconcilable. Write the notes file, leave proposal.md uncreated, and block.",
+      "fired": false,
+      "note": "All three propose lenses converged on Candidate 2 (worktree-local logs + in-memory SSE hub). Remaining disagreements are open questions or additive Request writers vs frozen Run/Outcome, which the code allows to coexist."
+    },
+    {
+      "hard_stop": "One or more lens drafts is missing from this worktree.",
+      "fired": false,
+      "note": "propose-lens-a.md, propose-lens-b.md, and propose-lens-c.md all exist under openspec/changes/control-room-telemetry/."
+    },
+    {
+      "hard_stop": "Covering the proposal spine honestly would require exceeding 1800 words. Report which item forces it rather than silently overrunning or silently cutting.",
+      "fired": false,
+      "note": "proposal.md is 1759 words (wc -w) and covers all nine spine items."
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false,
+      "note": "Allowed-path synthesis outputs are the two markdown files. .lucind/result.json is the packet Return envelope and is gitignored, so it does not appear in git status --porcelain. The sdd-propose skill's 450-word budget is overridden by this packet's 1800-word synthesis budget."
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/control-room-telemetry/proposal.md",
+      "change": "created",
+      "why": "Canonical proposal after citation verification and lens-A approach arbitration."
+    },
+    {
+      "path": "openspec/changes/control-room-telemetry/proposal-synthesis-notes.md",
+      "change": "created",
+      "why": "Orchestrator-facing record of dropped citations, coverage, and scope divergence."
+    },
+    {
+      "path": ".lucind/result.json",
+      "change": "created",
+      "why": "Packet return envelope required by the Return section."
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every file:line citation surviving into proposal.md was opened and confirmed in this worktree, and every dropped claim is listed under ## Dropped Citations.",
+      "met": true,
+      "evidence": "Opened cited ranges in worktree source (executors, run.go, ledger, serve, specs, tests). 108 unique draft citations inspected; 15 claims listed under ## Dropped Citations in openspec/changes/control-room-telemetry/proposal-synthesis-notes.md; 93 unique citations remain in proposal.md."
+    },
+    {
+      "criterion": "proposal.md exists, is under 1800 words, and substantively covers the proposal spine, with anything missing reported under ## Coverage Gaps.",
+      "met": true,
+      "evidence": "wc -w openspec/changes/control-room-telemetry/proposal.md → 1759. Headings: Intent, Selected Candidate and Approach, Conceptual Changes, Capabilities, Delta Specifications, Risks, Rollback and Additivity, Test and Validation Impact, Out of Scope, Open Questions. Coverage Gaps section states None."
+    },
+    {
+      "criterion": "proposal-synthesis-notes.md exists with exactly the four required sections, each either populated or explicitly None.",
+      "met": true,
+      "evidence": "Headings at notes.md: ## Unresolved Contradictions (None), ## Coverage Gaps (None), ## Dropped Citations (15 entries), ## Scope Divergence (corroboration plus four divergences). No other H2 sections."
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (git status --porcelain empty and git log --oneline -1).",
+      "met": true,
+      "evidence": "git status --porcelain empty. git log --oneline -1 → ebc5e1c docs(control-room-telemetry): synthesize canonical proposal from three lenses. Full hash ebc5e1c302e46970b34f0964812a566a7b1e63ed."
+    }
+  ],
+  "commit": "ebc5e1c302e46970b34f0964812a566a7b1e63ed",
+  "findings": [
+    {
+      "finding": "Citations verified: 108 unique file:line citations across the three lens drafts were opened in this worktree.",
+      "evidence": "python count of `path:line` spans in propose-lens-a/b/c.md → 108 unique; each range read in the corresponding source file.",
+      "affects": "proposal synthesis evidence bar"
+    },
+    {
+      "finding": "Citations dropped: 15 claims.",
+      "evidence": "openspec/changes/control-room-telemetry/proposal-synthesis-notes.md ## Dropped Citations. Highest-cost misses: schema_test.go does not exist; token metadata is not on executor.Outcome; SSE disconnect cited at ListenAndServe shutdown; several lens-C test ranges point at helpers or capture tests, not the claimed coverage.",
+      "affects": "test plan for sdd-spec / sdd-tasks; do not cite schema_test.go or token fields"
+    },
+    {
+      "finding": "Contradictions escalated: 0.",
+      "evidence": "proposal-synthesis-notes.md ## Unresolved Contradictions: None.",
+      "affects": "no human arbitration required before specs"
+    },
+    {
+      "finding": "Coverage gaps: 0.",
+      "evidence": "proposal-synthesis-notes.md ## Coverage Gaps: None. All nine spine items were present in the drafts.",
+      "affects": "none"
+    },
+    {
+      "finding": "All three propose lenses independently converged on Candidate 2. Lens C's integration_events milestone option and token-metadata tests were dropped as scope divergence, not as a candidate split.",
+      "evidence": "propose-lens-a.md Selected Candidate 2; propose-lens-b.md tee+SSE delta specs; propose-lens-c.md files+SSE risk mitigations. integration_events is feature-scoped (internal/ledger/ledger.go:832-873).",
+      "affects": "sdd-spec should not put lane stream chunks in integration_events"
+    }
+  ],
+  "session_id": "propose-control-room-telemetry-synthesis"
+}

@@ -1,0 +1,48 @@
+{
+  "packet_id": "design-control-room-serve-lens-b",
+  "status": "done",
+  "summary": "Authored Design Lens B (Surface \u0026 Flow) for control-room-serve defining data flow invariants, surface deltas, and file changes with terminal consumers. Committed the design document within the word budget.",
+  "hard_stops": [
+    {
+      "hard_stop": "The specs do not determine whether a format delta is additive or breaking.",
+      "fired": false
+    },
+    {
+      "hard_stop": "A file change cannot name any terminal consumer.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Two reasonable architectures produce incompatible surface tables and the proposal does not choose between them.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/control-room-serve/design-lens-b.md",
+      "change": "created",
+      "why": "Design lens B artifact capturing surface deltas, invariants, and data flow."
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every `Surface Deltas` and `File Changes` row carries a `file:line` citation that points at real code in this worktree, and every `File Changes` row names a terminal consumer.",
+      "met": true,
+      "evidence": "Every row in Surface Deltas and File Changes in openspec/changes/control-room-serve/design-lens-b.md contains valid file:line references (e.g. internal/serve/handlers.go:36, internal/serve/model.go:128, internal/ledger/ledger.go:285, cmd/lucind-ai/cli.go:715) and explicit terminal consumers."
+    },
+    {
+      "criterion": "`design-lens-b.md` exists, is under 1000 words, and carries every skeleton section including `## Assumed architecture`.",
+      "met": true,
+      "evidence": "File openspec/changes/control-room-serve/design-lens-b.md exists with all skeleton sections and contains 913 words (wc -w openspec/changes/control-room-serve/design-lens-b.md)."
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (`git status --porcelain` empty and `git log --oneline -1`).",
+      "met": true,
+      "evidence": "Commit 8ca83ea (docs(openspec): add control-room-serve design lens b), git status --porcelain clean."
+    }
+  ],
+  "commit": "8ca83ea"
+}

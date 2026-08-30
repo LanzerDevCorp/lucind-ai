@@ -1,0 +1,91 @@
+{
+  "packet_id": "explore-control-room-serve-synthesis",
+  "status": "done",
+  "summary": "Verified every file:line citation in the three control-room-serve lens drafts against this worktree, then wrote a 1094-word canonical explore.md recommending granular REST plus SSE. Nineteen unsupported claims were dropped into explore-synthesis-notes.md; no contradictions were escalated.",
+  "hard_stops": [
+    {
+      "hard_stop": "The problem space or candidate approaches across drafts are mutually irreconcilable. Write the notes file, leave explore.md uncreated, and block.",
+      "fired": false
+    },
+    {
+      "hard_stop": "One or more lens drafts is missing from this worktree.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Covering the exploration spine honestly would require exceeding 1800 words. Report which item forces it rather than silently overrunning or silently cutting.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/control-room-serve/explore.md",
+      "change": "created",
+      "why": "Canonical exploration after citation verification and candidate arbitration."
+    },
+    {
+      "path": "openspec/changes/control-room-serve/explore-synthesis-notes.md",
+      "change": "created",
+      "why": "Orchestrator-facing notes: dropped citations, approach divergence, empty contradiction and coverage-gap sections."
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every file:line citation surviving into explore.md was opened and confirmed in this worktree, and every dropped claim is listed under ## Dropped Citations.",
+      "met": true,
+      "evidence": "55 unique surviving citations in openspec/changes/control-room-serve/explore.md were opened in this worktree (handlers.go, server.go, static.go, model.go, app.js, ledger.go, schema.go, cli.go, batch.go, server_test.go, docs/prd.md). 19 dropped claims are listed under ## Dropped Citations in openspec/changes/control-room-serve/explore-synthesis-notes.md."
+    },
+    {
+      "criterion": "explore.md exists, is under 1800 words, and substantively covers the exploration spine, with anything missing reported under ## Coverage Gaps.",
+      "met": true,
+      "evidence": "wc -w openspec/changes/control-room-serve/explore.md =\u003e 1094. Headings cover problem, candidates, user impact, scenarios, risks/trade-offs, spikes, success criteria, out of scope and open questions. ## Coverage Gaps is None."
+    },
+    {
+      "criterion": "explore-synthesis-notes.md exists with exactly the four required sections, each either populated or explicitly None.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-serve/explore-synthesis-notes.md headings: Unresolved Contradictions (None), Coverage Gaps (None), Dropped Citations (19 items), Approach Divergence (populated)."
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (git status --porcelain empty and git log --oneline -1).",
+      "met": true,
+      "evidence": "git status --porcelain empty. git log --oneline -1 =\u003e b855da8 docs(explore): synthesize control-room-serve exploration. Commit body has no Generated-by / Made-with trailer authored in the message; environment still injects Co-authored-by: Cursor on commit."
+    }
+  ],
+  "commit": "b855da8f0a38a015af1a08b477cfddc84a40fcca",
+  "findings": [
+    {
+      "finding": "Citations verified (unique surviving file:line blobs in explore.md): 55.",
+      "evidence": "python unique-citation count over openspec/changes/control-room-serve/explore.md; 81 occurrences collapsed to 55 unique ranges.",
+      "affects": "proposal/design may cite only those ranges, or re-open the files."
+    },
+    {
+      "finding": "Citations dropped: 19 claims (mostly lens B ledger.go line misses and proposed HTTP described as current).",
+      "evidence": "openspec/changes/control-room-serve/explore-synthesis-notes.md ## Dropped Citations",
+      "affects": "orchestrator must not promote dropped current-tense HTTP claims (unified /api/v1/state, SSE, reconcile POST) into specs."
+    },
+    {
+      "finding": "Contradictions escalated: 0.",
+      "evidence": "openspec/changes/control-room-serve/explore-synthesis-notes.md ## Unresolved Contradictions is None.",
+      "affects": "proposal can proceed on Candidate 1 (REST+SSE) without a human contradiction call."
+    },
+    {
+      "finding": "Coverage gaps: 0.",
+      "evidence": "openspec/changes/control-room-serve/explore-synthesis-notes.md ## Coverage Gaps is None.",
+      "affects": "sdd-propose can treat the eight-item explore spine as present."
+    },
+    {
+      "finding": "runDispatch and serveDispatch each call ledger.Open, so an in-process SSE broker in serve cannot observe run AppendEvent.",
+      "evidence": "cmd/lucind-ai/cli.go:285,707",
+      "affects": "design must pick SQLite tail, IPC, or sqlite hooks; not serve-local pub/sub alone."
+    },
+    {
+      "finding": "ApproverRate is wrong-approval rate (defects/approved), not accuracy. Connection pool SetMaxOpenConns(4) already exists.",
+      "evidence": "internal/ledger/ledger.go:182,795-814",
+      "affects": "do not re-specify pool sizing as new work; do not label the rate as accuracy."
+    }
+  ],
+  "session_id": "explore-control-room-serve-synthesis"
+}

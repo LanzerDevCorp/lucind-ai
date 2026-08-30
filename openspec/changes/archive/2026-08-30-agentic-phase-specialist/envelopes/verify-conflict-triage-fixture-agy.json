@@ -1,0 +1,68 @@
+{
+  "packet_id": "verify-conflict-triage-fixture-agy",
+  "status": "done",
+  "summary": "Qualitative verification completed for candidate change conflict-triage-fixture across all four capabilities. All requirements and scenarios from specs are fully covered by implementation and verified by targeted unit and integration tests asserting on terminal behaviors. All introduced symbols, invokers, and fixture generators are demonstrably consumed by terminal consumers.",
+  "hard_stops": [
+    {
+      "hard_stop": "Executing mechanical test/build commands when mechanical results are already provided.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Any credential value would need to be chosen, generated, or written.",
+      "fired": false
+    },
+    {
+      "hard_stop": "A done-criterion turns out to be impossible, or already true for a reason the packet did not anticipate.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Two reasonable interpretations exist for a spec requirement and the specification does not say which.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": ".lucind/result.json",
+      "change": "created",
+      "why": "Record verification result envelope"
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every indirection introduced is demonstrably consumed by a terminal consumer. Verification citations trace to concrete symbols, spec requirements, or tests.",
+      "met": true,
+      "evidence": "TriagePayload (internal/conflicttriage/types.go:37) is consumed by UpdateCandidateOutput (internal/reconcile/reconcile.go:912) and unmarshaled in rubric evaluation (internal/conflicttriage/fixture/rubric.go:84-112); TriageInvoker (internal/conflicttriage/invoker.go:7) is consumed by RunTriage (internal/conflicttriage/triage.go:42) and stubbed in unit tests (internal/conflicttriage/triage_test.go:121); UpdateCandidateOutput (internal/reconcile/reconcile.go:912) is consumed by RunTriage (internal/conflicttriage/triage.go:54) and verified by TestUpdateCandidateOutputOnly (internal/reconcile/reconcile_test.go:1206-1285); GenerateFixture (internal/conflicttriage/fixture/fixture.go:48) is consumed by evaluateOverlapGate in integration retry tests (internal/run/attempt_test.go:892, 981) and overlap.Evaluate in TestFixtureGenerator_ForcesClassRequired (internal/conflicttriage/fixture/fixture_test.go:56); EvaluateRubric (internal/conflicttriage/fixture/rubric.go:48) is consumed by TestRubric_GradesDistinctThreeHunkClassification (internal/conflicttriage/fixture/rubric_test.go:78, 123); packet templates (internal/conflicttriage/fixture/packets/) are consumed by packet.Parse in TestFixturePackets_DisjointAndValidParentRef (internal/conflicttriage/fixture/fixture_test.go:138)."
+    },
+    {
+      "criterion": "The worktree carries no unique commits and no working-tree changes relative to the lane's birth point (git status --porcelain empty AND HEAD equals git merge-base HEAD \u003cprimary HEAD\u003e).",
+      "met": true,
+      "evidence": "git status --porcelain is empty prior to result.json creation. git rev-parse HEAD (cf7bca364d32abf2dbcb2b56f12b1923ed1345c5) equals git merge-base HEAD feature/conflict-triage-fixture (cf7bca364d32abf2dbcb2b56f12b1923ed1345c5)."
+    },
+    {
+      "criterion": "Qualitative evaluation completed (.lucind/result.json populated with status, summary, and structured findings).",
+      "met": true,
+      "evidence": ".lucind/result.json populated with status done, 5 declared hard stops, 3 verified done criteria with concrete terminal consumer citations, and structured findings across all four specification capabilities."
+    }
+  ],
+  "findings": [
+    {
+      "finding": "Auditability of failed candidates: RunTriage persists the parsed or fail-open TriagePayload into Candidate.Output before running invariant checks. When invariant checks fail (e.g. residual conflict markers or out-of-scope edits), failCandidate marks the candidate status failed while retaining the output payload for post-mortem analysis.",
+      "evidence": "internal/conflicttriage/triage.go:54-85; internal/conflicttriage/triage_test.go:252-257",
+      "affects": "conflicttriage"
+    },
+    {
+      "finding": "Hunk spacing isolation in fixture generator: The 3-hunk fixture generates 25 padding comment lines between hunks in toy.go, safely exceeding overlap.DefaultThresholds().NearbyHunkLines (10 lines). This guarantees merge-tree classifies the 3 hunks independently rather than coalescing them.",
+      "evidence": "internal/conflicttriage/fixture/fixture.go:229-235; internal/conflicttriage/fixture/fixture_test.go:72-85",
+      "affects": "conflicttriage/fixture"
+    },
+    {
+      "finding": "Open questions remain properly uncommitted: Neither the exact non-decreasing numeric risk formula nor the production triage executor/model selection were hardcoded in the codebase; the production invoker remains stubbed/injected via TriageInvoker and risk bands are limited to low/medium/high constants.",
+      "evidence": "internal/conflicttriage/types.go:6-11; internal/conflicttriage/invoker.go:5-7; internal/conflicttriage/triage.go:14-16",
+      "affects": "conflicttriage"
+    }
+  ]
+}

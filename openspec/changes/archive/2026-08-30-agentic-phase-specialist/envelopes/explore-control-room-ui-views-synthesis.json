@@ -1,0 +1,90 @@
+{
+  "packet_id": "explore-control-room-ui-views-synthesis",
+  "status": "done",
+  "summary": "Verified every file:line citation in the three ui-views lens drafts against this worktree, dropped 19 claims whose cites failed, and wrote a 1188-word canonical explore.md recommending Candidate 2 (modular REST + lazy vanilla panels). One contradiction is escalated, not picked: whether the UI may POST reconcile mutations or only offer copy-paste CLI.",
+  "hard_stops": [
+    {
+      "hard_stop": "The problem space or candidate approaches across drafts are mutually irreconcilable. Write the notes file, leave explore.md uncreated, and block.",
+      "fired": false,
+      "note": "Lens A’s three candidates are primary. Lens C independently named the same axes (SPA vs MPA, monolithic vs granular fetch). Lens B’s five-view inventory is a superset of A’s four tabs, not a rival architecture. Candidate 2 remains viable."
+    },
+    {
+      "hard_stop": "One or more lens drafts is missing from this worktree.",
+      "fired": false,
+      "note": "explore-lens-a.md, explore-lens-b.md, and explore-lens-c.md are all present under openspec/changes/control-room-ui-views/."
+    },
+    {
+      "hard_stop": "Covering the exploration spine honestly would require exceeding 1800 words. Report which item forces it rather than silently overrunning or silently cutting.",
+      "fired": false,
+      "note": "explore.md is 1188 words (wc -w) and covers all eight spine items."
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false,
+      "note": "Allowed-paths constrain the change artifacts to explore.md and explore-synthesis-notes.md. The Return section separately requires .lucind/result.json, which is gitignored and was not committed."
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/control-room-ui-views/explore.md",
+      "change": "created",
+      "why": "Canonical exploration after citation verification and compression under 1800 words."
+    },
+    {
+      "path": "openspec/changes/control-room-ui-views/explore-synthesis-notes.md",
+      "change": "created",
+      "why": "Orchestrator-facing notes: one escalated contradiction, dropped citations, approach divergence."
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every file:line citation surviving into explore.md was opened and confirmed in this worktree, and every dropped claim is listed under ## Dropped Citations.",
+      "met": true,
+      "evidence": "Surviving cites were opened in handlers.go, model.go, schema.go, app.js, index.html, static.go, server.go, server_test.go, cli.go, batch.go, waves.go, status.go, barrier.go, worktree.go, feature.go, integrate_feature.go, reconcile.go, run.go, result.schema.json, approvals-web-ui/spec.md, prd.md. Dropped claims (19) are listed in explore-synthesis-notes.md ## Dropped Citations, including B’s wrong schema ranges (156-172 leases actually reconciliation_candidates; 206-230 requests actually v5 INSERT) and cli.go:350-380 (attempt id / runSplit, not question relays)."
+    },
+    {
+      "criterion": "explore.md exists, is under 1800 words, and substantively covers the exploration spine, with anything missing reported under ## Coverage Gaps.",
+      "met": true,
+      "evidence": "wc -w openspec/changes/control-room-ui-views/explore.md → 1188. Headings: Problem statement and background; Candidate approaches; User and capability impact; Scenarios and use cases; Technical risks and trade-offs; Potential spikes; Success criteria; Out of scope; Open questions. Coverage Gaps: None."
+    },
+    {
+      "criterion": "explore-synthesis-notes.md exists with exactly the four required sections, each either populated or explicitly None.",
+      "met": true,
+      "evidence": "grep '^## ' explore-synthesis-notes.md → Unresolved Contradictions (populated); Coverage Gaps (None); Dropped Citations (populated); Approach Divergence (populated)."
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (git status --porcelain empty and git log --oneline -1).",
+      "met": true,
+      "evidence": "git log --oneline -1 → 2ca9f1f docs(explore): synthesize control-room-ui-views exploration. git status --porcelain empty after that commit."
+    }
+  ],
+  "commit": "2ca9f1f",
+  "findings": [
+    {
+      "finding": "Citations verified (opened and supporting, kept in explore.md): 70+ unique file:line ranges across serve, ledger schema v4, Model, CLI, run, barrier, and approvals spec.",
+      "evidence": "openspec/changes/control-room-ui-views/explore.md (every parenthetical file:line was opened in this worktree).",
+      "affects": "control-room-ui-views proposal"
+    },
+    {
+      "finding": "Citations dropped: 19 claims. Lens B’s schema.go line numbers for leases, overlap, reconciliation, and events point at migrateV4ToV5DDL / migrate(), not those tables. dag/overlap.go:52-78 is DAG path overlap, not 4-way feature evidence. reconcile.go:122-260 is CreateRequest, not Approve/Decline. ledger.go:307-353 is LaneStates, not ApproverRate (797-814). cli.go:350-380 is not question relay. run.go:549-574 decideStatus does not inspect hard_stops. reconcile.Service has no Resolve method.",
+      "evidence": "openspec/changes/control-room-ui-views/explore-synthesis-notes.md ## Dropped Citations",
+      "affects": "control-room-ui-views proposal; any downstream that trusted lens-b schema cites"
+    },
+    {
+      "finding": "Contradictions escalated: 1. UI POST reconcile mutations vs copy-paste CLI. Code: CLI dispatch at cli.go:1043-1065; handlers.go:36-118 has no reconcile routes.",
+      "evidence": "openspec/changes/control-room-ui-views/explore-synthesis-notes.md ## Unresolved Contradictions",
+      "affects": "control-room-ui-views proposal (must not silently pick)"
+    },
+    {
+      "finding": "Coverage gaps: 0. All eight exploration-spine items were present in the drafts.",
+      "evidence": "openspec/changes/control-room-ui-views/explore-synthesis-notes.md ## Coverage Gaps → None",
+      "affects": "none"
+    },
+    {
+      "finding": "serve.Model is used by lucind-ai feature status (cli.go:852) and tests only; NewHandler(ledger) never constructs it. Model has no lanes query, so a Batch/Wave inspector needs new read methods over schema.go:18-32.",
+      "evidence": "internal/serve/handlers.go:36; internal/serve/model.go:26-125; cmd/lucind-ai/cli.go:852",
+      "affects": "control-room-ui-views design; possibly control-room-serve if HTTP wiring is split"
+    }
+  ],
+  "session_id": "explore-control-room-ui-views-synthesis"
+}

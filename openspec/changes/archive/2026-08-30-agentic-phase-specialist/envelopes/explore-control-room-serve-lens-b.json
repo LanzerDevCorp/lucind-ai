@@ -1,0 +1,45 @@
+{
+  "packet_id": "explore-control-room-serve-lens-b",
+  "status": "done",
+  "summary": "Authored explore-lens-b.md specifying capability impact, user journeys, concrete scenarios, and measurable success criteria with file:line citations for the Control Room serve subsystem.",
+  "hard_stops": [
+    {
+      "hard_stop": "The capability impact cannot be determined from packet context or codebase inspection.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Scenarios conflict with established system invariants and cannot be reconciled.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/control-room-serve/explore-lens-b.md",
+      "change": "created",
+      "why": "Explore Lens B for control-room-serve capabilities and scenarios"
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every scenario and capability claim carries file:line citations to real code in this worktree.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-serve/explore-lens-b.md:9,14,18,20-25,31-33,37-39,43-45,49-51,55-57,61-63,67-73"
+    },
+    {
+      "criterion": "explore-lens-b.md exists, is under 1000 words, and carries every skeleton section.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-serve/explore-lens-b.md (827 words) contains User \u0026 Capability Impact, Scenarios \u0026 Use Cases, Success Criteria, and Open Questions"
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (git status --porcelain empty and git log --oneline -1).",
+      "met": true,
+      "evidence": "c975198 docs(control-room): explore lens b capabilities and scenarios for serve subsystem"
+    }
+  ],
+  "commit": "c975198054ae6fb24e7664999df620f8a1da186a",
+  "session_id": "7a542fac-1eb5-4335-81d4-5514cd06102c"
+}

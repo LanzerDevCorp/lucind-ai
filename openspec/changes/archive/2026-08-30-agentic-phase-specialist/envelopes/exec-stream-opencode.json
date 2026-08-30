@@ -1,0 +1,62 @@
+{
+  "packet_id": "exec-stream-opencode",
+  "status": "done",
+  "summary": "Empirically captured opencode 1.18.21 JSON-line output and added a tolerant live decoder for step_start, text, and step_finish records while ignoring unknown records. Malformed telemetry now emits a best-effort fallback note, disables only progress decoding, and preserves the complete raw --format json Outcome path; focused and full race suites passed.",
+  "hard_stops": [],
+  "files_changed": [
+    {
+      "path": "internal/executor/opencode.go",
+      "change": "modified",
+      "why": "Enable incremental decoding only when Request.Progress is non-nil while retaining the unchanged blocking stdout capture otherwise."
+    },
+    {
+      "path": "internal/executor/opencode_stream.go",
+      "change": "created",
+      "why": "Normalize empirically observed JSON-line records, ignore unknown types, and disable only telemetry after malformed input."
+    },
+    {
+      "path": "internal/executor/opencode_stream_test.go",
+      "change": "created",
+      "why": "Cover observed known records, unknown records, malformed fallback, raw Outcome preservation, and nil-progress behavior."
+    },
+    {
+      "path": ".lucind/result.json",
+      "change": "created",
+      "why": "Record the packet-required validated delivery envelope; the packet explicitly requires this generated metadata path outside its three implementation allowed_paths."
+    }
+  ],
+  "external_changes": [
+    {
+      "path": "/home/lanzerdev/go/bin/lucind-ai",
+      "change": "modified",
+      "why": "CLAUDE.md requires make install after binary changes; lucind-ai -v now reports build 0be71f8.",
+      "revert": "Check out commit 64b6b2cc7539d4432457cc082bb6a82c8b599ae5 and run make install."
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Empirical output capture is attached to result evidence and focused tests cover known, unknown, and malformed records.",
+      "met": true,
+      "evidence": "Probe exited 0 with opencode 1.18.21. Exact command: timeout --signal=TERM --kill-after=5s 90s opencode run \"Do not use tools or modify files. Reply with exactly PROBE_OK.\" --format json --model openai/gpt-5.6-sol --agent build --dir /tmp/opencode/exec-stream-opencode-probe --pure --auto. Exact stdout records:\n{\"type\":\"step_start\",\"timestamp\":1787412178297,\"sessionID\":\"ses_fd5eebe70ffe4hfRD4rwgqyKee\",\"part\":{\"id\":\"prt_02a116555001jtPCygeywljsQD\",\"messageID\":\"msg_02a114b95001fvx2G5fw2W8QCe\",\"sessionID\":\"ses_fd5eebe70ffe4hfRD4rwgqyKee\",\"type\":\"step-start\"}}\n{\"type\":\"text\",\"timestamp\":1787412178422,\"sessionID\":\"ses_fd5eebe70ffe4hfRD4rwgqyKee\",\"part\":{\"id\":\"prt_02a116564001TCqG4v6OsMP9gx\",\"messageID\":\"msg_02a114b95001fvx2G5fw2W8QCe\",\"sessionID\":\"ses_fd5eebe70ffe4hfRD4rwgqyKee\",\"type\":\"text\",\"text\":\"PROBE_OK\",\"time\":{\"start\":1787412178276,\"end\":1787412178391},\"metadata\":{\"openai\":{\"itemId\":\"msg_0c389b9903afa671016a89bed22df087d087d7586f328f168e\",\"phase\":\"final_answer\"}}}}\n{\"type\":\"step_finish\",\"timestamp\":1787412178687,\"sessionID\":\"ses_fd5eebe70ffe4hfRD4rwgqyKee\",\"part\":{\"id\":\"prt_02a1166ac001UC0E3qIWf7wpSK\",\"reason\":\"stop\",\"messageID\":\"msg_02a114b95001fvx2G5fw2W8QCe\",\"sessionID\":\"ses_fd5eebe70ffe4hfRD4rwgqyKee\",\"type\":\"step-finish\",\"tokens\":{\"total\":18993,\"input\":10282,\"output\":7,\"reasoning\":0,\"cache\":{\"write\":0,\"read\":8704}},\"cost\":0}}. Focused command go test -json ./internal/executor -race -count=1 -run 'TestDecodeOpencodeRecord|TestOpencodeRun(Stream|Malformed|WithoutProgress)' exited 0 with PASS 9 tests/subtests, including step_start, text, step_finish, unknown_record, malformed_record, streaming integration, malformed fallback, and nil-progress preservation."
+    },
+    {
+      "criterion": "Only the three allowed paths change and the commit is recorded.",
+      "met": true,
+      "evidence": "git show --name-status --format=%H HEAD records commit 0be71f832d09d85b7e473a56bca376a183b74a86 with exactly M internal/executor/opencode.go, A internal/executor/opencode_stream.go, and A internal/executor/opencode_stream_test.go. .lucind/result.json is separately required generated delivery metadata by packet lines 26-28 and remains uncommitted. go test ./... -race -count=1 exited 0 with all 18 packages ok; make install exited 0; lucind-ai -v reports lucind-ai 0be71f8 (go1.25.0, linux/amd64)."
+    }
+  ],
+  "commit": "0be71f832d09d85b7e473a56bca376a183b74a86",
+  "findings": [
+    {
+      "finding": "The packet declares no hard-stop entries, so the mandatory hard_stops field is an empty array.",
+      "evidence": "openspec/plans/control-room/control-room-capture/packets/exec-stream-opencode.md:20-28 lists two done criteria and the result instruction with no hard-stop section.",
+      "affects": "The result envelope must still include hard_stops explicitly."
+    },
+    {
+      "finding": "The empirical stream uses newline-delimited step_start, text, and step_finish records with nested part payloads.",
+      "evidence": "The bounded opencode 1.18.21 probe command and all three exact stdout records are attached to the first done-criterion evidence.",
+      "affects": "internal/executor/opencode_stream.go normalizes only these observed record types and ignores future unknown types."
+    }
+  ],
+  "session_id": "sdd-apply-exec-stream-opencode-20260822"
+}

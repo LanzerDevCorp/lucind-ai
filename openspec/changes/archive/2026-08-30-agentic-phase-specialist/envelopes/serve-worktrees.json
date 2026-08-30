@@ -1,0 +1,39 @@
+{
+  "packet_id": "serve-worktrees",
+  "status": "done",
+  "summary": "Added a shell-free worktree status payload that reports ledger-associated path, branch, lane, disk bytes, and stale state without invoking Git. Added real temporary-repository coverage for live and stale worktrees and verified repository metadata remains unchanged.",
+  "hard_stops": [],
+  "files_changed": [
+    {
+      "path": "internal/serve/worktrees.go",
+      "change": "created",
+      "why": "Defines the read-only worktree status payload and ledger-backed collector."
+    },
+    {
+      "path": "internal/serve/worktrees_test.go",
+      "change": "created",
+      "why": "Covers live and stale temporary Git worktrees, disk bytes, associations, and non-mutation."
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Tests use temporary repositories/directories and assert stale and live cases.",
+      "met": true,
+      "evidence": "internal/serve/worktrees_test.go:16-86 uses t.TempDir-backed repositories and real linked worktrees; go test ./internal/serve -run '^TestListWorktreesReportsLiveAndStaleEntriesWithoutRepositoryMutation$' -count=1 passed."
+    },
+    {
+      "criterion": "Only the two allowed paths change and the commit is recorded.",
+      "met": true,
+      "evidence": "git show --stat --oneline 57fa2c4 reports exactly internal/serve/worktrees.go and internal/serve/worktrees_test.go; commit 57fa2c46f60dce897be34bcc3c0dfbb683a1feec records the work."
+    }
+  ],
+  "commit": "57fa2c46f60dce897be34bcc3c0dfbb683a1feec",
+  "findings": [
+    {
+      "finding": "Disk-byte collection recursively stats every file in each recorded worktree, so collection cost scales with worktree size.",
+      "evidence": "internal/serve/worktrees.go:61-86",
+      "affects": "Future polling frequency for the serve status surface."
+    }
+  ],
+  "session_id": "apply-serve-worktrees-20260822"
+}

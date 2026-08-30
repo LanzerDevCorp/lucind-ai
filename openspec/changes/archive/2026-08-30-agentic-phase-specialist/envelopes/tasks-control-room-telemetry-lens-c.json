@@ -1,0 +1,63 @@
+{
+  "packet_id": "tasks-control-room-telemetry-lens-c",
+  "status": "done",
+  "summary": "Generated tasks-lens-c.md containing assumed decomposition, review workload forecast, threat-matrix RED test mappings, and acceptance evidence with real test file citations. Verified word count (772 words) and committed cleanly with no AI attribution.",
+  "hard_stops": [
+    {
+      "hard_stop": "The design has no threat matrix, so there is nothing to derive RED tests from.",
+      "fired": false
+    },
+    {
+      "hard_stop": "A behavior the specs require cannot be proven through any test this repository can run, and no new seam is identified in the design.",
+      "fired": false
+    },
+    {
+      "hard_stop": "The changed-line estimate cannot be grounded in anything — no comparable file, no archived change of similar shape.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/control-room-telemetry/tasks-lens-c.md",
+      "change": "created",
+      "why": "Feedstock for tasks synthesis lane covering proof, test seams, and review workload forecast."
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every threat-matrix row in the design appears in ## RED Tests from the Threat Matrix with the design's own Applicable / N/A verdict, and no row was invented.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-telemetry/tasks-lens-c.md:27-37 lists all 5 rows verbatim from design.md:109-115 with matching N/A verdicts."
+    },
+    {
+      "criterion": "Every applicable row names a RED test and the assertion that fires.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-telemetry/tasks-lens-c.md:27-37 notes 0 applicable boundary threat rows from design.md:107-118, with N/A declared across all columns."
+    },
+    {
+      "criterion": "The changed-line estimate states the basis it was derived from, not a bare number.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-telemetry/tasks-lens-c.md:23-24 states line breakdown across 9 production files and 8 test files compared to 2026-08-20-approvals-web-ui diff (420 lines)."
+    },
+    {
+      "criterion": "Every proving command is derived from a real test file in this worktree, cited with file:line.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-telemetry/tasks-lens-c.md:41-47 cites internal/executor/agy_test.go:28,166, cursor_agent_test.go:28, opencode_test.go:28, internal/serve/server_test.go:17-40, internal/serve/model_test.go:595-627, internal/ledger/ledger_test.go:733, internal/run/run_test.go:29,88, internal/run/batch_test.go:61-120, internal/barrier/barrier_test.go:31-60, and cmd/lucind-ai/cli_test.go:37-60."
+    },
+    {
+      "criterion": "tasks-lens-c.md exists, is under 1000 words, and carries ## Assumed decomposition, ## Review Workload Forecast, ## Acceptance Evidence, and ## Verification Gaps.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-telemetry/tasks-lens-c.md verified at 772 words with wc -w, containing all required section headers."
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (git status --porcelain empty and git log --oneline -1).",
+      "met": true,
+      "evidence": "git log --oneline -1 output: '6d911e0 docs(telemetry): add tasks lens c proof and review burden'; git status --porcelain is empty."
+    }
+  ],
+  "commit": "6d911e0"
+}

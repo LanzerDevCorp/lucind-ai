@@ -1,0 +1,86 @@
+{
+  "packet_id": "propose-control-room-ui-views-synthesis",
+  "status": "done",
+  "summary": "Synthesized the three propose lenses into openspec/changes/control-room-ui-views/proposal.md (Candidate 2: modular REST + lazy vanilla panels, 1454 words) and proposal-synthesis-notes.md. Every file:line citation was opened in this worktree; eight unsupported claims were dropped. Commit 569f6ba carries the two documents.",
+  "hard_stops": [
+    {
+      "hard_stop": "The proposed approaches across drafts are mutually irreconcilable. Write the notes file, leave proposal.md uncreated, and block.",
+      "fired": false
+    },
+    {
+      "hard_stop": "One or more lens drafts is missing from this worktree.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Covering the proposal spine honestly would require exceeding 1800 words. Report which item forces it rather than silently overrunning or silently cutting.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/control-room-ui-views/proposal.md",
+      "change": "created",
+      "why": "Canonical proposal after citation verification and Candidate 2 arbitration."
+    },
+    {
+      "path": "openspec/changes/control-room-ui-views/proposal-synthesis-notes.md",
+      "change": "created",
+      "why": "Orchestrator-facing record of dropped citations, scope divergence, contradictions, and coverage."
+    },
+    {
+      "path": ".lucind/result.json",
+      "change": "created",
+      "why": "Packet result envelope."
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every file:line citation surviving into proposal.md was opened and confirmed in this worktree, and every dropped claim is listed under ## Dropped Citations.",
+      "met": true,
+      "evidence": "Opened cited ranges in internal/serve/{server,static,handlers,model}.go, static/{app.js,index.html}, tests, internal/ledger/schema.go, internal/lane/status.go, internal/run/{batch,run}.go, internal/barrier/barrier.go, internal/dag/waves.go, internal/worktree/worktree.go, internal/feature/feature.go, internal/result/result.schema.json, cmd/lucind-ai/cli.go, docs/prd.md, openspec/specs/approvals-web-ui/spec.md, and explore.md. Eight dropped claims are under ## Dropped Citations in openspec/changes/control-room-ui-views/proposal-synthesis-notes.md."
+    },
+    {
+      "criterion": "proposal.md exists, is under 1800 words, and substantively covers the proposal spine, with anything missing reported under ## Coverage Gaps.",
+      "met": true,
+      "evidence": "wc -w openspec/changes/control-room-ui-views/proposal.md =\u003e 1454. Headings: Intent, Selected candidate and approach, Conceptual changes, Capabilities, Delta specifications, Technical risks and failure modes, Rollback and additivity, Test and validation impact, Out of scope, Open questions. proposal-synthesis-notes.md ## Coverage Gaps is None."
+    },
+    {
+      "criterion": "proposal-synthesis-notes.md exists with exactly the four required sections, each either populated or explicitly None.",
+      "met": true,
+      "evidence": "grep -n '^## ' openspec/changes/control-room-ui-views/proposal-synthesis-notes.md =\u003e Unresolved Contradictions (None), Coverage Gaps (None), Dropped Citations (8 claims), Scope Divergence (B/C vs A, with independent convergence)."
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (git status --porcelain empty and git log --oneline -1).",
+      "met": true,
+      "evidence": "git status --porcelain empty. git log --oneline -1 =\u003e 569f6ba docs(openspec): add control-room-ui-views proposal"
+    }
+  ],
+  "commit": "569f6ba docs(openspec): add control-room-ui-views proposal",
+  "findings": [
+    {
+      "finding": "Citations verified: 106 unique file:line citations across the three lens drafts were opened in this worktree.",
+      "evidence": "python count over propose-lens-{a,b,c}.md; files opened via Read/Grep as listed in done_criteria[0].",
+      "affects": "proposal.md citation set"
+    },
+    {
+      "finding": "Citations dropped: 8 claims (no runs table at schema.go:76-92; app.js not already tabbed; 400-line candidate diffs at model.go:109-110; 4-way overlap evidence; filesystem inspect of result.json; schema_test.go:1-80 as UI envelope tests; data races without Model; sidebar at index.html:1-140).",
+      "evidence": "openspec/changes/control-room-ui-views/proposal-synthesis-notes.md ## Dropped Citations",
+      "affects": "sdd-spec / sdd-design must not revive those claims"
+    },
+    {
+      "finding": "Contradictions escalated: 0. Coverage gaps: 0. Reconciliation mutation, evidence formatting, and expiry countdown remain shared open questions, not draft-vs-draft conflicts.",
+      "evidence": "proposal-synthesis-notes.md ## Unresolved Contradictions and ## Coverage Gaps; proposal.md ## Open questions",
+      "affects": "human merge of open questions before spec/design"
+    },
+    {
+      "finding": "serve.Model cannot read worktree .lucind/result.json: TestModelSourceDoesNotShellOut forbids os and os/exec imports, and the ledger has no envelope blob. Envelope inspector in the proposal is lane_note demotion text, not a file read.",
+      "evidence": "internal/serve/model_test.go:610-618; grep Envelope/result.json in internal/ledger returned no matches; internal/run/run.go:423-430",
+      "affects": "control-room-ledger if envelope fields must be queryable; sdd-design for lane-envelope-inspector"
+    }
+  ],
+  "session_id": "propose-control-room-ui-views-synthesis"
+}

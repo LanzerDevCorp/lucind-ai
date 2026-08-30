@@ -1,0 +1,44 @@
+{
+  "packet_id": "explore-control-room-ui-views-lens-b",
+  "status": "done",
+  "summary": "Authored explore-lens-b.md for control-room-ui-views covering capability impact across five views, concrete operator scenarios with code citations, and measurable success criteria.",
+  "hard_stops": [
+    {
+      "hard_stop": "The capability impact cannot be determined from packet context or codebase inspection.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Scenarios conflict with established system invariants and cannot be reconciled.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/control-room-ui-views/explore-lens-b.md",
+      "change": "created",
+      "why": "Explore Lens B for control-room-ui-views change"
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every scenario and capability claim carries file:line citations to real code in this worktree.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-ui-views/explore-lens-b.md:7-51 contains exact file:line citations for all 5 capability components, 5 scenarios, and 5 success criteria"
+    },
+    {
+      "criterion": "explore-lens-b.md exists, is under 1000 words, and carries every skeleton section.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-ui-views/explore-lens-b.md exists with 783 words (verified via wc -w) and includes all required skeleton sections: User \u0026 Capability Impact, Scenarios \u0026 Use Cases, Success Criteria, and Open Questions"
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (git status --porcelain empty and git log --oneline -1).",
+      "met": true,
+      "evidence": "commit f4938c7 docs(explore): add explore lens b for control-room-ui-views with clean git status --porcelain"
+    }
+  ],
+  "commit": "f4938c7"
+}

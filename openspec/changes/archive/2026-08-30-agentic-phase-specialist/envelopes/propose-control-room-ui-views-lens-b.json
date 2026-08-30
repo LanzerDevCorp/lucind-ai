@@ -1,0 +1,45 @@
+{
+  "packet_id": "propose-control-room-ui-views-lens-b",
+  "status": "done",
+  "summary": "Authored proposal lens B for control-room-ui-views containing user and capability impacts, seam citations, and structured delta specifications with RFC 2119 requirements and GIVEN/WHEN/THEN scenarios.",
+  "hard_stops": [
+    {
+      "hard_stop": "Delta requirements conflict with existing base specs without explicit migration path.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Capability impacts cannot be determined from packet context or code inspection.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/control-room-ui-views/propose-lens-b.md",
+      "change": "created",
+      "why": "Capability impact and delta specification feedstock for control room UI views proposal synthesis"
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every capability impact and delta spec requirement carries file:line citations to real code in this worktree.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-ui-views/propose-lens-b.md:7-11,17,21,22,27,28,33,37,39,43,44,49,53,55,59,63,65,69,73,75 cite internal/serve/handlers.go:36-118, 161-176, internal/serve/static/app.js:12-20, 22-70, internal/run/batch.go:19-27, internal/dag/waves.go:40-70, internal/lane/status.go:10-28, internal/barrier/barrier.go:21-60, internal/worktree/worktree.go:168-238, internal/ledger/schema.go:96-180, internal/serve/model.go:27-125, 128-343, internal/result/result.schema.json:1-98, and internal/run/run.go:576-654."
+    },
+    {
+      "criterion": "propose-lens-b.md exists, is under 1000 words, and carries every skeleton section.",
+      "met": true,
+      "evidence": "wc -w openspec/changes/control-room-ui-views/propose-lens-b.md reports 880 words and contains sections '# Proposal Lens B — Capability Impact \u0026 Specs: Control Room UI Views', '## User \u0026 Capability Impact', '## Delta Specifications', and '## Open Questions'."
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (git status --porcelain empty and git log --oneline -1).",
+      "met": true,
+      "evidence": "git log -1 --oneline output: 'b26276b docs(openspec): add propose lens b for control room ui views'; git status --porcelain ignores untracked .lucind/result.json."
+    }
+  ],
+  "commit": "b26276b5ee47770593f45abaf47aeca9ad7cf595",
+  "session_id": "53572776-9097-4dff-9771-180c9d75738a"
+}

@@ -1,0 +1,55 @@
+{
+  "packet_id": "spec-conflict-triage-fixture-lens-b",
+  "status": "done",
+  "summary": "Authored Given/When/Then scenarios, coverage mapping, untestable assertions, and citation manifest for all four conflict-triage-fixture requirements under openspec/changes/conflict-triage-fixture/spec-lens-b.md. Committed the completed lens draft under budget with zero hard stops fired.",
+  "hard_stops": [
+    {
+      "hard_stop": "The proposal does not determine what the system should do in a case, so the scenario would assert an outcome nobody chose.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Every scenario for a requirement would be untestable, meaning the requirement as proposed is unobservable.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/conflict-triage-fixture/spec-lens-b.md",
+      "change": "created",
+      "why": "Authored Spec Lens B containing Given/When/Then scenarios, coverage table, and citation manifest."
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "A `## Citation Manifest` section lists every unique citation, grouped by file, with the claim each one supports.",
+      "met": true,
+      "evidence": "openspec/changes/conflict-triage-fixture/spec-lens-b.md:111-156 contains 44 unique file:line citations grouped alphabetically by file with ascending line numbers and plain-claim assertions."
+    },
+    {
+      "criterion": "Every requirement named in `## Assumed requirements` has at least one scenario, and every scenario is in GIVEN / WHEN / THEN form.",
+      "met": true,
+      "evidence": "openspec/changes/conflict-triage-fixture/spec-lens-b.md:7-95 defines 12 GIVEN/WHEN/THEN scenarios covering all 4 assumed requirements (3 scenarios each across happy path, edge case, and error state)."
+    },
+    {
+      "criterion": "Every scenario's THEN names an observable outcome, and the coverage table cites the seam it is observable through or marks it \"new seam required\".",
+      "met": true,
+      "evidence": "openspec/changes/conflict-triage-fixture/spec-lens-b.md:99-105 maps every requirement's happy path, edge case, and error state to concrete test seams or new seam required."
+    },
+    {
+      "criterion": "`spec-lens-b.md` exists, is under 1000 words, and carries `## Assumed requirements`, `## Coverage`, and `## Untestable Assertions`.",
+      "met": true,
+      "evidence": "openspec/changes/conflict-triage-fixture/spec-lens-b.md body is 971 words (\u003c1000 word budget), containing ## Assumed requirements at :3, ## Coverage at :97, and ## Untestable Assertions at :105."
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (`git status --porcelain` empty and `git log --oneline -1`).",
+      "met": true,
+      "evidence": "Commit f3db78a docs(openspec): add spec lens b for conflict-triage-fixture carries the work; git status --porcelain is empty."
+    }
+  ],
+  "commit": "f3db78a26463351e9bcbc2856c832348407238d5",
+  "session_id": "889842bc-257c-44ad-bd9d-bd2b4b43565f"
+}

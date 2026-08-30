@@ -1,0 +1,44 @@
+{
+  "packet_id": "propose-control-room-telemetry-lens-b",
+  "status": "done",
+  "summary": "Authored Proposal Lens B document for control room telemetry detailing user capability impacts, delta requirements, and scenarios with verified file:line citations.",
+  "hard_stops": [
+    {
+      "hard_stop": "Delta requirements conflict with existing base specs without explicit migration path.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Capability impacts cannot be determined from packet context or code inspection.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/control-room-telemetry/propose-lens-b.md",
+      "change": "created",
+      "why": "Proposal lens B document defining capability impacts and delta specs for control room telemetry."
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every capability impact and delta spec requirement carries file:line citations to real code in this worktree.",
+      "met": true,
+      "evidence": "All 5 capability table rows and 4 delta spec requirements in openspec/changes/control-room-telemetry/propose-lens-b.md cite verified lines in internal/run/run.go, internal/executor/*.go, internal/serve/*.go, and internal/ledger/*.go."
+    },
+    {
+      "criterion": "propose-lens-b.md exists, is under 1000 words, and carries every skeleton section.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-telemetry/propose-lens-b.md exists with 940 words (wc -w) containing all required skeleton sections."
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (git status --porcelain empty and git log --oneline -1).",
+      "met": true,
+      "evidence": "git status --porcelain is clean and git log -1 --oneline returns commit a130472 with message docs(openspec): add propose lens b for control room telemetry without AI attribution."
+    }
+  ],
+  "commit": "a130472"
+}

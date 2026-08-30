@@ -1,0 +1,95 @@
+{
+  "packet_id": "design-control-room-telemetry-synthesis",
+  "status": "done",
+  "summary": "Verified every file:line citation in the three design lenses against this worktree, then wrote a 1483-word canonical design.md under lens A's Candidate 2 architecture. Twelve failed citations were dropped into design-synthesis-notes.md; no architecture hard stop fired; the work is committed as 61f5d6d.",
+  "hard_stops": [
+    {
+      "hard_stop": "The three `## Assumed architecture` blocks are mutually irreconcilable and the proposal and specs do not choose between them. Write the notes file, leave `design.md` uncreated, and block.",
+      "fired": false,
+      "note": "All three assumed Candidate 2: worktree-local logs plus an in-memory loopback SSE hub, optional Request writers, schema v5 unchanged. Proposal already selected Candidate 2."
+    },
+    {
+      "hard_stop": "Lens A's architecture is refuted by code you verified. Do not substitute your own.",
+      "fired": false,
+      "note": "A describes additive seams on current bytes.Buffer capture, schema v5, six-value lane.Status, and loopback NewHandler. Code confirms those seams; it does not refute the plan."
+    },
+    {
+      "hard_stop": "One or more lens drafts is missing from this worktree.",
+      "fired": false,
+      "note": "design-lens-a.md, design-lens-b.md, and design-lens-c.md are all present under openspec/changes/control-room-telemetry/."
+    },
+    {
+      "hard_stop": "Covering all eight spine items honestly would require exceeding 1800 words. Report which item forces it rather than silently overrunning or silently cutting.",
+      "fired": false,
+      "note": "design.md is 1483 words by wc -w and covers all eight spine items plus skill Interfaces/Contracts."
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false,
+      "note": "Allowed-path list names the two markdown files; Return also requires .lucind/result.json. Those are complementary outputs, not a conflict. Skill 800-word budget is explicitly superseded by the packet's 1800."
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/control-room-telemetry/design.md",
+      "change": "created",
+      "why": "Canonical design synthesized from the three verified lens drafts."
+    },
+    {
+      "path": "openspec/changes/control-room-telemetry/design-synthesis-notes.md",
+      "change": "created",
+      "why": "Orchestrator notes: dropped citations, coverage gaps, architecture divergence."
+    },
+    {
+      "path": ".lucind/result.json",
+      "change": "created",
+      "why": "Packet return envelope."
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every file:line citation surviving into design.md was opened and confirmed in this worktree, and every dropped claim is listed under ## Dropped Citations.",
+      "met": true,
+      "evidence": "96 unique draft citations opened. 12 dropped in openspec/changes/control-room-telemetry/design-synthesis-notes.md ## Dropped Citations (e.g. run.go:348-351 is SetStatus Running not flush; handlers_test.go missing). Survivors include internal/run/run.go:368-375 (exec.Run), internal/executor/agy.go:169-175 (bytes.Buffer assignment), internal/ledger/schema.go:38-39 (events.type CHECK), cmd/lucind-ai/cli.go:647-659 (PersistEnvelope writes JSON only)."
+    },
+    {
+      "criterion": "design.md exists, is under 1800 words, and substantively covers all eight spine items, with anything missing reported under ## Coverage Gaps.",
+      "met": true,
+      "evidence": "`wc -w openspec/changes/control-room-telemetry/design.md` = 1483. Headings: Technical Approach; Architecture Decisions (choice/alternatives/rationale); Flow and Invariants; Interfaces / Contracts; File Changes with terminal consumers; Testing Strategy and Test Seams; Threat Matrix (five rows N/A with reasons); Rollback and Additivity; Open Questions; Out of Scope. Coverage gaps are in design-synthesis-notes.md, not silent fills."
+    },
+    {
+      "criterion": "design-synthesis-notes.md exists with exactly the four required sections, each either populated or explicitly None.",
+      "met": true,
+      "evidence": "Headings in order: ## Unresolved Contradictions (None); ## Coverage Gaps (five items); ## Dropped Citations (twelve items); ## Architecture Divergence (A canonical; B/C converged on Candidate 2 with archive/hub-injection notes)."
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (`git status --porcelain` empty and `git log --oneline -1`).",
+      "met": true,
+      "evidence": "`git status --porcelain` empty. `git log --oneline -1` = 61f5d6d docs(control-room-telemetry): synthesize canonical design from three lenses. Full hash 61f5d6d3df47d0cbe752799d94533796aae10e4b."
+    }
+  ],
+  "commit": "61f5d6d3df47d0cbe752799d94533796aae10e4b",
+  "findings": [
+    {
+      "finding": "Citations verified: 96 unique file:line ranges across the three lens drafts were opened in this worktree.",
+      "evidence": "python unique-citation count over design-lens-{a,b,c}.md = 96; A=37 B=43 C=37 overlapping.",
+      "affects": "tasks; synthesizer evidence for the citation-verification done criterion"
+    },
+    {
+      "finding": "Citations dropped: 12 claims whose cited lines did not support the draft.",
+      "evidence": "openspec/changes/control-room-telemetry/design-synthesis-notes.md ## Dropped Citations",
+      "affects": "tasks; do not re-cite run.go:348-351 as flush, handlers_test.go, or result.go:10-40 as Envelope"
+    },
+    {
+      "finding": "Contradictions escalated: 0.",
+      "evidence": "openspec/changes/control-room-telemetry/design-synthesis-notes.md ## Unresolved Contradictions: None",
+      "affects": "orchestrator; no blocking question"
+    },
+    {
+      "finding": "Coverage gaps: 5 (missing change-local specs dir; no HTTP route for ListRunEvents; skill 800 vs packet 1800; skill Engram/return steps superseded; no extra loopback-HTTP threat-matrix row).",
+      "evidence": "openspec/changes/control-room-telemetry/design-synthesis-notes.md ## Coverage Gaps",
+      "affects": "sdd-spec follow-up if specs/ is still required; sdd-tasks for optional lifecycle HTTP"
+    }
+  ],
+  "session_id": "design-control-room-telemetry-synthesis"
+}

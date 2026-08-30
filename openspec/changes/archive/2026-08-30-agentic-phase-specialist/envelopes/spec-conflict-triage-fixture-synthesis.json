@@ -1,0 +1,133 @@
+{
+  "packet_id": "spec-conflict-triage-fixture-synthesis",
+  "status": "done",
+  "summary": "Canonical spec tree for conflict-triage-fixture is committed at 5cdd2ab (four capability files, 942 authored words). Synthesis notes are committed at ae6a2cf. All three lens manifests were citation-checked; two citation issues were dropped or retargeted; no MODIFIED block shipped; no unresolved contradictions.",
+  "hard_stops": [
+    {
+      "hard_stop": "The three Assumed-requirements blocks are mutually irreconcilable and the proposal does not choose. Write the notes file, leave specs/ uncreated, and block.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Lens A's requirement set is refuted by a live spec you verified. Do not substitute your own.",
+      "fired": false
+    },
+    {
+      "hard_stop": "A MODIFIED requirement's live block cannot be recovered from Lens C or from openspec/specs/, so the block would have to be partial. Never write a partial block.",
+      "fired": false
+    },
+    {
+      "hard_stop": "One or more lens drafts is missing from this worktree.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying the spine honestly would require exceeding the authored budget. Report which requirement forces it rather than silently overrunning or silently cutting.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/conflict-triage-fixture/specs/conflict-fixture/spec.md",
+      "change": "created",
+      "why": "Canonical full spec for new conflict-fixture capability (ADDED: Deterministic three-hunk fixture)."
+    },
+    {
+      "path": "openspec/changes/conflict-triage-fixture/specs/conflict-triage/spec.md",
+      "change": "created",
+      "why": "Canonical full spec for new conflict-triage capability (ADDED: Semantic triage and risk ratchet)."
+    },
+    {
+      "path": "openspec/changes/conflict-triage-fixture/specs/reconciliation-approval/spec.md",
+      "change": "created",
+      "why": "Canonical ADDED delta for existing reconciliation-approval (Two-step close and retry CAS)."
+    },
+    {
+      "path": "openspec/changes/conflict-triage-fixture/specs/triage-evaluation-rubric/spec.md",
+      "change": "created",
+      "why": "Canonical full spec for new triage-evaluation-rubric capability (ADDED: Dual-judge rubric isolation)."
+    },
+    {
+      "path": "openspec/changes/conflict-triage-fixture/spec-synthesis-notes.md",
+      "change": "created",
+      "why": "Orchestrator-facing notes: contradictions, coverage gaps, dropped citations, requirement divergence."
+    },
+    {
+      "path": ".lucind/result.json",
+      "change": "created",
+      "why": "Packet result envelope."
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "The canonical document was committed BEFORE the notes file was started, as its own commit.",
+      "met": true,
+      "evidence": "git log --oneline -2: 5cdd2ab docs(openspec): add canonical spec deltas for conflict triage fixture (specs/ only, 4 files); ae6a2cf docs(openspec): record spec synthesis notes for conflict triage fixture (notes only). Notes file was not present at 5cdd2ab."
+    },
+    {
+      "criterion": "Every citation in every lens manifest was opened and checked in this worktree, and its outcome recorded.",
+      "met": true,
+      "evidence": "Union of three Citation Manifest tables: 68 unique file:line ranges opened in this worktree. Outcomes recorded in spec-synthesis-notes.md ## Dropped Citations (1 truncated range retargeted; 1 Conflicts-prose misattribution dropped; remainder verified)."
+    },
+    {
+      "criterion": "Every file:line citation surviving into the delta tree was opened and confirmed in this worktree, and every dropped claim is listed under Dropped Citations.",
+      "met": true,
+      "evidence": "Delta tree contains no file:line citations (WHAT-not-HOW). Dropped claims listed in spec-synthesis-notes.md ## Dropped Citations (worktree.go:278-292 SHA-registration attribution; candidate.go:100-145 as the PathInScope comparison)."
+    },
+    {
+      "criterion": "Every MODIFIED block matches the live requirement scenario for scenario, with only the intended edits applied — verified by opening the live spec, not by trusting Lens C.",
+      "met": true,
+      "evidence": "Zero MODIFIED blocks shipped. Lens C's One Bounded Candidate copy was opened against openspec/specs/reconciliation-approval/spec.md:47-60, confirmed identical (2 scenarios: Authorized candidate passes; Candidate is unsafe), then not shipped because C Conflicts is None."
+    },
+    {
+      "criterion": "Every requirement carries an RFC 2119 keyword and at least one GIVEN / WHEN / THEN scenario.",
+      "met": true,
+      "evidence": "Four requirements, each with MUST/MUST NOT and 2–3 GIVEN/WHEN/THEN scenarios: conflict-fixture/spec.md (3), conflict-triage/spec.md (3), reconciliation-approval/spec.md (2), triage-evaluation-rubric/spec.md (3)."
+    },
+    {
+      "criterion": "The delta tree's authored content is under 1800 words excluding verbatim copied blocks, and every spine item is satisfied or reported under Coverage Gaps.",
+      "met": true,
+      "evidence": "python word count of specs/**/spec.md = 942 authored words; no verbatim MODIFIED copies. Spine: 4 capability files; 4 ADDED; RFC 2119; happy+edge GWT; no partial MODIFIED; no REMOVED/RENAMED; WHAT-not-HOW. Format drift vs sdd-spec recorded in spec-synthesis-notes.md ## Coverage Gaps."
+    },
+    {
+      "criterion": "spec-synthesis-notes.md exists with exactly the four required sections, each either populated or explicitly None.",
+      "met": true,
+      "evidence": "openspec/changes/conflict-triage-fixture/spec-synthesis-notes.md headings: Unresolved Contradictions (None); Coverage Gaps (populated); Dropped Citations (populated); Requirement Divergence (populated)."
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (git status --porcelain empty and git log --oneline -1).",
+      "met": true,
+      "evidence": "git status --porcelain empty; git log --oneline -1: ae6a2cf docs(openspec): record spec synthesis notes for conflict triage fixture. Committer git config not modified; messages have no AI attribution trailer."
+    }
+  ],
+  "commit": "ae6a2cf627c102278932c53e3095a561ba579b60",
+  "findings": [
+    {
+      "finding": "Citations verified: 66 of 68 unique manifest ranges supported their claims when opened in this worktree.",
+      "evidence": "Union of spec-lens-a/b/c.md Citation Manifest tables; opened cmd/lucind-ai/cli.go, internal/{executor,feature,integrate,ledger,overlap,packet,reconcile,resolve,run,worktree}/*, and openspec/specs/reconciliation-approval/spec.md:1-74.",
+      "affects": "spec-conflict-triage-fixture-synthesis notes counts"
+    },
+    {
+      "finding": "Citations dropped or retargeted: 2.",
+      "evidence": "internal/worktree/worktree.go:278-292 is IsLinkedWorktree, not SHA registration (C Conflicts prose). internal/resolve/candidate.go:100-145 is git-diff collection; packet.PathInScope is at :161-164.",
+      "affects": "spec-synthesis-notes.md ## Dropped Citations"
+    },
+    {
+      "finding": "MODIFIED blocks confirmed complete: 0 shipped. C's One Bounded Candidate copy was verified complete against the live spec and omitted.",
+      "evidence": "openspec/specs/reconciliation-approval/spec.md:47-60 matches C's MODIFIED Full Block byte-for-scenario; C Conflicts: None.",
+      "affects": "reconciliation-approval delta classification"
+    },
+    {
+      "finding": "Contradictions escalated: 0.",
+      "evidence": "spec-synthesis-notes.md ## Unresolved Contradictions = None. CandidateSHA writer, mixed-hunk risk formula, and production executor remain open by instruction, not as lens-vs-lens forks.",
+      "affects": "design-conflict-triage-fixture (CandidateSHA writer)"
+    },
+    {
+      "finding": "Coverage gaps: skill vs packet new-domain format and 650-vs-1800 word budget; Skill Steps 5–6 superseded; no MODIFIED/REMOVED/RENAMED (none required).",
+      "evidence": "spec-synthesis-notes.md ## Coverage Gaps; authored word count 942.",
+      "affects": "archive merge of new capabilities from the change-folder full specs"
+    }
+  ]
+}

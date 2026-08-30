@@ -1,0 +1,121 @@
+{
+  "packet_id": "tasks-agentic-phase-specialist-synthesis",
+  "status": "done",
+  "summary": "Synthesized the three tasks lens drafts into canonical tasks.md (915/1800 words) and tasks-synthesis-notes.md. Four-phase A checklist, three in-repo work units, no apply-dag sidecar, no waves merged, zero unresolved contradictions. Citations were opened in this worktree; dropped claims are in the notes.",
+  "hard_stops": [
+    {
+      "hard_stop": "The three ## Assumed decomposition blocks are mutually irreconcilable and the spec and design do not choose between them. Write the notes file, leave tasks.md uncreated, and block.",
+      "fired": false,
+      "note": "A four-phase split, B three independent deliverables, and C three sequential units all map onto skill docs + accept gating + attempt gating; A’s Phase 4 is out-of-repo by design. Reconcilable; A is authoritative."
+    },
+    {
+      "hard_stop": "Lens A's decomposition is refuted by code you verified. Do not substitute your own.",
+      "fired": false,
+      "note": "Every named production file exists. Verifier.Accept was a naming error (method is Verify), not a missing file or backwards dependency."
+    },
+    {
+      "hard_stop": "No partition exists in which every wave is green on its own and every same-wave pair is disjoint. Report it; the correct answer may be a single packet, but say so rather than shipping a plan Integrate will revert.",
+      "fired": false,
+      "note": "Single sequential packet is green. A hypothetical three-unit same-wave DAG on exact files is also PathInScope-disjoint and green; sidecar was declined."
+    },
+    {
+      "hard_stop": "One or more lens drafts is missing from this worktree.",
+      "fired": false,
+      "note": "tasks-lens-a.md, tasks-lens-b.md, and tasks-lens-c.md are all present."
+    },
+    {
+      "hard_stop": "Covering all eight spine items honestly would require exceeding 1800 words. Report which item forces it rather than silently overrunning or silently cutting.",
+      "fired": false,
+      "note": "tasks.md is 915 words and covers all eight spine items."
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false,
+      "note": "Packet 1800-word budget, two-commit discipline, and sdd-tasks forecast fields were all satisfiable together. Skill 530-word budget and Engram persist/return block are packet-superseded."
+    }
+  ],
+  "files_changed": [
+    {
+      "change": "created",
+      "path": "openspec/changes/agentic-phase-specialist/tasks.md",
+      "why": "Canonical tasks checklist for agentic-phase-specialist."
+    },
+    {
+      "change": "created",
+      "path": "openspec/changes/agentic-phase-specialist/tasks-synthesis-notes.md",
+      "why": "Arbitration record: contradictions, coverage gaps, dropped citations, decomposition divergence."
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "tasks.md was committed as its own commit before tasks-synthesis-notes.md was started, confirmed by the mid-flow lucind-lane-check.sh run reporting a clean git status --porcelain.",
+      "met": true,
+      "evidence": "Commit 1cddff0 created only tasks.md. Mid-flow ./lucind-lane-check.sh --file openspec/changes/agentic-phase-specialist/tasks.md --budget 1800 --skip-result:\nPASS  word budget: 915 / 1800 words\nPASS  git status --porcelain: clean\nRESULT: PASS"
+    },
+    {
+      "criterion": "Every file:line citation surviving into tasks.md was opened and confirmed in this worktree, and every dropped claim is listed under ## Dropped Citations.",
+      "met": true,
+      "evidence": "80 unique citation tokens across the three drafts were opened. Dropped/retargeted claims (Verifier.Accept / TestAccept_SDDPhase, accept.go:84-137 and attempt.go:431-448 as already-gated, accept_test.go:80-140 check-failures, packet_test.go:924-941 as whole TestSkillAssetContract, design.md:102-108 prompt range, run.go:377-394, TestCheck name, config.yaml 10000 as session budget) are listed in tasks-synthesis-notes.md ## Dropped Citations."
+    },
+    {
+      "criterion": "Every wave was independently judged green-on-its-own, and every wave that was not is merged and reported under ## Coverage Gaps.",
+      "met": true,
+      "evidence": "No waves merged. Single sequential packet is green. Lens B’s hypothetical units 1–3 wave is also green alone (docs-only + accept RED+GREEN + run RED+GREEN). Recorded under ## Coverage Gaps."
+    },
+    {
+      "criterion": "Every same-wave unit pair was re-checked against the component-boundary prefix rule rather than taken from lens B's table.",
+      "met": true,
+      "evidence": "PathInScope (disjoint.go:8-22,24-47) on exact files: plugin/… vs internal/accept/accept.go vs internal/run/attempt.go — none prefixes another. Same-wave disjointness does not apply to the shipped single packet. Both skill trees stay in unit 1."
+    },
+    {
+      "criterion": "tasks.md exists, is under 1800 words, and substantively covers all eight spine items, with anything missing reported under ## Coverage Gaps.",
+      "met": true,
+      "evidence": "Mid-flow PASS  word budget: 915 / 1800 words. Spine: forecast table + plain-text guard lines; work units with Likely PR, focused command, harness, rollback; phased checklist; threat-matrix all N/A so no threat RED; dependency table; green-alone + disjointness; executor named (cursor-agent); four requirements traced. Gaps (exception carrier, ungated Check pin with no A line) in notes."
+    },
+    {
+      "criterion": "tasks-synthesis-notes.md exists with exactly the four required sections, each either populated or explicitly None, confirmed by the final lucind-lane-check.sh run.",
+      "met": true,
+      "evidence": "Final ./lucind-lane-check.sh --file openspec/changes/agentic-phase-specialist/tasks-synthesis-notes.md --require-section \"Unresolved Contradictions\" --require-section \"Coverage Gaps\" --require-section \"Dropped Citations\" --require-section \"Decomposition Divergence\":\nPASS  section present: ## Unresolved Contradictions\nPASS  section present: ## Coverage Gaps\nPASS  section present: ## Dropped Citations\nPASS  section present: ## Decomposition Divergence\nPASS  git status --porcelain: clean\nPASS  result envelope: .lucind/result.json exists and parses as JSON\nRESULT: PASS"
+    },
+    {
+      "criterion": "The work is committed with two conventional commits and no AI attribution, confirmed by the final lucind-lane-check.sh run reporting a clean git status --porcelain and a valid .lucind/result.json.",
+      "met": true,
+      "evidence": "git log: 1cddff0 docs(sdd): add canonical tasks checklist for agentic-phase-specialist; da7dd60 docs(sdd): record tasks synthesis arbitration for agentic-phase-specialist. Trailer stripped via commit-tree. git log -1 --format=%B has no Co-authored-by. Final lane-check:\nPASS  git status --porcelain: clean\nPASS  result envelope: .lucind/result.json exists and parses as JSON\nRESULT: PASS"
+    }
+  ],
+  "commit": "da7dd60",
+  "findings": [
+    {
+      "finding": "Citations verified: 80 unique file:line tokens opened in this worktree.",
+      "evidence": "Union of the three lens manifests plus prose citations; python count of unique `path:line` tokens = 80.",
+      "affects": "apply-agentic-phase-specialist citation trust"
+    },
+    {
+      "finding": "Citations dropped or retargeted: 9 claims (Accept vs Verify, two current-gating overclaims, check-failures range, TestSkillAssetContract start line, prompt range, UpdateLaneMetadata end line, TestCheck name, session 10000 budget).",
+      "evidence": "openspec/changes/agentic-phase-specialist/tasks-synthesis-notes.md ## Dropped Citations",
+      "affects": "apply-agentic-phase-specialist proving commands"
+    },
+    {
+      "finding": "Waves merged for viability: 0.",
+      "evidence": "tasks-synthesis-notes.md ## Coverage Gaps first bullet",
+      "affects": "apply dispatch shape"
+    },
+    {
+      "finding": "Contradictions escalated: 0.",
+      "evidence": "tasks-synthesis-notes.md ## Unresolved Contradictions: None",
+      "affects": "tasks-phase Specialist Acceptance"
+    },
+    {
+      "finding": "Coverage gaps: exception carrier unspecified; C’s ungated Check proving command has no A checklist line; sdd-tasks 530-word/Engram persist superseded; Phase Verdict has no Go parser.",
+      "evidence": "tasks-synthesis-notes.md ## Coverage Gaps",
+      "affects": "apply-agentic-phase-specialist exception tests and integrate.Check"
+    }
+  ],
+  "skills_loaded": [
+    "lucind-executor",
+    "lucind-fan-out-lens",
+    "sdd-tasks",
+    "engram-memory"
+  ],
+  "session_id": "tasks-agentic-phase-specialist-synthesis"
+}

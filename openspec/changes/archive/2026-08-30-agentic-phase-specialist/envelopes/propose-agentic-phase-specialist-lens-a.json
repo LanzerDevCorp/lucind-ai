@@ -1,0 +1,60 @@
+{
+  "packet_id": "propose-agentic-phase-specialist-lens-a",
+  "status": "done",
+  "summary": "Authored Proposal Lens A for the Agentic Phase Specialist change, detailing candidate selection, the phase-scoped Specialist architecture, Phase Verdict protocol, scoped lucind-checks gating, and conceptual changes. Grounded with 24 verified file:line citations and verified under word budget.",
+  "hard_stops": [
+    {
+      "hard_stop": "The technical approach cannot be grounded in existing codebase patterns or proposal context.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Candidate selection contradicts frozen exploration conclusions without justification.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "change": "created",
+      "path": "openspec/changes/agentic-phase-specialist/propose-lens-a.md",
+      "why": "Proposal Lens A document containing candidate selection, approach, conceptual changes, rejected alternatives, open questions, and citation manifest."
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "A `## Citation Manifest` section lists every unique citation, grouped by file, with the claim each one supports.",
+      "met": true,
+      "evidence": "PASS section present: ## Citation Manifest; 24 unique citations listed grouped alphabetically by file with ascending line numbers and explicit claims."
+    },
+    {
+      "criterion": "`lucind-lane-check.sh --verify-citations` was run before committing and reported no FAIL against this draft's own manifest.",
+      "met": true,
+      "evidence": "lucind-lane-check.sh --verify-citations reported 24/24 PASS with zero FAIL."
+    },
+    {
+      "criterion": "Every candidate and approach claim carries `file:line` citations to real code in this worktree.",
+      "met": true,
+      "evidence": "All citations in openspec/changes/agentic-phase-specialist/propose-lens-a.md map to valid line ranges in existing repository files (CONTEXT.md, cli.go, ADR 0002, sdd-phase-specialist.md, accept.go, integrate.go, lanes_meta.go, phasespec.go, attempt.go, proposal.md, SKILL.md, acceptance-promotion.md, fan-out.md)."
+    },
+    {
+      "criterion": "`propose-lens-a.md` exists, is under 1000 words excluding the Citation Manifest, and carries every skeleton section plus `## Citation Manifest`.",
+      "met": true,
+      "evidence": "PASS word budget: 681 / 1000 words; all required sections present (Selected Candidate \u0026 Approach, Conceptual Changes \u0026 Architecture Rationale, Alternatives Considered \u0026 Rejected, Open Questions, Citation Manifest)."
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution, confirmed by the final `lucind-lane-check.sh` run reporting a clean `git status --porcelain` and a valid `.lucind/result.json`. Check `git log -1 --format=%B` after committing: some executors' commit wrappers append a `Co-authored-by:` trailer the message never contained. Strip it if present.",
+      "met": true,
+      "evidence": "Commit eb85ec4949c707a2e39bb85e8e2ef3c0e5d10978 committed cleanly with message 'docs(sdd): author propose-lens-a for agentic-phase-specialist' and no AI attribution; git status --porcelain is clean."
+    }
+  ],
+  "commit": "eb85ec4949c707a2e39bb85e8e2ef3c0e5d10978",
+  "skills_loaded": [
+    "lucind-fan-out-lens",
+    "lucind-executor",
+    "sdd-propose"
+  ],
+  "session_id": "f36622ab-1062-45c8-b1e9-46bf69ca402a"
+}

@@ -1,0 +1,94 @@
+{
+  "packet_id": "explore-control-room-telemetry-synthesis",
+  "status": "done",
+  "summary": "Verified every file:line citation in the three control-room-telemetry explore lenses against this worktree, dropped 16 unsupported claims, and wrote a 1350-word canonical explore.md recommending worktree-local logs plus an in-memory SSE hub. Synthesis notes record zero unresolved contradictions, zero coverage gaps, the dropped citations, and lens B's SQLite-store divergence from A's primary candidate.",
+  "hard_stops": [
+    {
+      "hard_stop": "The problem space or candidate approaches across drafts are mutually irreconcilable. Write the notes file, leave explore.md uncreated, and block.",
+      "fired": false,
+      "note": "Not fired. All three drafts share the black-box buffered-dispatch problem. Candidate 1 is unviable for high-frequency streams (lens C) but reconcilable: lens A's Candidate 2 is canonical; lens B's SQLite-centric scenarios were rewired rather than treated as an irreconcilable fork."
+    },
+    {
+      "hard_stop": "One or more lens drafts is missing from this worktree.",
+      "fired": false,
+      "note": "Not fired. explore-lens-a.md, explore-lens-b.md, and explore-lens-c.md are all present under openspec/changes/control-room-telemetry/."
+    },
+    {
+      "hard_stop": "Covering the exploration spine honestly would require exceeding 1800 words. Report which item forces it rather than silently overrunning or silently cutting.",
+      "fired": false,
+      "note": "Not fired. Canonical explore.md is 1350 words (wc -w) and covers all eight spine items."
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false,
+      "note": "Not fired. Allowed-path artifacts, citation procedure, notes shape, word budget, and commit criterion are simultaneously satisfied. .lucind/result.json is the mandated return envelope (gitignored; excluded from allowed_paths enforcement)."
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/control-room-telemetry/explore.md",
+      "change": "created",
+      "why": "Canonical exploration document after citation verification and candidate arbitration."
+    },
+    {
+      "path": "openspec/changes/control-room-telemetry/explore-synthesis-notes.md",
+      "change": "created",
+      "why": "Orchestrator-facing notes: dropped citations, approach divergence, empty contradiction and coverage-gap sections."
+    },
+    {
+      "path": ".lucind/result.json",
+      "change": "created",
+      "why": "Packet return envelope."
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every file:line citation surviving into explore.md was opened and confirmed in this worktree, and every dropped claim is listed under ## Dropped Citations.",
+      "met": true,
+      "evidence": "92 unique draft citations opened in this worktree. 16 unsupported claims listed under ## Dropped Citations in openspec/changes/control-room-telemetry/explore-synthesis-notes.md. Surviving explore.md citations were confirmed against the same files (e.g. bytes.Buffer at internal/executor/agy.go:169-175, events CHECK at internal/ledger/schema.go:34-43, /api/state at internal/serve/handlers.go:79-85)."
+    },
+    {
+      "criterion": "explore.md exists, is under 1800 words, and substantively covers the exploration spine, with anything missing reported under ## Coverage Gaps.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-telemetry/explore.md exists. wc -w reports 1350 words. Spine headings present: Problem, Candidate approaches, User and capability impact, Scenarios, Risks and trade-offs, Spikes, Success criteria, Out of scope, Open questions. ## Coverage Gaps in the notes file is None."
+    },
+    {
+      "criterion": "explore-synthesis-notes.md exists with exactly the four required sections, each either populated or explicitly None.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-telemetry/explore-synthesis-notes.md headings are exactly ## Unresolved Contradictions (None), ## Coverage Gaps (None), ## Dropped Citations (16 entries), ## Approach Divergence (populated)."
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (git status --porcelain empty and git log --oneline -1).",
+      "met": true,
+      "evidence": "git status --porcelain empty. git log --oneline -1: c456f3d docs(control-room-telemetry): synthesize canonical explore from three lenses. Full SHA c456f3d71d85fea762be65296bbd5412dd0ba816."
+    }
+  ],
+  "commit": "c456f3d71d85fea762be65296bbd5412dd0ba816",
+  "findings": [
+    {
+      "finding": "Citations verified: 92 unique file:line units across the three lens drafts were opened in this worktree.",
+      "evidence": "Unique citation count from explore-lens-a.md (35 raw), explore-lens-b.md (59 raw), explore-lens-c.md (28 raw) expanded to 92 unique file:line ranges.",
+      "affects": "explore.md citation set"
+    },
+    {
+      "finding": "Citations dropped: 16 claims whose cited lines did not support the claim (wrong symbol, unrelated code, or missing methods).",
+      "evidence": "openspec/changes/control-room-telemetry/explore-synthesis-notes.md ## Dropped Citations",
+      "affects": "proposal phase must not revive AppendTelemetry, ListRunEvents, or Outcome token fields as if they exist today"
+    },
+    {
+      "finding": "Contradictions escalated: 0.",
+      "evidence": "explore-synthesis-notes.md ## Unresolved Contradictions is None",
+      "affects": "proposal may proceed on Candidate 2 without waiting on an escalated fork"
+    },
+    {
+      "finding": "Coverage gaps: 0. All eight exploration-spine items were present in the drafts.",
+      "evidence": "explore-synthesis-notes.md ## Coverage Gaps is None",
+      "affects": "none"
+    },
+    {
+      "finding": "Lens B assumed SQLite as the telemetry store (new events.type values and Model query methods). Lens A and C independently prefer worktree files plus SSE; high-frequency ledger ingest is unviable against WAL locks and lease renewals.",
+      "evidence": "explore-lens-b.md scenarios 1-2 vs explore-lens-a.md Candidate 2 vs explore-lens-c.md risk row 1; internal/ledger/schema.go:38-39 CHECK; internal/ledger/ledger.go:162-164 WAL DSN",
+      "affects": "control-room-telemetry proposal and sibling control-room-ledger / control-room-serve explores"
+    }
+  ]
+}

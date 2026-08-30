@@ -1,0 +1,45 @@
+{
+  "packet_id": "explore-control-room-telemetry-lens-c",
+  "status": "done",
+  "summary": "Authored openspec/changes/control-room-telemetry/explore-lens-c.md analyzing technical risks, trade-offs matrix, prototype spikes, and out-of-scope boundaries with verified codebase file:line citations across executor, ledger, feature, and serve packages.",
+  "hard_stops": [
+    {
+      "hard_stop": "Critical unknown cannot be framed as a risk or spike with available codebase knowledge.",
+      "fired": false
+    },
+    {
+      "hard_stop": "The change requires touching fundamental invariant boundaries without possible mitigation.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/control-room-telemetry/explore-lens-c.md",
+      "change": "created",
+      "why": "Deliver Explore Lens C feedstock for control-room-telemetry change"
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every risk and spike proposal carries file:line citations to real code in this worktree.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-telemetry/explore-lens-c.md:7-12,27-29 cites internal/ledger/ledger.go:127-129,162-164, internal/feature/feature.go:354-385, internal/run/run.go:348-350, internal/ledger/schema.go:34-43, internal/executor/agy.go:160-175, internal/executor/cursor_agent.go:82-97, internal/executor/opencode.go:121-136, internal/serve/server.go:12-22, and internal/serve/handlers.go:36-118."
+    },
+    {
+      "criterion": "explore-lens-c.md exists, is under 1000 words, and carries every skeleton section.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-telemetry/explore-lens-c.md exists, measures 884 words via wc -w, and contains all required skeleton headers and tables."
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (git status --porcelain empty and git log --oneline -1).",
+      "met": true,
+      "evidence": "git log -1 displays commit a7c985b ('docs(openspec): add explore lens C for control-room-telemetry') and git status --porcelain is empty (excluding untracked .lucind/result.json)."
+    }
+  ],
+  "commit": "a7c985b86279d6c94e873e8e253e7bb1511ab898",
+  "session_id": "de950dbf-04d2-41dd-8848-2f623ab20408"
+}

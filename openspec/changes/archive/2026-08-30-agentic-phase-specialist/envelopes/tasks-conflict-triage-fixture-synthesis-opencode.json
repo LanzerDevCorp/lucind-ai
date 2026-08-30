@@ -1,0 +1,123 @@
+{
+  "packet_id": "tasks-conflict-triage-fixture-synthesis-opencode",
+  "status": "done",
+  "summary": "Synthesized the canonical Conflict Triage Fixture task checklist from Lens A's decomposition, with verified citations, strict-TDD ordering, single-packet delivery, and explicit requirement traceability. Recorded citation corrections, decomposition divergence, coverage gaps, and both unresolved design questions; next recommendation is to apply the checklist sequentially.",
+  "hard_stops": [
+    {
+      "hard_stop": "Drafts missing",
+      "fired": false
+    },
+    {
+      "hard_stop": "Lens A decomposition refuted by verified code",
+      "fired": false
+    },
+    {
+      "hard_stop": "Assumed decompositions mutually irreconcilable and spec/design do not choose",
+      "fired": false
+    },
+    {
+      "hard_stop": "No partition can make every wave green and same-wave disjoint",
+      "fired": false
+    },
+    {
+      "hard_stop": "Eight spine items honestly require over 1800 words",
+      "fired": false
+    },
+    {
+      "hard_stop": "Instruction conflict makes compliance impossible",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/conflict-triage-fixture/tasks-opencode.md",
+      "change": "created",
+      "why": "Canonical human implementation checklist."
+    },
+    {
+      "path": "openspec/changes/conflict-triage-fixture/tasks-opencode-synthesis-notes.md",
+      "change": "created",
+      "why": "Synthesis arbitration, citation audit, and gap record."
+    },
+    {
+      "path": ".lucind/result.json",
+      "change": "created",
+      "why": "Required packet result envelope."
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "All three task drafts and accepted proposal/spec/design were read before synthesis.",
+      "met": true,
+      "evidence": "Read tasks-lens-a.md, tasks-lens-b.md, tasks-lens-c.md, proposal.md, design.md, and all four accepted spec files in the worktree."
+    },
+    {
+      "criterion": "Canonical tasks are under 1800 words and satisfy the required planning spine.",
+      "met": true,
+      "evidence": "lucind-lane-check.sh report for openspec/changes/conflict-triage-fixture/tasks-opencode.md; PASS word budget: 801 / 1800 words; PASS git status --porcelain: clean; RESULT: PASS."
+    },
+    {
+      "criterion": "Notes contain exactly the required four synthesis sections.",
+      "met": true,
+      "evidence": "lucind-lane-check.sh report for openspec/changes/conflict-triage-fixture/tasks-opencode-synthesis-notes.md; PASS section present: ## Unresolved Contradictions; PASS section present: ## Coverage Gaps; PASS section present: ## Dropped Citations; PASS section present: ## Decomposition Divergence; PASS git status --porcelain: clean; PASS result envelope: .lucind/result.json exists and parses as JSON; RESULT: PASS."
+    },
+    {
+      "criterion": "Citations were semantically checked and unsupported claims were recorded.",
+      "met": true,
+      "evidence": "101 distinct citation tokens audited; 93 retained as supported and 8 dropped or retargeted, itemized in tasks-opencode-synthesis-notes.md under Dropped Citations."
+    },
+    {
+      "criterion": "The result envelope was validated against its JSON schema before writing.",
+      "met": true,
+      "evidence": "python3 jsonschema validation of candidate envelope against .lucind/result.schema.json returned PASS before write; post-write lane check reports PASS result envelope parsing."
+    },
+    {
+      "criterion": "Required commit and cleanliness discipline was followed.",
+      "met": true,
+      "evidence": "tasks commit f4fde59, notes commit 19d9184; the task lane report records PASS git status --porcelain: clean and the notes lane report records the same."
+    }
+  ],
+  "commit": "f4fde59; 19d9184",
+  "findings": [
+    {
+      "finding": "Citations verified: 93 of 101 distinct citation tokens retained after semantic review.",
+      "evidence": "tasks-opencode-synthesis-notes.md, Coverage Gaps",
+      "affects": "Canonical task citations."
+    },
+    {
+      "finding": "Citations dropped or retargeted: 8 unsupported, overbroad, incomplete, or non-root references.",
+      "evidence": "tasks-opencode-synthesis-notes.md, Dropped Citations items 1-8",
+      "affects": "Citation audit."
+    },
+    {
+      "finding": "Waves merged for viability: 1 proposed split collapsed into one sequential packet.",
+      "evidence": "tasks-opencode.md states no apply-dag sidecar and combined-tree Integrate after each work unit.",
+      "affects": "Strict-TDD delivery shape."
+    },
+    {
+      "finding": "Contradictions escalated: 2 design questions remain open.",
+      "evidence": "tasks-opencode-synthesis-notes.md, Unresolved Contradictions; risk formula/thresholds and production triage executor/model.",
+      "affects": "Apply must not invent either choice."
+    },
+    {
+      "finding": "Coverage gaps: 4 recorded categories remain for apply/verify, including live cloud execution and runtime Integrate proof.",
+      "evidence": "tasks-opencode-synthesis-notes.md, Coverage Gaps",
+      "affects": "Apply and verification planning."
+    },
+    {
+      "finding": "Risk: implementation estimate is 1100-1700 lines; nominal 400-line guard is High but the approved 2000-line single-PR size exception prevents chaining.",
+      "evidence": "tasks-opencode.md Review Workload Forecast",
+      "affects": "Review workload."
+    },
+    {
+      "finding": "Skill resolution: paths-injected; the requested external sdd-tasks skill wins for forecast, work-unit evidence, task quality, and threat RED ordering, with packet rules overriding persistence.",
+      "evidence": "Read /home/lanzerdev/.claude/skills/sdd-tasks/SKILL.md plus the four injected skill files before task work.",
+      "affects": "Artifact compliance."
+    },
+    {
+      "finding": "Next recommendation: apply the four phases as one sequential packet, keeping each threat RED and GREEN in the same unit and resolving the two open design questions before production triage.",
+      "evidence": "tasks-opencode.md dependency order and open-question statement",
+      "affects": "Next phase."
+    }
+  ]
+}

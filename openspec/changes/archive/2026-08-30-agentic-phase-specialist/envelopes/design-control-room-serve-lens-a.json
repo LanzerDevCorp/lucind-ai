@@ -1,0 +1,48 @@
+{
+  "packet_id": "design-control-room-serve-lens-a",
+  "status": "done",
+  "summary": "Authored design lens A for control-room-serve specifying the technical approach and five architectural decisions with terminal consumer file:line citations. Document follows the required skeleton within the word budget.",
+  "hard_stops": [
+    {
+      "hard_stop": "The proposal or specs do not determine an architectural choice, and two reasonable shapes are equally supported.",
+      "fired": false
+    },
+    {
+      "hard_stop": "A decision cannot name any terminal consumer.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Making this decision would require designing the file-change surface or the test strategy, which this packet forbids.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/control-room-serve/design-lens-a.md",
+      "change": "created",
+      "why": "Design lens A technical approach and architecture decisions for control-room-serve"
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every decision names a terminal consumer with a `file:line` citation, and that citation points at real code in this worktree.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-serve/design-lens-a.md:38,44,50,56,62 cite internal/serve/handlers.go:36-38, internal/serve/server.go:19-28, cmd/lucind-ai/cli.go:715, internal/serve/handlers.go:36-85, internal/serve/handlers.go:36-118, and internal/serve/handlers.go:148-231."
+    },
+    {
+      "criterion": "`design-lens-a.md` exists, is under 1000 words, and carries every skeleton section including `## Assumed architecture`.",
+      "met": true,
+      "evidence": "wc -w openspec/changes/control-room-serve/design-lens-a.md returns 886 words and file contains Assumed architecture, Technical Approach, Decisions 1-5, and Open Questions."
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (`git status --porcelain` empty and `git log --oneline -1`).",
+      "met": true,
+      "evidence": "Commit 18f405a 'docs(openspec): add control-room-serve design lens a'; git status --porcelain returns empty."
+    }
+  ],
+  "commit": "18f405a"
+}

@@ -1,0 +1,58 @@
+{
+  "packet_id": "tasks-control-room-telemetry-lens-b",
+  "status": "done",
+  "summary": "Produced tasks-lens-b.md partitioning control-room-telemetry into three dispatchable units across a two-wave plan with pairwise disjointness proofs, and recommended single packet apply based on archived precedents.",
+  "hard_stops": [
+    {
+      "hard_stop": "No partition exists in which every wave is green on its own, so the change cannot be dispatched as waves at all. Say so; a single packet is the correct answer and is not a failure.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Two units that must run in the same wave cannot have disjoint `allowed_paths` because they edit the same file.",
+      "fired": false
+    },
+    {
+      "hard_stop": "The design's file-changes table does not determine which unit owns a file.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/control-room-telemetry/tasks-lens-b.md",
+      "change": "created",
+      "why": "Tasks lens B partitioning and dispatch shape deliverable"
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every pair of units sharing a wave was checked by hand against the component-boundary prefix rule, and the verdict is recorded in `## Disjointness Check`.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-telemetry/tasks-lens-b.md:27-29 contains pairwise check of Unit 1 (internal/executor/*) vs Unit 2 (internal/serve/*) showing disjoint component trees."
+    },
+    {
+      "criterion": "Every wave's \"green on its own\" column is a yes with a reason, or the wave was merged into its successor.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-telemetry/tasks-lens-b.md:21-24 verifies Wave 1 and Wave 2 are green on their own with additive optional sinks, hub, DTOs, and integration tests."
+    },
+    {
+      "criterion": "Every unit names concrete `allowed_paths` and an executor, and every path claim resolves in this worktree or is marked \"new file\".",
+      "met": true,
+      "evidence": "openspec/changes/control-room-telemetry/tasks-lens-b.md:11-17 names concrete paths for Units 1-3, all mapped to existing worktree files or marked (new file)."
+    },
+    {
+      "criterion": "`tasks-lens-b.md` exists, is under 1000 words, and carries `## Assumed decomposition`, `## Wave Plan`, `## Disjointness Check`, and `## Sidecar Recommendation`.",
+      "met": true,
+      "evidence": "wc -w openspec/changes/control-room-telemetry/tasks-lens-b.md reports 433 words; all required sections present."
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (`git status --porcelain` empty and `git log --oneline -1`).",
+      "met": true,
+      "evidence": "Commit 8fc66e3 (docs(tasks): add lens-b partition and dispatch shape for control-room-telemetry), git status is clean."
+    }
+  ],
+  "commit": "8fc66e328e7e6823fbbb42437a42c6f3796cda2e"
+}

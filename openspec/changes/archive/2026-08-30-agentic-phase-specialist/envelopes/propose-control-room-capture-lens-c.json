@@ -1,0 +1,44 @@
+{
+  "packet_id": "propose-control-room-capture-lens-c",
+  "status": "done",
+  "summary": "Produced Proposal Lens C covering technical risks, rollback plan, additivity, test and validation impact, out of scope boundaries, and open questions for the control-room-capture change with file:line citations across all matrix rows.",
+  "hard_stops": [
+    {
+      "hard_stop": "Whether a schema or format change is additive cannot be determined, making rollback a guess.",
+      "fired": false
+    },
+    {
+      "hard_stop": "A critical failure mode has no identifiable mitigation or test seam.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/control-room-capture/propose-lens-c.md",
+      "change": "created",
+      "why": "feedstock draft for proposal synthesis covering risks, rollback, additivity, and test impact"
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every risk, test seam, and rollback claim carries file:line citations to real code in this worktree.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-capture/propose-lens-c.md cites internal/executor/agy.go:15-39,165-197, internal/executor/cursor_agent.go:87-118, internal/executor/opencode.go:126-160, internal/run/run.go:62-70,89,125-144,402,416-435,488-499,501-508, internal/run/integrate.go:159-165, cmd/lucind-ai/cli.go:99-127,641-660, internal/ledgerpath/ledgerpath.go:23-58, internal/serve/server.go:19-53, internal/serve/handlers.go:36-118, internal/ledger/schema.go:9-10,34-43,59-78,190-219, and test files internal/executor/agy_test.go:28-60,158-218, internal/run/run_test.go:645-730,820-950, internal/run/batch_test.go:66-100, internal/serve/server_test.go:17-40, cmd/lucind-ai/cli_test.go:37-80"
+    },
+    {
+      "criterion": "propose-lens-c.md exists, is under 1000 words, and carries every skeleton section.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-capture/propose-lens-c.md exists, word count is 954 words via wc -w, and carries # Proposal Lens C — Risks, Rollback \u0026 Test Impact: Control Room Capture, ## Technical Risks \u0026 Failure Modes, ## Rollback \u0026 Additivity, ## Test \u0026 Validation Impact, ## Out of Scope, and ## Open Questions"
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (git status --porcelain empty and git log --oneline -1).",
+      "met": true,
+      "evidence": "Commit 482c961 'docs(openspec): add propose-lens-c for control-room-capture'; git status --porcelain is clean"
+    }
+  ],
+  "commit": "482c961"
+}

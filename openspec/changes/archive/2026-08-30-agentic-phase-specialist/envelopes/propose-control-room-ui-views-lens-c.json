@@ -1,0 +1,44 @@
+{
+  "packet_id": "propose-control-room-ui-views-lens-c",
+  "status": "done",
+  "summary": "Authored Proposal Lens C for control-room-ui-views covering technical failure modes, zero-migration rollback via git revert, schema/wire additivity, and multi-layer test impact. All claims are grounded with file:line citations to real worktree code within word budget.",
+  "hard_stops": [
+    {
+      "hard_stop": "Whether a schema or format change is additive cannot be determined, making rollback a guess.",
+      "fired": false
+    },
+    {
+      "hard_stop": "A critical failure mode has no identifiable mitigation or test seam.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/control-room-ui-views/propose-lens-c.md",
+      "change": "created",
+      "why": "Propose Lens C covering risks, rollback, additivity, and test impact for control-room-ui-views"
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every risk, test seam, and rollback claim carries file:line citations to real code in this worktree.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-ui-views/propose-lens-c.md:7-12, 16-18, 24-28 citing internal/serve/static/app.js:45-70, internal/serve/handlers.go:161-176, internal/serve/model.go:14-125, internal/ledger/schema.go:10-180, internal/serve/server_test.go:42-93, internal/serve/static_test.go:11-102"
+    },
+    {
+      "criterion": "propose-lens-c.md exists, is under 1000 words, and carries every skeleton section.",
+      "met": true,
+      "evidence": "wc -w openspec/changes/control-room-ui-views/propose-lens-c.md reports 861 words; file carries all 5 required skeleton sections"
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (git status --porcelain empty and git log --oneline -1).",
+      "met": true,
+      "evidence": "Commit 71e52d0 'docs(openspec): add propose lens C for control-room-ui-views', clean working tree (git status --porcelain is empty)"
+    }
+  ],
+  "commit": "71e52d0c7d4feeb771a007d36af7df2e7376184e"
+}

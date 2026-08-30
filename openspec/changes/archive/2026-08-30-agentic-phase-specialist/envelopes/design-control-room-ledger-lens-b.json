@@ -1,0 +1,48 @@
+{
+  "packet_id": "design-control-room-ledger-lens-b",
+  "status": "done",
+  "summary": "Produced Design Lens B for control-room-ledger specifying assumed architecture, data flow invariants across 6 hops, complete surface deltas, and file changes with terminal consumers. Committed the design document under openspec/changes/control-room-ledger/design-lens-b.md.",
+  "hard_stops": [
+    {
+      "hard_stop": "The specs do not determine whether a format delta is additive or breaking.",
+      "fired": false
+    },
+    {
+      "hard_stop": "A file change cannot name any terminal consumer.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Two reasonable architectures produce incompatible surface tables and the proposal does not choose between them.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/control-room-ledger/design-lens-b.md",
+      "change": "created",
+      "why": "Design Lens B document detailing surface deltas, flow invariants, and file changes for control-room-ledger."
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every Surface Deltas and File Changes row carries a file:line citation that points at real code in this worktree, and every File Changes row names a terminal consumer.",
+      "met": true,
+      "evidence": "All 14 Surface Deltas and 8 File Changes rows cite file:line references to internal/ledger/, internal/serve/, cmd/lucind-ai/, and internal/run/, with terminal consumers specified for every file change row."
+    },
+    {
+      "criterion": "design-lens-b.md exists, is under 1000 words, and carries every skeleton section including ## Assumed architecture.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-ledger/design-lens-b.md exists with 963 words (under 1000 word budget) and contains all required skeleton sections."
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (git status --porcelain empty and git log --oneline -1).",
+      "met": true,
+      "evidence": "Commit 394ed82: docs(control-room-ledger): produce design lens b for surface and flow with empty porcelain status."
+    }
+  ],
+  "commit": "394ed82ea27fdef54bf61cf2c6a566651917afdd"
+}

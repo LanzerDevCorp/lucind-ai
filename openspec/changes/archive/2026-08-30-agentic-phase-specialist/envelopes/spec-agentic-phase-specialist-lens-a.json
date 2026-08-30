@@ -1,0 +1,72 @@
+{
+  "packet_id": "spec-agentic-phase-specialist-lens-a",
+  "status": "done",
+  "summary": "Authored Spec Lens A for the Agentic Phase Specialist change, establishing the capability-to-file map across one new and three modified capabilities with four ADDED requirement statements. Phrased the Specialist Acceptance requirement strictly as independent decision authority and verified all citations through lucind-lane-check.sh.",
+  "hard_stops": [
+    {
+      "hard_stop": "The proposal has no Capabilities section and no Affected Areas section to infer one from.",
+      "fired": false
+    },
+    {
+      "hard_stop": "A capability the proposal names as Modified has no live spec in openspec/specs/.",
+      "fired": false
+    },
+    {
+      "hard_stop": "A requirement cannot be stated without deciding an implementation detail the design phase has not decided.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "change": "created",
+      "path": "openspec/changes/agentic-phase-specialist/spec-lens-a.md",
+      "why": "Draft capabilities and requirements specification for Spec Lens A"
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "A `## Citation Manifest` section lists every unique citation, grouped by file, with the claim each one supports.",
+      "met": true,
+      "evidence": "openspec/changes/agentic-phase-specialist/spec-lens-a.md:46-72"
+    },
+    {
+      "criterion": "`lucind-lane-check.sh --verify-citations` reported no FAIL against this draft's own manifest.",
+      "met": true,
+      "evidence": "PASS  word budget: 497 / 1000 words\nPASS  section present: ## Assumed requirements\nPASS  section present: ## Capability Map\nPASS  section present: ## Open Questions\nPASS  section present: ## Citation Manifest\nPASS  citation CONTEXT.md:51-53: file exists, has 109 lines\nPASS  citation CONTEXT.md:91-93: file exists, has 109 lines\nPASS  citation CONTEXT.md:103-106: file exists, has 109 lines\nPASS  citation CONTEXT.md:107-109: file exists, has 109 lines\nPASS  citation docs/sdd-phase-specialist.md:21-30: file exists, has 41 lines\nPASS  citation internal/accept/accept.go:84-96: file exists, has 504 lines\nPASS  citation internal/accept/accept.go:120-137: file exists, has 504 lines\nPASS  citation internal/integrate/integrate.go:159-200: file exists, has 346 lines\nPASS  citation internal/ledger/lanes_meta.go:20-47: file exists, has 143 lines\nPASS  citation internal/run/attempt.go:431-435: file exists, has 1057 lines\nPASS  citation openspec/changes/agentic-phase-specialist/proposal.md:26-35: file exists, has 194 lines\nPASS  citation openspec/changes/agentic-phase-specialist/proposal.md:65-132: file exists, has 194 lines\nPASS  citation openspec/specs/acceptance-verifier/spec.md:1-167: file exists, has 167 lines\nPASS  citation openspec/specs/acceptance-verifier/spec.md:30-33: file exists, has 167 lines\nPASS  citation openspec/specs/acceptance-verifier/spec.md:124-127: file exists, has 167 lines\nPASS  citation openspec/specs/phase-specialist-dispatch/spec.md:1-29: file exists, has 29 lines\nPASS  citation openspec/specs/phase-specialist-dispatch/spec.md:9-12: file exists, has 29 lines\nPASS  citation openspec/specs/sdd-planning-fan-out/spec.md:1-107: file exists, has 107 lines\nPASS  citation openspec/specs/sdd-planning-fan-out/spec.md:9-12: file exists, has 107 lines\nPASS  citation plugin/claude-code/skills/lucind-ai/SKILL.md:19: file exists, has 65 lines\nPASS  citation plugin/claude-code/skills/lucind-ai/references/contracts/acceptance-promotion.md:38-43: file exists, has 50 lines\nPASS  citation plugin/claude-code/skills/lucind-ai/references/contracts/acceptance-promotion.md:44-50: file exists, has 50 lines\nPASS  citation plugin/claude-code/skills/lucind-ai/references/strategies/fan-out.md:47-48: file exists, has 63 lines\nRESULT: PASS"
+    },
+    {
+      "criterion": "Every capability-map row is classified new or existing, and every \"existing\" row cites the live spec with `file:line` that resolves in this worktree.",
+      "met": true,
+      "evidence": "openspec/changes/agentic-phase-specialist/spec-lens-a.md:11-16; live specs cited: phase-specialist-dispatch: openspec/specs/phase-specialist-dispatch/spec.md:1-29; acceptance-verifier: openspec/specs/acceptance-verifier/spec.md:1-167; sdd-planning-fan-out: openspec/specs/sdd-planning-fan-out/spec.md:1-107."
+    },
+    {
+      "criterion": "Every requirement carries an RFC 2119 keyword and states observable behavior.",
+      "met": true,
+      "evidence": "openspec/changes/agentic-phase-specialist/spec-lens-a.md:20-40 (Specialist Phase Acceptance: MUST/MUST NOT; Structured Phase Verdict Reporting: MUST/MUST NOT; SDD Phase-Gated Verification Check Execution: MUST; Specialist-Owned Synthesis Arbitration: MUST/SHALL NOT)."
+    },
+    {
+      "criterion": "The Specialist Acceptance requirement is phrased as decision authority, not literal command execution (see \"Known correction\" above).",
+      "met": true,
+      "evidence": "openspec/changes/agentic-phase-specialist/spec-lens-a.md:22: 'The phase Specialist MUST independently decide Acceptance for Lanes in its assigned phase without human confirmation, and MUST direct the Orchestrator to execute the corresponding `lucind-ai accept` invocation upon its decision'."
+    },
+    {
+      "criterion": "`spec-lens-a.md` exists, is under 1000 words excluding the Citation Manifest, and carries `## Assumed requirements`, `## Capability Map`, and `## Citation Manifest`.",
+      "met": true,
+      "evidence": "./lucind-lane-check.sh report: PASS word budget: 497 / 1000 words; PASS section present: ## Assumed requirements; PASS section present: ## Capability Map; PASS section present: ## Open Questions; PASS section present: ## Citation Manifest"
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution. Strip any injected `Co-authored-by:` trailer.",
+      "met": true,
+      "evidence": "commit 4b82f454fad4a8eba4a2a6bb840f2dd37bbae1c2 'feat(spec): add spec lens a for agentic phase specialist'"
+    }
+  ],
+  "commit": "4b82f454fad4a8eba4a2a6bb840f2dd37bbae1c2",
+  "skills_loaded": [
+    "lucind-executor",
+    "lucind-fan-out-lens"
+  ]
+}

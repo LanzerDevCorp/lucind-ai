@@ -1,0 +1,95 @@
+{
+  "packet_id": "propose-control-room-serve-synthesis",
+  "status": "done",
+  "summary": "Synthesized the three propose lens drafts into canonical openspec/changes/control-room-serve/proposal.md (1206 words) covering the nine-item spine, using Lens A's REST+SSE candidate after verifying every file:line citation. Ten failed citations were dropped into proposal-synthesis-notes.md; Lens B's HTTP reconcile dispatch and path variants were recorded as scope divergence. Committed as 01daa53eea58f02f4831c8fe1178a4666f012e15.",
+  "hard_stops": [
+    {
+      "hard_stop": "The proposed approaches across drafts are mutually irreconcilable. Write the notes file, leave proposal.md uncreated, and block.",
+      "fired": false,
+      "note": "All three drafts selected granular REST reads plus SSE. Lens B added HTTP reconcile dispatch and different URL shapes; that is scope divergence under Lens A, not an irreconcilable candidate split."
+    },
+    {
+      "hard_stop": "One or more lens drafts is missing from this worktree.",
+      "fired": false,
+      "note": "propose-lens-a.md, propose-lens-b.md, and propose-lens-c.md are all present under openspec/changes/control-room-serve/."
+    },
+    {
+      "hard_stop": "Covering the proposal spine honestly would require exceeding 1800 words. Report which item forces it rather than silently overrunning or silently cutting.",
+      "fired": false,
+      "note": "proposal.md is 1206 words by wc -w and covers all nine spine items."
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false,
+      "note": "Allowed-paths constrain the work product to the two markdown files; Return separately requires .lucind/result.json. Those are complementary, not contradictory. The sdd-propose skill's 450-word template is superseded by this packet's 1800-word budget and spine."
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/control-room-serve/proposal.md",
+      "change": "created",
+      "why": "Canonical proposal after citation verification and Lens A arbitration."
+    },
+    {
+      "path": "openspec/changes/control-room-serve/proposal-synthesis-notes.md",
+      "change": "created",
+      "why": "Orchestrator-facing record of dropped citations, scope divergence, contradictions, and coverage gaps."
+    },
+    {
+      "path": ".lucind/result.json",
+      "change": "created",
+      "why": "Packet return envelope."
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every file:line citation surviving into proposal.md was opened and confirmed in this worktree, and every dropped claim is listed under ## Dropped Citations.",
+      "met": true,
+      "evidence": "Opened handlers.go, server.go, model.go, static.go, app.js:96-97, ledger.go (Open/Lanes/LaneStates/AppendEvent/SetStatus/Events/Decide/PendingApprovals/IntegrationEvents), schema.go:1-308, cli.go serve/run/feature/reconcile ranges, batch.go:29-53, prd.md:53, server_test.go, cli_test.go:1908-1917, model_test.go:595-628, static_test.go:11-103, packet.go:32-47, go.mod, result.schema.json. Ten dropped claims are listed in openspec/changes/control-room-serve/proposal-synthesis-notes.md under ## Dropped Citations."
+    },
+    {
+      "criterion": "proposal.md exists, is under 1800 words, and substantively covers the proposal spine, with anything missing reported under ## Coverage Gaps.",
+      "met": true,
+      "evidence": "wc -w openspec/changes/control-room-serve/proposal.md = 1206. Headings: Executive summary and problem; Selected candidate and approach; Concepts and architecture; User and capability impact; Delta specifications; Technical risks and failure modes; Rollback and additivity; Test and validation impact; Out of scope and open questions. Coverage Gaps: None."
+    },
+    {
+      "criterion": "proposal-synthesis-notes.md exists with exactly the four required sections, each either populated or explicitly None.",
+      "met": true,
+      "evidence": "Headings in order: ## Unresolved Contradictions (None); ## Coverage Gaps (None); ## Dropped Citations (10 items); ## Scope Divergence (Lens B/C vs A, plus independent REST+SSE corroboration)."
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (git status --porcelain empty and git log --oneline -1).",
+      "met": true,
+      "evidence": "git status --porcelain empty. git log --oneline -1: 01daa53 docs(control-room-serve): synthesize canonical proposal from three lenses. Message has no AI attribution."
+    }
+  ],
+  "commit": "01daa53eea58f02f4831c8fe1178a4666f012e15",
+  "findings": [
+    {
+      "finding": "Citations verified: 91 unique file:line citations in the three lens drafts were opened in this worktree (excluding false-positive host:port matches).",
+      "evidence": "python extraction over propose-lens-a.md, propose-lens-b.md, propose-lens-c.md; corresponding source files read in internal/serve, internal/ledger, cmd/lucind-ai, docs/prd.md, go.mod.",
+      "affects": "proposal.md citation honesty"
+    },
+    {
+      "finding": "Citations dropped: 10 claims (wrong lines or missing paths).",
+      "evidence": "openspec/changes/control-room-serve/proposal-synthesis-notes.md ## Dropped Citations",
+      "affects": "orchestrator notes; specs must not revive dropped current-tense claims"
+    },
+    {
+      "finding": "Contradictions escalated: 0.",
+      "evidence": "proposal-synthesis-notes.md ## Unresolved Contradictions: None",
+      "affects": "no human unblock required on candidate choice"
+    },
+    {
+      "finding": "Coverage gaps: 0 packet-spine items.",
+      "evidence": "proposal-synthesis-notes.md ## Coverage Gaps: None",
+      "affects": "sdd-spec can proceed from proposal.md"
+    },
+    {
+      "finding": "No Ledger.Runs() exists; Events() and IntegrationEvents() are keyed listings, not id-cursor tails. /api/v1/runs and SSE cursor queries are new work.",
+      "evidence": "internal/ledger/ledger.go:285-358 Lanes/LaneStates; 490-525 Events WHERE run_id=?; 892-925 IntegrationEvents WHERE feature_id=?",
+      "affects": "sdd-spec and sdd-design for run listing and SSE tail"
+    }
+  ],
+  "session_id": "propose-control-room-serve-synthesis"
+}

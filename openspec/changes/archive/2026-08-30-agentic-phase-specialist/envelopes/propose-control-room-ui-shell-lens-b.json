@@ -1,0 +1,44 @@
+{
+  "packet_id": "propose-control-room-ui-shell-lens-b",
+  "status": "done",
+  "summary": "Authored propose-lens-b.md for control-room-ui-shell specifying capability impacts, delta requirements with RFC 2119 keywords, and GIVEN/WHEN/THEN scenarios with exact file:line citations. Committed changes cleanly under conventional commit standards.",
+  "hard_stops": [
+    {
+      "hard_stop": "Delta requirements conflict with existing base specs without explicit migration path.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Capability impacts cannot be determined from packet context or code inspection.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/control-room-ui-shell/propose-lens-b.md",
+      "change": "created",
+      "why": "Deliver proposal Lens B capability impact and delta specifications."
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every capability impact and delta spec requirement carries file:line citations to real code in this worktree.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-ui-shell/propose-lens-b.md:7-12,20,26,34,40,48,54,62,68,76,82,90"
+    },
+    {
+      "criterion": "propose-lens-b.md exists, is under 1000 words, and carries every skeleton section.",
+      "met": true,
+      "evidence": "wc -w openspec/changes/control-room-ui-shell/propose-lens-b.md: 954 words"
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (git status --porcelain empty and git log --oneline -1).",
+      "met": true,
+      "evidence": "52f47b6 docs(propose): add control-room-ui-shell propose lens b"
+    }
+  ],
+  "commit": "52f47b601fa95a7b7a9cfb83a74ecb39a969bace"
+}

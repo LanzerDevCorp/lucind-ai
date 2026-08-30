@@ -1,0 +1,93 @@
+{
+  "packet_id": "design-lane-status-observability-synthesis",
+  "status": "done",
+  "summary": "Verified every lens-manifest citation against this worktree, closed Open Questions 1–5 with the owning lenses’ concrete choices, and wrote canonical openspec/changes/lane-status-observability/design.md (1702 words excluding v7 DDL) as commit f268570 before notes. Synthesis notes record two dropped claims, one retarget, no unresolved contradictions, and one coverage gap (tool_rate elapsed-time origin).",
+  "hard_stops": [
+    {
+      "hard_stop": "The three ## Assumed architecture blocks are mutually irreconcilable and the proposal and specs do not choose between them. Write the notes file, leave design.md uncreated, and block.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Lens B's v7 migration DDL is missing, incomplete, or does not compile as plausible SQL — do not invent or repair it yourself.",
+      "fired": false
+    },
+    {
+      "hard_stop": "One or more lens drafts is missing from this worktree.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Covering all eight spine items honestly would require exceeding 1800 words (DDL excluded). Report which item forces it rather than silently overrunning or silently cutting.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/lane-status-observability/design.md",
+      "change": "created",
+      "why": "Canonical design synthesized from three verified lens drafts."
+    },
+    {
+      "path": "openspec/changes/lane-status-observability/design-synthesis-notes.md",
+      "change": "created",
+      "why": "Four-section synthesis notes for the orchestrator."
+    },
+    {
+      "path": ".lucind/result.json",
+      "change": "created",
+      "why": "Packet result envelope."
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "The canonical document was committed BEFORE the notes file was started, as its own commit.",
+      "met": true,
+      "evidence": "git show f268570 --stat: only openspec/changes/lane-status-observability/design.md (198 insertions). design-synthesis-notes.md did not exist at that commit; it was written after."
+    },
+    {
+      "criterion": "Every citation in every lens manifest was opened and checked in this worktree, and its outcome recorded.",
+      "met": true,
+      "evidence": "84 manifest rows across design-lens-a.md, -b.md, -c.md opened in this worktree (unique ranges batched by file). Drops/retargets in design-synthesis-notes.md ## Dropped Citations (claude_stream_test.go:50-60; hub.go:213-235 as Sweeper.Run; cursor_agent_stream.go:1-218→1-217)."
+    },
+    {
+      "criterion": "Every file:line citation surviving into design.md was opened and confirmed in this worktree, and every dropped claim is listed under ## Dropped Citations.",
+      "met": true,
+      "evidence": "Surviving citations in design.md (packet.go:94-138, lanes_meta.go:20-32/25-26/67-77/89-127, schema.go:10/183-189/190-219/223-224/225-308/226-234/249-251/298-305/306-307/313-409, handlers.go:190-357/195-255/316-350/55-59, app.js:534-536/542-544, executor.go:18-21, agy_stream.go:12-18, claude_stream.go:18-21,35, opencode_stream.go:106-112,123, cursor_agent.go:239-270, hub.go:213-235 as Hub.Run pattern, cli.go:314-324/770-774, runs.go:29-41/165-188, ledger.go:366-378/452-484, and listed test seams) were read in this worktree. Dropped claims are the five ## Dropped Citations entries."
+    },
+    {
+      "criterion": "Each of Open Questions 1-5 is explicitly addressed in design.md — resolved with the final choice stated, or left open with the reason.",
+      "met": true,
+      "evidence": "design.md opening block: OQ1 sdd_phase/fanout_group/skill; OQ2 LaneMetadata.PacketPath JSON; OQ3 10s ticker; OQ4 kill(pid,0) Linux-only; OQ5 DAG Node/EmitPacketContent follow-up. All five closed; none left open."
+    },
+    {
+      "criterion": "design.md exists, is under 1800 words (v7 DDL excluded), and substantively covers all eight spine items, with anything missing reported under ## Coverage Gaps.",
+      "met": true,
+      "evidence": "python split() on design.md with sql fence removed: 1702 words. Spine: Technical Approach; Architecture Decisions (Choice/Alternatives/Rationale); Flow and Invariants; File Changes with terminal consumers; Testing Strategy; Threat Matrix (six rows, each Applicable or N/A); Rollback and Additivity; Open Questions and Out of Scope. Coverage Gaps: tool_rate elapsed origin; skill 800-word/Engram/return superseded by packet."
+    },
+    {
+      "criterion": "design-synthesis-notes.md exists with exactly the four required sections, each either populated or explicitly None.",
+      "met": true,
+      "evidence": "File has exactly ## Unresolved Contradictions (None), ## Coverage Gaps (populated), ## Dropped Citations (five entries), ## Architecture Divergence (None — all three converged)."
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (git status --porcelain empty and git log --oneline -1).",
+      "met": true,
+      "evidence": "f268570 docs(openspec): add canonical lane-status-observability design. 1d699e2 docs(openspec): record lane-status-observability design synthesis notes. git status --porcelain empty. git log --oneline -1 = 1d699e2. .lucind/result.json is gitignored (.gitignore:.lucind/) and remains on disk for the orchestrator."
+    }
+  ],
+  "findings": [
+    {
+      "finding": "Citations verified vs dropped: 84 manifest rows opened; 2 claims dropped (claude_stream_test.go:50-60 as telemetry seam; hub.go:213-235 as Sweeper.Run); 1 retarget (cursor_agent_stream.go:1-218 to 1-217). Known-wrong propose/spec citations did not resurface.",
+      "evidence": "openspec/changes/lane-status-observability/design-synthesis-notes.md ## Dropped Citations",
+      "affects": "tasks phase should not treat hub.go:213-235 as the sweeper or claude_stream_test.go:50-60 as a usage-decode fixture"
+    },
+    {
+      "finding": "Open Questions 1-5 all closed (5 closed, 0 left open). No unresolved contradictions escalated. One coverage gap: tool_rate elapsed-time origin was not named by any lens.",
+      "evidence": "design.md opening OQ block; design-synthesis-notes.md ## Unresolved Contradictions and ## Coverage Gaps",
+      "affects": "tasks may pick lane StartedAt or another origin for tool_rate; formula and 1s floor are closed"
+    }
+  ]
+}

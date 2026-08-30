@@ -1,0 +1,73 @@
+{
+  "packet_id": "tasks-conflict-triage-fixture-lens-c",
+  "status": "done",
+  "summary": "Authored tasks-lens-c.md defining the proof and review burden for conflict-triage-fixture, including assumed decomposition across 4 units, review workload forecast (1100–1700 lines across 7 files, single PR under 2000-line budget), threat matrix RED tests, acceptance evidence, verification gaps, and citation manifest.",
+  "hard_stops": [
+    {
+      "hard_stop": "The design has no threat matrix, so there is nothing to derive RED tests from.",
+      "fired": false
+    },
+    {
+      "hard_stop": "A behavior the specs require cannot be proven through any test this repository can run, and no new seam is identified in the design.",
+      "fired": false
+    },
+    {
+      "hard_stop": "The changed-line estimate cannot be grounded in anything — no comparable file, no archived change of similar shape.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/conflict-triage-fixture/tasks-lens-c.md",
+      "change": "created",
+      "why": "Tasks Lens C draft covering proof strategy, line forecast, threat matrix RED tests, acceptance evidence, and citation manifest"
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "A `## Citation Manifest` section lists every unique citation, grouped by file, with the claim each one supports.",
+      "met": true,
+      "evidence": "openspec/changes/conflict-triage-fixture/tasks-lens-c.md:59-88"
+    },
+    {
+      "criterion": "`lucind-lane-check.sh --verify-citations` was run before committing and reported no FAIL against this draft's own manifest.",
+      "met": true,
+      "evidence": "PASS citation manifest verification (28/28 citations resolved) via ./lucind-lane-check.sh --verify-citations"
+    },
+    {
+      "criterion": "Every threat-matrix row in the design appears in `## RED Tests from the Threat Matrix` with the design's own `Applicable` / `N/A` verdict, and no row was invented.",
+      "met": true,
+      "evidence": "openspec/changes/conflict-triage-fixture/tasks-lens-c.md:27-35 matching design.md:104-110"
+    },
+    {
+      "criterion": "Every applicable row names a RED test and the assertion that fires.",
+      "met": true,
+      "evidence": "openspec/changes/conflict-triage-fixture/tasks-lens-c.md:31-33"
+    },
+    {
+      "criterion": "The changed-line estimate states the basis it was derived from, not a bare number, and assesses risk against this change's real 2000-line budget rather than the skill's nominal default.",
+      "met": true,
+      "evidence": "openspec/changes/conflict-triage-fixture/tasks-lens-c.md:9-24"
+    },
+    {
+      "criterion": "Every proving command is derived from a real test file in this worktree, cited with file:line.",
+      "met": true,
+      "evidence": "openspec/changes/conflict-triage-fixture/tasks-lens-c.md:37-48"
+    },
+    {
+      "criterion": "`tasks-lens-c.md` exists, is under 1000 words excluding the Citation Manifest, and carries `## Assumed decomposition`, `## Review Workload Forecast`, `## Acceptance Evidence`, `## Verification Gaps`, and `## Citation Manifest`.",
+      "met": true,
+      "evidence": "PASS word budget: 905 / 1000 words and all required sections present via ./lucind-lane-check.sh"
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution, confirmed by `./lucind-lane-check.sh --file tasks-lens-c.md` reporting a clean `git status --porcelain` and a valid `.lucind/result.json`.",
+      "met": true,
+      "evidence": "commit b77e961b2c17682fb9bd01426b305b23bba8c976; PASS git status --porcelain: clean via ./lucind-lane-check.sh"
+    }
+  ],
+  "commit": "b77e961b2c17682fb9bd01426b305b23bba8c976"
+}

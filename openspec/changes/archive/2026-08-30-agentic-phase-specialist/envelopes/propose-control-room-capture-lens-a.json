@@ -1,0 +1,44 @@
+{
+  "packet_id": "propose-control-room-capture-lens-a",
+  "status": "done",
+  "summary": "Authored Proposal Lens A for control-room-capture selecting hybrid file-backed stream spooling with ledger milestones and serve query model routing. Detailed core architecture rationale, conceptual model changes, rejected alternatives, and open questions with exact file:line citations.",
+  "hard_stops": [
+    {
+      "hard_stop": "The technical approach cannot be grounded in existing codebase patterns or proposal context.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Candidate selection contradicts frozen exploration conclusions without justification.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/control-room-capture/propose-lens-a.md",
+      "change": "created",
+      "why": "Proposal Lens A document containing candidate selection, approach, conceptual changes, architecture rationale, rejected alternatives, and open questions."
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every candidate and approach claim carries file:line citations to real code in this worktree.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-capture/propose-lens-a.md:1-39 with citations across internal/executor, internal/run, internal/ledger, internal/serve, cmd/lucind-ai, and docs/prd.md"
+    },
+    {
+      "criterion": "propose-lens-a.md exists, is under 1000 words, and carries every skeleton section.",
+      "met": true,
+      "evidence": "wc -w openspec/changes/control-room-capture/propose-lens-a.md reports 761 words, with all 4 skeleton sections present"
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (git status --porcelain empty and git log --oneline -1).",
+      "met": true,
+      "evidence": "Commit f250b8b docs(openspec): add proposal lens A for control-room-capture; git status --porcelain is empty"
+    }
+  ],
+  "commit": "f250b8b"
+}

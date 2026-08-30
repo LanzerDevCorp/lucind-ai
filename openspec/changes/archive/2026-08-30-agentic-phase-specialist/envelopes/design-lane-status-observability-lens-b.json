@@ -1,0 +1,63 @@
+{
+  "packet_id": "design-lane-status-observability-lens-b",
+  "status": "done",
+  "summary": "Authored design-lens-b.md specifying structured progress telemetry fields, per-decoder token arithmetic, and the complete SQLite STRICT schema v7 migration DDL for runs and lane_progress. Reconciled tool metric count versus rate by persisting raw counts in SQLite and computing rates dynamically at the serve layer.",
+  "hard_stops": [
+    {
+      "hard_stop": "The specs do not determine whether a telemetry field is additive.",
+      "fired": false
+    },
+    {
+      "hard_stop": "A decision cannot name any terminal consumer.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Deciding this lens's scope would require designing lens A's or lens C's slice.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/lane-status-observability/design-lens-b.md",
+      "change": "created",
+      "why": "Design document for structured progress telemetry, decoder mappings, and schema v7 STRICT migration DDL"
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "A ## Citation Manifest section lists every unique citation, grouped by file.",
+      "met": true,
+      "evidence": "openspec/changes/lane-status-observability/design-lens-b.md:154-197 lists all 40 unique citations grouped alphabetically by file with ascending line ranges."
+    },
+    {
+      "criterion": "Decisions 1, 2, and 3 each state a FINAL choice, including Decision 2's count-vs-rate resolution — no \"either could work.\"",
+      "met": true,
+      "evidence": "openspec/changes/lane-status-observability/design-lens-b.md:10-72 defines exact final choices for field names, decoder arithmetic, count persistence with rate calculation at serve layer, and v7 rebuild DDL."
+    },
+    {
+      "criterion": "## Interfaces / Contracts contains the complete, syntactically plausible migrateV6ToV7DDL SQL text covering both tables, excluded from the word budget.",
+      "met": true,
+      "evidence": "openspec/changes/lane-status-observability/design-lens-b.md:76-126 contains full migrateV6ToV7DDL SQL recreating runs and lane_progress tables with STRICT mode and index recreation."
+    },
+    {
+      "criterion": "Every decision and file-change row names a terminal consumer with a file:line citation that points at real code in this worktree.",
+      "met": true,
+      "evidence": "openspec/changes/lane-status-observability/design-lens-b.md:36,54,72,139-147 cite internal/serve/static/app.js:542-544, internal/ledger/schema.go:313-409, and Go subsystem terminal consumers."
+    },
+    {
+      "criterion": "design-lens-b.md exists, is under 1000 words (SQL block excluded), and carries every skeleton section.",
+      "met": true,
+      "evidence": "openspec/changes/lane-status-observability/design-lens-b.md contains 985 words (excluding SQL block and citation manifest) with all skeleton sections present."
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (git status --porcelain empty and git log --oneline -1).",
+      "met": true,
+      "evidence": "commit 29eb053 (docs(openspec): design telemetry and schema v7 for lane status observability), git status --porcelain is empty."
+    }
+  ],
+  "commit": "29eb053"
+}

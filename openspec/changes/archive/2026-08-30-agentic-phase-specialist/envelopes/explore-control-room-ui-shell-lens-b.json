@@ -1,0 +1,44 @@
+{
+  "packet_id": "explore-control-room-ui-shell-lens-b",
+  "status": "done",
+  "summary": "Explored capabilities, user impact, concrete scenarios, and success criteria for the Control Room UI Shell change. Created openspec/changes/control-room-ui-shell/explore-lens-b.md with file:line citations and committed the change.",
+  "hard_stops": [
+    {
+      "hard_stop": "The capability impact cannot be determined from packet context or codebase inspection.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Scenarios conflict with established system invariants and cannot be reconciled.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/control-room-ui-shell/explore-lens-b.md",
+      "change": "created",
+      "why": "Explore Lens B artifact specifying capability impact, user journeys, concrete scenarios, and measurable success criteria for the Control Room UI Shell change."
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every scenario and capability claim carries file:line citations to real code in this worktree.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-ui-shell/explore-lens-b.md:5-56 contains citations to cmd/lucind-ai/cli.go:675, internal/serve/handlers.go:36, internal/serve/model.go:128, internal/serve/server.go:19, and internal/serve/static/app.js:12"
+    },
+    {
+      "criterion": "explore-lens-b.md exists, is under 1000 words, and carries every skeleton section.",
+      "met": true,
+      "evidence": "wc -w openspec/changes/control-room-ui-shell/explore-lens-b.md reports 766 words with sections User \u0026 Capability Impact, Scenarios \u0026 Use Cases, Success Criteria, and Open Questions"
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (git status --porcelain empty and git log --oneline -1).",
+      "met": true,
+      "evidence": "Commit a2a32aac023f69fe529f721539c75ba8c8e06924: docs(explore): add lens-b capabilities and scenarios for control-room-ui-shell; git status --porcelain is empty"
+    }
+  ],
+  "commit": "a2a32aac023f69fe529f721539c75ba8c8e06924"
+}

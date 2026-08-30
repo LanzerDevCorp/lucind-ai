@@ -1,0 +1,93 @@
+{
+  "packet_id": "design-conflict-triage-fixture-synthesis",
+  "status": "done",
+  "summary": "Verified all three design-lens drafts against this worktree, kept lens A's architecture, and wrote a 1228-word canonical design.md (committed first) plus synthesis notes. Human exclusive write of CandidateSHA; agent JSON in Output; two product questions left open.",
+  "hard_stops": [
+    {
+      "hard_stop": "The three ## Assumed architecture blocks are mutually irreconcilable and the proposal and specs do not choose between them.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Lens A's architecture is refuted by code you verified. Do not substitute your own.",
+      "fired": false
+    },
+    {
+      "hard_stop": "One or more lens drafts is missing from this worktree.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Covering all eight spine items honestly would require exceeding 1800 words.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/conflict-triage-fixture/design.md",
+      "change": "created",
+      "why": "Canonical design: verified citations, lens-A architecture, eight spine items."
+    },
+    {
+      "path": "openspec/changes/conflict-triage-fixture/design-synthesis-notes.md",
+      "change": "created",
+      "why": "Orchestrator-facing notes: contradictions, gaps, dropped citations, architecture divergence."
+    },
+    {
+      "path": ".lucind/result.json",
+      "change": "created",
+      "why": "Packet result envelope."
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "The canonical document was committed BEFORE the notes file was started, as its own commit.",
+      "met": true,
+      "evidence": "git log shows a0d45c5 docs(openspec): synthesize conflict-triage-fixture design with only design.md; notes file did not exist on that commit (git show --stat a0d45c5)."
+    },
+    {
+      "criterion": "Every citation in every lens manifest was opened and checked in this worktree, and its outcome recorded.",
+      "met": true,
+      "evidence": "80 unique path:line citations from the three manifests opened in this worktree; outcomes in design-synthesis-notes.md ## Dropped Citations (1 qualifier dropped, 2 ranges tightened, remainder verified)."
+    },
+    {
+      "criterion": "Every file:line citation surviving into design.md was opened and confirmed in this worktree, and every dropped claim is listed under ## Dropped Citations.",
+      "met": true,
+      "evidence": "Surviving citations in design.md were confirmed against the named files (e.g. reconcile.go:105/107, attempt.go:687,743-747,821-828,870, overlap.go:623-659, cli.go:1445-1511,1501-1506, schema.go:163). Dropped/retargeted listed in notes ## Dropped Citations."
+    },
+    {
+      "criterion": "design.md exists, is under 1800 words, and substantively covers all eight spine items, with anything missing reported under ## Coverage Gaps.",
+      "met": true,
+      "evidence": "wc -w = 1228; sections Technical Approach, Architecture Decisions, Flow and Invariants, Interfaces/Contracts, File Changes, Testing Strategy and Test Seams, Threat Matrix, Rollback and Additivity, Open Questions and Out of Scope. Notes ## Coverage Gaps: none of the eight missing."
+    },
+    {
+      "criterion": "design-synthesis-notes.md exists with exactly the four required sections, each either populated or explicitly None.",
+      "met": true,
+      "evidence": "Headings: Unresolved Contradictions (None); Coverage Gaps (none of eight missing; skill-budget drift noted); Dropped Citations (populated); Architecture Divergence (None — all three converged, with corroboration)."
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (git status --porcelain empty and git log --oneline -1).",
+      "met": true,
+      "evidence": "First commit a0d45c5; notes+envelope committed as docs(openspec): record conflict-triage-fixture design synthesis notes. No AI trailer. Verify porcelain empty after that commit."
+    }
+  ],
+  "findings": [
+    {
+      "finding": "citations_verified=80; citations_dropped=1 (nullable qualifier on schema.go:163); citations_retargeted=2 (overlap.go:623-660→623-659, reconcile.go:213-336→213-335); contradictions_escalated=0; coverage_gaps=0 spine items.",
+      "evidence": "Union of three ## Citation Manifest tables; openspec/changes/conflict-triage-fixture/design-synthesis-notes.md ## Dropped Citations."
+    },
+    {
+      "finding": "UpdateCandidateStatus does not persist Candidate.Output; an output-only Service update is required so triage JSON can land without writing CandidateSHA.",
+      "evidence": "internal/reconcile/reconcile.go:873-876 (UPDATE sets status, candidate_sha, failure_reason); internal/ledger/ledger.go:1314-1338 (UpdateReconciliationCandidate can set output).",
+      "affects": "spec and tasks: add output-only persist; do not route Output through UpdateCandidateStatus."
+    },
+    {
+      "finding": "internal/conflicttriage as an allowed_paths prefix PathInScope-includes fixture/; agent packet must enumerate package-root files.",
+      "evidence": "internal/packet/disjoint.go:13-22 PathInScope prefix rule; proposal-synthesis-notes.md last paragraph.",
+      "affects": "tasks: encode the two build features' allowed_paths so they are disjoint and do not overlap-gate each other."
+    }
+  ],
+  "session_id": "design-conflict-triage-fixture-synthesis"
+}

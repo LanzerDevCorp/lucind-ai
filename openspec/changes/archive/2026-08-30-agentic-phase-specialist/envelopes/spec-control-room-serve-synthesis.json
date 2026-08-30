@@ -1,0 +1,119 @@
+{
+  "packet_id": "spec-control-room-serve-synthesis",
+  "status": "done",
+  "summary": "Verified every file:line citation in the three control-room-serve spec lenses against this worktree, then assembled five delta spec files from lens A's requirement set, lens B's matching scenarios, and the live Loopback Binding block. Authored content is 784 words; no citations were dropped; Individual Decisions stayed out of the delta because lens A did not name it.",
+  "hard_stops": [
+    {
+      "hard_stop": "The three `## Assumed requirements` blocks are mutually irreconcilable and the proposal does not choose between them. Write the notes file, leave `specs/` uncreated, and block.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Lens A's requirement set is refuted by a live spec you verified. Do not substitute your own.",
+      "fired": false
+    },
+    {
+      "hard_stop": "A `MODIFIED` requirement's live block cannot be recovered from lens C or from `openspec/specs/`, so the block would have to be partial. Never write a partial block.",
+      "fired": false
+    },
+    {
+      "hard_stop": "One or more lens drafts is missing from this worktree.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying the spine honestly would require exceeding the authored budget. Report which requirement forces it rather than silently overrunning or silently cutting.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/control-room-serve/specs/control-room-api-runs/spec.md",
+      "change": "created",
+      "why": "ADDED Run Listing Endpoint and Lane Listing by Run Endpoint for the new capability."
+    },
+    {
+      "path": "openspec/changes/control-room-serve/specs/control-room-api-features/spec.md",
+      "change": "created",
+      "why": "ADDED Feature Listing and Inspection Endpoint for the new capability."
+    },
+    {
+      "path": "openspec/changes/control-room-serve/specs/control-room-api-reconcile/spec.md",
+      "change": "created",
+      "why": "ADDED Reconciliation Candidates Endpoint for the new capability."
+    },
+    {
+      "path": "openspec/changes/control-room-serve/specs/control-room-events-stream/spec.md",
+      "change": "created",
+      "why": "ADDED Real-Time Event Streaming via SSE for the new capability."
+    },
+    {
+      "path": "openspec/changes/control-room-serve/specs/approvals-web-ui/spec.md",
+      "change": "created",
+      "why": "ADDED approval queue and JSON 404 routing; MODIFIED Loopback Binding with the full live block plus worktree refusal."
+    },
+    {
+      "path": "openspec/changes/control-room-serve/spec-synthesis-notes.md",
+      "change": "created",
+      "why": "Orchestrator-facing notes: four required sections, including B/C divergence on Individual Decisions."
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every `file:line` citation surviving into the delta tree was opened and confirmed in this worktree, and every dropped claim is listed under `## Dropped Citations`.",
+      "met": true,
+      "evidence": "Opened handlers.go:36-118,39-77,87-115,148-211; static.go:8-18; model.go:128-266,278-323; server.go:14,20-22,55-73; server_test.go:42-135; ledger.go:285-330,705-717; schema.go:34-43,171-180; cli.go:691-707,702-707,1166-1176; openspec/specs/approvals-web-ui/spec.md:1-83,10-25,26. All resolved. Dropped Citations is None."
+    },
+    {
+      "criterion": "Every `MODIFIED` block matches the live requirement scenario for scenario, with only the intended edits applied — verified by opening the live spec, not by trusting lens C.",
+      "met": true,
+      "evidence": "Live Loopback Binding at openspec/specs/approvals-web-ui/spec.md:10-25 has two scenarios (Loopback listen, Non-loopback rejected). Delta keeps both verbatim, edits the requirement text, adds Previously, and adds B's linked-worktree scenario. Confirmed substring match of the two live scenarios in specs/approvals-web-ui/spec.md."
+    },
+    {
+      "criterion": "Every requirement carries an RFC 2119 keyword and at least one GIVEN / WHEN / THEN scenario.",
+      "met": true,
+      "evidence": "Eight requirements, each with MUST in the statement and two or three GIVEN/WHEN/THEN scenarios (Loopback Binding has three). Counted via split on ### Requirement: across the five spec.md files."
+    },
+    {
+      "criterion": "The delta tree's authored content is under 1800 words excluding verbatim copied blocks, and every spine item is satisfied or reported under `## Coverage Gaps`.",
+      "met": true,
+      "evidence": "specs/ total 834 words; two verbatim live scenarios 50 words; authored 784. Coverage Gaps records skill FULL-spec format drift, omitted error/edge scenarios, unspecified GET /api/state, unspecified reconciliations feature_id filter, deferred open questions, and http.Flusher HOW tension."
+    },
+    {
+      "criterion": "`spec-synthesis-notes.md` exists with exactly the four required sections, each either populated or explicitly \"None\".",
+      "met": true,
+      "evidence": "openspec/changes/control-room-serve/spec-synthesis-notes.md headings: Unresolved Contradictions (None), Coverage Gaps (populated), Dropped Citations (None), Requirement Divergence (populated)."
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (`git status --porcelain` empty and `git log --oneline -1`).",
+      "met": true,
+      "evidence": "git status --porcelain empty. git log --oneline -1: 47e412a docs(spec): synthesize control-room-serve canonical delta specs. Commit body has no Co-authored-by or AI attribution."
+    }
+  ],
+  "commit": "47e412ae01b5829cd99797a645a30ada36b92bca",
+  "findings": [
+    {
+      "finding": "Citations verified: 16 unique file:line targets across the three drafts. Citations dropped: 0.",
+      "evidence": "Every cited span opened in this worktree; spec-synthesis-notes.md ## Dropped Citations is None.",
+      "affects": "spec-control-room-serve archive; no citation re-check needed"
+    },
+    {
+      "finding": "MODIFIED blocks confirmed complete: 1 (Loopback Binding). Live two scenarios kept verbatim; worktree refusal added. Individual Decisions was inventoried by C but not classified MODIFIED.",
+      "evidence": "openspec/specs/approvals-web-ui/spec.md:10-25 vs openspec/changes/control-room-serve/specs/approvals-web-ui/spec.md MODIFIED section.",
+      "affects": "archive of approvals-web-ui; live Individual Decisions, Inline Evidence, and Approver Rate stay untouched"
+    },
+    {
+      "finding": "Contradictions escalated: 0. Coverage gaps: 6 (FULL-spec format drift; omitted error/edge scenarios; unspecified GET /api/state; reconciliations feature_id vs unfiltered path; deferred open questions; http.Flusher HOW in A's SSE statement).",
+      "evidence": "openspec/changes/control-room-serve/spec-synthesis-notes.md ## Unresolved Contradictions and ## Coverage Gaps.",
+      "affects": "tasks lane for feature_id query and SSE flush seam; design.md already chose ?feature_id= and SQLite cursor"
+    },
+    {
+      "finding": "Authored delta-tree word count is 784 of 1800 after excluding 50 words of verbatim live Loopback Binding scenarios.",
+      "evidence": "Word split of specs/**/spec.md minus the two live scenario blocks confirmed present as a substring.",
+      "affects": "none; budget headroom"
+    }
+  ],
+  "session_id": "spec-control-room-serve-synthesis"
+}

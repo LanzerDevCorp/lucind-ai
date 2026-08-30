@@ -1,0 +1,49 @@
+{
+  "packet_id": "spec-control-room-capture-lens-b",
+  "status": "done",
+  "summary": "Produced spec-lens-b.md containing Given/When/Then scenario sets and coverage mappings for all four control-room-capture requirements under the 1000-word budget. Committed cleanly with a conventional commit.",
+  "hard_stops": [
+    {
+      "hard_stop": "The proposal does not determine what the system should do in a case, so the scenario would assert an outcome nobody chose.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Every scenario for a requirement would be untestable, meaning the requirement as proposed is unobservable.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/control-room-capture/spec-lens-b.md",
+      "change": "created",
+      "why": "Spec lens B scenario and coverage draft for control-room-capture"
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every requirement named in `## Assumed requirements` has at least one scenario, and every scenario is in GIVEN / WHEN / THEN form.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-capture/spec-lens-b.md:7-92 defines 15 GIVEN/WHEN/THEN scenarios covering all 4 assumed requirements"
+    },
+    {
+      "criterion": "Every scenario's THEN names an observable outcome, and the coverage table cites the seam it is observable through or marks it \"new seam required\".",
+      "met": true,
+      "evidence": "openspec/changes/control-room-capture/spec-lens-b.md:94-101 maps all 4 requirements across happy path, edge case, and error states with code seams"
+    },
+    {
+      "criterion": "`spec-lens-b.md` exists, is under 1000 words, and carries `## Assumed requirements`, `## Coverage`, and `## Untestable Assertions`.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-capture/spec-lens-b.md word count is 914 words (wc -w) and includes all required sections"
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (`git status --porcelain` empty and `git log --oneline -1`).",
+      "met": true,
+      "evidence": "commit 219c8ff docs(control-room-capture): produce spec lens b scenarios and coverage with empty git status --porcelain"
+    }
+  ],
+  "commit": "219c8ff"
+}

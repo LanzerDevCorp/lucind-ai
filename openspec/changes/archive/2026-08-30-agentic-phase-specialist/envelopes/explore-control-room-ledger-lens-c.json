@@ -1,0 +1,45 @@
+{
+  "packet_id": "explore-control-room-ledger-lens-c",
+  "status": "done",
+  "summary": "Authored openspec/changes/control-room-ledger/explore-lens-c.md analyzing technical risks, trade-offs matrix, spike proposals, and out-of-scope boundaries for Control Room Ledger. All risks and spikes carry precise file:line code citations across internal/ledger, internal/run, and internal/serve packages.",
+  "hard_stops": [
+    {
+      "hard_stop": "Critical unknown cannot be framed as a risk or spike with available codebase knowledge.",
+      "fired": false
+    },
+    {
+      "hard_stop": "The change requires touching fundamental invariant boundaries without possible mitigation.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/control-room-ledger/explore-lens-c.md",
+      "change": "created",
+      "why": "Explore Lens C artifact documenting technical risks, trade-offs, spikes, and scope boundaries for Control Room Ledger."
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every risk and spike proposal carries file:line citations to real code in this worktree.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-ledger/explore-lens-c.md:7-12,26-39 citing internal/ledger/ledger.go:162-185, internal/ledger/schema.go:18-57, internal/run/attempt.go:434-441, internal/serve/handlers.go:36-85, and internal/ledgerpath/ledgerpath.go:23-58"
+    },
+    {
+      "criterion": "explore-lens-c.md exists, is under 1000 words, and carries every skeleton section.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-ledger/explore-lens-c.md contains 828 words (wc -w) and includes all 5 skeleton sections"
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (git status --porcelain empty and git log --oneline -1).",
+      "met": true,
+      "evidence": "commit 5e9b374 'docs(explore): explore control-room-ledger risks, trade-offs, and spikes (lens c)' with clean git status --porcelain"
+    }
+  ],
+  "commit": "5e9b374c9db9e54696107c9577adc7e82944cf47",
+  "session_id": "c67d1ddc-90dd-4596-bd6a-7d4261ab37ed"
+}

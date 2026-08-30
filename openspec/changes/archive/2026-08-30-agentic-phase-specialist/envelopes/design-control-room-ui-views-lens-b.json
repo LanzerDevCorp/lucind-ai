@@ -1,0 +1,48 @@
+{
+  "packet_id": "design-control-room-ui-views-lens-b",
+  "status": "done",
+  "summary": "Authored design lens B (Surface \u0026 Flow) for control-room-ui-views covering architecture assumptions, data flow invariants, surface deltas with file:line citations, and file changes with terminal consumers.",
+  "hard_stops": [
+    {
+      "hard_stop": "The specs do not determine whether a format delta is additive or breaking.",
+      "fired": false
+    },
+    {
+      "hard_stop": "A file change cannot name any terminal consumer.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Two reasonable architectures produce incompatible surface tables and the proposal does not choose between them.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/control-room-ui-views/design-lens-b.md",
+      "change": "created",
+      "why": "Design lens B surface and flow specification for control-room-ui-views"
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every `Surface Deltas` and `File Changes` row carries a `file:line` citation that points at real code in this worktree, and every `File Changes` row names a terminal consumer.",
+      "met": true,
+      "evidence": "Every row in openspec/changes/control-room-ui-views/design-lens-b.md cites real code (e.g. internal/serve/handlers.go:36-118, internal/serve/model.go:14-24, internal/serve/static/app.js:1-98) and names terminal consumers like serve.ListenAndServe at internal/serve/server.go:19-28 and TestModelSourceDoesNotShellOut at internal/serve/model_test.go:595-627."
+    },
+    {
+      "criterion": "`design-lens-b.md` exists, is under 1000 words, and carries every skeleton section including `## Assumed architecture`.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-ui-views/design-lens-b.md exists (960 words via `wc -w`) with all skeleton sections: ## Assumed architecture, ## Flow and Invariants, ## Surface Deltas, ## File Changes, ## Open Questions."
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (`git status --porcelain` empty and `git log --oneline -1`).",
+      "met": true,
+      "evidence": "Commit f7fee7d (docs(design): draft control-room-ui-views lens B surface and flow) with git status --porcelain clean."
+    }
+  ],
+  "commit": "f7fee7d"
+}

@@ -1,0 +1,44 @@
+{
+  "packet_id": "explore-control-room-ui-views-lens-a",
+  "status": "done",
+  "summary": "Authored Explore Lens A for control-room-ui-views defining the problem space, background, limitations of existing approvals-only serve package, and three candidate approaches with pros, cons, and feasibility grounded in real code citations. Recommended a modular REST API with lazy-loaded view panels and committed to the worktree.",
+  "hard_stops": [
+    {
+      "hard_stop": "The problem scope cannot be identified from codebase inspection or packet context.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Candidate approaches cannot be formulated without designing complete implementation details (which belongs to design phase).",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/control-room-ui-views/explore-lens-a.md",
+      "change": "created",
+      "why": "Explore Lens A document for control-room-ui-views problem space and candidates"
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every candidate and problem claim carries file:line citations to real code in this worktree.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-ui-views/explore-lens-a.md:5-45 cites internal/serve/server.go:19-28, internal/serve/handlers.go:16-118, internal/ledger/schema.go:95-180, internal/serve/model.go:14-343, internal/serve/static/index.html:6,144, internal/serve/static/app.js:22-70, cmd/lucind-ai/cli.go:820-1441, internal/reconcile/reconcile.go:89-96, and internal/ledger/ledger.go:131-148."
+    },
+    {
+      "criterion": "explore-lens-a.md exists, is under 1000 words, and carries every skeleton section.",
+      "met": true,
+      "evidence": "wc -w reports 743 words; sections '# Explore Lens A — Problem \u0026 Candidates: Control Room UI Views', '## Problem Space', '## Candidate Approaches', '## Initial Recommendations', '## Open Questions' present in openspec/changes/control-room-ui-views/explore-lens-a.md:1-50."
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (git status --porcelain empty and git log --oneline -1).",
+      "met": true,
+      "evidence": "commit ea3a931: 'docs(openspec): add explore lens a for control-room-ui-views'; git status --porcelain is empty."
+    }
+  ],
+  "commit": "ea3a931c36c67814653fd42dfc4ecaebdbedc5ec"
+}

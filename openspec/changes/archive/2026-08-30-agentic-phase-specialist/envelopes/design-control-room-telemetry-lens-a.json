@@ -1,0 +1,48 @@
+{
+  "packet_id": "design-control-room-telemetry-lens-a",
+  "status": "done",
+  "summary": "Drafted Design Lens A for control-room-telemetry establishing dual-tier telemetry architecture, backward-compatible executor sinks via Request, stdlib SSE streaming on loopback, shell-free serve.Model DTOs, bounded stream flush before barrier observation, and log archiving on worktree removal.",
+  "hard_stops": [
+    {
+      "hard_stop": "The proposal or specs do not determine an architectural choice, and two reasonable shapes are equally supported.",
+      "fired": false
+    },
+    {
+      "hard_stop": "A decision cannot name any terminal consumer.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Making this decision would require designing the file-change surface or the test strategy, which this packet forbids.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/control-room-telemetry/design-lens-a.md",
+      "change": "created",
+      "why": "Design Lens A document defining assumed architecture, technical approach, decisions with terminal consumers, and open questions."
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every decision names a terminal consumer with a file:line citation, and that citation points at real code in this worktree.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-telemetry/design-lens-a.md:20,28,36,44,52,60 citing internal/run/run.go:368-375, internal/executor/executor.go:66-80, internal/serve/handlers.go:36-85, internal/serve/model.go:17-24, internal/barrier/barrier.go:36-60, cmd/lucind-ai/cli.go:641-660"
+    },
+    {
+      "criterion": "design-lens-a.md exists, is under 1000 words, and carries every skeleton section including ## Assumed architecture.",
+      "met": true,
+      "evidence": "wc -w openspec/changes/control-room-telemetry/design-lens-a.md reports 818 words; contains ## Assumed architecture, ## Technical Approach, ## Decision 1-6, and ## Open Questions"
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (git status --porcelain empty and git log --oneline -1).",
+      "met": true,
+      "evidence": "Commit 4a2c658: docs(design): draft control-room-telemetry design lens a, git status --porcelain is clean"
+    }
+  ],
+  "commit": "4a2c6588934a5e7f49ed9f1e06a3f29bd2d212e6"
+}

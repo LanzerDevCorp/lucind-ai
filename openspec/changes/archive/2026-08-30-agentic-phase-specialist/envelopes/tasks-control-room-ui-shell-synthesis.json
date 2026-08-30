@@ -1,0 +1,93 @@
+{
+  "packet_id": "tasks-control-room-ui-shell-synthesis",
+  "status": "done",
+  "summary": "Synthesized canonical openspec/changes/control-room-ui-shell/tasks.md (807 words) and tasks-synthesis-notes.md from the three lens drafts after opening every file:line citation. Lens A's 10-task four-phase checklist is the decomposition; lens B's two sequential work units ship as a single packet with no apply-dag.yaml sidecar; lens C's forecast and N/A threat-matrix rows are kept. Eight dropped citations, C's Unit 2+3 merged for Integrate-green, zero contradictions escalated.",
+  "hard_stops": [
+    {
+      "hard_stop": "The three `## Assumed decomposition` blocks are mutually irreconcilable and the spec and design do not choose between them. Write the notes file, leave `tasks.md` uncreated, and block.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Lens A's decomposition is refuted by code you verified. Do not substitute your own.",
+      "fired": false
+    },
+    {
+      "hard_stop": "No partition exists in which every wave is green on its own and every same-wave pair is disjoint. Report it; the correct answer may be a single packet, but say so rather than shipping a plan `Integrate` will revert.",
+      "fired": false
+    },
+    {
+      "hard_stop": "One or more lens drafts is missing from this worktree.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Covering all eight spine items honestly would require exceeding 1800 words. Report which item forces it rather than silently overrunning or silently cutting.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/control-room-ui-shell/tasks.md",
+      "change": "created",
+      "why": "Canonical tasks checklist for apply: forecast, two work units, 10-task phased list, requirement traceability."
+    },
+    {
+      "path": "openspec/changes/control-room-ui-shell/tasks-synthesis-notes.md",
+      "change": "created",
+      "why": "Orchestrator-facing record of dropped citations, the Unit 2+3 merge, embed glob coverage gap, and decomposition divergence."
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every `file:line` citation surviving into `tasks.md` was opened and confirmed in this worktree, and every dropped claim is listed under `## Dropped Citations`.",
+      "met": true,
+      "evidence": "Surviving citations opened in this worktree include internal/serve/handlers.go:36-38,79-85,44-47,87-115; model.go:21-24,128-343; server_test.go:17-40,42-93,136-194; model_test.go:595-627; static_test.go:11-102,14,57,86; app.js:12-19,45-69,64-65,96-97; index.html:141-157,160. Eight dropped claims in openspec/changes/control-room-ui-shell/tasks-synthesis-notes.md under ## Dropped Citations."
+    },
+    {
+      "criterion": "Every wave was independently judged green-on-its-own, and every wave that was not is merged and reported under `## Coverage Gaps`.",
+      "met": true,
+      "evidence": "Unit 1 (handlers.go+server_test.go) is green alone. Unit 2 keeps static_test.go with app.js deletion because static_test.go:14,57,86 ReadFile app.js; Integrate would revert a failing combined tree (internal/run/integrate.go:50-59). C Units 2+3 merged into B Unit 2; recorded in tasks-synthesis-notes.md ## Coverage Gaps item 2. Single sequential packet, no parallel Integrate wave."
+    },
+    {
+      "criterion": "Every same-wave unit pair was re-checked against the component-boundary prefix rule rather than taken from lens B's table.",
+      "met": true,
+      "evidence": "PathInScope in internal/packet/disjoint.go:13-21: equal path or prefix plus '/'. Unit 1 files internal/serve/handlers.go and internal/serve/server_test.go are not prefixes of Unit 2's internal/serve/static/... or internal/serve/static_test.go, nor the reverse. Directory prefix internal/serve/ would collide; concrete files do not. Sequential single packet has no same-wave pair at Integrate time."
+    },
+    {
+      "criterion": "`tasks.md` exists, is under 1800 words, and substantively covers all eight spine items, with anything missing reported under `## Coverage Gaps`.",
+      "met": true,
+      "evidence": "`wc -w openspec/changes/control-room-ui-shell/tasks.md` = 807. Spine: Review Workload Forecast table plus guard lines; Suggested Work Units with skill columns plus allowed_paths/executor; 10 phased tasks; threat-matrix all N/A so no RED tasks; dependency order; single-packet green waves; executors cursor-agent and agy; six spec requirements traced. Gaps in tasks-synthesis-notes.md ## Coverage Gaps (embed glob, TDD order, skill 530-word budget)."
+    },
+    {
+      "criterion": "`tasks-synthesis-notes.md` exists with exactly the four required sections, each either populated or explicitly \"None\".",
+      "met": true,
+      "evidence": "Headings in order: # Tasks Synthesis Notes: Control Room UI Shell; ## Unresolved Contradictions (None); ## Coverage Gaps (five items); ## Dropped Citations (eight items); ## Decomposition Divergence (A canonical; B converged; C three-unit split cost the static_test.go placement)."
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (`git status --porcelain` empty and `git log --oneline -1`).",
+      "met": true,
+      "evidence": "`git status --porcelain` empty. `git log --oneline -1` = aeec7b2 docs(openspec): synthesize canonical control-room-ui-shell tasks"
+    }
+  ],
+  "commit": "aeec7b2",
+  "findings": [
+    {
+      "finding": "Citations verified: every file:line in the three lens drafts was opened. Eight claims dropped. Waves merged for viability: 1 (C Units 2+3 into B Unit 2). Contradictions escalated: 0. Coverage gaps: 5.",
+      "evidence": "openspec/changes/control-room-ui-shell/tasks-synthesis-notes.md ## Dropped Citations (8), ## Coverage Gaps (5), ## Unresolved Contradictions (None)."
+    },
+    {
+      "finding": "`go test -run` on invented test names exits 0 with zero tests; lens C proving commands TestModelEndpoints*, TestStaticAssetsMIMETypes, TestSPAShellContainsOutletAndHeader, TestRouterModuleStructureAndLifecycle, TestStoreModulePollingAndSubscriberAPI, TestApprovalsViewValidationAndSafety do not exist.",
+      "evidence": "internal/serve/server_test.go tests are TestNonLoopbackListenFails, TestBulkRequestBodyReturns400, TestUnselectedDecisionReturns400, TestSingleApprovalAndDefectEndpoints, TestDecideAlreadyDecidedReturns409Conflict. static_test.go tests are TestEmbedFSHasNoApproveAllControl, TestStaticAssetsContainOpencodeCommandAndInlineEvidence, TestItemsStartUnselectedInUI, TestStaticEvidenceValidationRejectsBareMultilineProse.",
+      "affects": "apply proving commands; tasks.md uses `go test ./internal/serve` only"
+    },
+    {
+      "finding": "`//go:embed static/*` does not recurse into static/views/, so views/approvals.js will not be in StaticFS unless static.go is changed. No lens tasked that change.",
+      "evidence": "internal/serve/static.go:8 `//go:embed static/*`. Go embed * does not match path separators.",
+      "affects": "apply of tasks 3.1 and 4.1; GET /views/approvals.js"
+    }
+  ],
+  "session_id": "tasks-control-room-ui-shell-synthesis"
+}

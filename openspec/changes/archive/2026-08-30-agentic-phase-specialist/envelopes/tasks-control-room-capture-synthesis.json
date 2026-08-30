@@ -1,0 +1,100 @@
+{
+  "packet_id": "tasks-control-room-capture-synthesis",
+  "status": "done",
+  "summary": "Synthesized canonical openspec/changes/control-room-capture/tasks.md (916 words) and tasks-synthesis-notes.md after verifying every lens citation against this worktree. Single packet, no apply-dag.yaml; 12 citation claims dropped; one contradiction escalated (Request dest field names); zero waves merged.",
+  "hard_stops": [
+    {
+      "hard_stop": "The three ## Assumed decomposition blocks are mutually irreconcilable and the spec and design do not choose between them. Write the notes file, leave tasks.md uncreated, and block.",
+      "fired": false,
+      "note": "A and C independently converged on four sequential phases. B regrouped 1.1 into the executor unit for a parallel Wave 1, then recommended no sidecar. Compatible with A's dependency table."
+    },
+    {
+      "hard_stop": "Lens A's decomposition is refuted by code you verified. Do not substitute your own.",
+      "fired": false,
+      "note": "Every A target file exists. Dependencies match the code (Request fields before MultiWriter, ResolveLog before Execute/serve, NewHandler signature with cli.go)."
+    },
+    {
+      "hard_stop": "No partition exists in which every wave is green on its own and every same-wave pair is disjoint. Report it; the correct answer may be a single packet, but say so rather than shipping a plan Integrate will revert.",
+      "fired": false,
+      "note": "Shipped as a single packet (B's sidecar recommendation). Hypothetical B waves are prefix-disjoint and would be Integrate-green with RED+GREEN in the same unit. Unit 4 keeps NewHandler, cli.go:715, and server_test.go call sites together."
+    },
+    {
+      "hard_stop": "One or more lens drafts is missing from this worktree.",
+      "fired": false,
+      "note": "tasks-lens-a.md, tasks-lens-b.md, and tasks-lens-c.md are all present under openspec/changes/control-room-capture/."
+    },
+    {
+      "hard_stop": "Covering all eight spine items honestly would require exceeding 1800 words. Report which item forces it rather than silently overrunning or silently cutting.",
+      "fired": false,
+      "note": "tasks.md is 916 words and covers all eight spine items. Skill 530-word budget is superseded by this packet and recorded under Coverage Gaps."
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false,
+      "note": "Skill 530-word budget vs packet 1800: packet wins on execution. Skill Engram persist/return block vs two files plus result.json: packet wins. No other collision."
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/control-room-capture/tasks.md",
+      "change": "created",
+      "why": "Canonical tasks checklist assembled from three verified lens drafts."
+    },
+    {
+      "path": "openspec/changes/control-room-capture/tasks-synthesis-notes.md",
+      "change": "created",
+      "why": "Orchestrator notes: contradictions, coverage gaps, dropped citations, decomposition divergence."
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every file:line citation surviving into tasks.md was opened and confirmed in this worktree, and every dropped claim is listed under ## Dropped Citations.",
+      "met": true,
+      "evidence": "Surviving cites opened in-tree (executor.go:15-37, ledgerpath.go:34-58, agy.go:169-173, cursor_agent.go:91-95, opencode.go:130-134, run.go:220-258,368-374,89,416-435,488-508, handlers.go:36-118, cli.go:674-725,715, WaitDelay tests agy_test.go:166 / cursor_agent_test.go:178 / opencode_test.go:178, run_test.go:856,1106, integrate.go:50-59,159-163, server_test.go:17, model.go:22). Twelve dropped claims recorded in tasks-synthesis-notes.md ## Dropped Citations."
+    },
+    {
+      "criterion": "Every wave was independently judged green-on-its-own, and every wave that was not is merged and reported under ## Coverage Gaps.",
+      "met": true,
+      "evidence": "Single packet (B recommended no sidecar). Hypothetical Wave 1 additive ResolveLog ∥ nil dest fields; Wave 2 Execute spool ∥ HTTP after Wave 1. Zero waves merged; recorded under Coverage Gaps."
+    },
+    {
+      "criterion": "Every same-wave unit pair was re-checked against the component-boundary prefix rule rather than taken from lens B's table.",
+      "met": true,
+      "evidence": "Shipped sequential units, no same-wave pairs. Re-checked B's pairs via internal/packet/disjoint.go PathInScope: internal/ledgerpath vs internal/executor; internal/run vs internal/serve and cmd/lucind-ai — neither prefixes the other."
+    },
+    {
+      "criterion": "tasks.md exists, is under 1800 words, and substantively covers all eight spine items, with anything missing reported under ## Coverage Gaps.",
+      "met": true,
+      "evidence": "wc -w = 916. Forecast table plus plain-text guard lines; work units with rollback; phased checklist; threat-matrix RED for Git repository selection only; dependency order; single-packet green; executors named from B; four spec requirements traced. Gaps: design E2E CLI log test, live-vendor/SSE harnesses, skill 530-word budget."
+    },
+    {
+      "criterion": "tasks-synthesis-notes.md exists with exactly the four required sections, each either populated or explicitly None.",
+      "met": true,
+      "evidence": "Sections in order: Unresolved Contradictions (Request dest names), Coverage Gaps (populated), Dropped Citations (12 claims), Decomposition Divergence (A authoritative; C converged; B regrouped then declined DAG)."
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (git status --porcelain empty and git log --oneline -1).",
+      "met": true,
+      "evidence": "git status --porcelain empty. git log --oneline -1: 32a73d9 docs(openspec): synthesize control-room-capture implementation tasks"
+    }
+  ],
+  "commit": "32a73d99a7b329897bde9d31787e331236fc13c2",
+  "findings": [
+    {
+      "finding": "Citations verified: 28 unique file:line spans opened across the three drafts. Citations dropped: 12 claims (proving commands that pass on HEAD, WaitDelay line ranges that are exit-code tests, integrate_test envelope persist cited as log survival, Validate-update and 4096-cap already implemented).",
+      "evidence": "openspec/changes/control-room-capture/tasks-synthesis-notes.md ## Dropped Citations",
+      "affects": "apply lanes must use the new TestResolveLog / TeeDestWriters / TestExecuteCreatesLogsUnderPrimaryRootOnly / TestLane* commands, not Lens C's HEAD-green regexes"
+    },
+    {
+      "finding": "Waves merged for Integrate viability: 0. Contradictions escalated: 1 (Request dest field identifiers). Coverage gaps: design E2E CLI log test (no Lens A task), live vendor binaries and high-frequency SSE harness (Lens C verification gaps, not invented), skill 530-word vs packet 1800-word budget.",
+      "evidence": "openspec/changes/control-room-capture/tasks-synthesis-notes.md ## Unresolved Contradictions and ## Coverage Gaps",
+      "affects": "human must name dest fields before apply; ask-on-risk chained-PR decision still required"
+    },
+    {
+      "finding": "NewHandler signature change is not Integrate-green unless cli.go:715 and the four 3-arg NewHandler call sites in server_test.go land in the same unit as handlers.go.",
+      "evidence": "internal/serve/handlers.go:36; cmd/lucind-ai/cli.go:715; internal/serve/server_test.go NewHandler call sites",
+      "affects": "Unit 4 / Phase 4 must stay one work unit"
+    }
+  ],
+  "session_id": "tasks-control-room-capture-synthesis"
+}

@@ -1,0 +1,80 @@
+{
+  "packet_id": "design-control-room-ui-views-synthesis",
+  "status": "done",
+  "summary": "Verified every file:line citation in the three control-room-ui-views design lenses against this worktree, kept lens A's Candidate 2 architecture, and wrote canonical design.md (1314 words) plus design-synthesis-notes.md. One contradiction (reconcile POST vs copy-paste CLI) is escalated; wave/deadline-from-SQLite claims were dropped because schema v5 has no such columns.",
+  "hard_stops": [
+    {
+      "hard_stop": "The three ## Assumed architecture blocks are mutually irreconcilable and the proposal and specs do not choose between them. Write the notes file, leave design.md uncreated, and block.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Lens A's architecture is refuted by code you verified. Do not substitute your own.",
+      "fired": false
+    },
+    {
+      "hard_stop": "One or more lens drafts is missing from this worktree.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Covering all eight spine items honestly would require exceeding 1800 words. Report which item forces it rather than silently overrunning or silently cutting.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/control-room-ui-views/design.md",
+      "change": "created",
+      "why": "Canonical design synthesized from three lenses after citation verification."
+    },
+    {
+      "path": "openspec/changes/control-room-ui-views/design-synthesis-notes.md",
+      "change": "created",
+      "why": "Orchestrator notes: contradictions, coverage gaps, dropped citations, architecture divergence."
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every file:line citation surviving into design.md was opened and confirmed in this worktree, and every dropped claim is listed under ## Dropped Citations.",
+      "met": true,
+      "evidence": "Opened handlers.go, model.go, schema.go, app.js (97 lines), index.html (body 141-162), server.go, static.go, waves.go, batch.go, run.go, barrier.go, lane/status.go, cli.go, model_test.go, server_test.go, static_test.go, feature.go, reconcile.go, prd.md, approvals-web-ui spec. Surviving pins such as handlers.go:36-118 (NewHandler) and model.go:14-24 (Model) match. Dropped claims are in design-synthesis-notes.md ## Dropped Citations (waves/deadlines-from-SQLite, RFC3339Nano serialize, feature.go:48, reconcile/service.go:26, app.js:1-98, index.html:1-140, static.go:8-19, model.go:26 pin)."
+    },
+    {
+      "criterion": "design.md exists, is under 1800 words, and substantively covers all eight spine items, with anything missing reported under ## Coverage Gaps.",
+      "met": true,
+      "evidence": "wc -w openspec/changes/control-room-ui-views/design.md → 1314. Sections present: Technical Approach; Architecture Decisions (choice/alternatives/rationale); Flow and Invariants; Interfaces/Contracts; File Changes with terminal consumers; Testing Strategy and Test Seams; Threat Matrix (every row N/A: reason); Rollback and Additivity; Open Questions; Out of Scope. Gaps (waves/deadlines not in schema v5; no hard_stops DTO; missing specs/ dir) are in notes, not invented."
+    },
+    {
+      "criterion": "design-synthesis-notes.md exists with exactly the four required sections, each either populated or explicitly None.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-ui-views/design-synthesis-notes.md headings: Unresolved Contradictions (reconcile POST vs CLI); Coverage Gaps (three items plus skill 800-word drift note); Dropped Citations (A/B/C lists); Architecture Divergence (convergence plus C constructor/CLI close)."
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (git status --porcelain empty and git log --oneline -1).",
+      "met": true,
+      "evidence": "git status --porcelain empty. git log --oneline -1: 1b76e81 docs(control-room-ui-views): synthesize canonical design from three lenses"
+    }
+  ],
+  "commit": "1b76e811e5f5420a83d07514778559572dfa32c2",
+  "findings": [
+    {
+      "finding": "citations_verified=65 unique file:line pins survive in design.md after opening every citation in the three lens drafts; citations_dropped=9; contradictions_escalated=1; coverage_gaps=3",
+      "evidence": "design.md unique pins counted; dropped list in design-synthesis-notes.md ## Dropped Citations; contradiction is reconcile POST vs copy-paste CLI; gaps: Kahn waves/deadlines absent from schema v5 lanes (schema.go:18-32), envelope hard_stops have no Model field, openspec/changes/control-room-ui-views/specs/ missing",
+      "affects": "sdd-tasks for control-room-ui-views (must not assume SQL-backed wave index or deadline; must not invent envelope hard_stops source)"
+    },
+    {
+      "finding": "ListBatchLanes cannot SELECT Kahn wave grouping or per-lane deadlines from schema v5. waves.go:41-70 is in-memory Kahn; batch.go:40-43 is ExecuteBatch LaneTimeout commentary. lanes has started_at/ended_at/worktree_* only.",
+      "evidence": "internal/ledger/schema.go:18-32; internal/dag/waves.go:41-70; internal/run/batch.go:40-43",
+      "affects": "batch-wave-view implementation and any task that treats wave number as a ledger column"
+    },
+    {
+      "finding": "internal/reconcile/service.go does not exist; feature.NewService is at feature.go:94 not :48.",
+      "evidence": "Glob internal/reconcile → reconcile.go, reconcile_test.go. NewService at reconcile.go:157; feature.go:48 is StatusCreated, NewService at :94.",
+      "affects": "test-seam citations in later tasks.md"
+    }
+  ],
+  "session_id": "design-control-room-ui-views-synthesis"
+}

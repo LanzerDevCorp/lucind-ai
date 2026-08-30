@@ -1,0 +1,58 @@
+{
+  "packet_id": "spec-conflict-triage-fixture-lens-a",
+  "status": "done",
+  "summary": "Generated openspec/changes/conflict-triage-fixture/spec-lens-a.md specifying the four capability mappings, four ADDED requirement statements using RFC 2119 keywords with terminal consumers, open questions for design and risk calibration, and a verified citation manifest.",
+  "hard_stops": [
+    {
+      "hard_stop": "The proposal has no Capabilities section and no Affected Areas section to infer one from.",
+      "fired": false
+    },
+    {
+      "hard_stop": "A capability the proposal names as Modified has no live spec in openspec/specs/, so it is really new and the proposal is wrong about which.",
+      "fired": false
+    },
+    {
+      "hard_stop": "A requirement cannot be stated without deciding an implementation detail the design phase has not decided.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/conflict-triage-fixture/spec-lens-a.md",
+      "change": "created",
+      "why": "Spec Lens A defining capability map, ADDED requirements, open questions, and citation manifest for conflict triage fixture."
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "A `## Citation Manifest` section lists every unique citation, grouped by file, with the claim each one supports.",
+      "met": true,
+      "evidence": "openspec/changes/conflict-triage-fixture/spec-lens-a.md:47-79 contains the 27-row Citation Manifest table alphabetically grouped by file."
+    },
+    {
+      "criterion": "Every capability-map row is classified new or existing, and every \"existing\" row cites the live spec with `file:line` that resolves in this worktree.",
+      "met": true,
+      "evidence": "openspec/changes/conflict-triage-fixture/spec-lens-a.md:11-18 maps 4 capabilities; reconciliation-approval is classified Existing and cites openspec/specs/reconciliation-approval/spec.md:1-74."
+    },
+    {
+      "criterion": "Every requirement carries an RFC 2119 keyword and states observable behavior rather than implementation.",
+      "met": true,
+      "evidence": "openspec/changes/conflict-triage-fixture/spec-lens-a.md:21-41 defines 4 ADDED requirements using MUST/SHALL with observable terminal consumers."
+    },
+    {
+      "criterion": "`spec-lens-a.md` exists, is under 1000 words, and carries `## Assumed requirements` and `## Capability Map`.",
+      "met": true,
+      "evidence": "openspec/changes/conflict-triage-fixture/spec-lens-a.md exists (749 words excluding citation manifest) and carries ## Assumed requirements and ## Capability Map."
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (`git status --porcelain` empty and `git log --oneline -1`).",
+      "met": true,
+      "evidence": "Commit e2d68ce: docs(spec): add spec lens a for conflict triage fixture; git status is clean."
+    }
+  ],
+  "commit": "e2d68ce6478bb47c7c16a1daf8a8839fb579d566"
+}

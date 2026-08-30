@@ -1,0 +1,109 @@
+{
+  "packet_id": "tasks-conflict-triage-fixture-synthesis",
+  "status": "done",
+  "summary": "Verified the three tasks-lens drafts against this worktree, then shipped canonical tasks.md (990 words, eight spine items) as its own commit before tasks-synthesis-notes.md. Dispatch is a single packet with no apply-dag sidecar; B Wave 2 was merged to sequential Units 1–4 so Integrate stays green. Four dropped or retargeted citation claims are in the notes; no contradiction was escalated.",
+  "hard_stops": [
+    {
+      "hard_stop": "The three Assumed decomposition blocks are mutually irreconcilable and the spec and design do not choose among them. Write the notes file, leave tasks.md uncreated, and block.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Lens A's decomposition is refuted by code you verified. Do not substitute your own.",
+      "fired": false
+    },
+    {
+      "hard_stop": "No partition exists in which every wave is green on its own and every same-wave pair is disjoint. Report it; the correct answer may be a single packet, but say so rather than shipping a plan Integrate will revert.",
+      "fired": false
+    },
+    {
+      "hard_stop": "One or more lens drafts is missing from this worktree.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Covering all eight spine items honestly would require exceeding 1800 words. Report which item forces it rather than silently overrunning or silently cutting.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/conflict-triage-fixture/tasks.md",
+      "change": "created",
+      "why": "Canonical tasks checklist assembled from the three lenses after citation verification."
+    },
+    {
+      "path": "openspec/changes/conflict-triage-fixture/tasks-synthesis-notes.md",
+      "change": "created",
+      "why": "Orchestrator-facing notes: contradictions, coverage gaps, dropped citations, decomposition divergence."
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "tasks.md was committed as its own commit before tasks-synthesis-notes.md was started, confirmed by the mid-flow lucind-lane-check.sh run reporting a clean git status --porcelain.",
+      "met": true,
+      "evidence": "Commit e39bd07 created only tasks.md. Mid-flow ./lucind-lane-check.sh --file openspec/changes/conflict-triage-fixture/tasks.md --budget 1800 --skip-result: PASS word budget 990/1800; PASS git status --porcelain: clean; RESULT: PASS."
+    },
+    {
+      "criterion": "Every file:line citation surviving into tasks.md was opened and confirmed in this worktree, and every dropped claim is listed under ## Dropped Citations.",
+      "met": true,
+      "evidence": "Unique manifest ranges opened in this worktree (candidate.go, reconcile.go, attempt.go, disjoint.go, cli.go, etc.). Dropped/retargeted claims are in tasks-synthesis-notes.md ## Dropped Citations (linked-worktree file retarget, 3.4↛1.4, reconcile.go:496-504, cli.go:56 routing, TestReconcileResolveCLI as CAS proof)."
+    },
+    {
+      "criterion": "Every wave was independently judged green-on-its-own, and every wave that was not is merged and reported under ## Coverage Gaps.",
+      "met": true,
+      "evidence": "Canonical dispatch is four sequential units in one packet (each RED+GREEN). B Wave 1 (U1∥U3) judged green and disjoint but not dispatched. B Wave 2 (U2∥U4) judged not green under Integrate bisection given A 4.1→1.1; merged to sequential; recorded in ## Coverage Gaps."
+    },
+    {
+      "criterion": "Every same-wave unit pair was re-checked against the component-boundary prefix rule rather than taken from lens B's table.",
+      "met": true,
+      "evidence": "PathInScope at internal/packet/disjoint.go:13-22 reapplied. Canonical same-wave pairs: none (sequential). File-level Unit 2 vs fixture/ does not prefix; directory internal/conflicttriage would collide and is forbidden in tasks.md."
+    },
+    {
+      "criterion": "tasks.md exists, is under 1800 words, and substantively covers all eight spine items, with anything missing reported under ## Coverage Gaps.",
+      "met": true,
+      "evidence": "990 words (lane-check PASS 990/1800). Spine: forecast table+guard lines, work units, phased checklist, three Applicable RED tests and no N/A RED, dependency table, sequential green waves, per-unit executor, four requirements traced. Skill 530-word and literal-400-line drifts recorded in ## Coverage Gaps."
+    },
+    {
+      "criterion": "tasks-synthesis-notes.md exists with exactly the four required sections, each either populated or explicitly None, confirmed by the final lucind-lane-check.sh run.",
+      "met": true,
+      "evidence": "Final ./lucind-lane-check.sh --file openspec/changes/conflict-triage-fixture/tasks-synthesis-notes.md --require-section Unresolved Contradictions --require-section Coverage Gaps --require-section Dropped Citations --require-section Decomposition Divergence: PASS section present (all four); PASS git status --porcelain: clean; PASS result envelope: .lucind/result.json exists and parses as JSON; RESULT: PASS. Unresolved Contradictions body is None."
+    },
+    {
+      "criterion": "The work is committed with two conventional commits and no AI attribution, confirmed by the final lucind-lane-check.sh run reporting a clean git status --porcelain and a valid .lucind/result.json.",
+      "met": true,
+      "evidence": "e39bd07 docs(openspec): add tasks for conflict-triage-fixture; 2bdb2a5 docs(openspec): add tasks synthesis notes for conflict-triage-fixture; no AI attribution. Final lucind-lane-check.sh: PASS git status --porcelain: clean; PASS result envelope: .lucind/result.json exists and parses as JSON; RESULT: PASS."
+    }
+  ],
+  "commit": "2bdb2a5",
+  "findings": [
+    {
+      "finding": "Citations verified: 70 unique manifest ranges opened in this worktree and judged to support their claims.",
+      "evidence": "Union of the three ## Citation Manifest tables; each unique file batched and read (cli.go, candidate.go, reconcile.go, attempt.go, disjoint.go, overlap.go, ledger.go, schema.go, feature.go, integrate.go, integrate_feature.go, worktree.go, claude.go, opencode.go, specs, design.md).",
+      "affects": "tasks.md citations"
+    },
+    {
+      "finding": "Citations dropped or retargeted: 5 claims.",
+      "evidence": "tasks-synthesis-notes.md ## Dropped Citations: linked-worktree test file retargeted to cli_test.go; 3.4 depends-on-1.4 dropped; reconcile.go:496-504 audit claim dropped; cli.go:56 routing claim dropped; TestReconcileResolveCLI as CAS-retry proof dropped.",
+      "affects": "apply proving commands and 3.4 placement"
+    },
+    {
+      "finding": "Waves merged for viability: 1 (B Wave 2 Unit 2 ∥ Unit 4).",
+      "evidence": "A 4.1 depends on 1.1; B placed types in Unit 2. Isolated Unit 4 worktree cannot compile rubric tests. Sequential Units 1–4 in one packet. B Wave 1 left undispatched because sidecar was declined, not because it fails green-on-its-own.",
+      "affects": "apply dispatch; no apply-dag.yaml"
+    },
+    {
+      "finding": "Contradictions escalated: 0.",
+      "evidence": "tasks-synthesis-notes.md ## Unresolved Contradictions: None.",
+      "affects": "orchestrator"
+    },
+    {
+      "finding": "Coverage gaps recorded: skill 530-word budget unused (packet 1800); 400-line field judged against 2000-line human budget; B omitted work-unit columns and A 2.1/3.4 paths; live LLM not in CI.",
+      "evidence": "tasks-synthesis-notes.md ## Coverage Gaps",
+      "affects": "forecast interpretation and apply harness"
+    }
+  ],
+  "session_id": "tasks-conflict-triage-fixture-synthesis"
+}

@@ -1,0 +1,67 @@
+{
+  "packet_id": "propose-agentic-phase-specialist-lens-c",
+  "status": "done",
+  "summary": "Authored Proposal Lens C for Agentic Phase Specialist detailing technical risks, rollback plan, additive schema evolution, and test impacts. All claims and failure modes are grounded with verified file:line citations and validated via lucind-lane-check.",
+  "hard_stops": [
+    {
+      "hard_stop": "Whether a schema or format change is additive cannot be determined, making rollback a guess.",
+      "fired": false
+    },
+    {
+      "hard_stop": "A critical failure mode has no identifiable mitigation or test seam.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "change": "created",
+      "path": "openspec/changes/agentic-phase-specialist/propose-lens-c.md",
+      "why": "Proposal Lens C document covering technical risks, rollback plan, additivity, and test impact for the Agentic Phase Specialist change."
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "A `## Citation Manifest` section lists every unique citation, grouped by file, with the claim each one supports.",
+      "met": true,
+      "evidence": "openspec/changes/agentic-phase-specialist/propose-lens-c.md contains ## Citation Manifest with 46 unique citations grouped by file alphabetically with lines ascending."
+    },
+    {
+      "criterion": "`lucind-lane-check.sh --verify-citations` was run before committing and reported no FAIL against this draft's own manifest.",
+      "met": true,
+      "evidence": "lucind-lane-check.sh report: PASS word budget: 754 / 1000 words; PASS on all 6 required sections; PASS on all 46 citations; RESULT: PASS."
+    },
+    {
+      "criterion": "Every risk, test seam, and rollback claim carries `file:line` citations to real code in this worktree.",
+      "met": true,
+      "evidence": "Every row in Technical Risks \u0026 Failure Modes, Rollback \u0026 Additivity, and Test \u0026 Validation Impact tables cites verified file:line locations in this worktree."
+    },
+    {
+      "criterion": "`propose-lens-c.md` exists, is under 1000 words excluding the Citation Manifest, and carries every skeleton section plus `## Citation Manifest`.",
+      "met": true,
+      "evidence": "openspec/changes/agentic-phase-specialist/propose-lens-c.md word count is 754 words (\u003c 1000 limit) and includes all required skeleton sections."
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution, confirmed by the final `lucind-lane-check.sh` run reporting a clean `git status --porcelain` and a valid `.lucind/result.json`. Strip any injected `Co-authored-by:` trailer.",
+      "met": true,
+      "evidence": "Commit 17a1532ef7612af429ca5e026b7f4fcac88a3d94 ('docs(openspec): author propose lens c for agentic phase specialist') with clean git status --porcelain."
+    }
+  ],
+  "commit": "17a1532ef7612af429ca5e026b7f4fcac88a3d94",
+  "findings": [
+    {
+      "finding": "6 technical risks identified with concrete mitigations and test seams, confirming zero schema migration required.",
+      "evidence": "openspec/changes/agentic-phase-specialist/propose-lens-c.md:5-12",
+      "affects": "Proposal synthesis and spec planning phases"
+    }
+  ],
+  "skills_loaded": [
+    "lucind-fan-out-lens",
+    "lucind-executor",
+    "sdd-propose"
+  ],
+  "session_id": "d128551e-af3f-4e64-9704-251055e7d032"
+}

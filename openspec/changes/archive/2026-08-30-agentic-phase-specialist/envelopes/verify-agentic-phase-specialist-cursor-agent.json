@@ -1,0 +1,94 @@
+{
+  "packet_id": "verify-agentic-phase-specialist-cursor-agent",
+  "status": "done",
+  "summary": "Qualitative verification of agentic-phase-specialist passed against the four delta specs, design.md Decision 2–5, and tasks.md done criteria. Production gating fires on Verifier.Verify (lucind-ai accept) and ExecuteAttempt CHECKING (feature-targeted lucind-ai run); exclusive-mode Integrate remains an ungated residual; task 4.1 is correctly out of lane authority.",
+  "hard_stops": [
+    {
+      "hard_stop": "Executing mechanical test/build commands when mechanical results are already provided.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Any credential value would need to be chosen, generated, or written.",
+      "fired": false
+    },
+    {
+      "hard_stop": "A done-criterion turns out to be impossible, or already true for a reason the packet did not anticipate.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Two reasonable interpretations exist for a spec requirement and the specification does not say which.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "change": "created",
+      "path": ".lucind/result.json",
+      "why": "Read-only judgment envelope for the dispatching binary."
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every indirection introduced is demonstrably consumed by a terminal consumer. Verification citations trace to concrete symbols, spec requirements, or tests.",
+      "met": true,
+      "evidence": "runSDDPhaseChecks is a local in Verifier.Verify (internal/accept/accept.go:120-149) and is consumed by that same function, which runAccept invokes at cmd/lucind-ai/cli.go:699 via acceptVerifierFactory (cli.go:654-656, NewVerifier). GetLaneMetadata is loaded unconditionally at accept.go:84-87, outside the AuthoringEvidenceVersion branch (88-96); validateResultAndScope stays unconditional at 97-99. shouldRunAttemptChecks (attempt.go:384-396) is consumed only by driveAttemptFromLeased CHECKING (attempt.go:469-477); ExecuteAttempt is the production caller via IntegrateFeature (integrate_feature.go:105-111), which lucind-ai run selects for feature-targeted batches (cli.go:451-455). Hard Rule / fan-out / acceptance-promotion edits are consumed by the sdd-* runtimes as prompt text and by TestSkillTreesByteIdentical (packet_test.go:943-967). integrate.Check (integrate.go:159) is not gated."
+    },
+    {
+      "criterion": "The worktree carries no unique commits and no working-tree changes relative to the lane's birth point (git status --porcelain empty AND HEAD equals git merge-base HEAD \u003cprimary HEAD\u003e).",
+      "met": true,
+      "evidence": "git status --porcelain produced no output (working tree clean). HEAD=c271f2e9d4382121abc1f38091e551c00c04a348, local primary `dev`=c271f2e9d4382121abc1f38091e551c00c04a348, git merge-base HEAD dev=c271f2e9d4382121abc1f38091e551c00c04a348, git rev-list --count dev..HEAD=0. The verify branch has no unique commits relative to the candidate HEAD it was born from."
+    },
+    {
+      "criterion": "Qualitative evaluation completed (.lucind/result.json populated with status, summary, and structured findings).",
+      "met": true,
+      "evidence": "This envelope. Specs scanned: openspec/changes/agentic-phase-specialist/specs/{acceptance-verifier,phase-specialist-dispatch,phase-verdict-reporting,sdd-planning-fan-out}/spec.md. Production diffs read via git show 6723b77, 2080528, 8dc595b. Mechanical log frozen at openspec/changes/agentic-phase-specialist/verify-mechanical.log (exit 0, SHA 19d5f01); not re-run."
+    }
+  ],
+  "findings": [
+    {
+      "finding": "The accept and feature-targeted attempt gates fire on the real production call paths, not only in unit fixtures. Verifier.Verify skips CheckPolicySnapshot and v.check unless SDDPhase is empty or \"apply\", after validateResultAndScope. ExecuteAttempt skips checkFunc only when every combined lane is a declared non-apply phase; nil ledger, empty branches, lookup error, empty SDDPhase, and \"apply\" all fail closed to running checks. Lease renewal still starts around the CHECKING window; integrate.Check is unchanged.",
+      "evidence": "internal/accept/accept.go:84-149 (GetLaneMetadata:84, validateResultAndScope:97, runSDDPhaseChecks:120, v.check:131); cmd/lucind-ai/cli.go:699; internal/run/attempt.go:384-396,447-478; integrate_feature.go:105-111; cli.go:451-455 vs exclusive Integrate at cli.go:457; internal/integrate/integrate.go:159",
+      "affects": "acceptance-verifier Fail-Closed Mechanical Criteria scenarios Apply phase / Planning phase / Unlabeled lane; design.md Decision 2"
+    },
+    {
+      "finding": "Accept tests assert terminal behavior with a real failing lucind-checks.sh (exit 7): TestVerifierSkipsChecksForDeclaredNonApplyPhase expects Verify success; TestVerifierRunsChecksForApplyEmptyOrMissingSDDPhase expects rejection for apply, explicit empty, and missing metadata; TestVerifierNonApplyPhaseStillEnforcesScope still rejects an out-of-scope candidate. Attempt tests drive ExecuteAttempt and assert spies.checkCalls (0 vs 1) rather than mocking shouldRunAttemptChecks. There is no mixed-combined-lane test; the loop at attempt.go:388-394 would fail closed if any combined lane is apply/empty/error.",
+      "evidence": "internal/accept/accept_test.go:362-405 (fixture newVerifierFixture:26-67 uses the checksScript as lucind-checks.sh); internal/run/attempt_test.go:1252-1347 (attemptSpies.checkCalls:84-92); shouldRunAttemptChecks loop attempt.go:388-394",
+      "affects": "Test quality evaluation area; missing mixed-phase combined-lane coverage"
+    },
+    {
+      "finding": "Task 4.1 is correctly scoped as out-of-lane-authority, not a missed in-repo requirement. fan-out.md forbids writes outside the repository; design.md File Changes states ~/.claude/skills/sdd-*/SKILL.md is human/Orchestrator paste after in-repo docs land. The paste-ready block at design.md:104-106 is present; tasks.md leaves 4.1 unchecked on purpose. Phase-verdict-reporting and specialist sequencing for sdd-* runtimes therefore remain prompt-level until that paste happens. The in-repo skill trees carry the Hard Rule carve-out, Specialist synthesis arbitration, and decision-bearing Acceptance language; Dual-Judge at acceptance-promotion.md:38-43 is unchanged. Both trees are byte-identical (diff -q on the three edited pairs).",
+      "evidence": "openspec/changes/agentic-phase-specialist/tasks.md:52 (4.1 unchecked); design.md:102-106; plugin/claude-code/skills/lucind-ai/references/strategies/fan-out.md:43,47; SKILL.md:19 matches design.md New: text verbatim; acceptance-promotion.md:20,27,31-43; plugin/opencode mirrors identical",
+      "affects": "phase-verdict-reporting; phase-specialist-dispatch; sdd-planning-fan-out; human follow-up for ~/.claude/skills/sdd-*"
+    },
+    {
+      "finding": "Exclusive/legacy_main lucind-ai run still invokes Integrate, which calls deps.RunChecks unconditionally (including bisection tryCombine). Design Decision 2 names only accept.go and ExecuteAttempt CHECKING as gated call sites, so this is a residual exclusive-mode path rather than a missed Decision 2 site. Isolated feature-targeted runs (the SDD default) go through IntegrateFeature and are gated. A planning batch dispatched with --legacy-main would still pay the full Go suite on combine.",
+      "evidence": "internal/run/integrate.go:50,117,276; cmd/lucind-ai/cli.go:451-457,2277-2279; design.md:21-31 (call sites accept.go:84-137, attempt.go CHECKING); productionDeps RunChecks=integrate.Check at cli.go:979",
+      "affects": "Exclusive-mode / --legacy-main planning batches; not the feature-targeted attempt path the spec names"
+    },
+    {
+      "finding": "The spec, design testing strategy, and acceptance-promotion checklist mention an explicit check exception that would force lucind-checks.sh on a non-apply phase. LaneMetadata has SDDPhase and no exception field. tasks.md Open Questions and design.md:140 leave --force-checks vs packet-level exception unresolved and say do not add schema. Empty/missing unlabeled lanes already fail closed to running checks. The exception half of the unlabeled-or-exception scenario is vacuously unimplemented: there is no way to configure it, so the skip for a declared non-apply phase cannot currently be overridden.",
+      "evidence": "openspec/changes/agentic-phase-specialist/specs/acceptance-verifier/spec.md:7,53-57; design.md:23,114; tasks.md:80-82; internal/ledger/lanes_meta.go:20-47; acceptance-promotion.md:20,27 (checklist steps 1 and 8 still say \"or carries an explicit exception\")",
+      "affects": "acceptance-verifier Unlabeled lane or explicit exception scenario; later Change for --force-checks / exception metadata"
+    },
+    {
+      "finding": "RecoverAttempt's non-CASPending replay rebuilds AttemptRequest.Branches as []string{worktree.BranchFor(att.ID)} rather than the original combined lane IDs. shouldRunAttemptChecks then looks up metadata for that attempt-id lane; a miss fail-closes to running checks. A crashed planning-phase feature attempt that resumes would therefore re-run lucind-checks.sh even when every original combined lane was a declared non-apply phase.",
+      "evidence": "internal/run/attempt.go:710-721 (Branches: worktree.BranchFor(att.ID)); shouldRunAttemptChecks:388-393 (err != nil → return true); worktree.go:83-85",
+      "affects": "Planning-phase feature-attempt crash recovery; ExecuteAttempt fail-closed conservative extension"
+    },
+    {
+      "finding": "docs/adr/0002-phase-specialist-authority-and-scoped-checks.md:19 and docs/sdd-phase-specialist.md:36-41 still list the Hard Rule rewrite, fan-out rewrite, and sdd_phase gate as \"Not yet done\" after those in-repo items landed in 6723b77/2080528/8dc595b. Those pre-SDD notes were not in tasks.md. Readers of the ADR will think the gate is still pending.",
+      "evidence": "docs/adr/0002-phase-specialist-authority-and-scoped-checks.md:19; docs/sdd-phase-specialist.md:36-41; git log 6723b77 2080528 8dc595b",
+      "affects": "Documentation follow-up; not a spec requirement of this Change"
+    }
+  ],
+  "skills_loaded": [
+    "lucind-verify",
+    "lucind-executor",
+    "engram-memory"
+  ],
+  "session_id": "verify-agentic-phase-specialist-cursor-agent"
+}

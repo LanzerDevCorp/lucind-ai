@@ -1,0 +1,104 @@
+{
+  "packet_id": "tasks-control-room-telemetry-synthesis",
+  "status": "done",
+  "summary": "Verified every file:line citation in the three tasks-lens drafts against this worktree, dropped eight claims that did not match the code, and merged Lens B Wave 1 so NewHandler and cli.go:715 land in one Integrate-green unit. Canonical tasks.md (879 words) plus tasks-synthesis-notes.md are committed as 2d5bdb8.",
+  "hard_stops": [
+    {
+      "hard_stop": "The three ## Assumed decomposition blocks are mutually irreconcilable and the spec and design do not choose between them. Write the notes file, leave tasks.md uncreated, and block.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Lens A's decomposition is refuted by code you verified. Do not substitute your own.",
+      "fired": false
+    },
+    {
+      "hard_stop": "No partition exists in which every wave is green on its own and every same-wave pair is disjoint. Report it; the correct answer may be a single packet, but say so rather than shipping a plan Integrate will revert.",
+      "fired": false,
+      "note": "Did not fire: after moving handlers.go/SSE into Unit 3, the single-packet sequential shape is Integrate-green. Original B Wave 1 (executor ∥ NewHandler signature change) would not have been."
+    },
+    {
+      "hard_stop": "One or more lens drafts is missing from this worktree.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Covering all eight spine items honestly would require exceeding 1800 words. Report which item forces it rather than silently overrunning or silently cutting.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/control-room-telemetry/tasks.md",
+      "change": "created",
+      "why": "Canonical tasks checklist assembled from three verified lenses under the 1800-word budget."
+    },
+    {
+      "path": "openspec/changes/control-room-telemetry/tasks-synthesis-notes.md",
+      "change": "created",
+      "why": "Orchestrator-facing notes: dropped citations, wave merge, decomposition divergence."
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every file:line citation surviving into tasks.md was opened and confirmed in this worktree, and every dropped claim is listed under ## Dropped Citations.",
+      "met": true,
+      "evidence": "Opened executor.go:15-37, agy.go:169-197, cursor_agent.go:91-118, opencode.go:130-160, handlers.go:36-211, model.go:17-24, run.go:71-89,149-212,313-316,368-483, cli.go:641-723, schema.go:9-10,38-39, ledger.go:490-526, ledger_test.go:733, batch.go:66-153, batch_test.go:66-113,1038, run_test.go:29-91,856, serve/server.go:19-22, server_test.go:17-40,70, model_test.go:595-627, agy_test.go:18-166, cli_test.go:37-60,1154, barrier.go:36-47, barrier_test.go:31-60, disjoint.go:8-21, integrate.go:50-59, lucind-checks.sh:1-4, design.md:100-127. Dropped claims recorded in tasks-synthesis-notes.md ## Dropped Citations (8)."
+    },
+    {
+      "criterion": "Every wave was independently judged green-on-its-own, and every wave that was not is merged and reported under ## Coverage Gaps.",
+      "met": true,
+      "evidence": "lucind-checks.sh is go build ./... then go test ./... -race. B Wave 1 with NewHandler(*Hub) in Unit 2 fails go build at cli.go:715. Merged handlers/SSE into Unit 3; reported under Coverage Gaps. Sequential single packet is green; hypothetical Wave 1 of Unit 1 ∥ Hub+ListRunEvents (no signature change) would also build."
+    },
+    {
+      "criterion": "Every same-wave unit pair was re-checked against the component-boundary prefix rule rather than taken from lens B's table.",
+      "met": true,
+      "evidence": "Re-applied packet.PathInScope (disjoint.go:13-21). Sequential packet has no same-wave pairs. File-level Unit 1 internal/executor vs Unit 2 hub.go/model.go do not prefix-match. Unit 2 vs Unit 3 share package serve on different files; they remain sequential because Unit 3 needs type Hub."
+    },
+    {
+      "criterion": "tasks.md exists, is under 1800 words, and substantively covers all eight spine items, with anything missing reported under ## Coverage Gaps.",
+      "met": true,
+      "evidence": "wc -w = 879. Spine: forecast table + four guard lines; work-unit table with focused test, harness, rollback, executor; phased checklist; threat matrix all N/A so no RED tasks; dependency order; sequential waves green; requirement traceability for all five spec deltas."
+    },
+    {
+      "criterion": "tasks-synthesis-notes.md exists with exactly the four required sections, each either populated or explicitly None.",
+      "met": true,
+      "evidence": "Sections Unresolved Contradictions (None), Coverage Gaps (wave merge + skill High-path drift + allowed_paths), Dropped Citations (8 claims), Decomposition Divergence (A vs B/C convergence)."
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (git status --porcelain empty and git log --oneline -1).",
+      "met": true,
+      "evidence": "git status --porcelain empty. git log --oneline -1: 2d5bdb8 docs(telemetry): synthesize canonical tasks from three lenses"
+    }
+  ],
+  "commit": "2d5bdb8",
+  "findings": [
+    {
+      "finding": "Citations verified: 40 file:line claims opened in this worktree that support their surviving tasks.md entries (Request, three MultiWriter sites, WaitDelay, NewHandler, Execute/SetStatus, PersistEnvelope, writeStub trio, fakeExecutor, TestModelSourceDoesNotShellOut, TestNonLoopbackListenFails, schema CHECK, Ledger.Events, ExecuteBatch/Observe, threat matrix).",
+      "evidence": "tasks.md citations plus the Read/Grep pass over the files listed in done_criteria evidence.",
+      "affects": "apply phase executes only verified seams"
+    },
+    {
+      "finding": "Citations dropped: 8.",
+      "evidence": "tasks-synthesis-notes.md ## Dropped Citations: ledger_test.go:733, batch_test.go:66-113 and :61-120, cli_test.go:37-60, three vacuous C -run filters, model_test.go:595-627 as ListRunEvents mapping.",
+      "affects": "apply must not treat those -run names as existing tests"
+    },
+    {
+      "finding": "Waves merged for viability: 1 (B Wave 1 parallel Unit 1 ∥ Unit 2 with handlers.go).",
+      "evidence": "cli.go:715 still calls NewHandler with three args; lucind-checks.sh:1-4 go build ./...; integrate.go:50-59 reverts a red combined tree.",
+      "affects": "apply-dag.yaml if later authored must not restore that Wave 1"
+    },
+    {
+      "finding": "Contradictions escalated: 0.",
+      "evidence": "tasks-synthesis-notes.md ## Unresolved Contradictions: None. SSE payload remains design.md:127 open question, not a lens-vs-lens conflict.",
+      "affects": "orchestrator has no blocking question from this phase"
+    },
+    {
+      "finding": "Coverage gaps: 3 (wave merge recorded; sdd-tasks High-path vs Lens C Medium forecast; B omitted ledger_test.go and batch_test.go from allowed_paths, added to Unit 3).",
+      "evidence": "tasks-synthesis-notes.md ## Coverage Gaps",
+      "affects": "orchestrator size-exception if apply exceeds 400 lines; Unit 3 allowed_paths in tasks.md"
+    }
+  ]
+}

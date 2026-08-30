@@ -1,0 +1,70 @@
+{
+  "packet_id": "tasks-lane-status-observability-lens-c",
+  "status": "done",
+  "summary": "Authored tasks-lens-c.md covering orphan-lane reconciliation: runner PID persistence in ledger and CLI capture (Phase C1), serve-side sweeper daemon with Linux POSIX liveness probing and lane failure transitions with lane notes (Phase C2), threat-matrix RED tests, dependency ordering, and traceability.",
+  "hard_stops": [
+    {
+      "hard_stop": "A requirement in orphan-lane-reconciliation/spec.md cannot be decomposed into tasks because design.md does not say how it is built.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Two tasks in this slice are mutually circular.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/lane-status-observability/tasks-lens-c.md",
+      "change": "created",
+      "why": "Task checklist and planning draft for orphan-lane reconciliation capability slice"
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "A `## Citation Manifest` section lists every unique citation, grouped by file.",
+      "met": true,
+      "evidence": "openspec/changes/lane-status-observability/tasks-lens-c.md:75-94 contains 18 unique citations grouped alphabetically across 7 files"
+    },
+    {
+      "criterion": "`lucind-lane-check.sh --verify-citations` reported no FAIL against this draft's own manifest.",
+      "met": true,
+      "evidence": "PASS citation existence check over all 18 citations in Citation Manifest (RESULT: PASS)"
+    },
+    {
+      "criterion": "Every task names a concrete path, and every \"modify\" task's path resolves in this worktree.",
+      "met": true,
+      "evidence": "All modify paths (cmd/lucind-ai/cli.go, internal/ledger/runs.go, internal/ledger/runs_test.go) exist in worktree; create paths (internal/serve/sweeper.go, internal/serve/sweeper_test.go) explicitly specified"
+    },
+    {
+      "criterion": "The \"Process integration\" threat-matrix row is expanded into explicit RED tests — live PID, dead PID, PID 0, PID recycling, `EPERM` — each preceding its production task.",
+      "met": true,
+      "evidence": "openspec/changes/lane-status-observability/tasks-lens-c.md:46-52 specifies TestSweeper_LivePIDRetained, TestSweeper_DeadPIDReconciled, TestSweeper_ZeroPIDIgnored, and TestSweeper_RecycledPIDAndEPERM preceding task C2.5"
+    },
+    {
+      "criterion": "The cross-lens dependency on lens B's schema-v7 `runs.pid` column and the shared-file overlap with lens A's `cli.go` changes are named in `## Open Questions`.",
+      "met": true,
+      "evidence": "openspec/changes/lane-status-observability/tasks-lens-c.md:71-73 details schema-v7 runs.pid dependency on Lens B and cli.go shared-file overlap with Lens A"
+    },
+    {
+      "criterion": "Every requirement in `orphan-lane-reconciliation/spec.md` appears in the traceability table.",
+      "met": true,
+      "evidence": "openspec/changes/lane-status-observability/tasks-lens-c.md:63-68 maps 'Orphaned lane reconciliation', 'Scenario: Dead-process lane swept to failed', and 'Scenario: Active process lanes unchanged' to tasks C1.1-C1.3 and C2.1-C2.6"
+    },
+    {
+      "criterion": "`tasks-lens-c.md` exists, is under 1000 words excluding the Citation Manifest, and carries every skeleton section.",
+      "met": true,
+      "evidence": "lucind-lane-check.sh report: PASS word budget: 960 / 1000 words; all required sections present"
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (git status --porcelain empty; check git log -1 --format=%B for an unwanted Co-authored-by: trailer and strip it if present).",
+      "met": true,
+      "evidence": "Commit 7aac10e8e9c621c8e8d1ae8c35e5836e80c1edf3 with subject 'docs(tasks): add lens C tasks for orphan lane reconciliation' without Co-authored-by attribution"
+    }
+  ],
+  "commit": "7aac10e8e9c621c8e8d1ae8c35e5836e80c1edf3",
+  "session_id": "14ee672e-6c02-44cc-8d40-a72b84c105b1"
+}

@@ -1,0 +1,44 @@
+{
+  "packet_id": "explore-control-room-telemetry-lens-a",
+  "status": "done",
+  "summary": "Authored explore-lens-a.md defining the problem space and three candidate architectures for Control Room Telemetry with grounded file:line citations. Recommended Candidate 2 (worktree-local log streaming with in-memory Pub/Sub SSE hub) to prevent SQLite write lock contention and preserve worktree isolation.",
+  "hard_stops": [
+    {
+      "hard_stop": "The problem scope cannot be identified from codebase inspection or packet context.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Candidate approaches cannot be formulated without designing complete implementation details (which belongs to design phase).",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/control-room-telemetry/explore-lens-a.md",
+      "change": "created",
+      "why": "Explore Lens A problem space and candidate architectures for Control Room Telemetry"
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every candidate and problem claim carries file:line citations to real code in this worktree.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-telemetry/explore-lens-a.md:5-40 cites internal/executor/agy.go:169-175, internal/executor/cursor_agent.go:91-97, internal/executor/opencode.go:129-135, internal/ledger/schema.go:34-43, internal/run/batch.go:81-89, internal/serve/handlers.go:36-118, cmd/lucind-ai/cli.go:42, etc."
+    },
+    {
+      "criterion": "explore-lens-a.md exists, is under 1000 words, and carries every skeleton section.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-telemetry/explore-lens-a.md exists, word count is 641 words (\u003c 1000 words budget), and contains ## Problem Space, ## Candidate Approaches (Candidates 1-3), ## Initial Recommendations, and ## Open Questions."
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (git status --porcelain empty and git log --oneline -1).",
+      "met": true,
+      "evidence": "commit 0572a1ddfcd92f1d4e38b07abe102de7017c73c1 ('docs(control-room-telemetry): add explore lens a problem and candidates') has no AI attribution; git status --porcelain is clean."
+    }
+  ],
+  "commit": "0572a1ddfcd92f1d4e38b07abe102de7017c73c1"
+}

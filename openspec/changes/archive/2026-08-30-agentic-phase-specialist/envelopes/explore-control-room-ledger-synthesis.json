@@ -1,0 +1,84 @@
+{
+  "packet_id": "explore-control-room-ledger-synthesis",
+  "status": "done",
+  "summary": "Verified all three lens drafts against this worktree, dropped 16 failed citations, and wrote canonical openspec/changes/control-room-ledger/explore.md (1318 words) plus explore-synthesis-notes.md. Candidate 1 (schema v6 relational expansion and domain-file split) is recommended; one contradiction on WAL ingest feasibility is escalated, not resolved.",
+  "hard_stops": [
+    {
+      "hard_stop": "The problem space or candidate approaches across drafts are mutually irreconcilable. Write the notes file, leave explore.md uncreated, and block.",
+      "fired": false,
+      "note": "Problem boundaries converge on ledger schema/persistence gaps. Candidate 3 is low-feasibility as a progress store; lens C pub/sub is a complementary UI layer, not a veto of Candidate 1. WAL contention is escalated, not treated as irreconcilable."
+    },
+    {
+      "hard_stop": "One or more lens drafts is missing from this worktree.",
+      "fired": false,
+      "note": "explore-lens-a.md, explore-lens-b.md, and explore-lens-c.md are present under openspec/changes/control-room-ledger/."
+    },
+    {
+      "hard_stop": "Covering the exploration spine honestly would require exceeding 1800 words. Report which item forces it rather than silently overrunning or silently cutting.",
+      "fired": false,
+      "note": "explore.md is 1318 words (wc -w) and covers all eight packet spine items."
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false,
+      "note": "Packet allowed_paths name the two OpenSpec artifacts; the Return section separately requires .lucind/result.json. sdd-explore's exploration.md filename is overridden by this packet's explore.md output path. No instruction conflict required a guess."
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/control-room-ledger/explore.md",
+      "change": "created",
+      "why": "Canonical exploration after citation verification and compression under 1800 words."
+    },
+    {
+      "path": "openspec/changes/control-room-ledger/explore-synthesis-notes.md",
+      "change": "created",
+      "why": "Orchestrator-facing notes: contradictions, coverage, dropped citations, approach divergence."
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every file:line citation surviving into explore.md was opened and confirmed in this worktree, and every dropped claim is listed under ## Dropped Citations.",
+      "met": true,
+      "evidence": "74 unique draft citations opened in this worktree. 16 failed claims listed in openspec/changes/control-room-ledger/explore-synthesis-notes.md ## Dropped Citations (items 1-16). Surviving citations in explore.md were retargeted only to ranges also opened (e.g. worktree.go:150-171, attempt.go:482-488, ledger.go:8-17)."
+    },
+    {
+      "criterion": "explore.md exists, is under 1800 words, and substantively covers the exploration spine, with anything missing reported under ## Coverage Gaps.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-ledger/explore.md exists; wc -w = 1318. Headings: Problem statement and background; Candidate approaches; User and capability impact; Scenarios and use cases; Technical risks and trade-offs; Potential spikes; Success criteria; Out of scope; Open questions. Coverage Gaps section states none for the eight spine items."
+    },
+    {
+      "criterion": "explore-synthesis-notes.md exists with exactly the four required sections, each either populated or explicitly None.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-ledger/explore-synthesis-notes.md headings in order: Unresolved Contradictions (populated); Coverage Gaps (none for spine, with non-spine notes); Dropped Citations (16 items); Approach Divergence (populated)."
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (git status --porcelain empty and git log --oneline -1).",
+      "met": true,
+      "evidence": "git status --porcelain empty. git log --oneline -1: b9b6075 docs(explore): synthesize control-room-ledger exploration"
+    }
+  ],
+  "commit": "b9b6075",
+  "findings": [
+    {
+      "finding": "Draft citation inventory: 74 unique file:line citations across the three lenses; 16 claims dropped; 1 contradiction escalated (A high-feasibility vs C WAL write-lock); 0 exploration-spine coverage gaps.",
+      "evidence": "python unique-citation count on explore-lens-{a,b,c}.md = 74; explore-synthesis-notes.md ## Dropped Citations items 1-16; ## Unresolved Contradictions; ## Coverage Gaps first sentence.",
+      "affects": "control-room-ledger proposal/design; orchestrator should not re-read lens drafts"
+    },
+    {
+      "finding": "Packet named validation schema at .lucind/result.schema.json; this worktree has the schema at internal/result/result.schema.json (.lucind/ is gitignored and had no schema file).",
+      "evidence": "ls internal/result/result.schema.json; no .lucind/result.schema.json before this envelope write",
+      "affects": "result envelope validation for this and sibling packets"
+    },
+    {
+      "finding": "ledgerpath.Validate is implemented but Open does not call it; worktree refusal is CLI IsLinkedWorktree, while Open will open a DB if primaryRoot is a worktree path.",
+      "evidence": "internal/ledger/ledger.go:8-17,146-148; internal/ledgerpath/ledgerpath.go:44-58; cmd/lucind-ai/cli.go:277-280,702-705",
+      "affects": "control-room-ledger isolation requirements; any in-worktree agent/telemetry writer"
+    },
+    {
+      "finding": "/api/state does not use serve.Model; it queries PendingApprovals and ApproverRate directly. Model is the feature-parent DTO surface.",
+      "evidence": "internal/serve/handlers.go:120-145 vs internal/serve/model.go:14-25,128-149",
+      "affects": "control-room-serve and control-room-ui-shell read-model wiring"
+    }
+  ]
+}

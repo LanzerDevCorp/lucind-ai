@@ -1,0 +1,58 @@
+{
+  "packet_id": "design-conflict-triage-fixture-lens-c",
+  "status": "done",
+  "summary": "Authored Design Lens C (openspec/changes/conflict-triage-fixture/design-lens-c.md) covering testing strategy, test seams, threat matrix, rollback and additivity rationale, open questions, and citation manifest under the 1000-word budget.",
+  "hard_stops": [
+    {
+      "hard_stop": "A behavior the specs require cannot be tested through any existing or proposed seam.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Whether a format delta is additive cannot be determined from the specs, so the rollback decision would be a guess.",
+      "fired": false
+    },
+    {
+      "hard_stop": "The threat matrix is missing from both ## Context and the skill reference.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/conflict-triage-fixture/design-lens-c.md",
+      "change": "created",
+      "why": "Design Lens C detailing failure, testing strategy, threat matrix, rollback, and citation manifest for conflict-triage-fixture"
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "A ## Citation Manifest section lists every unique citation, grouped by file, with the claim each one supports.",
+      "met": true,
+      "evidence": "openspec/changes/conflict-triage-fixture/design-lens-c.md:62-111 lists 46 unique citations grouped alphabetically by file and ascending by line number with exact claims."
+    },
+    {
+      "criterion": "Every named test seam carries a file:line citation that points at real code in this worktree, or is explicitly marked \"new seam required\".",
+      "met": true,
+      "evidence": "Existing seams cite internal/reconcile/reconcile.go:128-145,157-168, internal/run/run.go:211, internal/integrate/integrate.go:151-173, internal/worktree/worktree.go:278-292, internal/resolve/candidate.go:48-95,100-145, cmd/lucind-ai/cli.go:60,65-70; new seams explicitly marked for conflicttriage.TriageInvoker and fixture.GeneratorOptions at design-lens-c.md:28-30."
+    },
+    {
+      "criterion": "Every threat-matrix row is marked Applicable or N/A with a reason, and every applicable row names a planned RED test.",
+      "met": true,
+      "evidence": "design-lens-c.md:32-40 marks documentation paths, repo selection, and commit state as Applicable with named RED tests, and push state and PR commands as N/A with explicit domain reasons."
+    },
+    {
+      "criterion": "design-lens-c.md exists, is under 1000 words, and carries every skeleton section including ## Assumed architecture.",
+      "met": true,
+      "evidence": "openspec/changes/conflict-triage-fixture/design-lens-c.md contains all skeleton sections with 926 words in the main body (excluding citation manifest)."
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (git status --porcelain empty and git log --oneline -1).",
+      "met": true,
+      "evidence": "Commit a4a1bd0 with message \"docs(conflict-triage-fixture): add design lens c\" and clean git status."
+    }
+  ],
+  "commit": "a4a1bd03b8e3d2c686bcd7a88edaed7bef840285"
+}

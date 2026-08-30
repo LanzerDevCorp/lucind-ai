@@ -1,0 +1,59 @@
+{
+  "packet_id": "spec-lane-status-observability-lens-b",
+  "status": "done",
+  "summary": "Authored delta specifications and scenarios for dispatched-packet-body and lane-progress-telemetry in spec-lens-b.md. Verified terminal consumers across CLI, stream decoders, ledger, and HTTP serve routes while preserving open design questions.",
+  "hard_stops": [
+    {
+      "hard_stop": "openspec/specs/dispatched-packet-body/ or openspec/specs/lane-progress-telemetry/ already exists, contradicting the proposal's \"New Capabilities\" classification.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Either requirement cannot be stated without deciding an implementation detail the design phase has not decided (e.g. the packet-path persistence mechanism — Open Question 2 stays open).",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/lane-status-observability/spec-lens-b.md",
+      "change": "created",
+      "why": "Authored delta specification lens B covering dispatched-packet-body and lane-progress-telemetry requirements and scenarios"
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "A ## Citation Manifest section lists every unique citation, grouped by file, with the claim it supports.",
+      "met": true,
+      "evidence": "openspec/changes/lane-status-observability/spec-lens-b.md:79-100 lists 18 unique citations grouped by file in ascending line order"
+    },
+    {
+      "criterion": "Both capability-map rows are classified \"new\" correctly (confirmed absent from openspec/specs/).",
+      "met": true,
+      "evidence": "Confirmed openspec/specs/dispatched-packet-body and openspec/specs/lane-progress-telemetry do not exist; spec-lens-b.md:12-16 marks both as new"
+    },
+    {
+      "criterion": "Both requirements carry an RFC 2119 keyword and state observable behavior, not implementation.",
+      "met": true,
+      "evidence": "spec-lens-b.md:20-25 and :46-52 use MUST/SHALL NOT specifying observable HTTP endpoints, stream events, and DTO contracts"
+    },
+    {
+      "criterion": "Every scenario's THEN is observable; the coverage table names the seam or marks \"new seam required\".",
+      "met": true,
+      "evidence": "spec-lens-b.md:28-42,54-68 specify observable THEN clauses; coverage table at :72-75 maps seams and test files"
+    },
+    {
+      "criterion": "spec-lens-b.md exists, is under 1000 words, and carries ## Assumed requirements, ## Coverage, and ## Untestable Assertions.",
+      "met": true,
+      "evidence": "spec-lens-b.md exists with 855 body words (under 1000 words); required sections present at :5-7, :70-75, :77"
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (git status --porcelain empty and git log --oneline -1).",
+      "met": true,
+      "evidence": "Commit e6621f3 with message 'docs(openspec): specify dispatched packet body and telemetry in spec lens b'; git status --porcelain empty"
+    }
+  ],
+  "commit": "e6621f3"
+}

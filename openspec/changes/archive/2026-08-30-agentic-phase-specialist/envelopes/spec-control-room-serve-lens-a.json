@@ -1,0 +1,54 @@
+{
+  "packet_id": "spec-control-room-serve-lens-a",
+  "status": "done",
+  "summary": "Authored spec lens A for control-room-serve covering capability mapping and requirements classification. Mapped four new capabilities and one modified capability with observable RFC 2119 requirement definitions under budget.",
+  "hard_stops": [
+    {
+      "hard_stop": "The proposal has no Capabilities section and no *Affected Areas* section to infer one from.",
+      "fired": false
+    },
+    {
+      "hard_stop": "A capability the proposal names as *Modified* has no live spec in `openspec/specs/`, so it is really new and the proposal is wrong about which.",
+      "fired": false
+    },
+    {
+      "hard_stop": "A requirement cannot be stated without deciding an implementation detail the design phase has not decided.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/control-room-serve/spec-lens-a.md",
+      "change": "created",
+      "why": "Capability mapping and ADDED/MODIFIED requirement statements for control-room-serve"
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every capability-map row is classified new or existing, and every \"existing\" row cites the live spec with file:line that resolves in this worktree.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-serve/spec-lens-a.md:9-17 contains 4 New capabilities and 1 Existing capability citing openspec/specs/approvals-web-ui/spec.md:1-83"
+    },
+    {
+      "criterion": "Every requirement carries an RFC 2119 keyword and states observable behavior rather than implementation.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-serve/spec-lens-a.md:19-67 specifies requirements using MUST across 7 ADDED and 1 MODIFIED requirement blocks"
+    },
+    {
+      "criterion": "spec-lens-a.md exists, is under 1000 words, and carries ## Assumed requirements and ## Capability Map.",
+      "met": true,
+      "evidence": "wc -w openspec/changes/control-room-serve/spec-lens-a.md returns 552 words; file contains ## Assumed requirements (line 3) and ## Capability Map (line 7)"
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (git status --porcelain empty and git log --oneline -1).",
+      "met": true,
+      "evidence": "commit 9e9f9c8d21475eb29b209bb289f85532bc6b04a6 ('docs(spec): add spec lens a for control-room-serve'); git status --porcelain is empty"
+    }
+  ],
+  "commit": "9e9f9c8d21475eb29b209bb289f85532bc6b04a6",
+  "session_id": "c0801e22-294b-4fad-8824-7c6dc6c04143"
+}

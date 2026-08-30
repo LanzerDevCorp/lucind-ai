@@ -1,0 +1,87 @@
+{
+  "packet_id": "design-control-room-ledger-synthesis",
+  "status": "done",
+  "summary": "Synthesized a canonical openspec/changes/control-room-ledger/design.md (1643 words) from three verified lens drafts, following Lens A's Candidate-1 architecture. Dropped twelve failed citations, escalated one Model-method naming contradiction, and recorded coverage gaps including the missing specs/ directory.",
+  "hard_stops": [
+    {
+      "hard_stop": "The three ## Assumed architecture blocks are mutually irreconcilable and the proposal and specs do not choose between them. Write the notes file, leave design.md uncreated, and block.",
+      "fired": false,
+      "note": "All three assumed Candidate 1 (relational schema expansion with modular domain files). Independent convergence recorded in Architecture Divergence."
+    },
+    {
+      "hard_stop": "Lens A's architecture is refuted by code you verified. Do not substitute your own.",
+      "fired": false,
+      "note": "Verified code matches A's current-state citations (schema v5, migrate through v5, RegisterLane omitting model/agent/feature, no runs table, WAL/busy_timeout/pool, primary-root Resolve, CLI worktree gates). Architecture is a planned extension of those seams, not a false claim about them."
+    },
+    {
+      "hard_stop": "One or more lens drafts is missing from this worktree.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Covering all eight spine items honestly would require exceeding 1800 words. Report which item forces it rather than silently overrunning or silently cutting.",
+      "fired": false,
+      "note": "design.md is 1643 words and covers all eight spine items plus skill-required Interfaces/Contracts."
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/control-room-ledger/design.md",
+      "change": "created",
+      "why": "Canonical design after citation verification and Lens-A architecture arbitration."
+    },
+    {
+      "path": "openspec/changes/control-room-ledger/design-synthesis-notes.md",
+      "change": "created",
+      "why": "Orchestrator-facing notes: contradictions, coverage gaps, dropped citations, architecture divergence."
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every file:line citation surviving into design.md was opened and confirmed in this worktree, and every dropped claim is listed under ## Dropped Citations.",
+      "met": true,
+      "evidence": "Verification pass opened schema.go, ledger.go, cli.go, packet.go, dag/parse.go, ledgerpath.go, handlers.go, model.go, model_test.go, app.js, run.go, batch.go, attempt.go, disjoint.go, ledger_test.go, ledgerpath_test.go, cli_test.go, result.schema.json. Twelve failed claims listed in design-synthesis-notes.md ## Dropped Citations. design.md wc -w = 1643."
+    },
+    {
+      "criterion": "design.md exists, is under 1800 words, and substantively covers all eight spine items, with anything missing reported under ## Coverage Gaps.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-ledger/design.md is 1643 words. Spine present: Technical Approach; Architecture Decisions (Choice/Alternatives/Rationale); Flow and Invariants; File Changes with terminal consumers; Testing Strategy and Test Seams; Threat Matrix (every row Applicable or N/A: reason); Rollback and Additivity; Open Questions and Out of Scope. Gaps (missing specs/, unsized SQL types, uncarried AppendEvent question) reported in notes, not invented into design.md."
+    },
+    {
+      "criterion": "design-synthesis-notes.md exists with exactly the four required sections, each either populated or explicitly None.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-ledger/design-synthesis-notes.md sections in order: Unresolved Contradictions (Model method names); Coverage Gaps (four items); Dropped Citations (twelve); Architecture Divergence (convergence plus B's non-surviving sites). None of the four is empty."
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (git status --porcelain empty and git log --oneline -1).",
+      "met": true,
+      "evidence": "git log --oneline -1 = 7361f0b docs(control-room-ledger): synthesize canonical design from three lenses; git status --porcelain empty. .lucind/result.json is gitignored."
+    }
+  ],
+  "commit": "7361f0b",
+  "findings": [
+    {
+      "finding": "Citations verified (unique file:line tokens across the three lens drafts, each opened in this worktree): 77.",
+      "evidence": "Python scan of design-lens-{a,b,c}.md; every cited path was Read in this session.",
+      "affects": "design.md citation integrity"
+    },
+    {
+      "finding": "Citations dropped (claims removed or rewritten because the cited lines did not support them): 12.",
+      "evidence": "design-synthesis-notes.md ## Dropped Citations items 1–12.",
+      "affects": "design.md; control-room-capture must not treat run.go:422-435 as a live stream writer"
+    },
+    {
+      "finding": "Contradictions escalated: 1 (serve.Model method names ListRuns/GetRun vs GetRunSummary/ListRunSummaries).",
+      "evidence": "design-synthesis-notes.md ## Unresolved Contradictions. *Ledger method names agree.",
+      "affects": "sdd-tasks; implementers must not invent Model identifiers until the human picks"
+    },
+    {
+      "finding": "Coverage gaps: 4 (missing specs/ directory; uncarried AppendEvent-vs-helpers question; unsized SQL types and runs.status enum; skill 800-word budget superseded by packet 1800).",
+      "evidence": "design-synthesis-notes.md ## Coverage Gaps.",
+      "affects": "sdd-specs / sdd-tasks"
+    }
+  ]
+}

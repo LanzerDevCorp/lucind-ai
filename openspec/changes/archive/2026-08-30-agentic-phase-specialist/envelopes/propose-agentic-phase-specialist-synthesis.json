@@ -1,0 +1,85 @@
+{
+  "packet_id": "propose-agentic-phase-specialist-synthesis",
+  "status": "done",
+  "summary": "Synthesized the three propose lens drafts into canonical proposal.md (1799 words) under Lens A's Phase-Scoped Agentic Specialist, after verifying citations against this worktree. Three citations were retargeted; zero contradictions escalated. Synthesis notes record dropped citations, scope divergence, and coverage gaps. Two conventional commits, no AI attribution.",
+  "hard_stops": [
+    {
+      "hard_stop": "The proposed approaches across drafts are mutually irreconcilable. Write the notes file, leave proposal.md uncreated, and block.",
+      "fired": false,
+      "note": "All three converged on Lens A's candidate. Lens C's Tier-A Acceptance restriction is scope divergence, not an irreconcilable approach."
+    },
+    {
+      "hard_stop": "One or more lens drafts is missing from this worktree.",
+      "fired": false,
+      "note": "propose-lens-a.md, propose-lens-b.md, and propose-lens-c.md are all present under openspec/changes/agentic-phase-specialist/."
+    },
+    {
+      "hard_stop": "Covering the proposal spine honestly would require exceeding 1800 words. Report which item forces it rather than silently overrunning or silently cutting.",
+      "fired": false,
+      "note": "proposal.md is 1799/1800 words and covers packet spine items 1–9. Review burden was unestimated by every lens and is reported as a coverage gap rather than invented."
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false,
+      "note": "Packet 1800-word budget governs this synthesis (fan-out.md: packet owns budgets). sdd-propose 450-word skill budget is the single-author contract, not this lane. Dual-Judge was settled by the ADR Lens A selected, not by picking between B and C."
+    }
+  ],
+  "files_changed": [
+    {
+      "change": "created",
+      "path": "openspec/changes/agentic-phase-specialist/proposal.md",
+      "why": "Canonical proposal synthesized from three verified lens drafts."
+    },
+    {
+      "change": "created",
+      "path": "openspec/changes/agentic-phase-specialist/proposal-synthesis-notes.md",
+      "why": "Orchestrator-facing notes: dropped citations, scope divergence, coverage gaps, no unresolved contradictions."
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "proposal.md was committed as its own commit before proposal-synthesis-notes.md was started, confirmed by the mid-flow lucind-lane-check.sh run reporting a clean git status --porcelain.",
+      "met": true,
+      "evidence": "First commit 84d3fe595acb1944d02e108abcf15404251b4c25 contains only proposal.md. Mid-flow ./lucind-lane-check.sh --file openspec/changes/agentic-phase-specialist/proposal.md --budget 1800 --skip-result: PASS  word budget: 1799 / 1800 words; PASS  git status --porcelain: clean; RESULT: PASS. Notes file was written after that run."
+    },
+    {
+      "criterion": "Every file:line citation surviving into proposal.md was opened and confirmed in this worktree, and every dropped claim is listed under ## Dropped Citations.",
+      "met": true,
+      "evidence": "72 unique ranges opened. 69 verified. 3 retargeted in proposal-synthesis-notes.md ## Dropped Citations: authoring.go:23 is PacketDigest (Contract is :26); accept.go:172-207 is validateTypedTargetBinding/validateObjects not allowed_paths (retarget 214-261); TestSkillDocumentsLanguageGlossary does not exist (glossary check is TestSkillAssetContract 924-941)."
+    },
+    {
+      "criterion": "proposal.md exists, is under 1800 words, and substantively covers the proposal spine, with anything missing reported under ## Coverage Gaps.",
+      "met": true,
+      "evidence": "Mid-flow lucind-lane-check.sh: PASS  word budget: 1799 / 1800 words. Spine items 1–9 present (Intent through Open Questions, including impact table, delta specs, risks, rollback, tests, out of scope). Coverage gap: no lens estimated review burden."
+    },
+    {
+      "criterion": "proposal-synthesis-notes.md exists with exactly the four required sections, each either populated or explicitly None, confirmed by the final lucind-lane-check.sh run.",
+      "met": true,
+      "evidence": "Final ./lucind-lane-check.sh --file openspec/changes/agentic-phase-specialist/proposal-synthesis-notes.md --require-section Unresolved Contradictions --require-section Coverage Gaps --require-section Dropped Citations --require-section Scope Divergence: PASS  section present: ## Unresolved Contradictions; PASS  section present: ## Coverage Gaps; PASS  section present: ## Dropped Citations; PASS  section present: ## Scope Divergence; PASS  git status --porcelain: clean; PASS  result envelope: .lucind/result.json exists and parses as JSON; RESULT: PASS."
+    },
+    {
+      "criterion": "The work is committed with two conventional commits and no AI attribution, confirmed by the final lucind-lane-check.sh run reporting a clean git status --porcelain and a valid .lucind/result.json.",
+      "met": true,
+      "evidence": "git log: 84d3fe5 docs(sdd): add canonical proposal for agentic-phase-specialist; 25dcf97 docs(sdd): add proposal synthesis notes for agentic-phase-specialist. git log -1 --format=%B on each has no Co-authored-by. Final lucind-lane-check.sh: PASS  git status --porcelain: clean; PASS  result envelope: .lucind/result.json exists and parses as JSON; RESULT: PASS."
+    }
+  ],
+  "commit": "25dcf97718686ea0190543410a97975668d9e8e5",
+  "findings": [
+    {
+      "finding": "Citations verified: 69. Citations dropped/retargeted: 3. Contradictions escalated: 0. Coverage gaps: 1 (review burden unestimated).",
+      "evidence": "openspec/changes/agentic-phase-specialist/proposal-synthesis-notes.md ## Dropped Citations and ## Coverage Gaps",
+      "affects": "sdd-spec / sdd-design for this Change; Dual-Judge and unlabeled sdd_phase fail-safe are in proposal.md, not open."
+    },
+    {
+      "finding": "Check gating must land at callers (accept.go Verify and attempt.go checkFunc), not inside integrate.Check. LaneMetadata.SDDPhase already exists at lanes_meta.go:25 but is loaded only inside the authoring-evidence branch for target binding.",
+      "evidence": "internal/accept/accept.go:84-96,120-137; internal/run/attempt.go:431-435; internal/integrate/integrate.go:159-176; internal/ledger/lanes_meta.go:25",
+      "affects": "apply-lane design of the sdd_phase gate"
+    }
+  ],
+  "skills_loaded": [
+    "lucind-executor",
+    "lucind-fan-out-lens",
+    "sdd-propose",
+    "engram-memory"
+  ]
+}

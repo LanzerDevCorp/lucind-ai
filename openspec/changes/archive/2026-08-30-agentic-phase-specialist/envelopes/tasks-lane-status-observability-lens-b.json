@@ -1,0 +1,78 @@
+{
+  "packet_id": "tasks-lane-status-observability-lens-b",
+  "status": "done",
+  "summary": "Generated tasks-lens-b.md for the lane-status-observability change, detailing the task breakdown for structured progress telemetry, decoder mappings, and schema v7 migration. Ensured strict TDD pairs, dependency ordering, requirement traceability, and verbatim v7 DDL inclusion.",
+  "hard_stops": [
+    {
+      "hard_stop": "The v7 DDL in design.md is missing or incomplete — do not invent or repair it yourself; block instead.",
+      "fired": false
+    },
+    {
+      "hard_stop": "A requirement in the two owned specs cannot be decomposed into tasks because design.md does not say how it is built.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Two tasks in this slice are mutually circular.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/lane-status-observability/tasks-lens-b.md",
+      "change": "created",
+      "why": "Task breakdown for structured progress telemetry and schema v7 migration (Lens B capability slice)"
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "A ## Citation Manifest section lists every unique citation, grouped by file.",
+      "met": true,
+      "evidence": "openspec/changes/lane-status-observability/tasks-lens-b.md:88-128 lists 37 unique citations grouped alphabetically by file with ascending line numbers."
+    },
+    {
+      "criterion": "lucind-lane-check.sh --verify-citations reported no FAIL against this draft's own manifest.",
+      "met": true,
+      "evidence": "PASS  citation internal/executor/agy_stream.go:12-18 through PASS  citation openspec/changes/lane-status-observability/specs/lane-progress-telemetry/spec.md:9-30 (0 failures)."
+    },
+    {
+      "criterion": "Every task names a concrete path, and every modify task's path resolves in this worktree.",
+      "met": true,
+      "evidence": "Every task in B1.1-B3.4 explicitly references concrete existing paths (e.g. internal/ledger/schema.go:10, internal/executor/agy_stream.go:12-18, internal/run/run.go:562-564, internal/serve/model.go:186-193)."
+    },
+    {
+      "criterion": "A RED test task precedes every GREEN production task, including for the v7 migration itself.",
+      "met": true,
+      "evidence": "B1.1 (RED) precedes B1.2 (GREEN); B1.3 (RED) precedes B1.4 (GREEN); B2.1 (RED) precedes B2.2 (GREEN); B2.3 (RED) precedes B2.4 (GREEN); B2.5 (RED) precedes B2.6 (GREEN); B2.7 (RED) precedes B2.8 (GREEN); B3.1 (RED) precedes B3.2 (GREEN); B3.3 (RED) precedes B3.4 (GREEN)."
+    },
+    {
+      "criterion": "The v7 DDL task cites design.md's ## Interfaces / Contracts verbatim, not a re-derived version.",
+      "met": true,
+      "evidence": "openspec/changes/lane-status-observability/tasks-lens-b.md:12-61 embeds the exact SQL constant migrateV6ToV7DDL copied verbatim from openspec/changes/lane-status-observability/design.md:113-161."
+    },
+    {
+      "criterion": "The cross-lens dependency on lens C's internal/ledger/runs.go and the shared-file overlap with lens A are named in ## Open Questions.",
+      "met": true,
+      "evidence": "openspec/changes/lane-status-observability/tasks-lens-b.md:82-85 explicitly details the dependency on runs.pid for lens C and the shared file changes in internal/serve/model.go / app.js for lens A."
+    },
+    {
+      "criterion": "Every requirement in the two owned specs' tool_rate/telemetry scenarios appears in the traceability table.",
+      "met": true,
+      "evidence": "openspec/changes/lane-status-observability/tasks-lens-b.md:73-79 maps Structured progress telemetry, Decoders populate usage, Cursor-agent emits zeroed metrics, Real-time telemetry broadcast, and Batch wave view lane card telemetry inspection."
+    },
+    {
+      "criterion": "tasks-lens-b.md exists, is under 1000 words excluding the Citation Manifest and the verbatim DDL, and carries every skeleton section.",
+      "met": true,
+      "evidence": "lucind-lane-check.sh reported: PASS  word budget: 848 / 1000 words; all required sections present."
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (git status --porcelain empty; check git log -1 --format=%B for an unwanted Co-authored-by: trailer and strip it if present).",
+      "met": true,
+      "evidence": "Commit 6414c85 carries message 'docs(openspec): add tasks lens-b for lane status observability' with zero trailers; git status is clean."
+    }
+  ],
+  "commit": "6414c85308abddc90f9dee36443a119b8b22ad97"
+}

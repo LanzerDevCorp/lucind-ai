@@ -1,0 +1,80 @@
+{
+  "packet_id": "propose-conflict-triage-fixture-synthesis",
+  "status": "done",
+  "summary": "Synthesized canonical openspec/changes/conflict-triage-fixture/proposal.md (1519 words) from three lens drafts after opening every file:line citation in this worktree. Candidate 1 (Lens A) is the approach; Lens B and C independently converged. Twelve citations were dropped; none of the explore dropped citations were resurrected. Two product questions remain open. Committed as e3a8f52.",
+  "hard_stops": [
+    {
+      "hard_stop": "The proposed approaches across drafts are mutually irreconcilable. Write the notes file, leave proposal.md uncreated, and block.",
+      "fired": false
+    },
+    {
+      "hard_stop": "One or more lens drafts is missing from this worktree.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Covering the proposal spine honestly would require exceeding 1800 words. Report which item forces it rather than silently overrunning or silently cutting.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/conflict-triage-fixture/proposal.md",
+      "change": "created",
+      "why": "Canonical proposal after citation verification and Candidate 1 arbitration."
+    },
+    {
+      "path": "openspec/changes/conflict-triage-fixture/proposal-synthesis-notes.md",
+      "change": "created",
+      "why": "Orchestrator-facing notes: dropped citations, scope divergence, no contradictions or coverage gaps."
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every file:line citation surviving into proposal.md was opened and confirmed in this worktree, and every dropped claim is listed under ## Dropped Citations.",
+      "met": true,
+      "evidence": "Twelve dropped citations in proposal-synthesis-notes.md ## Dropped Citations. Surviving citations were opened (attempt.go, overlap.go, reconcile.go, candidate.go, feature.go, schema.go, cli.go, worktree.go, disjoint.go, integrate_feature.go, integrate.go, executor files, listed tests)."
+    },
+    {
+      "criterion": "proposal.md exists, is under 1800 words, and substantively covers the proposal spine, with anything missing reported under ## Coverage Gaps.",
+      "met": true,
+      "evidence": "wc -w openspec/changes/conflict-triage-fixture/proposal.md = 1519. Spine present. Coverage Gaps = None."
+    },
+    {
+      "criterion": "proposal-synthesis-notes.md exists with exactly the four required sections, each either populated or explicitly None.",
+      "met": true,
+      "evidence": "File has Unresolved Contradictions (None), Coverage Gaps (None), Dropped Citations (12 items), Scope Divergence (populated)."
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (git status --porcelain empty and git log --oneline -1).",
+      "met": true,
+      "evidence": "git status --porcelain empty; git log --oneline -1 = e3a8f52 docs(openspec): synthesize conflict-triage-fixture proposal"
+    }
+  ],
+  "commit": "e3a8f52",
+  "findings": [
+    {
+      "finding": "citations_verified=kept unique file:line targets in proposal.md, each opened in this worktree",
+      "evidence": "wc -w openspec/changes/conflict-triage-fixture/proposal.md =\u003e 1519; surviving citations include attempt.go:687,743-747,777-855,821-828,848-855,870; overlap.go:93-98,623-659; reconcile.go:105,266,406-535; candidate.go:26,48-95,303-312",
+      "affects": "sdd-spec / design must not treat unverified lens line numbers as ground truth"
+    },
+    {
+      "finding": "citations_dropped=12",
+      "evidence": "openspec/changes/conflict-triage-fixture/proposal-synthesis-notes.md ## Dropped Citations items 1-12",
+      "affects": "do not retarget those line numbers in specs"
+    },
+    {
+      "finding": "contradictions_escalated=0",
+      "evidence": "proposal-synthesis-notes.md ## Unresolved Contradictions: None",
+      "affects": "no escalate-to-human fork on approach"
+    },
+    {
+      "finding": "coverage_gaps=0",
+      "evidence": "proposal-synthesis-notes.md ## Coverage Gaps: None; proposal covers the nine-item packet spine",
+      "affects": "specs phase can proceed from proposal.md"
+    }
+  ]
+}

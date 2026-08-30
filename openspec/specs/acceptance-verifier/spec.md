@@ -29,7 +29,8 @@ Every decision and receipt MUST immutably bind the lane, packet, base commit and
 
 ### Requirement: Fail-Closed Mechanical Criteria
 
-The verifier MUST reject a missing or invalid result schema, packet or candidate-commit mismatch, fired hard stop, unmet done criterion, undeclared or out-of-scope change, or failed required check. For versioned contracts it MUST also reject any missing, extra, duplicate, reordered, or altered authored criterion or hard stop; mode or commit disagreement; and any path or change-classification mismatch against the canonical frozen candidate change set. A rejected attempt MUST NOT create or reuse a receipt. The status-deciding step MUST explicitly evaluate every declared hard stop's `fired` value after schema validation and demote the lane to blocked when any is true, regardless of the envelope's claimed top-level status.
+The verifier MUST reject a missing or invalid result schema, packet or candidate-commit mismatch, fired hard stop, unmet done criterion, undeclared or out-of-scope change, or failed required check. A required check is the repository verification suite when the lane's declared SDD phase is `apply`, when that phase is empty or missing, or when an explicit check exception is configured; for every other declared SDD phase the verifier MUST skip that suite while continuing to enforce schema validation, hard stops, done criteria, and declared-scope constraints. Lane acceptance verification and attempt execution MUST apply this gate; the shared check primitive MUST remain ungated at its own definition. For versioned contracts it MUST also reject any missing, extra, duplicate, reordered, or altered authored criterion or hard stop; mode or commit disagreement; and any path or change-classification mismatch against the canonical frozen candidate change set. A rejected attempt MUST NOT create or reuse a receipt. The status-deciding step MUST explicitly evaluate every declared hard stop's `fired` value after schema validation and demote the lane to blocked when any is true, regardless of the envelope's claimed top-level status.
+(Previously: Required checks ran unconditionally on every acceptance and attempt, with no SDD-phase gate.)
 
 #### Scenario: Reject invalid result evidence
 - GIVEN result evidence is missing, schema-invalid, mismatched, has a fired hard stop, or has an unmet done criterion
@@ -61,6 +62,24 @@ The verifier MUST reject a missing or invalid result schema, packet or candidate
 - GIVEN a schema-valid result envelope where at least one declared hard stop's `fired` value is true
 - WHEN the verifier decides status
 - THEN the lane MUST be demoted to blocked even when `envelope.Status` claims `done`
+
+#### Scenario: Apply phase executes full verification suite
+
+- GIVEN a candidate lane declaring SDD phase `apply`
+- WHEN acceptance verification or attempt execution runs
+- THEN the repository verification suite is executed and passing checks are required for acceptance
+
+#### Scenario: Planning phase skips verification suite execution
+
+- GIVEN a planning lane declaring a non-apply SDD phase
+- WHEN acceptance verification runs
+- THEN the repository verification suite is skipped and acceptance is evaluated on schema, done criteria, hard stops, and scope
+
+#### Scenario: Unlabeled lane or explicit exception executes checks
+
+- GIVEN a lane with an empty or missing SDD phase, or declaring an explicit check exception
+- WHEN acceptance verification runs
+- THEN the repository verification suite is executed
 
 ### Requirement: Frozen Candidate Verification
 

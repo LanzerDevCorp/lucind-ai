@@ -1,0 +1,45 @@
+{
+  "packet_id": "propose-control-room-ui-shell-lens-a",
+  "status": "done",
+  "summary": "Authored propose-lens-a.md covering candidate selection, technical approach, conceptual changes, architecture rationale, rejected alternatives, and open questions for the Control Room UI Shell change. Selected the modular vanilla ES-module SPA candidate embedding static assets via Go embed and exposing read-only endpoints over serve.Model while preserving loopback safety and individual approval invariants.",
+  "hard_stops": [
+    {
+      "hard_stop": "The technical approach cannot be grounded in existing codebase patterns or proposal context.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Candidate selection contradicts frozen exploration conclusions without justification.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/control-room-ui-shell/propose-lens-a.md",
+      "change": "created",
+      "why": "Deliver proposal lens A containing candidate selection and technical architecture for control-room-ui-shell."
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every candidate and approach claim carries file:line citations to real code in this worktree.",
+      "met": true,
+      "evidence": "Verified citations across internal/serve/static.go:8-18, internal/serve/model.go:14-343, internal/serve/handlers.go:36-118, internal/serve/server.go:14-22,57-73, cmd/lucind-ai/cli.go:683-694, internal/serve/static/index.html:141-163, internal/serve/static/app.js:1-98, and internal/ledger/schema.go:18-180 in openspec/changes/control-room-ui-shell/propose-lens-a.md"
+    },
+    {
+      "criterion": "propose-lens-a.md exists, is under 1000 words, and carries every skeleton section.",
+      "met": true,
+      "evidence": "File openspec/changes/control-room-ui-shell/propose-lens-a.md created with 922 words (\u003c 1000 word budget) and all required skeleton sections."
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (git status --porcelain empty and git log --oneline -1).",
+      "met": true,
+      "evidence": "Commit aca4372 ('docs(propose): add control-room-ui-shell propose lens a') created with zero AI attribution; git status --porcelain reports working tree clean."
+    }
+  ],
+  "commit": "aca4372535bed3c1162bc2e8d6fed970c000ca6d",
+  "session_id": "de0d69d8-cad7-4a11-85aa-331cf3c125fb"
+}

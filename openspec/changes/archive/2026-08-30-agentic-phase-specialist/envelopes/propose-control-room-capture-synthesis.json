@@ -1,0 +1,89 @@
+{
+  "packet_id": "propose-control-room-capture-synthesis",
+  "status": "done",
+  "summary": "Verified every file:line citation in the three control-room-capture propose lens drafts, then wrote a 1770-word canonical proposal.md on Candidate 4 (primary-root file spooling, bounded ledger notes, loopback SSE/Model access) plus proposal-synthesis-notes.md. Seven citations were dropped; two contradictions (log path prefix, which change registers HTTP routes) were escalated unpicked.",
+  "hard_stops": [
+    {
+      "hard_stop": "The proposed approaches across drafts are mutually irreconcilable. Write the notes file, leave proposal.md uncreated, and block.",
+      "fired": false,
+      "note": "All three assume file-backed primary-root spooling. Lens A Candidate 4 is the architecture; B and C did not propose a competing capture store. Remaining disagreements are open questions, not irreconcilable candidates."
+    },
+    {
+      "hard_stop": "One or more lens drafts is missing from this worktree.",
+      "fired": false,
+      "note": "propose-lens-a.md, propose-lens-b.md, and propose-lens-c.md are all present under openspec/changes/control-room-capture/."
+    },
+    {
+      "hard_stop": "Covering the proposal spine honestly would require exceeding 1800 words. Report which item forces it rather than silently overrunning or silently cutting.",
+      "fired": false,
+      "note": "proposal.md is 1770 words (wc -w) and covers all nine spine items."
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false,
+      "note": "The sdd-propose skill's 450-word budget is overridden by this packet's explicit 1800-word budget. Allowed-path artifacts are the two markdown files; .lucind/result.json is required by the Return section and is gitignored."
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/control-room-capture/proposal.md",
+      "change": "created",
+      "why": "Canonical proposal synthesized from the three verified lens drafts."
+    },
+    {
+      "path": "openspec/changes/control-room-capture/proposal-synthesis-notes.md",
+      "change": "created",
+      "why": "Orchestrator-facing record of dropped citations, contradictions, coverage, and scope divergence."
+    },
+    {
+      "path": ".lucind/result.json",
+      "change": "created",
+      "why": "Packet return envelope."
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every file:line citation surviving into proposal.md was opened and confirmed in this worktree, and every dropped claim is listed under ## Dropped Citations.",
+      "met": true,
+      "evidence": "Opened each cited range in this worktree during the verification pass. proposal.md cites only ranges that resolved (including corrected seams run.go:369-374, cli.go:715, batch_test.go:530, integrate_test.go:392). Seven dropped claims are listed in openspec/changes/control-room-capture/proposal-synthesis-notes.md under ## Dropped Citations."
+    },
+    {
+      "criterion": "proposal.md exists, is under 1800 words, and substantively covers the proposal spine, with anything missing reported under ## Coverage Gaps.",
+      "met": true,
+      "evidence": "wc -w openspec/changes/control-room-capture/proposal.md =\u003e 1770. Spine sections present: Intent (problem), Selected Candidate and Approach, Conceptual Changes, User and Capability Impact, Delta Specifications, Risks, Rollback and Additivity, Test and Validation Impact, Out of Scope and Open Questions. ## Coverage Gaps in the notes file is 'None'."
+    },
+    {
+      "criterion": "proposal-synthesis-notes.md exists with exactly the four required sections, each either populated or explicitly None.",
+      "met": true,
+      "evidence": "Headings in order: ## Unresolved Contradictions (two items), ## Coverage Gaps (None), ## Dropped Citations (seven items), ## Scope Divergence (A authoritative; B/C corroboration and divergences). No extra top-level sections."
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (git status --porcelain empty and git log --oneline -1).",
+      "met": true,
+      "evidence": "git status --porcelain empty. git log --oneline -1 =\u003e 3c05208 docs(control-room-capture): synthesize canonical proposal from three lenses. Full SHA 3c05208b84055a1bcd9d288fd7dc093ff6f3b294."
+    }
+  ],
+  "commit": "3c05208b84055a1bcd9d288fd7dc093ff6f3b294",
+  "findings": [
+    {
+      "finding": "Citations verified: 82 unique supporting file:line claims kept from the three drafts (89 unique citation tokens minus 7 dropped).",
+      "evidence": "Python extract of file:line tokens across propose-lens-{a,b,c}.md yielded 89 unique; seven dropped claims recorded in proposal-synthesis-notes.md ## Dropped Citations.",
+      "affects": "proposal.md citation set; orchestrator notes"
+    },
+    {
+      "finding": "Citations dropped: 7.",
+      "evidence": "openspec/changes/control-room-capture/proposal-synthesis-notes.md ## Dropped Citations (apply-dag-dispatch WebSocket claim; cli.go:647-660 as worktree delete; run.go:169-175 as capture pipeline; schema.go:190-219 as events.type rebuild; batch_test.go:66-100; integrate_test.go:20-80; cli_test.go:37-80).",
+      "affects": "proposal.md; later spec/test task authors must not reuse those seams"
+    },
+    {
+      "finding": "Contradictions escalated: 2 (log directory prefix/split; which change registers HTTP log and Model routes).",
+      "evidence": "openspec/changes/control-room-capture/proposal-synthesis-notes.md ## Unresolved Contradictions. Code does not settle either; proposal.md leaves both as Open Questions.",
+      "affects": "human merge before specs; control-room-serve sibling scope"
+    },
+    {
+      "finding": "Coverage gaps: 0.",
+      "evidence": "openspec/changes/control-room-capture/proposal-synthesis-notes.md ## Coverage Gaps is None. Spine items 1–9 are all present in proposal.md.",
+      "affects": "none"
+    }
+  ]
+}

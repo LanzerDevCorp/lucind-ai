@@ -1,0 +1,52 @@
+{
+  "packet_id": "exec-contract",
+  "status": "done",
+  "summary": "Added the canonical executor ProgressEvent with message and timestamp fields plus an optional send-only Request.Progress channel whose zero value is nil. Added focused contract regressions, passed the complete executor package under the race detector, committed the work, and refreshed the installed binary.",
+  "hard_stops": [],
+  "files_changed": [
+    {
+      "path": "internal/executor/executor.go",
+      "change": "modified",
+      "why": "Define the canonical progress event and optional request channel without altering executor behavior when nil."
+    },
+    {
+      "path": "internal/executor/executor_test.go",
+      "change": "created",
+      "why": "Prove the zero-value nil contract and canonical event transport."
+    },
+    {
+      "path": ".lucind/result.json",
+      "change": "created",
+      "why": "Record the required validated packet result envelope."
+    }
+  ],
+  "external_changes": [
+    {
+      "path": "/home/lanzerdev/go/bin/lucind-ai",
+      "change": "modified",
+      "why": "Project instructions require installing the binary after code changes; lucind-ai -v now reports build 3a7fa6c.",
+      "revert": "Rebuild and install lucind-ai from the prior repository commit 4959d69."
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Contract and regression tests are limited to the two allowed paths.",
+      "met": true,
+      "evidence": "git show --name-status --format=%H HEAD reports exactly M internal/executor/executor.go and A internal/executor/executor_test.go for commit 3a7fa6c893517265e4aa68dcf29e993063b681fa; .lucind/result.json is the required generated envelope."
+    },
+    {
+      "criterion": "Existing executor tests pass and the commit is recorded.",
+      "met": true,
+      "evidence": "go test -json ./internal/executor -race -count=1 exited 0 with 68 tests passed, package pass true, and 0 failures; focused TestRequestProgress run passed 2 tests; commit 3a7fa6c893517265e4aa68dcf29e993063b681fa is HEAD."
+    }
+  ],
+  "commit": "3a7fa6c893517265e4aa68dcf29e993063b681fa",
+  "findings": [
+    {
+      "finding": "The packet declares no hard-stop entries, so the mandatory hard_stops field is an empty array.",
+      "evidence": "openspec/plans/control-room/control-room-capture/packets/exec-contract.md:20-28 contains two done criteria and the envelope instruction, with no hard-stop section.",
+      "affects": "The done envelope must still include hard_stops explicitly."
+    }
+  ],
+  "session_id": "sdd-apply-exec-contract-20260822"
+}

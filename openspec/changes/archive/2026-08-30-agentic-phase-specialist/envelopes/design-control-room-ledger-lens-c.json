@@ -1,0 +1,53 @@
+{
+  "packet_id": "design-control-room-ledger-lens-c",
+  "status": "done",
+  "summary": "Authored design lens C for control-room-ledger covering testing strategy, test seams, threat matrix, and rollback/additivity decisions under 1000 words. Committed to branch lucind/design-control-room-ledger-lens-c.",
+  "hard_stops": [
+    {
+      "hard_stop": "A behavior the specs require cannot be tested through any existing or proposed seam.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Whether a format delta is additive cannot be determined from the specs, so the rollback decision would be a guess.",
+      "fired": false
+    },
+    {
+      "hard_stop": "The threat matrix is missing from both ## Context and the skill reference.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/control-room-ledger/design-lens-c.md",
+      "change": "created",
+      "why": "Design Lens C covering failure, testing seams, threat matrix, and rollback decision"
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every named test seam carries a file:line citation that points at real code in this worktree, or is explicitly marked \"new seam required\".",
+      "met": true,
+      "evidence": "Citations verified in worktree: internal/ledger/schema.go:221-307, internal/ledger/ledger_test.go:579-620,733-745,934-970, internal/ledger/ledger.go:162-185,877-890, internal/ledger/ledger_test.go:368,1584, internal/run/attempt.go:434-441,482-488, internal/serve/model.go:14-25, internal/serve/model_test.go:595, internal/ledgerpath/ledgerpath.go:36-44, internal/ledgerpath/ledgerpath_test.go:9,37, cmd/lucind-ai/cli.go:277-280,292,702-705, cmd/lucind-ai/cli_test.go:1078, internal/ledger/ledger.go:614-640,643-661,797-814, internal/serve/handlers.go:161-177, internal/ledger/ledger_test.go:1047,1153. New seams explicitly marked."
+    },
+    {
+      "criterion": "Every threat-matrix row is marked Applicable or N/A with a reason, and every applicable row names a planned RED test.",
+      "met": true,
+      "evidence": "Threat matrix table in openspec/changes/control-room-ledger/design-lens-c.md lines 34-43 with 5 rows: Git repository selection marked Applicable with RED tests named; Documentation-like paths, Commit state, Push state, and PR commands marked N/A with reasons."
+    },
+    {
+      "criterion": "design-lens-c.md exists, is under 1000 words, and carries every skeleton section including ## Assumed architecture.",
+      "met": true,
+      "evidence": "File openspec/changes/control-room-ledger/design-lens-c.md contains 907 words (wc -w) and includes ## Assumed architecture, ## Testing Strategy, ## Test Seams, ## Threat Matrix, ## Rollback and Additivity, ## Out of Scope, ## Open Questions."
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (git status --porcelain empty and git log --oneline -1).",
+      "met": true,
+      "evidence": "Commit 9a13555: docs(design): draft design lens C for control-room-ledger. git status --porcelain clean."
+    }
+  ],
+  "commit": "9a13555"
+}

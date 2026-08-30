@@ -1,0 +1,120 @@
+{
+  "packet_id": "spec-control-room-capture-synthesis",
+  "status": "done",
+  "summary": "Synthesized the control-room-capture spec delta from three lens drafts after opening every file:line citation. Four ADDED requirements shipped across control-room-capture, lane-execution, and approvals-web-ui; no MODIFIED, REMOVED, or RENAMED. Authored delta-tree word count is 788. Notes record four dropped coverage-table citations, no unresolved contradictions, and the coverage gaps the drafts left.",
+  "hard_stops": [
+    {
+      "hard_stop": "The three ## Assumed requirements blocks are mutually irreconcilable and the proposal does not choose between them. Write the notes file, leave specs/ uncreated, and block.",
+      "fired": false,
+      "note": "All three named the same four requirements. Lens A assigned them to capabilities; B and C did not contradict that split."
+    },
+    {
+      "hard_stop": "Lens A's requirement set is refuted by a live spec you verified. Do not substitute your own.",
+      "fired": false,
+      "note": "Opened openspec/specs/lane-execution/spec.md and openspec/specs/approvals-web-ui/spec.md. Live requirements remain true; none of A's four names exist there."
+    },
+    {
+      "hard_stop": "A MODIFIED requirement's live block cannot be recovered from lens C or from openspec/specs/, so the block would have to be partial. Never write a partial block.",
+      "fired": false,
+      "note": "No MODIFIED requirements. Lens C recorded none; live specs confirm no overlapping requirement names."
+    },
+    {
+      "hard_stop": "One or more lens drafts is missing from this worktree.",
+      "fired": false,
+      "note": "spec-lens-a.md, spec-lens-b.md, and spec-lens-c.md are all present under openspec/changes/control-room-capture/."
+    },
+    {
+      "hard_stop": "Satisfying the spine honestly would require exceeding the authored budget. Report which requirement forces it rather than silently overrunning or silently cutting.",
+      "fired": false,
+      "note": "Authored delta-tree word count is 788, under the packet's 1800 (no copied MODIFIED blocks). Skill 650 is format-skill drift recorded in Coverage Gaps, not this packet's ceiling."
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false,
+      "note": "Skill wants Purpose/Requirements for new capabilities and a 650-word artifact; packet requires delta format under the change folder and a 1800-word authored ceiling. Packet wins on execution; skill format and size drift are in Coverage Gaps. Allowed paths vs .lucind/result.json is an explicit Return instruction, not a conflict."
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/control-room-capture/specs/control-room-capture/spec.md",
+      "change": "created",
+      "why": "New-capability delta: Continuous primary-root stream spooling and Bounded SQLite diagnostics."
+    },
+    {
+      "path": "openspec/changes/control-room-capture/specs/lane-execution/spec.md",
+      "change": "created",
+      "why": "Existing-capability ADDED delta: Non-interfering WaitDelay drain."
+    },
+    {
+      "path": "openspec/changes/control-room-capture/specs/approvals-web-ui/spec.md",
+      "change": "created",
+      "why": "Existing-capability ADDED delta: Loopback HTTP stream access."
+    },
+    {
+      "path": "openspec/changes/control-room-capture/spec-synthesis-notes.md",
+      "change": "created",
+      "why": "Orchestrator-facing notes: contradictions, coverage gaps, dropped citations, requirement divergence."
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every file:line citation surviving into the delta tree was opened and confirmed in this worktree, and every dropped claim is listed under ## Dropped Citations.",
+      "met": true,
+      "evidence": "20 unique draft citations opened. Survivors include run.go:368-374 (Request build), agy.go:169-173 / cursor_agent.go:91-95 / opencode.go:130-134 (stdio assignment), run.go:488-499,506 (OutputTruncated note and Report), run.go:125-144 and :132 (diagnosisDetail / formatStreamDetail 4096 cap), run.go:422-435 (AppendEvent on non-empty reason), handlers.go:36-118 and cli.go:715-719 (NewHandler from serveDispatch), live specs at lane-execution/spec.md:1 (3 req / 6 scn) and approvals-web-ui/spec.md:1 (4 req / 9 scn), agy_test.go:158 (grandchild WaitDelay). Four coverage-table claims dropped in spec-synthesis-notes.md ## Dropped Citations (run_test.go:820, :645, agy_test.go:28, integrate_test.go:392)."
+    },
+    {
+      "criterion": "Every MODIFIED block matches the live requirement scenario for scenario, with only the intended edits applied — verified by opening the live spec, not by trusting lens C.",
+      "met": true,
+      "evidence": "Zero MODIFIED blocks. Opened openspec/specs/lane-execution/spec.md (Gate Placement, Resolve Before Barrier Observation, Additive Schema) and openspec/specs/approvals-web-ui/spec.md (Loopback Binding, Individual Decisions, Inline Evidence, Approver Wrong-Approval Rate). No live requirement name matches an ADDED name; no block was copied or edited."
+    },
+    {
+      "criterion": "Every requirement carries an RFC 2119 keyword and at least one GIVEN / WHEN / THEN scenario.",
+      "met": true,
+      "evidence": "Four requirements, all MUST in the statement: Continuous primary-root stream spooling (4 scenarios), Bounded SQLite diagnostics (3), Non-interfering WaitDelay drain (3), Loopback HTTP stream access (4). Each scenario uses GIVEN / WHEN / THEN."
+    },
+    {
+      "criterion": "The delta tree's authored content is under 1800 words excluding verbatim copied blocks, and every spine item is satisfied or reported under ## Coverage Gaps.",
+      "met": true,
+      "evidence": "wc via python split: 402 + 181 + 205 = 788 authored words, no copied MODIFIED blocks. Spine: three capability files; all ADDED; RFC 2119; \u003e=1 GWT scenario each; happy+edge; no partial MODIFIED; no REMOVED/RENAMED needing migration. Gaps in notes: unreadable-envelope scenario, retention/layout, Model JSON, route-phase, skill format/size drift."
+    },
+    {
+      "criterion": "spec-synthesis-notes.md exists with exactly the four required sections, each either populated or explicitly None.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-capture/spec-synthesis-notes.md headings in order: Unresolved Contradictions (None), Coverage Gaps (populated), Dropped Citations (four entries), Requirement Divergence (populated). No extra sections."
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (git status --porcelain empty and git log --oneline -1).",
+      "met": true,
+      "evidence": "git status --porcelain empty. git log --oneline -1: 9f9b652 docs(openspec): synthesize control-room-capture canonical spec delta. Full hash 9f9b6521f1aad75f67bcef5fe83fab8ec94891ff. Message has no Co-authored-by or AI attribution."
+    }
+  ],
+  "commit": "9f9b6521f1aad75f67bcef5fe83fab8ec94891ff",
+  "findings": [
+    {
+      "finding": "Citations verified: 20 unique file:line citations from the three drafts were opened in this worktree.",
+      "evidence": "Lens A: lane-execution/spec.md:1, approvals-web-ui/spec.md:1, run.go:368-374, agy.go:169-173, cursor_agent.go:91-95, opencode.go:130-134, run.go:488-499,506, run.go:125-144, run.go:422-435, handlers.go:36-118, cli.go:715-719, SKILL.md:280-285, cli.go:56. Lens B: agy_test.go:28, integrate_test.go:392, run_test.go:820, agy_test.go:158, run_test.go:645, run.go:132, server_test.go:17. Lens C: the two live specs only.",
+      "affects": "spec-synthesis-notes.md ## Dropped Citations; surviving claims in the delta tree"
+    },
+    {
+      "finding": "Citations dropped: 4 coverage-table claims. No requirement or scenario was dropped for a failed citation; WaitDelay and Bounded SQLite scenarios were independently supported.",
+      "evidence": "run_test.go:820 is TestExecuteUnreadableEnvelopeLedgerNoteCarriesStderr, not WaitDelay (WaitDelay Execute is :645). run_test.go:645 is truncation/WaitDelay, not 4096-byte cap (cap is :856 and run.go:132). agy_test.go:28 is TestRunExitZero. integrate_test.go:392 persists envelopes, not logs.",
+      "affects": "openspec/changes/control-room-capture/spec-synthesis-notes.md ## Dropped Citations"
+    },
+    {
+      "finding": "MODIFIED blocks confirmed complete: 0. None classified. Live specs opened; no overlapping requirement names.",
+      "evidence": "openspec/specs/lane-execution/spec.md requirements Gate Placement, Resolve Before Barrier Observation, Additive Schema. openspec/specs/approvals-web-ui/spec.md requirements Loopback Binding, Individual Decisions Without Bulk Approval, Inline Evidence and Batch Review Command, Approver Wrong-Approval Rate.",
+      "affects": "archive merge; no live requirement will be replaced"
+    },
+    {
+      "finding": "Contradictions escalated: 0.",
+      "evidence": "spec-synthesis-notes.md ## Unresolved Contradictions is None. Shared open questions (layout, route phase, retention) are coverage gaps, not draft-vs-draft contradictions.",
+      "affects": "orchestrator; no human arbitration needed on requirement set"
+    },
+    {
+      "finding": "Coverage gaps: unreadable-envelope scenario missing; retention/layout/split unset; Model JSON unnamed by spec lenses; route registration phase unset; skill new-spec format and 650-word budget drift (authored 788, packet ceiling 1800).",
+      "evidence": "spec-synthesis-notes.md ## Coverage Gaps; python word counts 402+181+205=788; ~/.claude/skills/sdd-spec/SKILL.md For NEW Specs and Size budget 650; plugin/claude-code/skills/lucind-ai/assets/archive-packet-template.md:126-134.",
+      "affects": "tasks/apply; archive conversion of control-room-capture delta into a live spec"
+    }
+  ],
+  "session_id": "spec-control-room-capture-synthesis"
+}

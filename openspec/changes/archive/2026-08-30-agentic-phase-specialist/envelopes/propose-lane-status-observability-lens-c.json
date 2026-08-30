@@ -1,0 +1,45 @@
+{
+  "packet_id": "propose-lane-status-observability-lens-c",
+  "status": "done",
+  "summary": "Authored Proposal Lens C for lane-status-observability covering technical failure modes, rollback and additivity analysis, test matrix seams, out-of-scope boundaries, and open questions. All claims cite concrete file:line locations in the worktree and conform to the word budget.",
+  "hard_stops": [
+    {
+      "hard_stop": "Whether a schema or format change is additive cannot be determined, making rollback a guess.",
+      "fired": false
+    },
+    {
+      "hard_stop": "A critical failure mode has no identifiable mitigation or test seam.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/lane-status-observability/propose-lens-c.md",
+      "change": "created",
+      "why": "Proposal Lens C detailing risks, rollback strategy, additivity, and test impact."
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every risk, test seam, and rollback claim carries `file:line` citations to real code in this worktree.",
+      "met": true,
+      "evidence": "openspec/changes/lane-status-observability/propose-lens-c.md:7-13,18-27,33-38"
+    },
+    {
+      "criterion": "`propose-lens-c.md` exists, is under 1000 words, and carries every skeleton section.",
+      "met": true,
+      "evidence": "openspec/changes/lane-status-observability/propose-lens-c.md (846 words, verified via wc -w)"
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (`git status --porcelain` empty and `git log --oneline -1`).",
+      "met": true,
+      "evidence": "commit eef7093 (docs(openspec): add propose lens c for lane status observability), git status --porcelain is empty"
+    }
+  ],
+  "commit": "eef7093",
+  "session_id": "f8f73623-e92b-446d-9c06-0fde33e8de15"
+}

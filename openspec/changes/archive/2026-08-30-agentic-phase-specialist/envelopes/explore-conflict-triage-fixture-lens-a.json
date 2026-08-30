@@ -1,0 +1,44 @@
+{
+  "packet_id": "explore-conflict-triage-fixture-lens-a",
+  "status": "done",
+  "summary": "Authored explore-lens-a.md containing the problem space definition, three candidate approaches with code citations and feasibility assessments, initial recommendations, and open questions for the conflict triage fixture.",
+  "hard_stops": [
+    {
+      "hard_stop": "The problem scope cannot be identified from codebase inspection or packet context.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Candidate approaches cannot be formulated without designing complete implementation details (which belongs to design phase).",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/conflict-triage-fixture/explore-lens-a.md",
+      "change": "created",
+      "why": "Explore Lens A problem space and candidates analysis artifact"
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every candidate and problem claim carries file:line citations to real code in this worktree.",
+      "met": true,
+      "evidence": "openspec/changes/conflict-triage-fixture/explore-lens-a.md:5-11, 17-20, 24-27, 31-34, 38 cite internal/worktree/worktree.go:150-185, internal/run/attempt.go:684-856, internal/overlap/overlap.go:622-660, internal/reconcile/reconcile.go:1-934, cmd/lucind-ai/cli.go:1386-1463, internal/run/integrate_feature.go:26-78, internal/resolve/candidate.go:1-378, internal/packet/disjoint.go:29-48, cmd/lucind-ai/cli.go:65-70"
+    },
+    {
+      "criterion": "explore-lens-a.md exists, is under 1000 words, and carries every skeleton section.",
+      "met": true,
+      "evidence": "File exists at openspec/changes/conflict-triage-fixture/explore-lens-a.md with 803 words (\u003c 1000 limit) and sections ## Problem Space, ## Candidate Approaches, ## Initial Recommendations, and ## Open Questions."
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (git status --porcelain empty and git log --oneline -1).",
+      "met": true,
+      "evidence": "Commit c5ca6ee 'docs(explore): author conflict triage fixture explore lens a'; git status --porcelain is empty."
+    }
+  ],
+  "commit": "c5ca6ee"
+}

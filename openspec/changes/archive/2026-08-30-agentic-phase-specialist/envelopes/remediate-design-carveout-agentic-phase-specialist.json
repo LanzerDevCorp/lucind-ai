@@ -1,0 +1,72 @@
+{
+  "packet_id": "remediate-design-carveout-agentic-phase-specialist",
+  "status": "done",
+  "summary": "Closed the two Specialist gaps in design.md only: Decision 3 now has a copy-ready old→new Hard Rule for SKILL.md:19, the File Changes out-of-repo note names design.md as the in-repo carrier with paste-ready sdd-* instruction text, and the acceptance-promotion.md row covers checklist steps 1 and 8 with the Decision 2 sdd_phase caveat. One conventional commit, no Co-authored-by trailer. Word count 1227 → 1397.",
+  "hard_stops": [
+    {
+      "hard_stop": "Crafting the exact Hard Rule replacement sentence would require a security/authority judgment call beyond what Decision 3's existing semantic description already settled (e.g. if it seems to require deciding something Decision 3 left genuinely open, not just wording something it already decided).",
+      "fired": false,
+      "note": "Replacement words Decision 3's already-settled carve-out: ordinary Agents keep Lanes not scope/priorities/Dependencies; named sdd-* may independently Accept own-phase Lanes; Promotion stays forbidden to every Agent, Specialist included."
+    },
+    {
+      "hard_stop": "design.md's current structure has changed since this packet was written such that the named sections/line numbers no longer exist.",
+      "fired": false,
+      "note": "Decision 3 heading, File Changes table, out-of-repository note, and live SKILL.md:19 text all still present and matched the packet."
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false,
+      "note": "Citation Manifest (Remediation) appendix is the packet's required close-out, not a rewrite of Decisions 1, 2, 4, 5 or the other named sections."
+    }
+  ],
+  "files_changed": [
+    {
+      "change": "modified",
+      "path": "openspec/changes/agentic-phase-specialist/design.md",
+      "why": "Gap 1 Hard Rule replacement and out-of-repo carrier text; Gap 2 checklist steps 1 and 8 caveat; no-new-citations appendix"
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Decision 3 (or an immediately adjacent subsection) contains the literal, verbatim replacement sentence(s) for SKILL.md:19, presented as an old→new quoted block, ready to copy into both skill trees without further wordsmithing.",
+      "met": true,
+      "evidence": "openspec/changes/agentic-phase-specialist/design.md:39-47 — Old quotes live SKILL.md:19 exactly; New is the two-sentence Hard Rule: Agents own Lanes, not scope, priorities, or Dependencies; a named sdd-* phase-Specialist may independently Accept its own phase's Lanes; Promotion remains forbidden to every Agent, Specialist included."
+    },
+    {
+      "criterion": "The out-of-repository note names design.md itself as the in-repo carrier and includes the literal instruction text to paste into each ~/.claude/skills/sdd-*/SKILL.md file.",
+      "met": true,
+      "evidence": "openspec/changes/agentic-phase-specialist/design.md:102-106 — names design.md itself (this section) as the in-repo carrier and quotes the paste-ready instruction: stop doing the phase's work directly; author/dispatch fan-out+synthesis via lucind-ai; read synthesis notes; independently judge Acceptance; return only a Phase Verdict."
+    },
+    {
+      "criterion": "The ## File Changes table (or an adjacent note) explicitly covers acceptance-promotion.md checklist steps 1 and 8 (lines 18-30), stating they need the same sdd_phase-conditional caveat as the rest of the gate.",
+      "met": true,
+      "evidence": "openspec/changes/agentic-phase-specialist/design.md:96 — existing acceptance-promotion.md row extended to cover lines 18–30 (checklist steps 1 and 8): checks run only when sdd_phase is \"apply\", empty/missing, or an explicit exception; otherwise skip those steps."
+    },
+    {
+      "criterion": "No other section of design.md was modified.",
+      "met": true,
+      "evidence": "git diff HEAD^..HEAD touches only Decision 3 (replacement block), the File Changes table row plus out-of-repo note, and the packet-required ## Citation Manifest (Remediation) appendix. Decisions 1, 2, 4, 5, Testing Strategy, Threat Matrix, Rollback, and Open Questions/Out of Scope body are unchanged."
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution, confirmed by lucind-lane-check.sh reporting a clean git status --porcelain and a valid .lucind/result.json. Check git log -1 --format=%B after committing and strip any injected Co-authored-by: trailer.",
+      "met": true,
+      "evidence": "Commit 94b8060a0f7cded82342523ca6a036319202e0f8 'docs(sdd): add copy-ready Hard Rule and checklist caveat to design'. git log -1 --format=%B has no Co-authored-by. Word count 1227 → 1397. Before: PASS  git status --porcelain: clean; RESULT: PASS. After commit with --skip-result: PASS  git status --porcelain: clean; RESULT: PASS. Final with envelope:\nlucind-lane-check.sh report for openspec/changes/agentic-phase-specialist/design.md\n----------------------------------------\nPASS  git status --porcelain: clean\nPASS  result envelope: .lucind/result.json exists and parses as JSON\n----------------------------------------\nRESULT: PASS"
+    }
+  ],
+  "commit": "94b8060a0f7cded82342523ca6a036319202e0f8",
+  "findings": [
+    {
+      "finding": "git commit and git commit --amend both re-inject Co-authored-by: Cursor \u003ccursoragent@cursor.com\u003e. Stripping required git commit-tree + git reset --soft on the unpushed HEAD so the message stayed conventional without skipping hooks.",
+      "evidence": "First commit 21a53a1 and amend 20be3e1 both carried the trailer; 94b8060 after commit-tree does not.",
+      "affects": "Every lucind write lane that must return a trailer-free conventional commit"
+    }
+  ],
+  "skills_loaded": [
+    "lucind-executor",
+    "sdd-design",
+    "cognitive-doc-design",
+    "work-unit-commits",
+    "engram-memory"
+  ],
+  "session_id": "remediate-design-carveout-agentic-phase-specialist"
+}

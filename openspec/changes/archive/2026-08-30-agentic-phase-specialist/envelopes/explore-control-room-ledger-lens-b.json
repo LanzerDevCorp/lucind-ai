@@ -1,0 +1,44 @@
+{
+  "packet_id": "explore-control-room-ledger-lens-b",
+  "status": "done",
+  "summary": "Authored openspec/changes/control-room-ledger/explore-lens-b.md detailing the user and capability impact, 5 concrete scenarios with file:line citations, success criteria, and open questions for the Control Room Ledger change. The document is 777 words and committed cleanly.",
+  "hard_stops": [
+    {
+      "hard_stop": "The capability impact cannot be determined from packet context or codebase inspection.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Scenarios conflict with established system invariants and cannot be reconciled.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/control-room-ledger/explore-lens-b.md",
+      "change": "created",
+      "why": "Feedstock for synthesis lane specifying capabilities, user journeys, scenarios, and success criteria for control-room-ledger"
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every scenario and capability claim carries file:line citations to real code in this worktree.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-ledger/explore-lens-b.md lines 12-25, 30-58, 62-67 cite internal/ledger/ledger.go, schema.go, internal/serve/handlers.go, internal/serve/model.go, internal/ledgerpath/ledgerpath.go, cmd/lucind-ai/cli.go"
+    },
+    {
+      "criterion": "explore-lens-b.md exists, is under 1000 words, and carries every skeleton section.",
+      "met": true,
+      "evidence": "wc -w openspec/changes/control-room-ledger/explore-lens-b.md reports 777 words; all 4 required sections present"
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (git status --porcelain empty and git log --oneline -1).",
+      "met": true,
+      "evidence": "commit 4080c4c (docs(openspec): add explore-lens-b for control-room-ledger); git status --porcelain is clean (ignoring untracked .lucind/result.json)"
+    }
+  ],
+  "commit": "4080c4c881d7a4b7536f5b57e82d019106e881f5"
+}

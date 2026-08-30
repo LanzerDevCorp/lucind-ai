@@ -1,0 +1,73 @@
+{
+  "packet_id": "tasks-lane-status-observability-lens-a",
+  "status": "done",
+  "summary": "Authored tasks-lens-a.md containing the capability-sliced task breakdown, dependency order, work units, RED test specifications, acceptance evidence, requirement traceability, and citation manifest for lane-status-observability Lens A.",
+  "hard_stops": [
+    {
+      "hard_stop": "A requirement in the three owned specs cannot be decomposed into tasks because design.md does not say how it is built.",
+      "fired": false
+    },
+    {
+      "hard_stop": "design.md's Decisions 1-4 and the specs disagree about what this slice does.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Two tasks in this slice are mutually circular.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/lane-status-observability/tasks-lens-a.md",
+      "change": "created",
+      "why": "Implementation task checklist for lens A (metadata persistence, extended frontmatter, packet-body endpoint)"
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "A `## Citation Manifest` section lists every unique citation, grouped by file.",
+      "met": true,
+      "evidence": "openspec/changes/lane-status-observability/tasks-lens-a.md:88-119 lists 31 unique citations grouped alphabetically by file (cmd/lucind-ai/cli.go to specs/read-only-packet-schema/spec.md) and sorted by ascending line numbers."
+    },
+    {
+      "criterion": "`lucind-lane-check.sh --verify-citations` reported no FAIL against this draft's own manifest.",
+      "met": true,
+      "evidence": "Pre-commit report:\nPASS  word budget: 962 / 1000 words\nPASS  section present: ## Assumed decomposition\nPASS  section present: ## Dependency Order (this slice)\nPASS  section present: ## Suggested Work Unit\nPASS  section present: ## RED Tests from the Threat Matrix (this slice)\nPASS  section present: ## Acceptance Evidence\nPASS  section present: ## Requirement Traceability\nPASS  section present: ## Open Questions\nPASS  section present: ## Citation Manifest\nAll 31 citations PASS\nRESULT: PASS\n\nPost-commit \u0026 envelope report:\nPASS  word budget: 962 / 1000 words\nPASS  section present: ## Assumed decomposition\nPASS  section present: ## Dependency Order (this slice)\nPASS  section present: ## Suggested Work Unit\nPASS  section present: ## RED Tests from the Threat Matrix (this slice)\nPASS  section present: ## Acceptance Evidence\nPASS  section present: ## Requirement Traceability\nPASS  section present: ## Open Questions\nPASS  section present: ## Citation Manifest\nPASS  citation cmd/lucind-ai/cli.go:160-174: file exists, has 1573 lines\nPASS  citation cmd/lucind-ai/cli_test.go:40-60: file exists, has 3701 lines\nPASS  citation internal/ledger/lanes_meta.go:20-32: file exists, has 128 lines\nPASS  citation internal/ledger/lanes_meta.go:39-83: file exists, has 128 lines\nPASS  citation internal/ledger/lanes_meta.go:89-128: file exists, has 128 lines\nPASS  citation internal/ledger/lanes_meta_test.go:15-81: file exists, has 241 lines\nPASS  citation internal/ledger/lanes_meta_test.go:177-203: file exists, has 241 lines\nPASS  citation internal/packet/packet.go:33-75: file exists, has 167 lines\nPASS  citation internal/packet/packet.go:94-138: file exists, has 167 lines\nPASS  citation internal/packet/packet_test.go:15-48: file exists, has 1751 lines\nPASS  citation internal/packet/packet_test.go:50-90: file exists, has 1751 lines\nPASS  citation internal/run/batch.go:167-217: file exists, has 217 lines\nPASS  citation internal/run/run.go:334-358: file exists, has 800 lines\nPASS  citation internal/run/run_test.go:79-93: file exists, has 2773 lines\nPASS  citation internal/serve/handlers.go:316-350: file exists, has 922 lines\nPASS  citation internal/serve/handlers.go:352-354: file exists, has 922 lines\nPASS  citation internal/serve/model.go:163-184: file exists, has 936 lines\nPASS  citation internal/serve/model.go:322-333: file exists, has 936 lines\nPASS  citation internal/serve/model_test.go:599-669: file exists, has 946 lines\nPASS  citation internal/serve/server_test.go:47-100: file exists, has 1014 lines\nPASS  citation internal/serve/static/app.js:534-536: file exists, has 2115 lines\nPASS  citation internal/serve/static/app.js:575-593: file exists, has 2115 lines\nPASS  citation internal/serve/static_test.go:286-300: file exists, has 973 lines\nPASS  citation openspec/changes/lane-status-observability/design.md:17-23: file exists, has 198 lines\nPASS  citation openspec/changes/lane-status-observability/design.md:24-30: file exists, has 198 lines\nPASS  citation openspec/changes/lane-status-observability/design.md:31-37: file exists, has 198 lines\nPASS  citation openspec/changes/lane-status-observability/design.md:38-44: file exists, has 198 lines\nPASS  citation openspec/changes/lane-status-observability/design.md:179-189: file exists, has 198 lines\nPASS  citation openspec/changes/lane-status-observability/specs/dispatched-packet-body/spec.md:9-30: file exists, has 29 lines\nPASS  citation openspec/changes/lane-status-observability/specs/lane-execution/spec.md:5-26: file exists, has 25 lines\nPASS  citation openspec/changes/lane-status-observability/specs/read-only-packet-schema/spec.md:5-26: file exists, has 25 lines\nPASS  git status --porcelain: clean\nPASS  result envelope: .lucind/result.json exists and parses as JSON\nRESULT: PASS"
+    },
+    {
+      "criterion": "Every task names a concrete path, and every \"modify\" task's path resolves in this worktree.",
+      "met": true,
+      "evidence": "All tasks reference concrete worktree paths: internal/packet/packet.go, internal/packet/packet_test.go, cmd/lucind-ai/cli.go, cmd/lucind-ai/cli_test.go, internal/ledger/lanes_meta.go, internal/ledger/lanes_meta_test.go, internal/run/run.go, internal/run/batch.go, internal/run/run_test.go, internal/serve/model.go, internal/serve/model_test.go, internal/serve/handlers.go, internal/serve/server_test.go, internal/serve/static/app.js, and internal/serve/static_test.go, all of which resolve in the repository."
+    },
+    {
+      "criterion": "A RED test task precedes every GREEN production task for a behavior change in this slice.",
+      "met": true,
+      "evidence": "Strict TDD sequence established: A1.1 (RED) precedes A1.2 (GREEN); A1.3 (RED) precedes A1.4 (GREEN); A2.1 (RED) precedes A2.2 (GREEN); A2.3 (RED) precedes A2.4 (GREEN); A3.1 (RED) precedes A3.2 (GREEN); A3.3 (RED) precedes A3.4 (GREEN); A3.5 (RED) precedes A3.6 (GREEN)."
+    },
+    {
+      "criterion": "Every requirement in the three owned specs appears in the traceability table with at least one task.",
+      "met": true,
+      "evidence": "Requirement Traceability table maps Extended packet frontmatter parsing to A1.1, A1.2; Dispatched packet body inspection to A1.3, A1.4, A2.1, A2.2, A2.3, A2.4, A3.1, A3.2, A3.3, A3.4, A3.5, A3.6; Lane metadata dispatch persistence to A2.1, A2.2, A2.3, A2.4, A3.1, A3.2."
+    },
+    {
+      "criterion": "The shared-file overlap on `internal/serve/model.go` and `app.js` with lens B is named in `## Open Questions`.",
+      "met": true,
+      "evidence": "openspec/changes/lane-status-observability/tasks-lens-a.md:84-86 explicitly documents the shared-file overlap on internal/serve/model.go and static/app.js with Lens B telemetry fields."
+    },
+    {
+      "criterion": "`tasks-lens-a.md` exists, is under 1000 words excluding the Citation Manifest, and carries every skeleton section.",
+      "met": true,
+      "evidence": "File created at openspec/changes/lane-status-observability/tasks-lens-a.md; lucind-lane-check.sh confirms 962 / 1000 words and all 8 required sections present."
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (`git status --porcelain` empty; check `git log -1 --format=%B` for an unwanted `Co-authored-by:` trailer and strip it if present).",
+      "met": true,
+      "evidence": "Commit b63fc8dfa96eba68f8b096609ec9e7d07d890890 'docs(sdd): author tasks lens A for lane-status-observability' has no Co-authored-by trailers and git status --porcelain is clean."
+    }
+  ],
+  "commit": "b63fc8dfa96eba68f8b096609ec9e7d07d890890"
+}

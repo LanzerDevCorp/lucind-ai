@@ -1,0 +1,63 @@
+{
+  "packet_id": "design-skill-provisioning-and-phase-specialist-lens-c",
+  "status": "done",
+  "summary": "Authored Design Lens C for Skill Provisioning and the SDD Phase Specialist covering failure modes, testing strategy, threat matrix, test seams, and rollback/additivity. Resolved Open Question 2 by declaring archive and ultrafixer roles derived-empty for phase child skills.",
+  "hard_stops": [
+    {
+      "hard_stop": "A behavior the proposal requires cannot be tested through any existing or proposed seam.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Whether a format delta is additive cannot be determined from the proposal, so the rollback decision would be a guess.",
+      "fired": false
+    },
+    {
+      "hard_stop": "The threat matrix is missing from both ## Context and the skill reference.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "change": "created",
+      "path": "openspec/changes/skill-provisioning-and-phase-specialist/design-lens-c.md",
+      "why": "Deliver Design Lens C covering failure, test, and rollback for skill provisioning and phase specialist"
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "A ## Citation Manifest section lists every unique citation, grouped by file.",
+      "met": true,
+      "evidence": "openspec/changes/skill-provisioning-and-phase-specialist/design-lens-c.md:83-125; ./lucind-lane-check.sh --verify-citations passed all 39 citations"
+    },
+    {
+      "criterion": "Decision 1 states a FINAL choice (resolving Open Question 2) — no \"either could work.\"",
+      "met": true,
+      "evidence": "openspec/changes/skill-provisioning-and-phase-specialist/design-lens-c.md:7-13; Choice explicitly declares archive and ultrafixer derived-empty with terminal consumer cmd/lucind-ai/packet_authoring.go:32-54"
+    },
+    {
+      "criterion": "Every named test seam carries a file:line citation that points at real code in this worktree, or is explicitly marked \"new seam required\".",
+      "met": true,
+      "evidence": "openspec/changes/skill-provisioning-and-phase-specialist/design-lens-c.md:14-44; all 10 Testing Strategy and 9 Test Seams rows carry exact file:line citations or explicit 'new seam required'"
+    },
+    {
+      "criterion": "Every threat-matrix row is marked Applicable or N/A with a reason, and every applicable row names a planned RED test.",
+      "met": true,
+      "evidence": "openspec/changes/skill-provisioning-and-phase-specialist/design-lens-c.md:46-54; all 5 boundary rows categorized with design responses and concrete planned RED tests"
+    },
+    {
+      "criterion": "design-lens-c.md exists, is under 1000 words, and carries every skeleton section.",
+      "met": true,
+      "evidence": "openspec/changes/skill-provisioning-and-phase-specialist/design-lens-c.md; ./lucind-lane-check.sh reports 990 / 1000 words and all 9 required sections present"
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (git status --porcelain empty and git log --oneline -1).",
+      "met": true,
+      "evidence": "commit 43dfe38 (docs(openspec): author design lens c for skill provisioning and phase specialist); git status --porcelain is empty"
+    }
+  ],
+  "commit": "43dfe38683d2fbb65896dad5954d489a02d100c7"
+}

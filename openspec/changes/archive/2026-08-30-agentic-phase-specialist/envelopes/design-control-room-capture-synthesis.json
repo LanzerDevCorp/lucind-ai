@@ -1,0 +1,90 @@
+{
+  "packet_id": "design-control-room-capture-synthesis",
+  "status": "done",
+  "summary": "Verified every file:line citation in the three control-room-capture design lens drafts against this worktree, kept lens A's Candidate 4 architecture, and wrote a 1214-word canonical design.md plus synthesis notes. Fifteen citation claims were dropped; one identifier contradiction was escalated; change-local specs are absent.",
+  "hard_stops": [
+    {
+      "hard_stop": "The three `## Assumed architecture` blocks are mutually irreconcilable and the proposal and specs do not choose between them. Write the notes file, leave `design.md` uncreated, and block.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Lens A's architecture is refuted by code you verified. Do not substitute your own.",
+      "fired": false
+    },
+    {
+      "hard_stop": "One or more lens drafts is missing from this worktree.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Covering all eight spine items honestly would require exceeding 1800 words. Report which item forces it rather than silently overrunning or silently cutting.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/control-room-capture/design.md",
+      "change": "created",
+      "why": "Canonical design synthesized from the three lens drafts after citation verification and architecture arbitration."
+    },
+    {
+      "path": "openspec/changes/control-room-capture/design-synthesis-notes.md",
+      "change": "created",
+      "why": "Orchestrator-facing notes: unresolved contradictions, coverage gaps, dropped citations, architecture divergence."
+    },
+    {
+      "path": ".lucind/result.json",
+      "change": "created",
+      "why": "Packet result envelope required by the Return section."
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every file:line citation surviving into design.md was opened and confirmed in this worktree, and every dropped claim is listed under ## Dropped Citations.",
+      "met": true,
+      "evidence": "Surviving citations in openspec/changes/control-room-capture/design.md were opened in executor.go, agy.go, cursor_agent.go, opencode.go, run.go, integrate.go, handlers.go, model.go, server.go, schema.go, ledger.go, ledgerpath.go, batch.go, cli.go, result.go, result/schema.go, barrier.go (dropped), prd.md (dropped), SKILL.md:280-283, .gitignore:2, and the cited *_test.go ranges. Dropped claims: 15 bullets under ## Dropped Citations in design-synthesis-notes.md."
+    },
+    {
+      "criterion": "design.md exists, is under 1800 words, and substantively covers all eight spine items, with anything missing reported under ## Coverage Gaps.",
+      "met": true,
+      "evidence": "`wc -w openspec/changes/control-room-capture/design.md` = 1214. Sections present: Technical Approach; Architecture Decisions (Choice/Alternatives/Rationale); Flow and Invariants; Interfaces / Contracts; File Changes with terminal consumers; Testing Strategy and Test Seams; Threat Matrix (every skill row Applicable or N/A: reason); Rollback and Additivity; Open Questions and Out of Scope. Coverage Gaps records absent change-local specs and skill heading/budget drift."
+    },
+    {
+      "criterion": "design-synthesis-notes.md exists with exactly the four required sections, each either populated or explicitly None.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-capture/design-synthesis-notes.md headings: Unresolved Contradictions (1 item), Coverage Gaps (3 items), Dropped Citations (15 items), Architecture Divergence (convergence plus 5 deltas). None of the four is empty or missing."
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (git status --porcelain empty and git log --oneline -1).",
+      "met": true,
+      "evidence": "`git status --porcelain` empty. `git log --oneline -1` = `647056f docs(openspec): synthesize control-room-capture canonical design`. Full hash 647056feed095ce4c72451722658b5ce3a828bec."
+    }
+  ],
+  "commit": "647056feed095ce4c72451722658b5ce3a828bec",
+  "findings": [
+    {
+      "finding": "Citations verified: 80 file:line instances survive in design.md; each was opened in this worktree.",
+      "evidence": "python count of path:line citations in openspec/changes/control-room-capture/design.md plus two `.gitignore:2` hits; source files read during the verification pass.",
+      "affects": "design.md authority"
+    },
+    {
+      "finding": "Citations dropped: 15 claims.",
+      "evidence": "openspec/changes/control-room-capture/design-synthesis-notes.md ## Dropped Citations",
+      "affects": "tasks lane should not reuse the dropped line ranges as seams"
+    },
+    {
+      "finding": "Contradictions escalated: 1 (Request destination field identifiers StdoutDest/StderrDest vs StdoutWriter/StderrWriter).",
+      "evidence": "design-synthesis-notes.md ## Unresolved Contradictions item 1; executor.go:15-37 has no dest fields today.",
+      "affects": "tasks.md field naming"
+    },
+    {
+      "finding": "Coverage gaps: 3 (change-local specs directory absent; skill Migration/Rollout 800-word heading vs repo Rollback/Additivity 1800-word ceiling; no max log bytes, redaction, or retention TTL).",
+      "evidence": "Glob of openspec/changes/control-room-capture/ found no specs/; ~/.claude/skills/sdd-design/SKILL.md vs packet 1800-word budget; design-synthesis-notes.md ## Coverage Gaps.",
+      "affects": "specs phase if still pending; tasks should not invent spec IDs from this design"
+    }
+  ],
+  "session_id": "design-control-room-capture-synthesis"
+}

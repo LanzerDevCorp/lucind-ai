@@ -1,0 +1,44 @@
+{
+  "packet_id": "propose-control-room-ledger-lens-c",
+  "status": "done",
+  "summary": "Authored openspec/changes/control-room-ledger/propose-lens-c.md detailing technical risks, rollback strategy, schema additivity, and test impact for the Control Room Ledger change. All risks, mitigations, and test layers carry verified file:line citations.",
+  "hard_stops": [
+    {
+      "hard_stop": "Whether a schema or format change is additive cannot be determined, making rollback a guess.",
+      "fired": false
+    },
+    {
+      "hard_stop": "A critical failure mode has no identifiable mitigation or test seam.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/control-room-ledger/propose-lens-c.md",
+      "change": "created",
+      "why": "Feedstock for proposal synthesis lane covering risks, rollback, additivity, and test impact"
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every risk, test seam, and rollback claim carries file:line citations to real code in this worktree.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-ledger/propose-lens-c.md:7-12,16-20,26-32 referencing internal/ledger, internal/run, internal/serve, internal/packet, and cmd/lucind-ai"
+    },
+    {
+      "criterion": "propose-lens-c.md exists, is under 1000 words, and carries every skeleton section.",
+      "met": true,
+      "evidence": "wc -w output: 925 words; contains all required skeleton sections (Technical Risks \u0026 Failure Modes, Rollback \u0026 Additivity, Test \u0026 Validation Impact, Out of Scope, Open Questions)"
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (git status --porcelain empty and git log --oneline -1).",
+      "met": true,
+      "evidence": "commit 912cb05826f3da3ca36c5ec834953bd6d8536458 (docs(openspec): add propose-lens-c for control-room-ledger); git status --porcelain reports empty (clean worktree before result.json)"
+    }
+  ],
+  "commit": "912cb05826f3da3ca36c5ec834953bd6d8536458"
+}

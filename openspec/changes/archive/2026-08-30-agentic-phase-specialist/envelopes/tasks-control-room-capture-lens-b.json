@@ -1,0 +1,58 @@
+{
+  "packet_id": "tasks-control-room-capture-lens-b",
+  "status": "done",
+  "summary": "Partitioned the control-room-capture change into 4 dispatchable work units across 2 parallel waves. Validated pairwise path disjointness under the component-boundary prefix rule and recommended single-packet dispatch without an apply-dag sidecar based on small change size.",
+  "hard_stops": [
+    {
+      "hard_stop": "No partition exists in which every wave is green on its own, so the change cannot be dispatched as waves at all.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Two units that must run in the same wave cannot have disjoint allowed_paths because they edit the same file.",
+      "fired": false
+    },
+    {
+      "hard_stop": "The design's file-changes table does not determine which unit owns a file.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/control-room-capture/tasks-lens-b.md",
+      "change": "created",
+      "why": "Tasks Lens B partition and dispatch shape artifact"
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every pair of units sharing a wave was checked by hand against the component-boundary prefix rule, and the verdict is recorded in ## Disjointness Check.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-capture/tasks-lens-b.md:23-26 records prefix checks and Disjoint verdicts for Wave 1 (Unit 1 vs Unit 2) and Wave 2 (Unit 3 vs Unit 4)."
+    },
+    {
+      "criterion": "Every wave's \"green on its own\" column is a yes with a reason, or the wave was merged into its successor.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-capture/tasks-lens-b.md:18-21 lists Yes with individual compilation and test pass rationales for Wave 1 and Wave 2."
+    },
+    {
+      "criterion": "Every unit names concrete allowed_paths and an executor, and every path claim resolves in this worktree or is marked \"new file\".",
+      "met": true,
+      "evidence": "openspec/changes/control-room-capture/tasks-lens-b.md:9-14 lists exact file paths and executors, with internal/serve/handlers_test.go designated as (new file)."
+    },
+    {
+      "criterion": "tasks-lens-b.md exists, is under 1000 words, and carries ## Assumed decomposition, ## Wave Plan, ## Disjointness Check, and ## Sidecar Recommendation.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-capture/tasks-lens-b.md exists with 521 words verified via wc -w and contains all four mandatory sections."
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (git status --porcelain empty and git log --oneline -1).",
+      "met": true,
+      "evidence": "Commit 6cb6580 \"docs(openspec): add tasks lens b partition for control-room-capture\" with empty git status --porcelain."
+    }
+  ],
+  "commit": "6cb6580eb0ea38ec71ecc2f0e25b1059f3cc0177"
+}

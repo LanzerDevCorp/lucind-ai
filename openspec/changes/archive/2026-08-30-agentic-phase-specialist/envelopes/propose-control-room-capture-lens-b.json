@@ -1,0 +1,44 @@
+{
+  "packet_id": "propose-control-room-capture-lens-b",
+  "status": "done",
+  "summary": "Drafted proposal lens B for control-room-capture detailing user and capability impacts across lane execution, stream capture, loopback serve, and ledger events. Specified delta requirements and scenarios with file:line citations for continuous primary-root stream spooling, non-interfering WaitDelay drain semantics, bounded ledger notes, and loopback HTTP stream access. Committed changes under conventional commit format.",
+  "hard_stops": [
+    {
+      "hard_stop": "Delta requirements conflict with existing base specs without explicit migration path.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Capability impacts cannot be determined from packet context or code inspection.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Satisfying one instruction in this packet would require violating another.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "path": "openspec/changes/control-room-capture/propose-lens-b.md",
+      "change": "created",
+      "why": "Proposal Lens B draft containing capability impacts, delta specifications, and open questions."
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "Every capability impact and delta spec requirement carries file:line citations to real code in this worktree.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-capture/propose-lens-b.md lines 7-10, 22, 27, 33, 42, 45, 49, 54, 58, 60, 64, 70, 74, 80, 93 cite real seams across internal/run/run.go, internal/executor/*.go, internal/run/integrate.go, internal/ledgerpath/ledgerpath.go, internal/ledger/schema.go, internal/serve/*.go, and cmd/lucind-ai/cli.go"
+    },
+    {
+      "criterion": "propose-lens-b.md exists, is under 1000 words, and carries every skeleton section.",
+      "met": true,
+      "evidence": "openspec/changes/control-room-capture/propose-lens-b.md exists with 993 words (verified via wc -w) and contains all required skeleton sections (User \u0026 Capability Impact, Delta Specifications, Open Questions)."
+    },
+    {
+      "criterion": "The work is committed with a conventional commit and no AI attribution (git status --porcelain empty and git log --oneline -1).",
+      "met": true,
+      "evidence": "git status --porcelain is empty; git log --oneline -1 reports: 24054a9 feat(control-room-capture): add proposal lens b capability impact and delta specs"
+    }
+  ],
+  "commit": "24054a99051443563a7a173055612345a5ae81fe"
+}
