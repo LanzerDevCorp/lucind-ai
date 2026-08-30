@@ -44,8 +44,8 @@ Same-wave disjointness does not apply (single packet). If a DAG is authored late
 
 ## Phase 3: Attempt Execution SDD-Phase Gating
 
-- [ ] 3.1-RED In `internal/run/attempt_test.go`, using `attemptSpies.checkCalls` (`:24-44,83-92`), write failing tests: `ExecuteAttempt` (`attempt.go:217-328`) invokes `checkFunc` (`:431-448`) when any combined lane is apply or empty/missing; skips only when every combined lane is a declared non-apply phase. Must fail today: `:448` always calls `checkFunc`.
-- [ ] 3.2 GREEN: In CHECKING, resolve `SDDPhase` from combined lanes via `Deps.Ledger` (`internal/run/run.go:165,377-397`) and gate `checkFunc`. Leave lease renewal (`attempt.go:447-449`) and `integrate.Check` ungated.
+- [x] 3.1-RED In `internal/run/attempt_test.go`, using `attemptSpies.checkCalls` (`:24-44,83-92`), write failing tests: `ExecuteAttempt` (`attempt.go:217-328`) invokes `checkFunc` (`:431-448`) when any combined lane is apply or empty/missing; skips only when every combined lane is a declared non-apply phase. Must fail today: `:448` always calls `checkFunc`.
+- [x] 3.2 GREEN: In CHECKING, resolve `SDDPhase` from combined lanes via `Deps.Ledger` (`internal/run/run.go:165,377-397`) and gate `checkFunc`. Leave lease renewal (`attempt.go:447-449`) and `integrate.Check` ungated.
 
 ## Phase 4: Out-of-Repository Specialist Prompt Handoff
 

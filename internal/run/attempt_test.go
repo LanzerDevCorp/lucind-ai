@@ -15,6 +15,7 @@ import (
 	"github.com/LanzerDevCorp/lucind-ai/internal/conflicttriage/fixture"
 	"github.com/LanzerDevCorp/lucind-ai/internal/feature"
 	"github.com/LanzerDevCorp/lucind-ai/internal/integrate"
+	"github.com/LanzerDevCorp/lucind-ai/internal/lane"
 	"github.com/LanzerDevCorp/lucind-ai/internal/ledger"
 	"github.com/LanzerDevCorp/lucind-ai/internal/reconcile"
 	"github.com/LanzerDevCorp/lucind-ai/internal/run"
@@ -1247,3 +1248,102 @@ func TestFixtureRetryReblocksOnTipDrift(t *testing.T) {
 		t.Errorf("res2.FailureReason = %q, want it to include the current (drifted) SHA %q", res2.FailureReason, otherTip)
 	}
 }
+
+func TestExecuteAttemptSkipsChecksForDeclaredNonApplyLanes(t *testing.T) {
+	spies := &attemptSpies{}
+	deps, l, featSvc := newAttemptTestDeps(t, spies)
+
+	featID := "feat-non-apply-1"
+	if _, err := featSvc.Create(context.Background(), featID, "refs/heads/feature-non-apply", "base-sha-non-apply", "expected-parent-sha-1"); err != nil {
+		t.Fatalf("featSvc.Create() error = %v", err)
+	}
+	if err := l.RegisterLane(context.Background(), ledger.Lane{RunID: deps.RunID, LaneID: "lane-1", PacketID: "lane-1", Executor: "agy", RoutingCondition: "test", Status: lane.Running}); err != nil {
+		t.Fatalf("RegisterLane() error = %v", err)
+	}
+	if err := l.UpdateLaneMetadata(context.Background(), ledger.LaneMetadata{RunID: deps.RunID, LaneID: "lane-1", SDDPhase: "propose"}, time.Now().UTC()); err != nil {
+		t.Fatalf("UpdateLaneMetadata() error = %v", err)
+	}
+
+	req := run.AttemptRequest{
+		ID:                "att-non-apply-1",
+		FeatureID:         featID,
+		ParentRef:         "refs/heads/feature-non-apply",
+		BaseSHA:           "base-sha-non-apply",
+		ExpectedParentSHA: "expected-parent-sha-1",
+		IdempotencyKey:    "key-non-apply-1",
+		Owner:             "owner-non-apply",
+		Branches:          []string{"lucind/lane-1"},
+	}
+
+	res, err := run.ExecuteAttempt(context.Background(), deps, req)
+	if err != nil {
+		t.Fatalf("ExecuteAttempt() error = %v", err)
+	}
+	if res.Status != run.AttemptStatusPromoted {
+		t.Fatalf("res.Status = %v, want %v", res.Status, run.AttemptStatusPromoted)
+	}
+
+	spies.mu.Lock()
+	checkCalls := len(spies.checkCalls)
+	spies.mu.Unlock()
+	if checkCalls != 0 {
+		t.Fatalf("checkFunc called %d times, want 0 for a declared non-apply combined lane", checkCalls)
+	}
+}
+
+func TestExecuteAttemptRunsChecksForApplyEmptyOrMissingCombinedLane(t *testing.T) {
+	tests := []struct {
+		slug         string
+		registerLane bool
+		setMetadata  bool
+		sddPhase     string
+	}{
+		{slug: "apply", registerLane: true, setMetadata: true, sddPhase: "apply"},
+		{slug: "empty", registerLane: true, setMetadata: true, sddPhase: ""},
+		{slug: "missing", registerLane: false, setMetadata: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.slug, func(t *testing.T) {
+			spies := &attemptSpies{}
+			deps, l, featSvc := newAttemptTestDeps(t, spies)
+			featID := "feat-run-checks-" + tt.slug
+			if _, err := featSvc.Create(context.Background(), featID, "refs/heads/feature-run-checks-"+tt.slug, "base-sha-run-checks-"+tt.slug, "expected-parent-sha-1"); err != nil {
+				t.Fatalf("featSvc.Create() error = %v", err)
+			}
+			if tt.registerLane {
+				if err := l.RegisterLane(context.Background(), ledger.Lane{RunID: deps.RunID, LaneID: "lane-1", PacketID: "lane-1", Executor: "agy", RoutingCondition: "test", Status: lane.Running}); err != nil {
+					t.Fatalf("RegisterLane() error = %v", err)
+				}
+			}
+			if tt.setMetadata {
+				if err := l.UpdateLaneMetadata(context.Background(), ledger.LaneMetadata{RunID: deps.RunID, LaneID: "lane-1", SDDPhase: tt.sddPhase}, time.Now().UTC()); err != nil {
+					t.Fatalf("UpdateLaneMetadata() error = %v", err)
+				}
+			}
+			req := run.AttemptRequest{
+				ID:                "att-run-checks-" + tt.slug,
+				FeatureID:         featID,
+				ParentRef:         "refs/heads/feature-run-checks-" + tt.slug,
+				BaseSHA:           "base-sha-run-checks-" + tt.slug,
+				ExpectedParentSHA: "expected-parent-sha-1",
+				IdempotencyKey:    "key-run-checks-" + tt.slug,
+				Owner:             "owner-run-checks",
+				Branches:          []string{"lucind/lane-1"},
+			}
+			res, err := run.ExecuteAttempt(context.Background(), deps, req)
+			if err != nil {
+				t.Fatalf("ExecuteAttempt() error = %v", err)
+			}
+			if res.Status != run.AttemptStatusPromoted {
+				t.Fatalf("res.Status = %v, want %v", res.Status, run.AttemptStatusPromoted)
+			}
+			spies.mu.Lock()
+			checkCalls := len(spies.checkCalls)
+			spies.mu.Unlock()
+			if checkCalls != 1 {
+				t.Fatalf("checkFunc called %d times, want 1 for %s", checkCalls, tt.slug)
+			}
+		})
+	}
+}
+

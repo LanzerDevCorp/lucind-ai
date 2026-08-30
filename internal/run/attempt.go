@@ -373,6 +373,28 @@ func startLeaseRenewal(ctx context.Context, featSvc *feature.Service, att Attemp
 	}
 }
 
+// shouldRunAttemptChecks resolves whether this attempt's CHECKING phase must
+// execute checkFunc, from the SDDPhase each combined lane declared at
+// dispatch time (ledger.LaneMetadata.SDDPhase, written via UpdateLaneMetadata
+// in internal/run/run.go). Checks run unless every combined lane is a
+// declared non-apply phase: an "apply" phase, an empty/missing sdd_phase, or
+// metadata that cannot be resolved all fail closed to running checks — a
+// conservative extension of design.md's Decision 2, matching
+// internal/accept's gate.
+func shouldRunAttemptChecks(ctx context.Context, deps Deps, branches []string) bool {
+	if deps.Ledger == nil || len(branches) == 0 {
+		return true
+	}
+	for _, branch := range branches {
+		laneID := strings.TrimPrefix(branch, "lucind/")
+		metadata, err := deps.Ledger.GetLaneMetadata(ctx, deps.RunID, laneID)
+		if err != nil || metadata.SDDPhase == "" || metadata.SDDPhase == "apply" {
+			return true
+		}
+	}
+	return false
+}
+
 func driveAttemptFromLeased(ctx context.Context, deps Deps, att Attempt, featSvc *feature.Service, req AttemptRequest) (Attempt, error) {
 	// 3. COMBINING
 	now := updateNow(deps)
@@ -444,8 +466,15 @@ func driveAttemptFromLeased(ctx context.Context, deps Deps, att Attempt, featSvc
 			renewInterval = time.Second
 		}
 	}
+	runSDDPhaseChecks := shouldRunAttemptChecks(ctx, deps, req.Branches)
 	stopLeaseRenewal := startLeaseRenewal(ctx, featSvc, att, checkLeaseTTL, renewInterval)
-	passed, output, err := checkFunc(ctx, wtPath)
+	var passed bool
+	var output string
+	if runSDDPhaseChecks {
+		passed, output, err = checkFunc(ctx, wtPath)
+	} else {
+		passed, output, err = true, "", nil
+	}
 	stopLeaseRenewal()
 	if err != nil || !passed {
 		reason := output
