@@ -81,14 +81,14 @@ func (v *Verifier) Verify(ctx context.Context, req AcceptanceRequest) (Acceptanc
 	if err := v.validateObjects(ctx, root, candidate); err != nil {
 		return AcceptanceReceipt{}, err
 	}
+	metadata, err := v.ledger.GetLaneMetadata(ctx, candidate.RunID, candidate.LaneID)
+	if err != nil {
+		return AcceptanceReceipt{}, fmt.Errorf("accept: load frozen target metadata: %w", err)
+	}
 	if candidate.AuthoringEvidenceVersion == ledger.AuthoringEvidenceVersion {
 		evidence, err := ledger.DecodeAuthoringEvidence(candidate.AuthoringEvidenceVersion, candidate.AuthoringEvidenceJSON, candidate.AuthoringEvidenceHash)
 		if err != nil {
 			return AcceptanceReceipt{}, fmt.Errorf("accept: invalid authoring evidence: %w", err)
-		}
-		metadata, err := v.ledger.GetLaneMetadata(ctx, candidate.RunID, candidate.LaneID)
-		if err != nil {
-			return AcceptanceReceipt{}, fmt.Errorf("accept: load frozen target metadata: %w", err)
 		}
 		if err := validateTypedTargetBinding(evidence.Binding, metadata); err != nil {
 			return AcceptanceReceipt{}, err
@@ -117,23 +117,35 @@ func (v *Verifier) Verify(ctx context.Context, req AcceptanceRequest) (Acceptanc
 	if err := createOwnedIsolation(ctx, root, isolation, candidate, marker); err != nil {
 		return AcceptanceReceipt{}, err
 	}
-	version, timeout, _, err := integrate.CheckPolicySnapshot()
-	if err != nil {
-		_ = cleanupOwnedIsolation(context.WithoutCancel(ctx), root, isolation, marker)
-		return AcceptanceReceipt{}, err
-	}
-	checkCtx, cancel := context.WithTimeout(ctx, timeout)
-	passed, output, checkErr := v.check(checkCtx, isolation)
-	cancel()
-	cleanupErr := cleanupOwnedIsolation(context.WithoutCancel(ctx), root, isolation, marker)
-	if cleanupErr != nil {
-		return AcceptanceReceipt{}, fmt.Errorf("accept: cleanup failed: %w", cleanupErr)
-	}
-	if checkErr != nil {
-		return AcceptanceReceipt{}, fmt.Errorf("accept: checks could not execute: %w", checkErr)
-	}
-	if !passed {
-		return AcceptanceReceipt{}, fmt.Errorf("accept: required mechanical checks failed: %s", strings.TrimSpace(output))
+	runSDDPhaseChecks := metadata.SDDPhase == "" || metadata.SDDPhase == "apply"
+	var version, output string
+	if runSDDPhaseChecks {
+		var timeout time.Duration
+		var err error
+		version, timeout, _, err = integrate.CheckPolicySnapshot()
+		if err != nil {
+			_ = cleanupOwnedIsolation(context.WithoutCancel(ctx), root, isolation, marker)
+			return AcceptanceReceipt{}, err
+		}
+		checkCtx, cancel := context.WithTimeout(ctx, timeout)
+		passed, checkOutput, checkErr := v.check(checkCtx, isolation)
+		cancel()
+		output = checkOutput
+		cleanupErr := cleanupOwnedIsolation(context.WithoutCancel(ctx), root, isolation, marker)
+		if cleanupErr != nil {
+			return AcceptanceReceipt{}, fmt.Errorf("accept: cleanup failed: %w", cleanupErr)
+		}
+		if checkErr != nil {
+			return AcceptanceReceipt{}, fmt.Errorf("accept: checks could not execute: %w", checkErr)
+		}
+		if !passed {
+			return AcceptanceReceipt{}, fmt.Errorf("accept: required mechanical checks failed: %s", strings.TrimSpace(output))
+		}
+	} else {
+		cleanupErr := cleanupOwnedIsolation(context.WithoutCancel(ctx), root, isolation, marker)
+		if cleanupErr != nil {
+			return AcceptanceReceipt{}, fmt.Errorf("accept: cleanup failed: %w", cleanupErr)
+		}
 	}
 	receipt := AcceptanceReceipt{
 		ReceiptID: id, BindingHash: bindingHash, Binding: binding, ResultHash: candidate.ResultHash,

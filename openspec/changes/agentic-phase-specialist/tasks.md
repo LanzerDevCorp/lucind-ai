@@ -32,20 +32,20 @@ Same-wave disjointness does not apply (single packet). If a DAG is authored late
 
 ## Phase 1: Operational Contracts & Skill Tree Synchronization
 
-- [ ] 1.1 Replace the Hard Rule at `plugin/claude-code/skills/lucind-ai/SKILL.md:19` and `plugin/opencode/skills/lucind-ai/SKILL.md:19` with Decision 3 New: text (`design.md:39-47`): a named `sdd-*` Specialist may Accept its own phase’s Lanes; Promotion stays forbidden to every Agent.
-- [ ] 1.2 In both trees’ `references/strategies/fan-out.md:47-48`, move synthesis-note review and contradiction arbitration from Orchestrator to Specialist.
-- [ ] 1.3 In both trees’ `references/contracts/acceptance-promotion.md:18-30,31-36`, add the Decision 2 `sdd_phase` caveat to checklist steps 1 and 8, and upgrade subagent delegation to decision-bearing Specialist Acceptance. Dual-Judge (`:38-43`) stays.
-- [ ] 1.4 After 1.1–1.3, confirm `TestSkillTreesByteIdentical` (`packet_test.go:943-967`) and glossary lockstep in `TestSkillAssetContract` (`packet_test.go:778,924-941`). Edit both mirrors in the same unit.
+- [x] 1.1 Replace the Hard Rule at `plugin/claude-code/skills/lucind-ai/SKILL.md:19` and `plugin/opencode/skills/lucind-ai/SKILL.md:19` with Decision 3 New: text (`design.md:39-47`): a named `sdd-*` Specialist may Accept its own phase’s Lanes; Promotion stays forbidden to every Agent.
+- [x] 1.2 In both trees’ `references/strategies/fan-out.md:47-48`, move synthesis-note review and contradiction arbitration from Orchestrator to Specialist.
+- [x] 1.3 In both trees’ `references/contracts/acceptance-promotion.md:18-30,31-36`, add the Decision 2 `sdd_phase` caveat to checklist steps 1 and 8, and upgrade subagent delegation to decision-bearing Specialist Acceptance. Dual-Judge (`:38-43`) stays.
+- [x] 1.4 After 1.1–1.3, confirm `TestSkillTreesByteIdentical` (`packet_test.go:943-967`) and glossary lockstep in `TestSkillAssetContract` (`packet_test.go:778,924-941`). Edit both mirrors in the same unit.
 
 ## Phase 2: Acceptance Verifier SDD-Phase Gating
 
-- [ ] 2.1-RED In `internal/accept/accept_test.go`, using `newVerifierFixture` (`:26-67`) and `UpdateLaneMetadata` (`internal/ledger/lanes_meta.go:49-60`), write failing `TestVerifier*` cases: `Verifier.Verify` (`accept.go:62`) runs `v.check` for `SDDPhase == "apply"`, `""`, or missing metadata; skips `CheckPolicySnapshot` and `v.check` for declared non-apply planning phases; still enforces schema, hard stops, done criteria, and `allowed_paths` (`:214-261`); failing checks reject apply/unlabeled (existing `:320`). Must fail today: checks always run (`:120-137`).
-- [ ] 2.2 GREEN: Lift `GetLaneMetadata` out of the `AuthoringEvidenceVersion` branch (`accept.go:84-96`). Gate `CheckPolicySnapshot` and `v.check` (`:120-137`) per Decision 2 (`design.md:21-27`). Do not modify `integrate.Check` (`internal/integrate/integrate.go:159-200`).
+- [x] 2.1-RED In `internal/accept/accept_test.go`, using `newVerifierFixture` (`:26-67`) and `UpdateLaneMetadata` (`internal/ledger/lanes_meta.go:49-60`), write failing `TestVerifier*` cases: `Verifier.Verify` (`accept.go:62`) runs `v.check` for `SDDPhase == "apply"`, `""`, or missing metadata; skips `CheckPolicySnapshot` and `v.check` for declared non-apply planning phases; still enforces schema, hard stops, done criteria, and `allowed_paths` (`:214-261`); failing checks reject apply/unlabeled (existing `:320`). Must fail today: checks always run (`:120-137`).
+- [x] 2.2 GREEN: Lift `GetLaneMetadata` out of the `AuthoringEvidenceVersion` branch (`accept.go:84-96`). Gate `CheckPolicySnapshot` and `v.check` (`:120-137`) per Decision 2 (`design.md:21-27`). Do not modify `integrate.Check` (`internal/integrate/integrate.go:159-200`).
 
 ## Phase 3: Attempt Execution SDD-Phase Gating
 
-- [ ] 3.1-RED In `internal/run/attempt_test.go`, using `attemptSpies.checkCalls` (`:24-44,83-92`), write failing tests: `ExecuteAttempt` (`attempt.go:217-328`) invokes `checkFunc` (`:431-448`) when any combined lane is apply or empty/missing; skips only when every combined lane is a declared non-apply phase. Must fail today: `:448` always calls `checkFunc`.
-- [ ] 3.2 GREEN: In CHECKING, resolve `SDDPhase` from combined lanes via `Deps.Ledger` (`internal/run/run.go:165,377-397`) and gate `checkFunc`. Leave lease renewal (`attempt.go:447-449`) and `integrate.Check` ungated.
+- [x] 3.1-RED In `internal/run/attempt_test.go`, using `attemptSpies.checkCalls` (`:24-44,83-92`), write failing tests: `ExecuteAttempt` (`attempt.go:217-328`) invokes `checkFunc` (`:431-448`) when any combined lane is apply or empty/missing; skips only when every combined lane is a declared non-apply phase. Must fail today: `:448` always calls `checkFunc`.
+- [x] 3.2 GREEN: In CHECKING, resolve `SDDPhase` from combined lanes via `Deps.Ledger` (`internal/run/run.go:165,377-397`) and gate `checkFunc`. Leave lease renewal (`attempt.go:447-449`) and `integrate.Check` ungated.
 
 ## Phase 4: Out-of-Repository Specialist Prompt Handoff
 
