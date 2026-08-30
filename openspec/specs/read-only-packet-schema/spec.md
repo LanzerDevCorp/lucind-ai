@@ -83,7 +83,8 @@ The schema change MUST stay purely additive: no ledger or envelope schema versio
 
 ### Requirement: Extended packet frontmatter parsing
 
-Packet parsing MUST accept optional SDD-phase, fanout-group, and skill frontmatter keys (exact key names remain an open design question) and MUST map present values onto the corresponding packet fields. Omitted keys MUST default to empty strings. Absence of these keys MUST NOT fail parsing. Live executor runtime skill telemetry MUST NOT be decoded from packet frontmatter.
+Packet parsing MUST accept optional `sdd_phase`, `fanout_group`, `skill`, and `lane_role` frontmatter keys, mapping present values onto the corresponding packet fields, and MUST default omitted keys to empty values. When `lane_role` is present, packet parsing MUST validate it against the closed set `{lens, synthesis, apply, verify, archive, ultrafixer, human}` and closed-validate `sdd_phase`; packets omitting `lane_role` MUST retain open `sdd_phase` parsing without failure. Live executor runtime skill telemetry MUST NOT be decoded from packet frontmatter.
+(Previously: Extended packet frontmatter keys had open schema validation with exact key names left unresolved.)
 
 #### Scenario: Parse frontmatter keys
 
@@ -102,6 +103,25 @@ Packet parsing MUST accept optional SDD-phase, fanout-group, and skill frontmatt
 - GIVEN a packet document that includes those keys with empty values
 - WHEN the packet is parsed
 - THEN parsing MUST succeed and assign empty strings to the corresponding fields
+
+#### Scenario: Valid lane_role and phase parsed
+
+- GIVEN frontmatter declaring `lane_role: lens` and `sdd_phase: propose`
+- WHEN the packet is parsed
+- THEN the packet MUST carry `lane_role` `lens` and `sdd_phase` `propose`.
+
+#### Scenario: Omitted lane_role preserves backward compatibility
+
+- GIVEN frontmatter omitting `lane_role`
+- WHEN the packet is parsed
+- THEN parsing MUST succeed with empty `lane_role` and unvalidated `sdd_phase`.
+
+#### Scenario: Unrecognized lane_role rejected
+
+- GIVEN frontmatter declaring an unrecognized `lane_role`
+- WHEN the packet is parsed
+- THEN parsing MUST return a validation error.
+
 
 ### Requirement: Read-Only Input Path Preservation and Visibility
 

@@ -1,0 +1,76 @@
+{
+  "packet_id": "packet-contract",
+  "status": "done",
+  "summary": "Extended packet and authoring contracts with LaneRole, AdhocSkills, and derived RequiredSkills. Updated Compile and renderBody to render required skill paths while preserving digest stability across resolved roots through skillset.DigestBody.",
+  "hard_stops": [
+    {
+      "hard_stop": "Stop `blocked` if `required_skills` becomes an authored frontmatter field, paths enter canonical digests, or ledger fields must change.",
+      "fired": false
+    },
+    {
+      "hard_stop": "Stop `blocked` for out-of-scope edits, impossible criteria, unresolved alternatives, or conflicting instructions.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "change": "modified",
+      "path": "internal/packet/packet.go",
+      "why": "Add LaneRole, AdhocSkills, RequiredSkills fields and closed-set validation"
+    },
+    {
+      "change": "modified",
+      "path": "internal/packet/packet_test.go",
+      "why": "Add tests for lane_role, sdd_phase closed validation, and adhoc_skills"
+    },
+    {
+      "change": "modified",
+      "path": "internal/packetauthor/contract.go",
+      "why": "Add LaneRole, AdhocSkills, and RequiredSkills to Contract"
+    },
+    {
+      "change": "modified",
+      "path": "internal/packetauthor/compile.go",
+      "why": "Add skill fields to normalizedContract, canonical name extraction, renderBody Required skills section, and DigestBody hashing"
+    },
+    {
+      "change": "modified",
+      "path": "internal/packetauthor/compile_test.go",
+      "why": "Add TestCompileDigestExcludesResolvedPaths and skill field digest tests"
+    },
+    {
+      "change": "modified",
+      "path": "internal/packetauthor/specialist.go",
+      "why": "Update cloneContract to copy AdhocSkills and RequiredSkills"
+    },
+    {
+      "change": "modified",
+      "path": "internal/packetauthor/compare.go",
+      "why": "Update contractDifferences to include lane_role, adhoc_skills, and required_skills"
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "RED then GREEN tests cover closed lane roles/phases, legacy omission, ad-hoc parsing, compile rendering, and digest stability across resolved roots.",
+      "met": true,
+      "evidence": "go test ./internal/packet/... and go test ./internal/packetauthor/... pass cleanly. Verified TestParseLaneRoleAndPhaseValidation, TestParseAdhocSkills, TestParseIgnoresRequiredSkillsFrontmatter, and TestCompileDigestExcludesResolvedPaths."
+    },
+    {
+      "criterion": "Run focused packet/packetauthor tests and `go test ./... -race -count=1` successfully.",
+      "met": true,
+      "evidence": "go test ./internal/packet/... and go test ./internal/packetauthor/... pass cleanly. Full test suite and package race tests pass."
+    },
+    {
+      "criterion": "`Compile` consumes `skillset.Derive` and its rendered contract is consumed by executor/runtime; cite terminal consumers.",
+      "met": true,
+      "evidence": "internal/packetauthor/compile.go:87-89 invokes skillset.Derive; rendered ## Required skills in packet prompt is consumed by dispatched agents parsing Packet.Body (internal/packet/packet.go:102) and executor requestEnv injecting LUCIND_REQUIRED_SKILLS into child process os.Environ (internal/executor/executor.go:20-39)."
+    },
+    {
+      "criterion": "Commit conventionally with no AI attribution; clean status and latest commit evidence are recorded.",
+      "met": true,
+      "evidence": "commit f900cb8992e4942deca97c40c6a1e2137dabcc6e carries conventional commit 'feat(packet): add lane role, adhoc skills, and contract compilation with digest stability' with empty git show -s --format=\"%b\" HEAD trailer; git status --porcelain is clean."
+    }
+  ],
+  "commit": "f900cb8992e4942deca97c40c6a1e2137dabcc6e",
+  "session_id": "8c4497bd-6b77-4b0a-a474-f98eab2f74eb"
+}

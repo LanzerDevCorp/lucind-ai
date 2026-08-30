@@ -1,0 +1,140 @@
+{
+  "packet_id": "remediate-opencode-assets",
+  "status": "done",
+  "summary": "Remediated verify.md finding 7 by updating OpenCode asset templates to drop hardcoded ~/.claude/skills/ paths and align with ## Required skills delivery matching the Claude Code templates. All 21 templates now match their Claude Code siblings byte-for-byte and pass verify-opencode checks.",
+  "hard_stops": [
+    {
+      "hard_stop": "Stop blocked if the OpenCode templates have a materially different structure/contract from plugin/claude-code's such that a like-for-like fix doesn't apply cleanly — describe the difference instead of guessing.",
+      "fired": false
+    }
+  ],
+  "files_changed": [
+    {
+      "change": "modified",
+      "path": "plugin/opencode/skills/lucind-ai/assets/archive-packet-template.md",
+      "why": "Drop hardcoded ~/.claude/skills/ paths and add ## Required skills delivery section"
+    },
+    {
+      "change": "modified",
+      "path": "plugin/opencode/skills/lucind-ai/assets/design-lens-a-packet-template.md",
+      "why": "Drop hardcoded ~/.claude/skills/ paths and add ## Required skills delivery section"
+    },
+    {
+      "change": "modified",
+      "path": "plugin/opencode/skills/lucind-ai/assets/design-lens-b-packet-template.md",
+      "why": "Drop hardcoded ~/.claude/skills/ paths and add ## Required skills delivery section"
+    },
+    {
+      "change": "modified",
+      "path": "plugin/opencode/skills/lucind-ai/assets/design-lens-c-packet-template.md",
+      "why": "Drop hardcoded ~/.claude/skills/ paths and add ## Required skills delivery section"
+    },
+    {
+      "change": "modified",
+      "path": "plugin/opencode/skills/lucind-ai/assets/design-synthesis-packet-template.md",
+      "why": "Drop hardcoded ~/.claude/skills/ paths and add ## Required skills delivery section"
+    },
+    {
+      "change": "modified",
+      "path": "plugin/opencode/skills/lucind-ai/assets/explore-lens-a-packet-template.md",
+      "why": "Drop hardcoded ~/.claude/skills/ paths and add ## Required skills delivery section"
+    },
+    {
+      "change": "modified",
+      "path": "plugin/opencode/skills/lucind-ai/assets/explore-lens-b-packet-template.md",
+      "why": "Drop hardcoded ~/.claude/skills/ paths and add ## Required skills delivery section"
+    },
+    {
+      "change": "modified",
+      "path": "plugin/opencode/skills/lucind-ai/assets/explore-lens-c-packet-template.md",
+      "why": "Drop hardcoded ~/.claude/skills/ paths and add ## Required skills delivery section"
+    },
+    {
+      "change": "modified",
+      "path": "plugin/opencode/skills/lucind-ai/assets/explore-synthesis-packet-template.md",
+      "why": "Drop hardcoded ~/.claude/skills/ paths and add ## Required skills delivery section"
+    },
+    {
+      "change": "modified",
+      "path": "plugin/opencode/skills/lucind-ai/assets/propose-lens-a-packet-template.md",
+      "why": "Drop hardcoded ~/.claude/skills/ paths and add ## Required skills delivery section"
+    },
+    {
+      "change": "modified",
+      "path": "plugin/opencode/skills/lucind-ai/assets/propose-lens-b-packet-template.md",
+      "why": "Drop hardcoded ~/.claude/skills/ paths and add ## Required skills delivery section"
+    },
+    {
+      "change": "modified",
+      "path": "plugin/opencode/skills/lucind-ai/assets/propose-lens-c-packet-template.md",
+      "why": "Drop hardcoded ~/.claude/skills/ paths and add ## Required skills delivery section"
+    },
+    {
+      "change": "modified",
+      "path": "plugin/opencode/skills/lucind-ai/assets/propose-synthesis-packet-template.md",
+      "why": "Drop hardcoded ~/.claude/skills/ paths and add ## Required skills delivery section"
+    },
+    {
+      "change": "modified",
+      "path": "plugin/opencode/skills/lucind-ai/assets/spec-lens-a-packet-template.md",
+      "why": "Drop hardcoded ~/.claude/skills/ paths and add ## Required skills delivery section"
+    },
+    {
+      "change": "modified",
+      "path": "plugin/opencode/skills/lucind-ai/assets/spec-lens-b-packet-template.md",
+      "why": "Drop hardcoded ~/.claude/skills/ paths and add ## Required skills delivery section"
+    },
+    {
+      "change": "modified",
+      "path": "plugin/opencode/skills/lucind-ai/assets/spec-lens-c-packet-template.md",
+      "why": "Drop hardcoded ~/.claude/skills/ paths and add ## Required skills delivery section"
+    },
+    {
+      "change": "modified",
+      "path": "plugin/opencode/skills/lucind-ai/assets/spec-synthesis-packet-template.md",
+      "why": "Drop hardcoded ~/.claude/skills/ paths and add ## Required skills delivery section"
+    },
+    {
+      "change": "modified",
+      "path": "plugin/opencode/skills/lucind-ai/assets/tasks-lens-a-packet-template.md",
+      "why": "Drop hardcoded ~/.claude/skills/ paths and add ## Required skills delivery section"
+    },
+    {
+      "change": "modified",
+      "path": "plugin/opencode/skills/lucind-ai/assets/tasks-lens-b-packet-template.md",
+      "why": "Drop hardcoded ~/.claude/skills/ paths and add ## Required skills delivery section"
+    },
+    {
+      "change": "modified",
+      "path": "plugin/opencode/skills/lucind-ai/assets/tasks-lens-c-packet-template.md",
+      "why": "Drop hardcoded ~/.claude/skills/ paths and add ## Required skills delivery section"
+    },
+    {
+      "change": "modified",
+      "path": "plugin/opencode/skills/lucind-ai/assets/tasks-synthesis-packet-template.md",
+      "why": "Drop hardcoded ~/.claude/skills/ paths and add ## Required skills delivery section"
+    }
+  ],
+  "done_criteria": [
+    {
+      "criterion": "git grep -n '~/.claude/skills/' plugin/opencode/skills/lucind-ai/assets returns no matches.",
+      "met": true,
+      "evidence": "git grep -n '~/.claude/skills/' plugin/opencode/skills/lucind-ai/assets exited with status 1 (0 matches)."
+    },
+    {
+      "criterion": "Every changed OpenCode template stays structurally valid (parses the same way the plugin/claude-code templates do — check for any internal/packet test that also covers OpenCode templates, if one exists; if none exists, verify by hand that structure matches the claude-code sibling).",
+      "met": true,
+      "evidence": "go run ./cmd/plugincontent verify-opencode reported 'plugincontent: OpenCode skill tree is byte-for-byte identical to the Claude Code source', and diff -r plugin/claude-code/skills/lucind-ai/assets plugin/opencode/skills/lucind-ai/assets produced no differences."
+    },
+    {
+      "criterion": "Commit conventionally with no AI attribution; clean status and latest commit evidence are recorded.",
+      "met": true,
+      "evidence": "Commit 0c4557c9c253ad266f20612295302eebeb9bb13d ('fix(assets): drop hardcoded skill paths from OpenCode templates') with zero trailers; git status --porcelain is empty."
+    }
+  ],
+  "commit": "0c4557c9c253ad266f20612295302eebeb9bb13d",
+  "skills_loaded": [
+    "lucind-executor",
+    "lucind-apply"
+  ]
+}
