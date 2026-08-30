@@ -99,3 +99,11 @@ _Avoid_: Parallel mode
 **Exclusive Mode**:
 A simplified form of work explicitly selected when one Change uses the primary workspace and no other Change can run concurrently. The selection remains fixed for the lifetime of that Change.
 _Avoid_: Legacy mode
+
+**Specialist**:
+A phase-scoped Agent that owns one SDD phase's Execution Strategy end to end: it drives that phase's fan-out-and-synthesis dispatch and independently accepts its own phase's Lanes without additional human confirmation. It reports only a Phase Verdict to its Orchestrator, never raw Lane evidence unless asked.
+_Avoid_: Agent (a Specialist holds phase-scoped Acceptance authority no ordinary Agent has); Orchestrator (a Specialist never owns Promotion or cross-phase priorities)
+
+**Phase Verdict**:
+The compressed report a Specialist returns to its Orchestrator after accepting or rejecting its phase: the outcome, the canonical artifact's path, and any unresolved divergence. Raw Lane evidence stays with the Specialist unless the Orchestrator asks for it.
+_Avoid_: Result envelope (per-Lane, machine-validated JSON); synthesis notes (the Specialist's own working detail)
