@@ -1,6 +1,10 @@
 # Verify: Skill Provisioning and the SDD Phase Specialist
 
-## Result: BLOCKED (second pass)
+## Result: PASSED (third pass, commit `d89604753adb3a5a52e8473b64b79685c29c141d`)
+
+Both `agy` and `cursor-agent` confirmed both round-2 residual findings (9, 10) fixed on the real production path (`lucind-ai phase` → `Adapter.Synthesize` → `Dispatcher` → `runDispatch` → `admitDispatchBatch` → `Execute`), with converging `file:line` citations. No new findings that reproduce a production defect. `cursor-agent` noted four minor non-blocking leftovers, explicitly characterized as not reproducing a defect: (a) a negative-path test still checks for the old `propose.md` filename rather than asserting `proposal.md` is absent — test-quality nit, not a production gap; (b) the delta spec's requirement prose (not its scenario, which was updated) still says `<phase>.md` generically — wording leftover; (c) `tasks.md` 6.1/6.2 checkboxes were unchecked despite the fix landing — checklist hygiene, corrected below; (d) if a stale synthesis packet from before this fix already exists on disk in gitignored `.lucind/packets/`, it is reused as-is and won't retroactively gain the `## Required skills` body section (env-var delivery still applies) — a first-run-after-upgrade cache edge case, not a defect in the fix itself. None block this change; (a)-(c) are cheap to fix in a follow-up, (d) is inherent to any runtime-cache-based feature and self-resolves once packets regenerate.
+
+## Original (second-pass BLOCKED) verdict, superseded above
 
 ## History
 
