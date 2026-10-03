@@ -184,8 +184,8 @@ func TestRunUnsupportedExecutorNamesIt(t *testing.T) {
 
 // TestRunModelMismatchedToExecutorIsRejected proves the exact regression
 // this check exists for: a packet naming a model from a different
-// provider family than its executor (here, a gemini- model on
-// cursor-agent) is rejected before any worktree is created, rather than
+// provider family than its executor (here, an unknown model on
+// agy) is rejected before any worktree is created, rather than
 // silently dispatching and billing against the wrong quota tier.
 func TestRunModelMismatchedToExecutorIsRejected(t *testing.T) {
 	var stdout, stderr bytes.Buffer
@@ -194,9 +194,9 @@ func TestRunModelMismatchedToExecutorIsRejected(t *testing.T) {
 	path := filepath.Join(dir, "packet.md")
 	content := "---\n" +
 		"id: lane-1\n" +
-		"executor: cursor-agent\n" +
+		"executor: agy\n" +
 		"routed_by: single-piece precision\n" +
-		"model: gemini-3.7-flash-high\n" +
+		"model: cursor-grok-4.6-high\n" +
 		"---\n" +
 		"Do the thing.\n"
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
@@ -208,10 +208,10 @@ func TestRunModelMismatchedToExecutorIsRejected(t *testing.T) {
 	if code == 0 {
 		t.Fatalf("run with mismatched model exit code = 0, want non-zero")
 	}
-	if !strings.Contains(stderr.String(), "gemini-3.7-flash-high") {
+	if !strings.Contains(stderr.String(), "cursor-grok-4.6-high") {
 		t.Fatalf("stderr = %q, want it to name the mismatched model", stderr.String())
 	}
-	if !strings.Contains(stderr.String(), "cursor-agent") {
+	if !strings.Contains(stderr.String(), "agy") {
 		t.Fatalf("stderr = %q, want it to name the executor", stderr.String())
 	}
 }
@@ -226,9 +226,9 @@ func TestRunKnownModelForExecutorPasses(t *testing.T) {
 	path := filepath.Join(dir, "packet.md")
 	content := "---\n" +
 		"id: lane-1\n" +
-		"executor: cursor-agent\n" +
+		"executor: agy\n" +
 		"routed_by: single-piece precision\n" +
-		"model: cursor-grok-4.6-high\n" +
+		"model: gemini-3.7-flash-high\n" +
 		"---\n" +
 		"Do the thing.\n"
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
@@ -244,7 +244,7 @@ func TestRunKnownModelForExecutorPasses(t *testing.T) {
 		t.Fatalf("run exit code = 0 with no real dispatch environment, want non-zero for an unrelated reason")
 	}
 	if strings.Contains(stderr.String(), "not a known model") {
-		t.Fatalf("stderr = %q, want the known model cursor-grok-4.6-high to pass the check", stderr.String())
+		t.Fatalf("stderr = %q, want the known model gemini-3.7-flash-high to pass the check", stderr.String())
 	}
 }
 
@@ -287,7 +287,7 @@ func TestRunEscalationUnknownModelRejected(t *testing.T) {
 		"routed_by: test\n" +
 		"verification: [\"go test ./...\"]\n" +
 		"commit_message: feat: x\n" +
-		"escalation: [{\"executor\":\"cursor-agent\",\"model\":\"gemini-3.7-flash-high\"}]\n" +
+		"escalation: [{\"executor\":\"herdr-agy\",\"model\":\"cursor-grok-4.6-high\"}]\n" +
 		"---\n" +
 		"Do the thing.\n"
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
@@ -299,10 +299,10 @@ func TestRunEscalationUnknownModelRejected(t *testing.T) {
 	if code != 1 {
 		t.Fatalf("run with unknown escalation model exit code = %d, want 1", code)
 	}
-	if !strings.Contains(stderr.String(), "gemini-3.7-flash-high") {
+	if !strings.Contains(stderr.String(), "cursor-grok-4.6-high") {
 		t.Fatalf("stderr = %q, want it to name the unknown model", stderr.String())
 	}
-	if !strings.Contains(stderr.String(), "cursor-agent") {
+	if !strings.Contains(stderr.String(), "herdr-agy") {
 		t.Fatalf("stderr = %q, want it to name the executor", stderr.String())
 	}
 }
@@ -316,7 +316,7 @@ func TestRunOmittedModelSkipsModelCheck(t *testing.T) {
 	path := filepath.Join(dir, "packet.md")
 	content := "---\n" +
 		"id: lane-1\n" +
-		"executor: cursor-agent\n" +
+		"executor: agy\n" +
 		"routed_by: single-piece precision\n" +
 		"---\n" +
 		"Do the thing.\n"
@@ -331,102 +331,13 @@ func TestRunOmittedModelSkipsModelCheck(t *testing.T) {
 	}
 }
 
-// TestRunAgentOnNonOpencodeExecutorIsRejected proves that a packet naming
-// agent on an executor other than opencode is rejected before dispatch,
-// since agent is only meaningful for opencode.
-func TestRunAgentOnNonOpencodeExecutorIsRejected(t *testing.T) {
-	var stdout, stderr bytes.Buffer
-
-	dir := t.TempDir()
-	path := filepath.Join(dir, "packet.md")
-	content := "---\n" +
-		"id: lane-1\n" +
-		"executor: agy\n" +
-		"routed_by: single-piece precision\n" +
-		"agent: lucind-dag\n" +
-		"---\n" +
-		"Do the thing.\n"
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-		t.Fatalf("write packet fixture: %v", err)
-	}
-
-	code := run(context.Background(), []string{"run", "--packet", path}, &stdout, &stderr)
-
-	if code == 0 {
-		t.Fatalf("run with agent on a non-opencode executor exit code = 0, want non-zero")
-	}
-	if !strings.Contains(stderr.String(), "lucind-dag") {
-		t.Fatalf("stderr = %q, want it to name the agent", stderr.String())
-	}
-	if !strings.Contains(stderr.String(), "agy") {
-		t.Fatalf("stderr = %q, want it to name the executor", stderr.String())
-	}
-}
-
-// TestRunAgentOnOpencodeExecutorPasses proves that a packet naming agent on
-// executor: opencode passes the pre-dispatch agent check.
-func TestRunAgentOnOpencodeExecutorPasses(t *testing.T) {
-	var stdout, stderr bytes.Buffer
-
-	dir := t.TempDir()
-	path := filepath.Join(dir, "packet.md")
-	content := "---\n" +
-		"id: lane-1\n" +
-		"executor: opencode\n" +
-		"routed_by: DAG authoring, specialist agent required\n" +
-		"agent: lucind-dag\n" +
-		"---\n" +
-		"Do the thing.\n"
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-		t.Fatalf("write packet fixture: %v", err)
-	}
-
-	code := run(context.Background(), []string{"run", "--packet", path}, &stdout, &stderr)
-
-	// The agent check must pass; the run still fails downstream because
-	// this test has no real primary root / ledger wired -- what matters
-	// here is that the agent-mismatch message never appears.
-	if code == 0 {
-		t.Fatalf("run exit code = 0 with no real dispatch environment, want non-zero for an unrelated reason")
-	}
-	if strings.Contains(stderr.String(), "only meaningful for executor") {
-		t.Fatalf("stderr = %q, want agent on opencode to pass the check", stderr.String())
-	}
-}
-
-// TestRunAcceptsCursorAgentExecutor proves that a packet specifying
-// "executor: cursor-agent" passes the pre-dispatch unsupported executor check.
-func TestRunAcceptsCursorAgentExecutor(t *testing.T) {
-	factory, ok := supportedExecutors["cursor-agent"]
-	if !ok {
-		t.Fatalf("supportedExecutors[%q] not found, want cursor-agent to be accepted as a supported executor", "cursor-agent")
-	}
-	if factory == nil || factory() == nil {
-		t.Fatalf("supportedExecutors[%q] factory returned nil", "cursor-agent")
-	}
-}
-
-// TestRunAcceptsOpencodeExecutor proves that a packet specifying
-// "executor: opencode" passes the pre-dispatch unsupported executor check.
-func TestRunAcceptsOpencodeExecutor(t *testing.T) {
-	factory, ok := supportedExecutors["opencode"]
-	if !ok {
-		t.Fatalf("supportedExecutors[%q] not found, want opencode to be accepted as a supported executor", "opencode")
-	}
-	if factory == nil || factory() == nil {
-		t.Fatalf("supportedExecutors[%q] factory returned nil", "opencode")
-	}
-}
-
-// TestRunAcceptsClaudeExecutor proves that a packet specifying
-// "executor: claude" passes the pre-dispatch unsupported executor check.
-func TestRunAcceptsClaudeExecutor(t *testing.T) {
-	factory, ok := supportedExecutors["claude"]
-	if !ok {
-		t.Fatalf("supportedExecutors[%q] not found, want claude to be accepted as a supported executor", "claude")
-	}
-	if factory == nil || factory() == nil {
-		t.Fatalf("supportedExecutors[%q] factory returned nil", "claude")
+// TestRunRejectsNonAgyExecutors proves that deleted executors (cursor-agent,
+// opencode, claude) are rejected as unsupported executors.
+func TestRunRejectsNonAgyExecutors(t *testing.T) {
+	for _, name := range []string{"cursor-agent", "opencode", "claude"} {
+		if _, ok := supportedExecutors[name]; ok {
+			t.Errorf("supportedExecutors[%q] found, want non-agy executor to be removed", name)
+		}
 	}
 }
 
@@ -946,7 +857,6 @@ func setupTestSkills(t *testing.T, root string) {
 		t.Fatal(err)
 	}
 	plantOrchestratorSkillFile(t, root, "claude-code", "SKILL.md", "canonical orchestrator skill\n")
-	plantOrchestratorSkillFile(t, root, "opencode", "SKILL.md", "canonical orchestrator skill\n")
 	plantResultSchema(t, root, result.SchemaJSON())
 }
 
@@ -1087,7 +997,7 @@ packets:
     depends_on: []
     body_path: bodies/apply-ledger.md
   - id: apply-serve
-    executor: cursor-agent
+    executor: agy
     routed_by: HTTP isolated after ledger exists
     allowed_paths:
       - internal/serve/
@@ -1966,7 +1876,7 @@ func TestRunDispatchGatesOnAgyQuotaForAgyExecutorBatch(t *testing.T) {
 // pooled-account quota it checks is meaningless for other executors' billing.
 func TestRunDispatchSkipsAgyQuotaGateForNonAgyBatch(t *testing.T) {
 	primaryRoot := initRepo(t)
-	p1 := writeAgyPacket(t, primaryRoot, "lane-1", "cursor-agent")
+	p1 := writeAgyPacket(t, primaryRoot, "lane-1", "herdr-agy")
 	overrideDispatchDeps(t, testDoneExecutor{})
 
 	var gateCalled bool
@@ -5726,36 +5636,13 @@ func TestPhaseSubcommandUnknown(t *testing.T) {
 	}
 }
 
-func TestRunPreflight_SkillParity(t *testing.T) {
+func TestRunPreflight_SchemaFreshness(t *testing.T) {
 	if testing.Short() {
 		t.Skip("shells out to real git")
 	}
 
-	t.Run("skill tree mismatch halts before CreateWorktree", func(t *testing.T) {
-		primaryRoot := initRepo(t)
-		plantOrchestratorSkillFile(t, primaryRoot, "claude-code", "SKILL.md", "canonical\n")
-		plantOrchestratorSkillFile(t, primaryRoot, "opencode", "SKILL.md", "replica drifted\n")
-		plantResultSchema(t, primaryRoot, result.SchemaJSON())
-		packetPath := writeLegacyDispatchPacket(t, primaryRoot)
-
-		createCalled := spyCreateWorktree(t)
-		cwd := chdirRepo(t, primaryRoot)
-		defer os.Chdir(cwd)
-
-		var stdout, stderr bytes.Buffer
-		code := run(context.Background(), []string{"run", "--min-quota", "0", "--packet", packetPath}, &stdout, &stderr)
-		if code == 0 {
-			t.Fatalf("run with mismatched skill trees exit code = 0, want non-zero; stderr = %q", stderr.String())
-		}
-		if *createCalled {
-			t.Fatal("CreateWorktree was called, want skill-parity preflight to halt before worktree allocation")
-		}
-	})
-
 	t.Run("stale embedded schema halts before CreateWorktree", func(t *testing.T) {
 		primaryRoot := initRepo(t)
-		plantOrchestratorSkillFile(t, primaryRoot, "claude-code", "SKILL.md", "same\n")
-		plantOrchestratorSkillFile(t, primaryRoot, "opencode", "SKILL.md", "same\n")
 		plantResultSchema(t, primaryRoot, []byte(`{"stale":true}`))
 		packetPath := writeLegacyDispatchPacket(t, primaryRoot)
 
@@ -5772,65 +5659,15 @@ func TestRunPreflight_SkillParity(t *testing.T) {
 			t.Fatal("CreateWorktree was called, want schema-freshness preflight to halt before worktree allocation")
 		}
 	})
-
-	t.Run("feature create skill mismatch halts before ledger write", func(t *testing.T) {
-		primaryRoot := initRepo(t)
-		plantOrchestratorSkillFile(t, primaryRoot, "claude-code", "SKILL.md", "canonical\n")
-		plantOrchestratorSkillFile(t, primaryRoot, "opencode", "SKILL.md", "replica drifted\n")
-		plantResultSchema(t, primaryRoot, result.SchemaJSON())
-
-		cwd := chdirRepo(t, primaryRoot)
-		defer os.Chdir(cwd)
-
-		var stdout, stderr bytes.Buffer
-		code := run(context.Background(), []string{
-			"feature", "create",
-			"--id", "feat-preflight",
-			"--parent", "refs/heads/feature-preflight",
-			"--base-sha", strings.Repeat("a", 40),
-		}, &stdout, &stderr)
-		if code == 0 {
-			t.Fatalf("feature create with mismatched skill trees exit code = 0, want non-zero; stderr = %q", stderr.String())
-		}
-		ledg, err := ledger.Open(context.Background(), primaryRoot)
-		if err != nil {
-			t.Fatalf("ledger.Open: %v", err)
-		}
-		defer ledg.Close()
-		if _, err := feature.NewService(ledg).Get(context.Background(), "feat-preflight"); err == nil {
-			t.Fatal("feature create wrote a ledger row, want skill-parity preflight to halt first")
-		}
-	})
 }
 
-// TestPreflightOrchestratorContract_SkipsWhenTargetHasNoSkillTreeOrSchema
-// covers a target repo that never had plugin/claude-code/skills/lucind-ai/
-// or internal/result/result.schema.json in the first place -- any project
-// other than lucind-ai's own source tree, since a real plugin install never
-// places either file inside the target repo's own working directory (the
-// Claude Code plugin cache lives under the user's home directory, and it
-// never ships internal/result/result.schema.json at all -- that file is a
-// Go source artifact, not something the plugin distributes). Preflight must
-// skip cleanly rather than fail closed on a check that cannot apply here.
-func TestPreflightOrchestratorContract_SkipsWhenTargetHasNoSkillTreeOrSchema(t *testing.T) {
+// TestPreflightOrchestratorContract_SkipsWhenTargetHasNoSchema
+// covers a target repo that never had internal/result/result.schema.json in the first place.
+func TestPreflightOrchestratorContract_SkipsWhenTargetHasNoSchema(t *testing.T) {
 	primaryRoot := t.TempDir()
 
 	if err := preflightOrchestratorContract(primaryRoot); err != nil {
-		t.Fatalf("preflightOrchestratorContract(%q) error = %v, want nil: a target repo with neither the canonical skill tree nor the on-disk schema file does not participate in this self-check", primaryRoot, err)
-	}
-}
-
-// TestPreflightOrchestratorContract_SkillTreePresentStillFailsClosed pins
-// the self-hosting case: once the canonical Claude skill tree exists at
-// primaryRoot, a missing or mismatched OpenCode replica must still halt --
-// the new "skip when absent" behavior above must not weaken this.
-func TestPreflightOrchestratorContract_SkillTreePresentStillFailsClosed(t *testing.T) {
-	primaryRoot := t.TempDir()
-	plantOrchestratorSkillFile(t, primaryRoot, "claude-code", "SKILL.md", "canonical\n")
-	// No OpenCode replica planted at all.
-
-	if err := preflightOrchestratorContract(primaryRoot); err == nil {
-		t.Fatal("preflightOrchestratorContract() error = nil, want non-nil: canonical tree present with no replica must still fail closed")
+		t.Fatalf("preflightOrchestratorContract(%q) error = %v, want nil: a target repo without the on-disk schema file does not participate in this self-check", primaryRoot, err)
 	}
 }
 
@@ -5956,7 +5793,7 @@ func writeLegacyDispatchPacket(t *testing.T, primaryRoot string) string {
 	path := filepath.Join(primaryRoot, "packet-preflight.md")
 	content := "---\n" +
 		"id: lane-preflight\n" +
-		"executor: cursor-agent\n" +
+		"executor: agy\n" +
 		"routed_by: preflight barrier\n" +
 		"legacy_main: true\n" +
 		"expected_parent_sha: " + currentHead(t, primaryRoot) + "\n" +

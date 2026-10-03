@@ -318,7 +318,7 @@ not a valid json line
    
 {"ts":"2026-10-03T10:01:00Z","run_id":"r2","lane_id":"l2","attempt":1,"executor":"claude","provider":"claude","total_tokens":200,"tokens_known":true}
 {"corrupt json
-{"ts":"2026-10-03T10:02:00Z","run_id":"r3","lane_id":"l3","attempt":1,"executor":"cursor-agent","provider":"cursor","total_tokens":300,"tokens_known":true}
+{"ts":"2026-10-03T10:02:00Z","run_id":"r3","lane_id":"l3","attempt":1,"executor":"agy","provider":"agy","total_tokens":300,"tokens_known":true}
 `
 		if err := os.WriteFile(logPath, []byte(content), 0600); err != nil {
 			t.Fatalf("write fixture: %v", err)

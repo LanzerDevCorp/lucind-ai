@@ -34,7 +34,7 @@ packets:
     depends_on: []
     body_path: bodies/apply-ledger.md
   - id: apply-serve
-    executor: cursor-agent
+    executor: agy
     routed_by: HTTP isolated after ledger exists
     allowed_paths:
       - internal/serve/

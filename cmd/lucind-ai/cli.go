@@ -88,11 +88,8 @@ var ensureAgyQuota = executor.AgyQuota{}.Ensure
 // how to dispatch. Unlisted values are a routing error, never a silent
 // fallback to agy — see internal/run's Deps.LookupExecutor field.
 var supportedExecutors = map[string]func() executor.Executor{
-	"agy":          agyExecutor,
-	"claude":       func() executor.Executor { return executor.Claude{} },
-	"cursor-agent": func() executor.Executor { return executor.CursorAgent{} },
-	"herdr-agy":    herdrAgyExecutor,
-	"opencode":     func() executor.Executor { return executor.Opencode{} },
+	"agy":       agyExecutor,
+	"herdr-agy": herdrAgyExecutor,
 }
 
 // packetPaths collects every --packet flag value, in the order given, so a
@@ -294,27 +291,12 @@ func executePacketBatch(ctx context.Context, cfg dispatchBatchConfig, stdout, st
 		}
 	}
 
-	// A named agent is only meaningful for the opencode executor -- checked
-	// for every packet before any of them dispatches, exactly like the
-	// executor-support and model checks above. Other executors ignore
-	// Request.Agent silently at the Run level, but rejecting it here catches
-	// a packet author's mistake (or copy-paste from an opencode packet)
-	// before it dispatches instead of it just being a no-op.
-	for i, p := range ps {
-		if p.Agent == "" {
-			continue
-		}
-		if p.Executor != "opencode" {
-			fmt.Fprintf(stderr, "lucind-ai: packet %q names agent %q, but agent is only meaningful for executor \"opencode\" (got executor %q)\n", cfg.packetPaths[i], p.Agent, p.Executor)
-			return lucindrun.BatchReport{}, 1
-		}
-	}
 
 	// A named model must be one this executor actually knows -- checked
 	// for every packet before any of them dispatches, exactly like the
 	// executor-support check above. This is what stops a copy-pasted or
-	// mistaken model string from a different provider family (e.g. a
-	// gemini- model named for cursor-agent) from silently running -- and
+	// mistaken model string from a different provider family (e.g. an
+	// unknown model named for agy) from silently running -- and
 	// billing -- as if it belonged to that executor. An omitted model is
 	// always fine: the executor supplies its own DefaultModel.
 	for i, p := range ps {
@@ -1007,14 +989,6 @@ func validateDispatchThresholds(ctx context.Context, primaryRoot string, ps []pa
 	return nil
 }
 
-// orchestratorSkillTrees returns the canonical Claude skill tree and its
-// OpenCode replica, relative to primaryRoot. Tests may override this to
-// inject fixture roots without relying on a full plugin checkout.
-var orchestratorSkillTrees = func(primaryRoot string) (canonical, replica string) {
-	return filepath.Join(primaryRoot, "plugin", "claude-code", "skills", "lucind-ai"),
-		filepath.Join(primaryRoot, "plugin", "opencode", "skills", "lucind-ai")
-}
-
 // onDiskResultSchemaPath is the source-of-truth schema file the binary's
 // embedded copy must match. Tests may override this.
 var onDiskResultSchemaPath = func(primaryRoot string) string {
@@ -1024,32 +998,9 @@ var onDiskResultSchemaPath = func(primaryRoot string) string {
 // embeddedResultSchema returns the schema bytes compiled into this binary.
 var embeddedResultSchema = result.SchemaJSON
 
-// preflightOrchestratorContract fails closed if the Claude and OpenCode
-// skill trees are not byte-identical or the embedded result schema does not
+// preflightOrchestratorContract fails closed if the embedded result schema does not
 // match the on-disk file. It must run before any worktree allocation.
-//
-// Both checks are self-referential: they only make sense when primaryRoot is
-// lucind-ai's own source tree (self-hosting, or a fork of it). A real plugin
-// install never places either artifact inside a consumer project's own
-// working directory -- the Claude Code plugin cache lives under the user's
-// home directory and carries only the Claude-runtime skill tree (no
-// OpenCode replica), and it never ships internal/result/result.schema.json
-// at all, since that file is a Go source artifact, not something the plugin
-// distributes. So a target repo that never had the canonical skill tree or
-// the on-disk schema file to begin with does not participate in this
-// self-check, and preflight must skip that half cleanly rather than treat
-// absence as drift. Once either artifact is present, the check stays fully
-// fail-closed exactly as before.
 func preflightOrchestratorContract(primaryRoot string) error {
-	canonical, replica := orchestratorSkillTrees(primaryRoot)
-	if _, err := os.Stat(canonical); err == nil {
-		if err := skillTreesByteIdentical(canonical, replica); err != nil {
-			return err
-		}
-	} else if !os.IsNotExist(err) {
-		return fmt.Errorf("skill parity: stat canonical %s: %w", canonical, err)
-	}
-
 	path := onDiskResultSchemaPath(primaryRoot)
 	onDisk, err := os.ReadFile(path)
 	if err != nil {
@@ -1062,66 +1013,6 @@ func preflightOrchestratorContract(primaryRoot string) error {
 		return fmt.Errorf("embedded result schema is stale: does not match %s", path)
 	}
 	return nil
-}
-
-func skillTreesByteIdentical(canonical, replica string) error {
-	canFiles, err := readSkillTree(canonical)
-	if err != nil {
-		return fmt.Errorf("skill parity: read canonical %s: %w", canonical, err)
-	}
-	repFiles, err := readSkillTree(replica)
-	if err != nil {
-		return fmt.Errorf("skill parity: read replica %s: %w", replica, err)
-	}
-	if _, ok := canFiles["SKILL.md"]; !ok {
-		return fmt.Errorf("skill parity: canonical tree %s missing SKILL.md", canonical)
-	}
-	if len(canFiles) != len(repFiles) {
-		return fmt.Errorf("skill parity: Claude and OpenCode trees differ (canonical %d files, replica %d files)", len(canFiles), len(repFiles))
-	}
-	for rel, want := range canFiles {
-		got, ok := repFiles[rel]
-		if !ok {
-			return fmt.Errorf("skill parity: OpenCode tree missing %s", rel)
-		}
-		if !bytes.Equal(want, got) {
-			return fmt.Errorf("skill parity: %s differs between Claude and OpenCode trees", rel)
-		}
-	}
-	return nil
-}
-
-func readSkillTree(root string) (map[string][]byte, error) {
-	info, err := os.Stat(root)
-	if err != nil {
-		return nil, err
-	}
-	if !info.IsDir() {
-		return nil, fmt.Errorf("not a directory")
-	}
-	files := make(map[string][]byte)
-	err = filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if entry.IsDir() {
-			return nil
-		}
-		rel, err := filepath.Rel(root, path)
-		if err != nil {
-			return err
-		}
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		files[filepath.ToSlash(rel)] = data
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	return files, nil
 }
 
 // productionDeps constructs the production run.Deps wiring real-world
@@ -1153,7 +1044,7 @@ func productionDeps(runID, primaryRoot string, ledg *ledger.Ledger, timeout time
 			return worktree.HasUniqueCommits(ctx, worktreePath, baseSHA)
 		},
 		PorcelainEmpty: worktree.PorcelainEmpty,
-		PreCommitGate:  judgeGateFromEnv(),
+		PreCommitGate:  nil,
 		CombineTree:    integrate.Combine,
 		RunChecks:      integrate.Check,
 		PromoteTarget:  integrate.Promote,

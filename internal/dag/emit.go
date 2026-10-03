@@ -9,8 +9,8 @@ import (
 )
 
 // EmitPacketContent formats the frontmatter and body for a single packet Node.
-// The frontmatter includes id, executor, routed_by, model (if set), agent (if
-// set), a single-line JSON array for allowed_paths, and a single-line JSON
+// The frontmatter includes id, executor, routed_by, model (if set),
+// a single-line JSON array for allowed_paths, and a single-line JSON
 // array for read_only_paths (if non-empty). The body is the Markdown at
 // body_path, with any leading YAML frontmatter block of its own stripped --
 // see stripLeadingFrontmatter's doc comment for why that defends against a
@@ -38,9 +38,6 @@ func EmitPacketContent(node Node, baseDir string) (string, error) {
 	b.WriteString(fmt.Sprintf("routed_by: %s\n", node.RoutedBy))
 	if node.Model != "" {
 		b.WriteString(fmt.Sprintf("model: %s\n", node.Model))
-	}
-	if node.Agent != "" {
-		b.WriteString(fmt.Sprintf("agent: %s\n", node.Agent))
 	}
 	if node.Feature != "" {
 		b.WriteString(fmt.Sprintf("feature: %s\n", node.Feature))
@@ -87,11 +84,9 @@ func EmitPacketContent(node Node, baseDir string) (string, error) {
 // frontmatter blocks. internal/packet.Parse only consumes the first one, so
 // the second becomes literal body text starting with "---": passed as an
 // executor's prompt, that leading "-" is indistinguishable from a CLI flag
-// to an argv parser expecting a flag or a positional message (confirmed
-// against opencode's yargs-based CLI, which prints its own --help and exits
-// 1 instead of dispatching). Stripping any such block here makes Emit
-// idempotent regardless of how body_path was authored or whether it has
-// already been split once before.
+// to an argv parser expecting a flag or a positional message. Stripping any
+// such block here makes Emit idempotent regardless of how body_path was
+// authored or whether it has already been split once before.
 func stripLeadingFrontmatter(body []byte) []byte {
 	trimmed := strings.TrimLeft(string(body), "\n")
 	if !strings.HasPrefix(trimmed, "---\n") && trimmed != "---" {

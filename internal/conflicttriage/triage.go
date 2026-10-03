@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/LanzerDevCorp/lucind-ai/internal/integrate"
 	"github.com/LanzerDevCorp/lucind-ai/internal/reconcile"
-	"github.com/LanzerDevCorp/lucind-ai/internal/resolve"
 )
 
 // RunOptions configures an advisory triage pass. Invoker is required so
@@ -60,17 +60,17 @@ func RunTriage(ctx context.Context, opts RunOptions) (RunResult, error) {
 	// after JSON is persisted. Invariants below still apply.
 	_ = invErr
 
-	if hasMarkers, markerFiles, scanErr := resolve.ScanConflictMarkers(opts.WorktreePath); scanErr != nil {
+	if hasMarkers, markerFiles, scanErr := integrate.ScanConflictMarkers(opts.WorktreePath); scanErr != nil {
 		return failCandidate(ctx, opts, cand, payload, fmt.Errorf("conflicttriage: scan conflict markers: %w", scanErr))
 	} else if hasMarkers {
 		reason := fmt.Sprintf("conflict markers remain in worktree: %s", strings.Join(markerFiles, ", "))
 		return failCandidate(ctx, opts, cand, payload, errors.New(reason))
 	}
 
-	if offending, scopeErr := resolve.EnforceAllowedPaths(ctx, opts.WorktreePath, opts.BaseSHA, opts.AllowedPaths); scopeErr != nil && !errors.Is(scopeErr, resolve.ErrOutOfScopeEdits) {
+	if offending, scopeErr := integrate.EnforceAllowedPaths(ctx, opts.WorktreePath, opts.BaseSHA, opts.AllowedPaths); scopeErr != nil && !errors.Is(scopeErr, integrate.ErrOutOfScopeEdits) {
 		return failCandidate(ctx, opts, cand, payload, fmt.Errorf("conflicttriage: enforce allowed paths: %w", scopeErr))
 	} else if len(offending) > 0 {
-		return failCandidate(ctx, opts, cand, payload, fmt.Errorf("%w: %s", resolve.ErrOutOfScopeEdits, strings.Join(offending, ", ")))
+		return failCandidate(ctx, opts, cand, payload, fmt.Errorf("%w: %s", integrate.ErrOutOfScopeEdits, strings.Join(offending, ", ")))
 	}
 
 	return RunResult{Payload: payload, Candidate: cand}, nil

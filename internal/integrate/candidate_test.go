@@ -2,8 +2,6 @@ package integrate_test
 
 import (
 	"context"
-	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -26,7 +24,7 @@ func setupReconciliationRepo(t *testing.T, checkScriptContent string, targetCont
 	runGit(t, root, "config", "user.name", "integrate-test")
 
 	// Base commit with shared file and checks script
-	if err := os.WriteFile(filepath.Join(root, "file.txt"), []byte("base line\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "file.txt"), []byte("line 1\nline 2\nline 3\n"), 0o644); err != nil {
 		t.Fatalf("WriteFile error = %v", err)
 	}
 	if checkScriptContent != "" {
@@ -128,18 +126,10 @@ func TestCandidateResolverHappyPathCASPromotion(t *testing.T) {
 
 	ctx := context.Background()
 	checksScript := "#!/bin/sh\nexit 0\n"
-	repoRoot, targetSHA, sourceSHA := setupReconciliationRepo(t, checksScript, "target line 1\n", "source line 1\n")
+	repoRoot, targetSHA, sourceSHA := setupReconciliationRepo(t, checksScript, "target line 1\nline 2\nline 3\n", "line 1\nline 2\nsource line 3\n")
 	_, svc := setupLedgerAndService(t, repoRoot)
 
 	req, cand := createApprovedCandidate(t, ctx, svc, targetSHA, sourceSHA, []string{"file.txt"})
-
-	fakeInvoker := func(ctx context.Context, worktreePath, prompt string) (string, error) {
-		// Cleanly resolve file.txt without markers
-		if err := os.WriteFile(filepath.Join(worktreePath, "file.txt"), []byte("resolved line\n"), 0o644); err != nil {
-			return "", err
-		}
-		return "resolved conflict", nil
-	}
 
 	result, err := integrate.ResolveAndPromoteCandidate(ctx, integrate.CandidateParams{
 		PrimaryRoot:       repoRoot,
@@ -150,7 +140,6 @@ func TestCandidateResolverHappyPathCASPromotion(t *testing.T) {
 		TargetRef:         "refs/heads/feature-target",
 		ExpectedTargetSHA: targetSHA,
 		AllowedPaths:      cand.AllowedPaths,
-		Invoker:           fakeInvoker,
 		ReconcileService:  svc,
 	})
 	if err != nil {
@@ -200,17 +189,10 @@ func TestCandidateResolverChecksFailingBlocksPromotionAndPreservesEvidence(t *te
 	ctx := context.Background()
 	// Deliberately failing lucind-checks.sh
 	checksScript := "#!/bin/sh\necho 'mandatory checks test failure' >&2\nexit 1\n"
-	repoRoot, targetSHA, sourceSHA := setupReconciliationRepo(t, checksScript, "target line 1\n", "source line 1\n")
+	repoRoot, targetSHA, sourceSHA := setupReconciliationRepo(t, checksScript, "target line 1\nline 2\nline 3\n", "line 1\nline 2\nsource line 3\n")
 	_, svc := setupLedgerAndService(t, repoRoot)
 
 	req, cand := createApprovedCandidate(t, ctx, svc, targetSHA, sourceSHA, []string{"file.txt"})
-
-	fakeInvoker := func(ctx context.Context, worktreePath, prompt string) (string, error) {
-		if err := os.WriteFile(filepath.Join(worktreePath, "file.txt"), []byte("resolved line\n"), 0o644); err != nil {
-			return "", err
-		}
-		return "resolved conflict", nil
-	}
 
 	result, err := integrate.ResolveAndPromoteCandidate(ctx, integrate.CandidateParams{
 		PrimaryRoot:       repoRoot,
@@ -221,7 +203,6 @@ func TestCandidateResolverChecksFailingBlocksPromotionAndPreservesEvidence(t *te
 		TargetRef:         "refs/heads/feature-target",
 		ExpectedTargetSHA: targetSHA,
 		AllowedPaths:      cand.AllowedPaths,
-		Invoker:           fakeInvoker,
 		ReconcileService:  svc,
 	})
 	if err != nil {
@@ -253,29 +234,17 @@ func TestCandidateResolverChecksFailingBlocksPromotionAndPreservesEvidence(t *te
 	}
 }
 
-func TestCandidateResolverConflictBoundExceededAborts(t *testing.T) {
+func TestCandidateResolverConflictFailsCandidate(t *testing.T) {
 	if testing.Short() {
 		t.Skip("shells out to real git")
 	}
 
 	ctx := context.Background()
-	var linesA, linesB strings.Builder
-	for i := 0; i < 210; i++ {
-		linesA.WriteString(fmt.Sprintf("target line %d\n", i))
-		linesB.WriteString(fmt.Sprintf("source line %d\n", i))
-	}
-
 	checksScript := "#!/bin/sh\nexit 0\n"
-	repoRoot, targetSHA, sourceSHA := setupReconciliationRepo(t, checksScript, linesA.String(), linesB.String())
+	repoRoot, targetSHA, sourceSHA := setupReconciliationRepo(t, checksScript, "target line\n", "source line\n")
 	_, svc := setupLedgerAndService(t, repoRoot)
 
 	req, cand := createApprovedCandidate(t, ctx, svc, targetSHA, sourceSHA, []string{"file.txt"})
-
-	invokerCalled := false
-	fakeInvoker := func(ctx context.Context, worktreePath, prompt string) (string, error) {
-		invokerCalled = true
-		panic("invoker must not be called when conflict lines exceed 400")
-	}
 
 	result, err := integrate.ResolveAndPromoteCandidate(ctx, integrate.CandidateParams{
 		PrimaryRoot:       repoRoot,
@@ -286,25 +255,20 @@ func TestCandidateResolverConflictBoundExceededAborts(t *testing.T) {
 		TargetRef:         "refs/heads/feature-target",
 		ExpectedTargetSHA: targetSHA,
 		AllowedPaths:      cand.AllowedPaths,
-		Invoker:           fakeInvoker,
 		ReconcileService:  svc,
-		MaxConflictLines:  400,
 	})
 	if err != nil {
 		t.Fatalf("ResolveAndPromoteCandidate() error = %v, want nil", err)
 	}
 
 	if result.Promoted {
-		t.Fatalf("result.Promoted = true, want false")
-	}
-	if invokerCalled {
-		t.Errorf("invoker was called, want not called")
+		t.Fatalf("result.Promoted = true, want false on conflict")
 	}
 	if result.Status != reconcile.CandidateStatusFailed {
 		t.Errorf("result.Status = %q, want %q", result.Status, reconcile.CandidateStatusFailed)
 	}
-	if !strings.Contains(result.FailureReason, "conflict exceeds 400-line bound") {
-		t.Errorf("result.FailureReason = %q, want bound message", result.FailureReason)
+	if !strings.Contains(result.FailureReason, "CONFLICT") && !strings.Contains(result.FailureReason, "Automatic merge failed") {
+		t.Errorf("result.FailureReason = %q, want conflict message", result.FailureReason)
 	}
 
 	// Verify target parent ref was NOT updated
@@ -314,144 +278,6 @@ func TestCandidateResolverConflictBoundExceededAborts(t *testing.T) {
 	}
 }
 
-func TestCandidateResolverTimeoutFailsClosed(t *testing.T) {
-	if testing.Short() {
-		t.Skip("shells out to real git")
-	}
-
-	ctx := context.Background()
-	checksScript := "#!/bin/sh\nexit 0\n"
-	repoRoot, targetSHA, sourceSHA := setupReconciliationRepo(t, checksScript, "target line\n", "source line\n")
-	_, svc := setupLedgerAndService(t, repoRoot)
-
-	req, cand := createApprovedCandidate(t, ctx, svc, targetSHA, sourceSHA, []string{"file.txt"})
-
-	fakeInvoker := func(ctx context.Context, worktreePath, prompt string) (string, error) {
-		return "timeout", context.DeadlineExceeded
-	}
-
-	result, err := integrate.ResolveAndPromoteCandidate(ctx, integrate.CandidateParams{
-		PrimaryRoot:       repoRoot,
-		CandidateID:       cand.ID,
-		RequestID:         req.ID,
-		SourceRef:         "refs/heads/feature-source",
-		ExpectedSourceSHA: sourceSHA,
-		TargetRef:         "refs/heads/feature-target",
-		ExpectedTargetSHA: targetSHA,
-		AllowedPaths:      cand.AllowedPaths,
-		Invoker:           fakeInvoker,
-		Timeout:           50 * time.Millisecond,
-		ReconcileService:  svc,
-	})
-	if err != nil {
-		t.Fatalf("ResolveAndPromoteCandidate() error = %v, want nil", err)
-	}
-
-	if result.Promoted {
-		t.Fatalf("result.Promoted = true, want false")
-	}
-	if result.Status != reconcile.CandidateStatusFailed {
-		t.Errorf("result.Status = %q, want %q", result.Status, reconcile.CandidateStatusFailed)
-	}
-	if !strings.Contains(result.FailureReason, "deadline exceeded") && !strings.Contains(result.FailureReason, "timeout") {
-		t.Errorf("result.FailureReason = %q, want timeout", result.FailureReason)
-	}
-}
-
-func TestCandidateResolverLeftoverMarkersBlockPromotion(t *testing.T) {
-	if testing.Short() {
-		t.Skip("shells out to real git")
-	}
-
-	ctx := context.Background()
-	checksScript := "#!/bin/sh\nexit 0\n"
-	repoRoot, targetSHA, sourceSHA := setupReconciliationRepo(t, checksScript, "target line\n", "source line\n")
-	_, svc := setupLedgerAndService(t, repoRoot)
-
-	req, cand := createApprovedCandidate(t, ctx, svc, targetSHA, sourceSHA, []string{"file.txt"})
-
-	fakeInvoker := func(ctx context.Context, worktreePath, prompt string) (string, error) {
-		if err := os.WriteFile(filepath.Join(worktreePath, "file.txt"), []byte("<<<<<<< HEAD\nunresolved\n=======\n"), 0o644); err != nil {
-			return "", err
-		}
-		return "left markers", nil
-	}
-
-	result, err := integrate.ResolveAndPromoteCandidate(ctx, integrate.CandidateParams{
-		PrimaryRoot:       repoRoot,
-		CandidateID:       cand.ID,
-		RequestID:         req.ID,
-		SourceRef:         "refs/heads/feature-source",
-		ExpectedSourceSHA: sourceSHA,
-		TargetRef:         "refs/heads/feature-target",
-		ExpectedTargetSHA: targetSHA,
-		AllowedPaths:      cand.AllowedPaths,
-		Invoker:           fakeInvoker,
-		ReconcileService:  svc,
-	})
-	if err != nil {
-		t.Fatalf("ResolveAndPromoteCandidate() error = %v, want nil", err)
-	}
-
-	if result.Promoted {
-		t.Fatalf("result.Promoted = true, want false")
-	}
-	if result.Status != reconcile.CandidateStatusFailed {
-		t.Errorf("result.Status = %q, want %q", result.Status, reconcile.CandidateStatusFailed)
-	}
-	if !strings.Contains(result.FailureReason, "conflict markers remain") {
-		t.Errorf("result.FailureReason = %q, want marker error", result.FailureReason)
-	}
-}
-
-func TestCandidateResolverOutOfScopeEditsBlockPromotion(t *testing.T) {
-	if testing.Short() {
-		t.Skip("shells out to real git")
-	}
-
-	ctx := context.Background()
-	checksScript := "#!/bin/sh\nexit 0\n"
-	repoRoot, targetSHA, sourceSHA := setupReconciliationRepo(t, checksScript, "target line\n", "source line\n")
-	_, svc := setupLedgerAndService(t, repoRoot)
-
-	req, cand := createApprovedCandidate(t, ctx, svc, targetSHA, sourceSHA, []string{"file.txt"})
-
-	fakeInvoker := func(ctx context.Context, worktreePath, prompt string) (string, error) {
-		if err := os.WriteFile(filepath.Join(worktreePath, "file.txt"), []byte("resolved\n"), 0o644); err != nil {
-			return "", err
-		}
-		if err := os.WriteFile(filepath.Join(worktreePath, "leak.txt"), []byte("leakage\n"), 0o644); err != nil {
-			return "", err
-		}
-		return "resolved with leak", nil
-	}
-
-	result, err := integrate.ResolveAndPromoteCandidate(ctx, integrate.CandidateParams{
-		PrimaryRoot:       repoRoot,
-		CandidateID:       cand.ID,
-		RequestID:         req.ID,
-		SourceRef:         "refs/heads/feature-source",
-		ExpectedSourceSHA: sourceSHA,
-		TargetRef:         "refs/heads/feature-target",
-		ExpectedTargetSHA: targetSHA,
-		AllowedPaths:      cand.AllowedPaths,
-		Invoker:           fakeInvoker,
-		ReconcileService:  svc,
-	})
-	if err != nil {
-		t.Fatalf("ResolveAndPromoteCandidate() error = %v, want nil", err)
-	}
-
-	if result.Promoted {
-		t.Fatalf("result.Promoted = true, want false")
-	}
-	if result.Status != reconcile.CandidateStatusFailed {
-		t.Errorf("result.Status = %q, want %q", result.Status, reconcile.CandidateStatusFailed)
-	}
-	if !strings.Contains(result.FailureReason, "outside declared allowed_paths") {
-		t.Errorf("result.FailureReason = %q, want outside allowed_paths error", result.FailureReason)
-	}
-}
 
 func TestCandidateResolverStaleExpectedRefsFailsClosed(t *testing.T) {
 	if testing.Short() {
@@ -476,12 +302,6 @@ func TestCandidateResolverStaleExpectedRefsFailsClosed(t *testing.T) {
 		runGit(t, repoRoot, "commit", "-m", "advance source")
 		runGit(t, repoRoot, "checkout", "main")
 
-		invokerCalled := false
-		fakeInvoker := func(ctx context.Context, worktreePath, prompt string) (string, error) {
-			invokerCalled = true
-			return "", nil
-		}
-
 		result, err := integrate.ResolveAndPromoteCandidate(ctx, integrate.CandidateParams{
 			PrimaryRoot:       repoRoot,
 			CandidateID:       cand.ID,
@@ -491,7 +311,6 @@ func TestCandidateResolverStaleExpectedRefsFailsClosed(t *testing.T) {
 			TargetRef:         "refs/heads/feature-target",
 			ExpectedTargetSHA: targetSHA,
 			AllowedPaths:      cand.AllowedPaths,
-			Invoker:           fakeInvoker,
 			ReconcileService:  svc,
 		})
 		if err != nil {
@@ -500,9 +319,6 @@ func TestCandidateResolverStaleExpectedRefsFailsClosed(t *testing.T) {
 
 		if result.Promoted {
 			t.Fatalf("result.Promoted = true, want false")
-		}
-		if invokerCalled {
-			t.Errorf("invoker was called despite stale source ref")
 		}
 		if result.Status != reconcile.CandidateStatusStale {
 			t.Errorf("result.Status = %q, want %q", result.Status, reconcile.CandidateStatusStale)
@@ -527,12 +343,6 @@ func TestCandidateResolverStaleExpectedRefsFailsClosed(t *testing.T) {
 		runGit(t, repoRoot, "commit", "-m", "advance target")
 		runGit(t, repoRoot, "checkout", "main")
 
-		invokerCalled := false
-		fakeInvoker := func(ctx context.Context, worktreePath, prompt string) (string, error) {
-			invokerCalled = true
-			return "", nil
-		}
-
 		result, err := integrate.ResolveAndPromoteCandidate(ctx, integrate.CandidateParams{
 			PrimaryRoot:       repoRoot,
 			CandidateID:       cand.ID,
@@ -542,7 +352,6 @@ func TestCandidateResolverStaleExpectedRefsFailsClosed(t *testing.T) {
 			TargetRef:         "refs/heads/feature-target",
 			ExpectedTargetSHA: targetSHA, // stale SHA!
 			AllowedPaths:      cand.AllowedPaths,
-			Invoker:           fakeInvoker,
 			ReconcileService:  svc,
 		})
 		if err != nil {
@@ -551,9 +360,6 @@ func TestCandidateResolverStaleExpectedRefsFailsClosed(t *testing.T) {
 
 		if result.Promoted {
 			t.Fatalf("result.Promoted = true, want false")
-		}
-		if invokerCalled {
-			t.Errorf("invoker was called despite stale target ref")
 		}
 		if result.Status != reconcile.CandidateStatusStale {
 			t.Errorf("result.Status = %q, want %q", result.Status, reconcile.CandidateStatusStale)
@@ -564,49 +370,3 @@ func TestCandidateResolverStaleExpectedRefsFailsClosed(t *testing.T) {
 	})
 }
 
-func TestCandidateResolverSemanticAmbiguityBlocksPromotion(t *testing.T) {
-	if testing.Short() {
-		t.Skip("shells out to real git")
-	}
-
-	ctx := context.Background()
-	checksScript := "#!/bin/sh\nexit 0\n"
-	repoRoot, targetSHA, sourceSHA := setupReconciliationRepo(t, checksScript,
-		"func Rate() int { return 10 /* tier 1 discount */ }\n",
-		"func Rate() int { return 25 /* promo campaign discount */ }\n",
-	)
-	_, svc := setupLedgerAndService(t, repoRoot)
-
-	req, cand := createApprovedCandidate(t, ctx, svc, targetSHA, sourceSHA, []string{"file.txt"})
-
-	fakeInvoker := func(ctx context.Context, worktreePath, prompt string) (string, error) {
-		return "ambiguous discount rules require human business decision",
-			errors.New("semantic ambiguity: conflicting business rules cannot be resolved automatically")
-	}
-
-	result, err := integrate.ResolveAndPromoteCandidate(ctx, integrate.CandidateParams{
-		PrimaryRoot:       repoRoot,
-		CandidateID:       cand.ID,
-		RequestID:         req.ID,
-		SourceRef:         "refs/heads/feature-source",
-		ExpectedSourceSHA: sourceSHA,
-		TargetRef:         "refs/heads/feature-target",
-		ExpectedTargetSHA: targetSHA,
-		AllowedPaths:      cand.AllowedPaths,
-		Invoker:           fakeInvoker,
-		ReconcileService:  svc,
-	})
-	if err != nil {
-		t.Fatalf("ResolveAndPromoteCandidate() error = %v, want nil", err)
-	}
-
-	if result.Promoted {
-		t.Fatalf("result.Promoted = true, want false on semantic ambiguity")
-	}
-	if result.Status != reconcile.CandidateStatusFailed {
-		t.Errorf("result.Status = %q, want %q", result.Status, reconcile.CandidateStatusFailed)
-	}
-	if !strings.Contains(result.FailureReason, "semantic ambiguity") {
-		t.Errorf("result.FailureReason = %q, want semantic ambiguity failure", result.FailureReason)
-	}
-}

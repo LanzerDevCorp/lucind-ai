@@ -16,7 +16,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/LanzerDevCorp/lucind-ai/internal/resolve"
 	"github.com/LanzerDevCorp/lucind-ai/internal/worktree"
 )
 
@@ -66,43 +65,12 @@ var ErrEmptySHA = errors.New("integrate: candidate sha and expected sha must not
 // wrapped with the failing branch name and git's output.
 // The caller never has to clean up after a failed Combine call.
 func Combine(ctx context.Context, primaryRoot, runID, parentRef, baseSHA string, branches []string) (worktreePath, branchName string, err error) {
-	return combine(ctx, primaryRoot, runID, parentRef, baseSHA, branches, resolve.RealInvoker)
-}
-
-// combine is Combine's implementation, parameterized over an Invoker for
-// conflict resolution. See Combine's doc comment for the meaning of
-// parentRef and baseSHA.
-func combine(ctx context.Context, primaryRoot, runID, parentRef, baseSHA string, branches []string, invoke resolve.Invoker) (worktreePath, branchName string, err error) {
 	wt, err := worktree.CreateWithParent(ctx, primaryRoot, "integrate-"+runID, parentRef, baseSHA)
 	if err != nil {
 		return "", "", fmt.Errorf("integrate: combine create worktree: %w", err)
 	}
 
 	for _, branch := range branches {
-		// A clean "git merge --no-ff" otherwise produces byte-identical trees
-		// and parents across repeated retries of the exact same, unchanged
-		// lane branches, but the resulting merge commit is still
-		// non-deterministic across retries for two independent reasons:
-		//
-		//  1. Its author/committer dates default to the current wall-clock
-		//     time, which differs on every invocation.
-		//  2. Its auto-generated message is "Merge branch '<branch>' into
-		//     <current-branch>" -- and the current branch here is always
-		//     "integrate-"+runID (see worktree.CreateWithParent above),
-		//     freshly named per invocation, so the message text itself
-		//     differs on every retry even when merging the exact same
-		//     branch.
-		//
-		// Either alone changes the merge commit's SHA even though nothing
-		// about its content did, which defeats "lucind-ai integrate retry":
-		// a reconciliation resolution registered against one retry's
-		// candidate_sha can never carry forward to the next retry's
-		// freshly-regenerated, unrelated candidate_sha. Pinning the dates to
-		// branch's own tip commit date (immutable for a preserved "done"
-		// lane branch) and the message to a fixed, runID-independent string
-		// makes the merge commit -- and therefore candidate_sha --
-		// deterministic across retries as long as the merged branches
-		// themselves have not changed.
 		cmd := exec.CommandContext(ctx, "git", "merge", "--no-ff", "-m", "Merge branch '"+branch+"'", branch)
 		cmd.Dir = wt.Path
 		if commitDate, dateErr := branchCommitDate(ctx, wt.Path, branch); dateErr == nil && commitDate != "" {
@@ -110,11 +78,6 @@ func combine(ctx context.Context, primaryRoot, runID, parentRef, baseSHA string,
 		}
 		out, mergeErr := cmd.CombinedOutput()
 		if mergeErr != nil {
-			resolved, _, resolveErr := resolve.Resolve(ctx, wt.Path, invoke)
-			if resolveErr == nil && resolved {
-				continue
-			}
-
 			abortCmd := exec.CommandContext(ctx, "git", "merge", "--abort")
 			abortCmd.Dir = wt.Path
 			_ = abortCmd.Run()
@@ -131,6 +94,11 @@ func combine(ctx context.Context, primaryRoot, runID, parentRef, baseSHA string,
 	}
 
 	return wt.Path, wt.Branch, nil
+}
+
+// CombineWithInvoker is retained for test compatibility; conflict resolution is removed.
+func CombineWithInvoker(ctx context.Context, primaryRoot, runID, parentRef, baseSHA string, branches []string, _ func(context.Context, string, string) (string, error)) (worktreePath, branchName string, err error) {
+	return Combine(ctx, primaryRoot, runID, parentRef, baseSHA, branches)
 }
 
 // branchCommitDate returns branch's tip commit date in strict ISO 8601

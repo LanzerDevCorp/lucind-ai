@@ -433,7 +433,7 @@ func TestEnvelopeCommitSchemaContract(t *testing.T) {
 
 func TestVerifyResultEnvelopeSchemaCompliance(t *testing.T) {
 	validVerifyJSON := `{
-		"packet_id": "verify-sample-cursor-agent",
+		"packet_id": "verify-sample-agy",
 		"status": "done",
 		"summary": "VERDICT: PASS. Implementation satisfies all spec requirements in specs/sample/spec.md. Mechanical checks passed cleanly.",
 		"hard_stops": [
@@ -477,8 +477,8 @@ func TestVerifyResultEnvelopeSchemaCompliance(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Read(validVerifyJSON) error = %v, want nil", err)
 	}
-	if e.PacketID != "verify-sample-cursor-agent" {
-		t.Errorf("PacketID = %q, want %q", e.PacketID, "verify-sample-cursor-agent")
+	if e.PacketID != "verify-sample-agy" {
+		t.Errorf("PacketID = %q, want %q", e.PacketID, "verify-sample-agy")
 	}
 	if e.Commit != "" {
 		t.Errorf("Commit = %q, want empty", e.Commit)
@@ -497,7 +497,7 @@ func TestVerifyResultEnvelopeSchemaCompliance(t *testing.T) {
 
 	// 2. Add unauthorized top-level property "verdict": "pass".
 	invalidVerifyJSON := `{
-		"packet_id": "verify-sample-cursor-agent",
+		"packet_id": "verify-sample-agy",
 		"status": "done",
 		"summary": "VERDICT: PASS. Implementation satisfies all spec requirements in specs/sample/spec.md. Mechanical checks passed cleanly.",
 		"verdict": "pass",
