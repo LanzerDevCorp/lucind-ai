@@ -17,6 +17,9 @@ D4 | 2026-10-03 | T4 | "make sdd-* derivation optional": lane roles apply/verify
 D5 | 2026-10-03 | T8 | blind review item: the exit sentinel nonce is readable from run.sh by the agent (it could print a forged sentinel) | delete run.sh before running agy / accept | accepted | agy already runs with --dangerously-skip-permissions and can write any file, so exit code and output are not a security boundary; trust comes from the dispatcher (attestation, allowed_paths diff, judges). A forged sentinel without a matching exit.code fails closed (read error) | n/a | f721ce8
 D6 | 2026-10-03 | T8 | review items: no hard-kill after C-c grace; state dirs of failed runs are never reaped | fix now / new task | new task T16 | closing panes/workspaces needs a policy for reused panes (rule: never close panes you did not create) that deserves its own task | n/a | f721ce8
 
+D7 | 2026-10-03 | T9 | dispatcher commit and repository hooks | run hooks (repo policy) / --no-verify | --no-verify | attested verification already gates quality; hooks could be redirected by the worker (core.hooksPath) or add trailers, and would run with dispatcher authority; two blind reviewers recommended it | remove --no-verify in commit_step.go (defaultGitCommit) | bed8d65
+D8 | 2026-10-03 | T9 | packet field design: commit_message requires verification; commit obligation value dispatcher; envelope.Commit must be empty | worker may also commit / dispatcher-only | dispatcher-only for packets that declare commit_message | one clear owner of the commit; legacy packets unchanged | drop CommitMessage handling in run.Execute and the dispatcher branch in accept | bed8d65
+
 Note for tomorrow: the T1 worktree `~/git_root/lucind-ai-worktrees/lane-t1-hmac-attestation` and branch `lane/t1-hmac-attestation` are kept (deletion is forbidden overnight).
 
 ## Registro de rotaciones
