@@ -20,6 +20,8 @@ D6 | 2026-10-03 | T8 | review items: no hard-kill after C-c grace; state dirs of
 D7 | 2026-10-03 | T9 | dispatcher commit and repository hooks | run hooks (repo policy) / --no-verify | --no-verify | attested verification already gates quality; hooks could be redirected by the worker (core.hooksPath) or add trailers, and would run with dispatcher authority; two blind reviewers recommended it | remove --no-verify in commit_step.go (defaultGitCommit) | bed8d65
 D8 | 2026-10-03 | T9 | packet field design: commit_message requires verification; commit obligation value dispatcher; envelope.Commit must be empty | worker may also commit / dispatcher-only | dispatcher-only for packets that declare commit_message | one clear owner of the commit; legacy packets unchanged | drop CommitMessage handling in run.Execute and the dispatcher branch in accept | bed8d65
 
+D9 | 2026-10-03 | T11 | what to do when a declared route contradicts computed signals | reject all mismatches / upgrade inline to worker / warn only | upgrade inline->worker (printed), reject only missing evidence or a malformed fanout; over-delegation (worker below threshold) accepted | a packet that reaches the dispatcher is delegated anyway, so upgrading is consistent and never unsafe; rejection is reserved for missing/incoherent declarations | remove validateDispatchThresholds from runDispatch in cmd/lucind-ai/cli.go | ebcd33c
+
 Note for tomorrow: the T1 worktree `~/git_root/lucind-ai-worktrees/lane-t1-hmac-attestation` and branch `lane/t1-hmac-attestation` are kept (deletion is forbidden overnight).
 
 ## Registro de rotaciones
