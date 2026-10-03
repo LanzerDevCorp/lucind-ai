@@ -116,7 +116,11 @@ Each task closes with a work-unit commit and records its commit id and review ti
     - Commits: lane `7f12d0e`, fix commit on the lane; integrated as the two commits ending at `f919168`.
 
   - [ ] **T12c. Explorer fan-out.** \`lucind-ai explore\`: 3 read-only lens lanes (structural, textual, historical) in parallel, then one synthesis lane fed with the bounded lens outputs; prints the handoff. Depends on T12a, T6. Est. ~350 lines.
-- [ ] **T13. Usage logging and report.** Per-call JSONL (provider, model, tokens, lane) and a report command against the 60/15/25 target. Route: delegated writer. Est. ~250 lines.
+- [x] **T13. Usage logging and report.** Per-call JSONL (provider, model, tokens, lane) and a report command against the 60/15/25 target. Route: delegated writer. Est. ~250 lines.
+  - Route: delegated writer (agy `gemini-3.8-flash-high`; trigger: new package + dispatcher wiring + CLI). Shipped `internal/usagelog` (append-only JSONL at `$XDG_STATE_HOME/lucind-ai/usage.jsonl`, 0600; `ExtractUsage` from agy/claude-style stdout JSON, fallback to progress events, else `tokens_known=false`; tolerant reader that skips and counts corrupt lines), one record per executor attempt in `run.Execute` (`Deps.RecordUsage` seam), `lucind-ai usage report [--since] [--file] [--json]` with the 60/15/25 comparison, `docs/usage-log.md`.
+  - Evidence: orchestrator re-ran build, vet, full suite and `-race` on usagelog/run/cmd; real binary report on a fixture (shares match hand calculation: 357630/517630 = 69.1%); found by hand that the cmd tests wrote 18 records of fake lanes into the real state file (the run package had its own guard, cmd did not): added an `init()` guard (`LUCIND_USAGE_LOG=off`) in `cmd/lucind-ai/usage_test.go`, removed the polluted file (every record was a test lane/model) and verified two full test runs create no file.
+  - Commit: lane `47bd901`; integrated as `47bd901`. Limitation documented: orchestrator Claude usage outside `claude` lanes is not visible.
+
 - [ ] **T14. Router interface with Jev in shadow mode.** Router interface; deterministic implementation as baseline and permanent fallback; Jev adapter over plain HTTP (no Go SDK) that logs disagreements to the T13 JSONL and has no authority. Read `docs.typesafe.ai/api.md` and `legal.md` first. Route: delegated writer. Est. ~350 lines.
 - [ ] **T15. Rules source and generated files.** Single rules source generating `CLAUDE.md`, `GEMINI.md`, `AGENTS.md` per workspace; workspace `CLAUDE.md` states that delegation goes through the dispatcher. Route: delegated writer. Est. ~200 lines.
 - [ ] **T16. HerdrAgy lifecycle: hard stop and cleanup.** Found by the T8 blind review: (a) after a timeout the C-c grace period can expire and the pane process keeps running (no hard-kill fallback); (b) state dirs `$XDG_STATE_HOME/lucind-ai/herdr/run-*` are kept on failure and never reaped; (c) `pane wait-output` followed by reading `exit.code` has no cross-check that agy really exited. Add a bounded hard-stop policy (second C-c, then close only the pane/workspace that this executor itself opened, never reused ones) and a reaper for old run dirs with a retention window. Route: delegated writer. Est. ~200 lines. Depends on T8.
@@ -141,6 +145,7 @@ Order: T1, T1b, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T1
 ## Next step
 
 T2 (packet contract fields and `interaction_required`): delegate to agy in a new worktree `lane/t2-packet-fields` from `feature/herdr-agent-factory`. The T1 worktree `lane-t1-hmac-attestation` is kept until the follow-ups are decided; remove it only after confirming nothing unique remains (its commit was cherry-picked, so the SHA differs).
+- 2026-10-03: T13 closed (`47bd901`).
 - 2026-10-03: T12b closed (`f919168`), review B pending (quota).
 - 2026-10-03: T12a closed (`be120f5`).
 - 2026-10-03: T11 closed (`ebcd33c`).
