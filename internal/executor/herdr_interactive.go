@@ -3,6 +3,7 @@ package executor
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/LanzerDevCorp/lucind-ai/internal/agyhooks"
 	"github.com/LanzerDevCorp/lucind-ai/internal/agytrust"
+	"github.com/LanzerDevCorp/lucind-ai/internal/rules"
 )
 
 // resultEnvelopeRelPath mirrors the dispatcher's contract (internal/run: .lucind/result.json).
@@ -94,6 +96,22 @@ func (h HerdrAgy) runInteractive(ctx context.Context, req Request) (outcome Outc
 		return Outcome{}, fmt.Errorf("install Stop hook: %w", err)
 	}
 	defer removeLaneHooks(req.WorktreePath)
+
+	// Standing constraints as Antigravity rules. They are guidance on top of the prompt, so a
+	// failure here is reported, not fatal.
+	var rulesWarning string
+	if ruleFiles, rerr := laneRuleFiles(req); rerr != nil {
+		rulesWarning = "lane rules skipped: " + rerr.Error()
+	} else if rerr := agyhooks.InstallRules(ctx, req.WorktreePath, ruleFiles); rerr != nil {
+		rulesWarning = "lane rules skipped: " + rerr.Error()
+	} else {
+		defer agyhooks.RemoveRules(req.WorktreePath, ruleFiles)
+	}
+	defer func() {
+		if rulesWarning != "" {
+			outcome.Stderr = strings.TrimSpace(outcome.Stderr + "\n" + rulesWarning)
+		}
+	}()
 
 	commonDir, err := h.getGitCommonDir(ctx, req.WorktreePath)
 	if err != nil {
@@ -301,6 +319,26 @@ func readInteractiveExit(exitCodePath string) (Outcome, error) {
 		return Outcome{}, fmt.Errorf("parse exit.code %q: %w", strings.TrimSpace(string(b)), convErr)
 	}
 	return Outcome{ExitCode: code}, nil
+}
+
+// laneRuleFiles renders the lane's Antigravity rules from the workspace's lucind-rules.md when it
+// has one, otherwise from the built-in default source.
+func laneRuleFiles(req Request) (map[string][]byte, error) {
+	src := rules.DefaultSource()
+	if b, err := os.ReadFile(filepath.Join(req.WorktreePath, "lucind-rules.md")); err == nil {
+		src = b
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return nil, fmt.Errorf("read lucind-rules.md: %w", err)
+	}
+	sections, err := rules.Parse(src)
+	if err != nil {
+		return nil, fmt.Errorf("parse lucind-rules.md: %w", err)
+	}
+	sum := sha256.Sum256(src)
+	return rules.LaneFiles(sections, hex.EncodeToString(sum[:]), rules.LaneScope{
+		AllowedPaths:  req.AllowedPaths,
+		ReadOnlyPaths: req.ReadOnlyPaths,
+	}), nil
 }
 
 // removeLaneHooks deletes the hooks file this lane installed (and .agents when that leaves it empty).

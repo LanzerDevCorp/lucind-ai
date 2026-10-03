@@ -539,6 +539,7 @@ func Execute(ctx context.Context, deps Deps, p packet.Packet) (Report, error) {
 			WorktreePath:   wt.Path,
 			Model:          model,
 			Agent:          p.Agent,
+			AllowedPaths:   append([]string(nil), p.AllowedPaths...),
 			ReadOnlyPaths:  append([]string(nil), p.ReadOnlyPaths...),
 			RequiredSkills: append([]string(nil), p.RequiredSkills...),
 			SchemaPath:     schemaPath,

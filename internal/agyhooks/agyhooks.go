@@ -187,6 +187,12 @@ func Install(ctx context.Context, worktree string, o Options) error {
 }
 
 func updateGitExclude(ctx context.Context, worktree string) error {
+	return addGitExclude(ctx, worktree, "/.agents/hooks.json")
+}
+
+// addGitExclude appends entry to the repository's info/exclude (once) so lane-only files never
+// show up in the lane diff or in the dispatcher commit.
+func addGitExclude(ctx context.Context, worktree, excludeEntry string) error {
 	cmd := exec.CommandContext(ctx, "git", "-C", worktree, "rev-parse", "--git-path", "info/exclude")
 	out, err := cmd.Output()
 	if err != nil {
@@ -196,8 +202,6 @@ func updateGitExclude(ctx context.Context, worktree string) error {
 	if !filepath.IsAbs(excludePath) {
 		excludePath = filepath.Join(worktree, excludePath)
 	}
-
-	const excludeEntry = "/.agents/hooks.json"
 
 	data, err := os.ReadFile(excludePath)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -231,4 +235,58 @@ func updateGitExclude(ctx context.Context, worktree string) error {
 	}
 	_ = os.Chmod(excludePath, 0644)
 	return nil
+}
+
+// rulesExcludeEntry covers every rule file lucind-ai installs under .agents/rules.
+const rulesExcludeEntry = "/.agents/rules/lucind-*.md"
+
+func validRuleName(name string) bool {
+	return name == filepath.Base(name) && strings.HasPrefix(name, "lucind-") && strings.HasSuffix(name, ".md")
+}
+
+// InstallRules writes Antigravity rule files into <worktree>/.agents/rules and keeps them out of
+// git. File names must be lucind-*.md (so the exclude entry covers exactly what we own). It
+// refuses to overwrite an existing file and leaves nothing behind when it refuses.
+func InstallRules(ctx context.Context, worktree string, files map[string][]byte) error {
+	dir := filepath.Join(worktree, ".agents", "rules")
+	names := make([]string, 0, len(files))
+	for name := range files {
+		if !validRuleName(name) {
+			return fmt.Errorf("agyhooks: unsafe rule file name %q (must be lucind-*.md)", name)
+		}
+		if _, err := os.Stat(filepath.Join(dir, name)); err == nil {
+			return fmt.Errorf("agyhooks: %s already exists", filepath.Join(dir, name))
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("agyhooks: stat %s: %w", filepath.Join(dir, name), err)
+		}
+		names = append(names, name)
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("agyhooks: create %s: %w", dir, err)
+	}
+	if err := addGitExclude(ctx, worktree, rulesExcludeEntry); err != nil {
+		return fmt.Errorf("agyhooks: update git exclude: %w", err)
+	}
+	for i, name := range names {
+		if err := os.WriteFile(filepath.Join(dir, name), files[name], 0o644); err != nil {
+			for _, done := range names[:i] {
+				_ = os.Remove(filepath.Join(dir, done))
+			}
+			return fmt.Errorf("agyhooks: write %s: %w", name, err)
+		}
+	}
+	return nil
+}
+
+// RemoveRules deletes the rule files InstallRules wrote, then .agents/rules and .agents when that
+// leaves them empty.
+func RemoveRules(worktree string, files map[string][]byte) {
+	dir := filepath.Join(worktree, ".agents", "rules")
+	for name := range files {
+		if validRuleName(name) {
+			_ = os.Remove(filepath.Join(dir, name))
+		}
+	}
+	_ = os.Remove(dir)
+	_ = os.Remove(filepath.Join(worktree, ".agents"))
 }

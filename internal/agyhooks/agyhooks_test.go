@@ -349,3 +349,61 @@ func TestDoneHelpers(t *testing.T) {
 		t.Fatalf("ReadDone got %+v, want %+v", done, orig)
 	}
 }
+
+func gitWorktree(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	if out, err := exec.Command("git", "-C", dir, "init", "-q").CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v: %s", err, out)
+	}
+	return dir
+}
+
+func TestInstallRulesWritesExcludedFilesAndRefusesOverwrite(t *testing.T) {
+	wt := gitWorktree(t)
+	files := map[string][]byte{"lucind-a.md": []byte("---\ntrigger: always_on\n---\nA\n"), "lucind-b.md": []byte("---\ntrigger: always_on\n---\nB\n")}
+	if err := agyhooks.InstallRules(context.Background(), wt, files); err != nil {
+		t.Fatalf("InstallRules: %v", err)
+	}
+	for name, want := range files {
+		got, err := os.ReadFile(filepath.Join(wt, ".agents", "rules", name))
+		if err != nil || string(got) != string(want) {
+			t.Fatalf("%s = %q, %v", name, got, err)
+		}
+	}
+	if out, _ := exec.Command("git", "-C", wt, "status", "--porcelain").Output(); strings.Contains(string(out), ".agents") {
+		t.Errorf("rule files must be excluded from git status, got:\n%s", out)
+	}
+
+	agyhooks.RemoveRules(wt, files)
+	if _, err := os.Stat(filepath.Join(wt, ".agents")); !os.IsNotExist(err) {
+		t.Errorf(".agents must be removed when it ends up empty (err = %v)", err)
+	}
+
+	wt2 := gitWorktree(t)
+	if err := os.MkdirAll(filepath.Join(wt2, ".agents", "rules"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	mine := filepath.Join(wt2, ".agents", "rules", "lucind-a.md")
+	if err := os.WriteFile(mine, []byte("user rule"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := agyhooks.InstallRules(context.Background(), wt2, files); err == nil {
+		t.Fatal("InstallRules must refuse to overwrite an existing rule file")
+	}
+	if b, _ := os.ReadFile(mine); string(b) != "user rule" {
+		t.Errorf("existing rule file was modified: %s", b)
+	}
+	if _, err := os.Stat(filepath.Join(wt2, ".agents", "rules", "lucind-b.md")); !os.IsNotExist(err) {
+		t.Errorf("a refused install must not leave partial files (err = %v)", err)
+	}
+}
+
+func TestInstallRulesRejectsUnsafeNames(t *testing.T) {
+	wt := gitWorktree(t)
+	for _, name := range []string{"../escape.md", "sub/dir.md", "other.md", "lucind-x.txt"} {
+		if err := agyhooks.InstallRules(context.Background(), wt, map[string][]byte{name: []byte("x")}); err == nil {
+			t.Errorf("name %q must be rejected", name)
+		}
+	}
+}

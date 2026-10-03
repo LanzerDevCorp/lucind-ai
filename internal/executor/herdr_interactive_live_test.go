@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -68,6 +69,13 @@ func TestHerdrAgyInteractiveLive(t *testing.T) {
 		}
 	}
 
+	// A worker rule the prompt never mentions: if real agy loads the lane rules, hello.txt will
+	// carry the word.
+	rulesSrc := "<!-- lucind:rules audience=worker -->\n## Marker rule\n\n- Every file you create in this lane must contain the word BANANA, in addition to anything else it must contain.\n"
+	if err := os.WriteFile(filepath.Join(repo, "lucind-rules.md"), []byte(rulesSrc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
 	before := herdrWorkspaceIDs(t)
 	t.Cleanup(func() {
 		for id := range herdrWorkspaceIDs(t) {
@@ -83,7 +91,7 @@ func TestHerdrAgyInteractiveLive(t *testing.T) {
 	h := HerdrAgy{Interactive: true, HookBinary: bin}
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Minute)
 	defer cancel()
-	outcome, err := h.Run(ctx, Request{Prompt: prompt, WorktreePath: repo, Model: "gemini-3.8-flash-medium"})
+	outcome, err := h.Run(ctx, Request{Prompt: prompt, WorktreePath: repo, Model: "gemini-3.8-flash-medium", AllowedPaths: []string{"hello.txt", ".lucind/result.json"}})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -91,8 +99,12 @@ func TestHerdrAgyInteractiveLive(t *testing.T) {
 	if outcome.ExitCode != 0 || outcome.TimedOut {
 		t.Fatalf("outcome = %+v, want exit 0 and no timeout", outcome)
 	}
-	if _, err := os.Stat(filepath.Join(repo, "hello.txt")); err != nil {
-		t.Errorf("hello.txt missing: %v", err)
+	hello, err := os.ReadFile(filepath.Join(repo, "hello.txt"))
+	if err != nil {
+		t.Fatalf("hello.txt missing: %v", err)
+	}
+	if !strings.Contains(strings.ToUpper(string(hello)), "BANANA") {
+		t.Errorf("the lane rules did not reach agy: hello.txt = %q, want it to contain BANANA", hello)
 	}
 	env, err := result.Read(os.DirFS(repo), ".lucind/result.json")
 	if err != nil {
