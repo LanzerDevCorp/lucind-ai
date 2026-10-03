@@ -10,6 +10,8 @@ D1 | 2026-10-03 | T1b | attestations were keyed by sha256(toplevel path), invisi
 
 D2 | 2026-10-03 | T1b | one unexplained `FAIL` count (3) from `go test ./...` on the feature branch right after `make install`; 3 reruns clean | investigate with `-race -count=20` / record | recorded | identified later: `TestLeaseAcquisitionAndMonotonicFence` (internal/feature/feature_test.go:297) is timing-flaky when the whole suite runs in parallel; passes 3/3 in isolation; unrelated to attest/packet changes. Treat a lone failure of it as a flake, rerun that package | n/a | n/a
 
+D3 | 2026-10-03 | T3 | legacy lanes carrying only `sdd_phase` (explore/spec/...) and no `lane_role`/`read_only` used to skip mechanical checks; the new predicate runs them | keep skipping on legacy SDD phases / fail closed | fail closed (checks run unless the lane is declared read-only or has a non-writing role) | the mission asks for a fail-closed role/read_only predicate; legacy SDD packets are being retired (T4/T5) | revert `RequiresMechanicalChecks` to the SDDPhase condition in accept.go and attempt.go | d5d07f2
+
 Note for tomorrow: the T1 worktree `~/git_root/lucind-ai-worktrees/lane-t1-hmac-attestation` and branch `lane/t1-hmac-attestation` are kept (deletion is forbidden overnight).
 
 ## Registro de rotaciones
