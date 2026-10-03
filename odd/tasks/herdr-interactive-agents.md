@@ -44,7 +44,8 @@ Forecast about 900-1,100 authored changed lines (T1-T6). Strategy `ask-on-risk`;
 
 - [x] **T1. Workspace trust registry.** `internal/agytrust`: `Add(path)` / `Remove(path)` on `trustedWorkspaces`; atomic write (temp + rename, mode kept), refuses unparseable JSON, preserves unknown keys, file lock. Route: inline. ~120 lines.
   - Route: inline (small, security-sensitive; ~230 lines with tests). RED: package did not compile before the implementation; GREEN: 8 tests, `-race -count=5`. Behavior: parse-preserving (unknown keys kept, indentation normalized), atomic temp+rename keeping the file mode, `flock` on `settings.json.lucind.lock`, never rewrites JSON it cannot parse or a wrongly typed `trustedWorkspaces`, no write when already trusted, `Remove` is a no-op for a missing file or entry, relative paths rejected. Tests only use temp dirs; the real settings file was not touched. Commit `62ce490`.
-- [ ] **T2. Lane hooks.** `lucind-ai hook stop` subcommand (reads the Stop payload on stdin, writes the sentinel, validates the envelope with `result.Read`, returns continue/stop with a bounded counter) and `internal/agyhooks` that writes the worktree's `.agents/hooks.json` plus the info/exclude entry. Route: delegated writer. ~300 lines.
+- [x] **T2. Lane hooks.** `lucind-ai hook stop` subcommand (reads the Stop payload on stdin, writes the sentinel, validates the envelope with `result.Read`, returns continue/stop with a bounded counter) and `internal/agyhooks` that writes the worktree's `.agents/hooks.json` plus the info/exclude entry. Route: delegated writer. ~300 lines.
+  - Route: delegated writer = `agy` (`gemini-3.8-flash-high`, print mode) in lane `lane/ia-t2-hooks`, packet = spec file in the worktree; parent verified scope (only the 5 allowed files), gofmt, vet, `go test -race`, read both implementation files, patched one defect (1 KiB error truncation could split a UTF-8 character), cherry-picked `ceec200`. Delivered: `lucind-ai hook stop` (always exit 0, `fullyIdle:false` writes nothing, valid envelope writes `done.json`, invalid one returns `continue` up to `--max-continues`, then `done.json` invalid), `internal/agyhooks` (`Install` writes `.agents/hooks.json` with a single `lucind-lane` Stop handler, refuses an existing file, adds `/.agents/hooks.json` to the repo `info/exclude`; `Done`, `ReadDone`, `WriteDone`). Notes for T3: the dispatcher must delete a stale `done.json` and `continues` before each launch, and remove `.agents/hooks.json` after the lane. Observed once: `TestExploreAllThreeLensesSucceed` failed in a full package run (3 lane executions instead of 4); 5 later runs passed, base too; not caused by this change, likely a timing flake.
 - [ ] **T3. Interactive HerdrAgy.** Run `agy -i` in the lane pane, wait for the sentinel file (poll, hard timeout), then end the session cleanly; trust the worktree first (T1), install hooks (T2); keep the headless path behind `Interactive=false`. Route: delegated writer. ~300 lines. Conflicts with `herdr-direct-dispatch` T3 on `internal/executor/herdr.go`.
 - [ ] **T4. Antigravity rules for lanes.** Extend `internal/rules` to emit `.agents/rules/lucind-*.md` with valid frontmatter (`always_on` write scope, `model_decision` guides), size and budget checks, excluded from the lane diff. Route: delegated writer. ~200 lines. Depends on T2 (exclude mechanism).
 - [ ] **T5. Route agy lanes through interactive herdr.** With `HERDR_ENV=1`, executor `agy` lanes (including explore lenses) use `herdr-agy` interactive; opt-out env `LUCIND_HERDR_VISIBLE=off`. Route: inline or delegated. ~100 lines. Depends on T3.
@@ -61,8 +62,9 @@ Forecast about 900-1,100 authored changed lines (T1-T6). Strategy `ask-on-risk`;
 ## Progress
 
 - 2026-10-03: feature document created from the spike (hooks schema, trust inheritance, `Stop` continue verified).
+- 2026-10-03: T2 closed (`ceec200`).
 - 2026-10-03: T1 closed (`62ce490`).
 
 ## Next step
 
-T2: lane hooks (`lucind-ai hook stop` + `internal/agyhooks`).
+T3: interactive `HerdrAgy` (trust, hooks, sentinel wait).
