@@ -1,9 +1,12 @@
 package agyplugin
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -102,18 +105,116 @@ func TestInstall_RejectsRelativeBinary(t *testing.T) {
 	}
 }
 
-func TestValidateOutput(t *testing.T) {
-	ok := "[ok]    lucind\n  ✔ hooks       : 1 processed\n  ✔ skills      : 1 processed\n"
-	if err := checkValidateOutput(ok); err != nil {
+type fakeAgy struct {
+	calls   [][]string
+	list    string
+	install string
+	err     map[string]error
+}
+
+func (f *fakeAgy) Run(ctx context.Context, args ...string) ([]byte, error) {
+	f.calls = append(f.calls, args)
+	key := strings.Join(args[:2], " ")
+	if e := f.err[key]; e != nil {
+		return []byte("boom"), e
+	}
+	switch key {
+	case "plugin list":
+		return []byte(f.list), nil
+	case "plugin install":
+		return []byte(f.install), nil
+	}
+	return []byte("ok"), nil
+}
+
+const goodInstall = "\x1b[32m[ok]\x1b[0m lucind\n  \u2714 hooks       : 1 processed\n"
+
+func TestSetup_RegistersViaAgyPluginInstall(t *testing.T) {
+	staging, obsolete := t.TempDir(), filepath.Join(t.TempDir(), "lucind")
+	if err := os.MkdirAll(obsolete, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	agy := &fakeAgy{list: `{"imports":[{"name":"other"}]}`, install: goodInstall}
+	dir, err := Setup(context.Background(), Options{StagingRoot: staging, Bin: "/a/lucind-ai", Agy: agy, ObsoleteDir: obsolete})
+	if err != nil {
+		t.Fatalf("Setup: %v", err)
+	}
+	if want := filepath.Join(staging, "lucind"); dir != want {
+		t.Fatalf("dir = %s, want %s", dir, want)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "hooks.json")); err != nil {
+		t.Errorf("staging not rendered: %v", err)
+	}
+	want := [][]string{{"plugin", "list"}, {"plugin", "install", dir}}
+	if !reflect.DeepEqual(agy.calls, want) {
+		t.Errorf("agy calls = %v, want %v", agy.calls, want)
+	}
+	if _, err := os.Stat(obsolete); !os.IsNotExist(err) {
+		t.Errorf("obsolete unloaded copy not removed: %v", err)
+	}
+}
+
+func TestSetup_UninstallsExistingImportFirst(t *testing.T) {
+	agy := &fakeAgy{list: `{"imports":[{"name":"lucind"},{"name":"x"}]}`, install: goodInstall}
+	dir, err := Setup(context.Background(), Options{StagingRoot: t.TempDir(), Bin: "/a/lucind-ai", Agy: agy})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := [][]string{{"plugin", "list"}, {"plugin", "uninstall", "lucind"}, {"plugin", "install", dir}}
+	if !reflect.DeepEqual(agy.calls, want) {
+		t.Errorf("agy calls = %v, want %v", agy.calls, want)
+	}
+}
+
+func TestSetup_FailsWhenAgyMissing(t *testing.T) {
+	agy := &fakeAgy{err: map[string]error{"plugin list": ErrAgyNotFound}}
+	_, err := Setup(context.Background(), Options{StagingRoot: t.TempDir(), Bin: "/a/lucind-ai", Agy: agy})
+	if err == nil || !strings.Contains(err.Error(), "agy") {
+		t.Fatalf("expected clear agy error, got %v", err)
+	}
+}
+
+func TestSetup_KeepsObsoleteWhenInstallFails(t *testing.T) {
+	obsolete := filepath.Join(t.TempDir(), "lucind")
+	_ = os.MkdirAll(obsolete, 0o755)
+	agy := &fakeAgy{list: `{}`, install: "[error] lucind\n", err: nil}
+	if _, err := Setup(context.Background(), Options{StagingRoot: t.TempDir(), Bin: "/a/lucind-ai", Agy: agy, ObsoleteDir: obsolete}); err == nil {
+		t.Fatal("expected failure on [error] output")
+	}
+	if _, err := os.Stat(obsolete); err != nil {
+		t.Errorf("obsolete removed despite failure: %v", err)
+	}
+	agy = &fakeAgy{list: `{}`, err: map[string]error{"plugin install": errors.New("exit 1")}}
+	if _, err := Setup(context.Background(), Options{StagingRoot: t.TempDir(), Bin: "/a/lucind-ai", Agy: agy}); err == nil {
+		t.Fatal("expected failure on agy exit error")
+	}
+}
+
+func TestCheckInstallOutput(t *testing.T) {
+	if err := checkInstallOutput(goodInstall); err != nil {
 		t.Errorf("good output rejected: %v", err)
 	}
 	for name, out := range map[string]string{
 		"no hooks":    "[ok]    lucind\n  - hooks       : skipped (not found)\n",
-		"zero hooks":  "  ✔ hooks       : 0 processed\n",
-		"error shown": "[error] lucind\n  ✔ hooks       : 1 processed\n",
+		"zero hooks":  "  \u2714 hooks       : 0 processed\n",
+		"error shown": "[error] lucind\n  \u2714 hooks       : 1 processed\n",
 	} {
-		if err := checkValidateOutput(out); err == nil {
+		if err := checkInstallOutput(out); err == nil {
 			t.Errorf("%s: expected rejection", name)
 		}
+	}
+}
+
+func TestStagingRoot_HonorsXDGDataHome(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", "/x/data")
+	got, err := StagingRoot()
+	if err != nil || got != "/x/data/lucind-ai/agy-plugin" {
+		t.Errorf("StagingRoot = %q, %v", got, err)
+	}
+	t.Setenv("XDG_DATA_HOME", "")
+	t.Setenv("HOME", "/h")
+	got, _ = StagingRoot()
+	if got != "/h/.local/share/lucind-ai/agy-plugin" {
+		t.Errorf("fallback StagingRoot = %q", got)
 	}
 }

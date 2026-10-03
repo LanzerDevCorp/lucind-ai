@@ -33,7 +33,7 @@ Lane state is plain JSON in `.lucind/lanes/<id>/`. Requires `HERDR_ENV=1` and `a
 make install
 ```
 
-Installs the binary, the agy plugin (`~/.gemini/antigravity-cli/plugins/lucind/`) and links the
+Installs the binary, the agy plugin (registered via `agy plugin install` into `~/.gemini/config/plugins/lucind/`) and links the
 Claude skill into `~/.claude/skills/lucind`. Verify with `lucind-ai -v`.
 
 ## Docs

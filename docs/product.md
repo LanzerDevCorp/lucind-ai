@@ -37,7 +37,7 @@ Claude --accept--> receipt.json (accepted | rejected)
 | `attest run -- <cmd>` / `attest verify --command <cmd>` | Run a command and sign `{command, exit code, tree hash}`; verify a matching passing attestation. See [`attestation.md`](attestation.md). |
 | `check [--out <path>]` | Run `lucind-checks.sh` (scrubbed env, timeout, process-group kill). |
 | `hook pre-tool-use\|stop` | Handlers called by the agy plugin. Pass-through without `LUCIND_LANE`. |
-| `plugin install [--dir <root>]` | Write the embedded agy plugin to `~/.gemini/antigravity-cli/plugins/lucind/`. |
+| `plugin install [--dir <staging root>]` | Render the embedded agy plugin into a staging dir (`$XDG_DATA_HOME/lucind-ai/agy-plugin/lucind`) and register it with `agy plugin install` (lands in `~/.gemini/config/plugins/lucind/`; requires `agy` on PATH). A plugin merely dropped into `~/.gemini/antigravity-cli/plugins/` validates but is never loaded, so the obsolete copy there is removed. |
 | `--version` | Exact build (`git describe`). |
 
 `dispatch`/`wait` print one JSON object. Exit codes: 0 done, 1 error, 3 failed, 4 timeout.

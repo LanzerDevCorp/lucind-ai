@@ -29,7 +29,7 @@ const usage = "usage: lucind-ai dispatch --cwd <dir> --allow <glob>... --brief <
 	"       lucind-ai attest run -- <command> [args...]\n" +
 	"       lucind-ai attest verify --command \"<exact command string>\"\n" +
 	"       lucind-ai hook pre-tool-use|stop   (agy plugin handlers; stdin JSON)\n" +
-	"       lucind-ai plugin install [--dir <plugins root>]\n" +
+	"       lucind-ai plugin install [--dir <staging root>]   (registers via agy plugin install)\n" +
 	"       lucind-ai --version"
 
 const (

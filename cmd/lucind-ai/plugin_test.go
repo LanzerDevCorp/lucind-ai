@@ -9,8 +9,22 @@ import (
 	"testing"
 )
 
-func TestPluginInstall_WritesToDir(t *testing.T) {
-	t.Setenv("PATH", "") // no agy on PATH: validation is skipped
+type fakePluginAgy struct{ calls [][]string }
+
+func (f *fakePluginAgy) Run(_ context.Context, args ...string) ([]byte, error) {
+	f.calls = append(f.calls, args)
+	if args[1] == "list" {
+		return []byte(`{"imports":[]}`), nil
+	}
+	return []byte("[ok] lucind\n  hooks : 1 processed\n"), nil
+}
+
+func TestPluginInstall_StagesAndRegisters(t *testing.T) {
+	fake := &fakePluginAgy{}
+	orig := pluginAgy
+	pluginAgy = fake
+	defer func() { pluginAgy = orig }()
+	t.Setenv("HOME", t.TempDir())
 	root := t.TempDir()
 	var stdout, stderr bytes.Buffer
 	code := pluginDispatch(context.Background(), []string{"install", "--dir", root}, &stdout, &stderr)
@@ -24,6 +38,9 @@ func TestPluginInstall_WritesToDir(t *testing.T) {
 	}
 	if !strings.Contains(string(data), exe) {
 		t.Errorf("hooks.json does not reference %s:\n%s", exe, data)
+	}
+	if n := len(fake.calls); n != 2 || fake.calls[1][1] != "install" || fake.calls[1][2] != filepath.Join(root, "lucind") {
+		t.Errorf("agy calls = %v", fake.calls)
 	}
 	if !strings.Contains(stdout.String(), filepath.Join(root, "lucind")) {
 		t.Errorf("stdout %q does not name the plugin dir", stdout.String())
