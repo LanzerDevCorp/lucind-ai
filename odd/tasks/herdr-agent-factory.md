@@ -41,7 +41,12 @@ Execution (owner-authorized 2026-10-03): tasks are delegated to `agy` headless (
 
 Each task closes with a work-unit commit and records its commit id and review tier.
 
-- [ ] **T1. HMAC test attestation.** `run-tests` wrapper writes `{command, exit code, git tree hash incl. uncommitted, timestamp}` signed with HMAC to a `chmod 444` log outside the worktree; `verify-attestation` accepts only a matching tree hash. Build on `internal/accept` receipts. Route: delegated writer (2+ non-trivial files). Est. ~350 lines.
+- [x] **T1. HMAC test attestation.** `run-tests` wrapper writes `{command, exit code, git tree hash incl. uncommitted, timestamp}` signed with HMAC to a `chmod 444` log outside the worktree; `verify-attestation` accepts only a matching tree hash. Build on `internal/accept` receipts. Route: delegated writer (2+ non-trivial files). Est. ~350 lines.
+  - Route: delegated (agy `gemini-3.8-flash-high`, headless in herdr pane, `--dangerously-skip-permissions`; trigger: 2+ non-trivial files plus new package). Shipped as `lucind-ai attest run|verify` (`internal/attest`, `cmd/lucind-ai/attest.go`) rather than a separate `run-tests` binary.
+  - Evidence: worker exit 0, status completed, RED then GREEN reported; orchestrator re-ran `go build ./...`, `go vet`, `go test ./internal/attest/... ./cmd/lucind-ai/...` (ok) and an end-to-end run in a throwaway repo: verify passes after `attest run`, fails with `tree changed` after an edit or an untracked file, passes again after revert, `tests failed` for a failing command, real git index untouched, log file mode 0444. Diff stayed inside the allowed edit surfaces.
+  - Commits: lane `87d2676` on `lane/t1-hmac-attestation`; integrated into the feature branch as `880665b` (cherry-pick).
+  - Review: assessed `high` (`process_boundary`: `attest.go` starts processes; 1571 lines for the range since `dev`); consent declined for this candidate (owner, 2026-10-03). The accept-time binding of the attestation to `lucind-ai accept` is not wired yet.
+  - Follow-ups (not blocking): key creation is not atomic if two first runs race (`os.WriteFile` then `Chmod`); log file is renamed before `chmod 0444`, leaving a short window with default mode; wire `attest verify` into `accept` and the dispatcher commit step (T9).
 - [ ] **T2. Packet contract fields.** Add `verification`, `known_environmental_failures`, `route`, `route_evidence`, injected skills by exact path to `internal/packet` and `packetauthor`; add `interaction_required` to `result.schema.json`. Route: delegated writer. Est. ~300 lines.
 - [ ] **T3. Neutralize SDD gates.** Replace `SDDPhase == "" || == "apply"` in `internal/accept/accept.go:120` and `internal/run/attempt.go:391` with a lane-role / `read_only` predicate (fail closed). Route: delegated writer. Est. ~120 lines.
 - [ ] **T4. SDD removal, docs and derivation.** Retire the 21 SDD packet templates and `references/strategies/sdd.md`; make `sdd-*` derivation in `internal/skillset` optional; add `odd.md` strategy. Plugin bump. Route: delegated writer. Est. ~400 lines (mostly deletions).
@@ -70,7 +75,8 @@ Order: T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15.
 
 - 2026-10-03: feature doc created on `feature/herdr-agent-factory`. No source changes yet.
 - Review tiers and commit ids are recorded per task as they close.
+- 2026-10-03: T1 closed (see task). Slice 1 of the `feature-branch-chain` = `880665b`.
 
 ## Next step
 
-Start T1 (delegated to agy in a herdr pane, worktree `lane/t1-hmac-attestation`).
+T2 (packet contract fields and `interaction_required`): delegate to agy in a new worktree `lane/t2-packet-fields` from `feature/herdr-agent-factory`. The T1 worktree `lane-t1-hmac-attestation` is kept until the follow-ups are decided; remove it only after confirming nothing unique remains (its commit was cherry-picked, so the SHA differs).
