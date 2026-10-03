@@ -233,7 +233,8 @@ func TestDispatch_Continuation(t *testing.T) {
 		t.Fatalf("lane.Create failed: %v", err)
 	}
 	createdLane.PaneID = "w1:pExisting"
-	createdLane.Status = lane.StatusRunning
+	createdLane.Status = lane.StatusFailed
+	createdLane.Retries = 2
 	if err := createdLane.Save(repoDir); err != nil {
 		t.Fatalf("lane.Save failed: %v", err)
 	}
@@ -273,6 +274,15 @@ func TestDispatch_Continuation(t *testing.T) {
 		if arg == "--wait" {
 			t.Errorf("agent prompt must NOT include --wait: %v", calls[0])
 		}
+	}
+
+	// A continuation re-arms the lane: running again with a fresh retry budget.
+	reloaded, err := lane.Load(repoDir, createdLane.ID)
+	if err != nil {
+		t.Fatalf("lane.Load failed: %v", err)
+	}
+	if reloaded.Status != lane.StatusRunning || reloaded.Retries != 0 {
+		t.Errorf("continued lane status=%s retries=%d, want running/0", reloaded.Status, reloaded.Retries)
 	}
 
 	// Verify brief.md updated
