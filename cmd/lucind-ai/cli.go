@@ -1151,6 +1151,7 @@ func productionDeps(runID, primaryRoot string, ledg *ledger.Ledger, timeout time
 			return worktree.HasUniqueCommits(ctx, worktreePath, baseSHA)
 		},
 		PorcelainEmpty: worktree.PorcelainEmpty,
+		PreCommitGate:  judgeGateFromEnv(),
 		CombineTree:    integrate.Combine,
 		RunChecks:      integrate.Check,
 		PromoteTarget:  integrate.Promote,

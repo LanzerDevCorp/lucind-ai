@@ -1,12 +1,12 @@
 // Package risk defines a minimal deterministic risk classifier for a candidate change
 // set and the mapping from risk tier to required verification.
 //
-// Judges via cursor-agent are NOT implemented yet; this package only declares the plan.
+// The judges themselves run in internal/judges; this package only declares the plan.
 package risk
 
 // Plan describes the verification obligations required for a risk tier.
 //
-// Judges via cursor-agent are NOT implemented yet; this package only declares the plan.
+// The judges themselves run in internal/judges; this package only declares the plan.
 type Plan struct {
 	Tier               Tier
 	StructuralReadback bool // true only for passive
