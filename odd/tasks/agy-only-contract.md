@@ -102,7 +102,7 @@ Route for every task: delegated to agy via herdr (multi-file, deletion-heavy wor
   build stays green), packet `agent` field, `plugin/opencode` + its Makefile targets, related
   tests/fixtures. Acceptance: `sh lucind-checks.sh` green; `rg -i 'cursor-agent|opencode|claude -p'`
   only in docs/history.
-- [ ] **T2 — Delete orchestration + ledger.** Remove `integrate`, `run` batch/integration,
+- [x] **T2 — Delete orchestration + ledger.** Remove `integrate`, `run` batch/integration,
   `explore`, `split`/`dag`, `feature`, `reconcile`, `defect`, `worktree` (per-lane worktree
   creation + cleanup), `usage`/usagelog, SQLite ledger + migrations, packets,
   `rules init|generate`. Introduce `.lucind/lanes/<id>/` JSON state. Keep `attest`, `check`,
@@ -149,6 +149,12 @@ Route for every task: delegated to agy via herdr (multi-file, deletion-heavy wor
   CHECK (T2), usagelog (T2), `scripts/hooks/check-orphaned-processes.sh` (T5 cleanup).
 - New agy session for T2+: pane **w1:pW** (`--dangerously-skip-permissions`, orchestrator role).
 
+- **T2** (route: delegated to agy pane w1:pW → worker subagents). Commits `9b887f0`,
+  `dc7685e`, `caf393c`, `c8897c2` (168 files, +2684/−63141). Packages left: accept, agyhooks,
+  agytrust, attest, check, executor, lane, result. CLI: check, accept --lane, attest run|verify,
+  hook stop, --version. Orchestrator re-run of `sh lucind-checks.sh`: exit 0, 9/9 packages ok;
+  `rg -l 'sqlite|ledger' --glob '*.go'` empty. Own glob matcher (no new dependency).
+
 ## Decisions log (taken autonomously; for user review)
 
 - D1 (T0): lane identity in hooks = `LUCIND_LANE` env var; no conversationId binding.
@@ -165,7 +171,21 @@ Route for every task: delegated to agy via herdr (multi-file, deletion-heavy wor
   `lucind-roles` (`agents/worker.md`, validated: "agents: 1 processed"), fallback
   `define_subagent`. Workers never commit; agy's orchestrator commits after verifying.
   agy sessions run with `--dangerously-skip-permissions` (user request).
+- D7: `dispatch` requires herdr (`HERDR_ENV=1`); no headless runtime.
+- D8: a new lane opens its own pane (`herdr pane split --env LUCIND_LANE=<id> --no-focus`) and
+  starts agy there with `--dangerously-skip-permissions`; the prompt points to
+  `.lucind/lanes/<id>/brief.md` (brief + contract footer).
+- D9: default dispatch timeout 60m.
+- D10: exit codes 0 done, 1 error, 3 failed, 4 timeout; stdout is one JSON object.
+- D11: model precedence `--model` > `LUCIND_AGY_MODEL` > agy DefaultModel.
+- D12 (agy, T2): `lucind-checks.sh` runner extracted to `internal/check`.
+- D13 (agy, T2): `attest.FindValidAttestation` returns the attestation path for receipt evidence.
+- D14 (agy, T2): accept's fallback check output goes to `.lucind/lanes/<id>/check.log`.
+- D15 (agy, T2): deleted `cmd/plugincontent`, `internal/skillcontent|skillroots|skillset`
+  (Claude plugin version sync); `plugin/claude-code` is rebuilt in T5.
+- D16: accept reuses only an attestation of the exact command `sh lucind-checks.sh`; the lane
+  brief footer tells agy to finish with `lucind-ai attest run -- sh lucind-checks.sh`.
 
 ## Next step
 
-T2.
+T3.
