@@ -27,14 +27,10 @@ import (
 	"github.com/LanzerDevCorp/lucind-ai/internal/integrate"
 	"github.com/LanzerDevCorp/lucind-ai/internal/lane"
 	"github.com/LanzerDevCorp/lucind-ai/internal/ledger"
-	"github.com/LanzerDevCorp/lucind-ai/internal/lucindconfig"
 	"github.com/LanzerDevCorp/lucind-ai/internal/packet"
-	"github.com/LanzerDevCorp/lucind-ai/internal/phasespec"
 	"github.com/LanzerDevCorp/lucind-ai/internal/reconcile"
 	"github.com/LanzerDevCorp/lucind-ai/internal/result"
 	lucindrun "github.com/LanzerDevCorp/lucind-ai/internal/run"
-	"github.com/LanzerDevCorp/lucind-ai/internal/skillroots"
-	"github.com/LanzerDevCorp/lucind-ai/internal/skillset"
 	"github.com/LanzerDevCorp/lucind-ai/internal/worktree"
 )
 
@@ -59,16 +55,11 @@ const attemptOwner = "lucind-ai run"
 // error, so a person driving the binary from a terminal always sees the one
 // invocation that works rather than a stack trace. --packet is repeatable:
 // each occurrence adds one more lane to the batch.
-const usage = "usage: lucind-ai run --packet <path> [--packet <path> ...] [--timeout <duration>] [--legacy-main --expected-parent-sha <sha>] [--min-quota <fraction>]\n       lucind-ai split --dag <path> --out <dir>\n       lucind-ai check [--out <path>]\n       lucind-ai accept --run <run-id> --lane <lane-id>\n       lucind-ai feature create --id <id> --parent <ref> --base-sha <sha> [--expected-parent-sha <sha>]\n       lucind-ai feature status [--id <id>]\n       lucind-ai feature recover --attempt <id>\n       lucind-ai feature renew --id <id> --owner <owner> --fence <fence> [--ttl <duration>]\n       lucind-ai feature lease release --id <id> [--owner <owner>] [--fence <fence>] [--pid <pid>] [--force]\n       lucind-ai feature lease status --id <id>\n       lucind-ai feature disable --id <id>\n       lucind-ai reconcile approve --request <id> --source <feature> --target <feature> [--actor <name>]\n       lucind-ai reconcile decline --request <id> [--actor <name>] [--reason <reason>]\n       lucind-ai reconcile cancel --request <id> [--actor <name>] [--reason <reason>]\n       lucind-ai reconcile renew --request <id> [--base-sha <sha>] [--source-sha <sha>] [--target-sha <sha>] [--wait-stable <duration>]\n       lucind-ai reconcile resolve --candidate <id> --sha <sha> [--actor <name>] [--wait-stable <duration>]\n       lucind-ai defect record --id <id> --feature <id> --signature <sig> [--evidence <ev>] [--disposition <disp>] [--run <run-id>] [--lane <lane-id>]\n       lucind-ai defect list --feature <id>\n       lucind-ai defect resolve --id <id>\n       lucind-ai defect decline --id <id>\n       lucind-ai defect defer --id <id>\n       lucind-ai worktree cleanup --lane <id> [--force]\n       lucind-ai integrate retry --run <run-id> [--lane <id> ...] [--timeout <duration>]\n       lucind-ai phase <name> [--change <name>] [--force]\n       lucind-ai attest run -- <command> [args...]\n       lucind-ai attest verify --command \"<exact command string>\"\n       lucind-ai --version"
+const usage = "usage: lucind-ai run --packet <path> [--packet <path> ...] [--timeout <duration>] [--legacy-main --expected-parent-sha <sha>] [--min-quota <fraction>]\n       lucind-ai split --dag <path> --out <dir>\n       lucind-ai check [--out <path>]\n       lucind-ai accept --run <run-id> --lane <lane-id>\n       lucind-ai feature create --id <id> --parent <ref> --base-sha <sha> [--expected-parent-sha <sha>]\n       lucind-ai feature status [--id <id>]\n       lucind-ai feature recover --attempt <id>\n       lucind-ai feature renew --id <id> --owner <owner> --fence <fence> [--ttl <duration>]\n       lucind-ai feature lease release --id <id> [--owner <owner>] [--fence <fence>] [--pid <pid>] [--force]\n       lucind-ai feature lease status --id <id>\n       lucind-ai feature disable --id <id>\n       lucind-ai reconcile approve --request <id> --source <feature> --target <feature> [--actor <name>]\n       lucind-ai reconcile decline --request <id> [--actor <name>] [--reason <reason>]\n       lucind-ai reconcile cancel --request <id> [--actor <name>] [--reason <reason>]\n       lucind-ai reconcile renew --request <id> [--base-sha <sha>] [--source-sha <sha>] [--target-sha <sha>] [--wait-stable <duration>]\n       lucind-ai reconcile resolve --candidate <id> --sha <sha> [--actor <name>] [--wait-stable <duration>]\n       lucind-ai defect record --id <id> --feature <id> --signature <sig> [--evidence <ev>] [--disposition <disp>] [--run <run-id>] [--lane <lane-id>]\n       lucind-ai defect list --feature <id>\n       lucind-ai defect resolve --id <id>\n       lucind-ai defect decline --id <id>\n       lucind-ai defect defer --id <id>\n       lucind-ai worktree cleanup --lane <id> [--force]\n       lucind-ai integrate retry --run <run-id> [--lane <id> ...] [--timeout <duration>]\n       lucind-ai attest run -- <command> [args...]\n       lucind-ai attest verify --command \"<exact command string>\"\n       lucind-ai --version"
 
 // depsFactory constructs run.Deps for runDispatch. In production it is
 // productionDeps; tests may override it to inject test doubles or observe dependency calls.
 var depsFactory = productionDeps
-
-// defaultStatusQuerier constructs a StatusQuerier for phaseDispatch.
-var defaultStatusQuerier = func(workDir string) phasespec.StatusQuerier {
-	return &phasespec.CLIStatusQuerier{WorkDir: workDir}
-}
 
 // defaultMinQuota is --min-quota's default: the minimum fraction of the
 // active agy-pool account's remaining 5-hour Gemini quota required before a
@@ -167,8 +158,6 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return worktreeDispatch(ctx, args[1:], stdout, stderr)
 	case "integrate":
 		return integrateDispatch(ctx, args[1:], stdout, stderr)
-	case "phase":
-		return phaseDispatch(ctx, args[1:], stdout, stderr)
 	case "attest":
 		return attestDispatch(ctx, args[1:], stdout, stderr)
 	case "--version", "-v":
@@ -2513,211 +2502,4 @@ func runDefectTransition(ctx context.Context, verb string, args []string, stdout
 
 	fmt.Fprintf(stdout, "%s defect %s\n", transition.Confirmation, *id)
 	return 0
-}
-
-// phaseDispatch implements the "phase" subcommand: runs the phase specialist for the named SDD phase.
-func phaseDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) int {
-	if len(args) == 0 {
-		fmt.Fprintln(stderr, "lucind-ai: phase name is required")
-		fmt.Fprintln(stderr, "usage: lucind-ai phase <name> [--change <name>] [--force]")
-		return 1
-	}
-
-	fs := flag.NewFlagSet("phase", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	fs.Usage = func() {
-		fmt.Fprintln(stderr, "usage: lucind-ai phase <name> [--change <name>] [--force] [--packet <path>]")
-		fs.PrintDefaults()
-	}
-	change := fs.String("change", "", "target change name (default: active change from sdd-status)")
-	force := fs.Bool("force", false, "force synthesis even if phase is complete")
-	packetFlag := fs.String("packet", "", "path to synthesis packet (default: generated synthesis packet or .lucind/packets/<phase>-<change>-synthesis.md)")
-
-	var nonFlags []string
-	for i := 0; i < len(args); i++ {
-		if strings.HasPrefix(args[i], "-") {
-			if err := fs.Parse(args[i:]); err != nil {
-				return 1
-			}
-			nonFlags = append(nonFlags, fs.Args()...)
-			break
-		} else {
-			nonFlags = append(nonFlags, args[i])
-		}
-	}
-
-	if len(nonFlags) == 0 {
-		fmt.Fprintln(stderr, "lucind-ai: phase name is required")
-		fs.Usage()
-		return 1
-	}
-	phaseName := nonFlags[0]
-
-	primaryRoot, err := resolvePrimaryRoot(ctx)
-	if err != nil {
-		fmt.Fprintf(stderr, "lucind-ai: resolve primary repository root: %v\n", err)
-		return 1
-	}
-
-	toplevel, err := gitShowToplevel(ctx)
-	if err == nil && worktree.IsLinkedWorktree(toplevel) {
-		fmt.Fprintf(stderr, "lucind-ai: refusing to run from inside a linked worktree (%s); run from the primary repository instead\n", toplevel)
-		return 1
-	}
-
-	querier := defaultStatusQuerier(primaryRoot)
-	adapter := phasespec.NewAdapter(querier, primaryRoot)
-
-	adapter.Dispatcher = func(ctx context.Context, changeName, phase string) error {
-		normPhase := strings.ToLower(strings.TrimSpace(phase))
-		packetPath := strings.TrimSpace(*packetFlag)
-		if packetPath == "" {
-			cand1 := filepath.Join(primaryRoot, ".lucind", "packets", fmt.Sprintf("%s-%s-synthesis.md", normPhase, changeName))
-			cand2 := filepath.Join(primaryRoot, "openspec", "changes", changeName, "packets", fmt.Sprintf("%s-%s-synthesis.md", normPhase, changeName))
-			cand3 := filepath.Join(primaryRoot, "openspec", "changes", changeName, fmt.Sprintf("%s-synthesis.md", normPhase))
-			// Existing synthesis packets already on disk are reused as-is without retroactively gaining ## Required skills (known cosmetic gap on stale local caches; env-var delivery still applies).
-			if _, err := os.Stat(cand1); err == nil {
-				packetPath = cand1
-			} else if _, err := os.Stat(cand2); err == nil {
-				packetPath = cand2
-			} else if _, err := os.Stat(cand3); err == nil {
-				packetPath = cand3
-			} else {
-				headSHA, _ := resolveAdmissionRefSHA(ctx, primaryRoot, "HEAD")
-				canonicalFilename, err := phasespec.CanonicalArtifactFilename(normPhase)
-				if err != nil {
-					return err
-				}
-				skillPaths, err := resolveSynthesisSkillPaths(primaryRoot, normPhase)
-				if err != nil {
-					return fmt.Errorf("resolve synthesis skills: %w", err)
-				}
-				var skillsSection strings.Builder
-				if len(skillPaths) > 0 {
-					skillsSection.WriteString("\n## Required skills\n")
-					for _, sp := range skillPaths {
-						fmt.Fprintf(&skillsSection, "- %s\n", sp)
-					}
-				}
-				packetDir := filepath.Join(primaryRoot, ".lucind", "packets")
-				if err := os.MkdirAll(packetDir, 0755); err != nil {
-					return fmt.Errorf("create packets dir: %w", err)
-				}
-				packetPath = cand1
-				packetContent := fmt.Sprintf(`---
-id: %s-%s-synthesis
-executor: agy
-model: gemini-3.7-flash-high
-routed_by: synthesis
-lane_role: synthesis
-sdd_phase: %s
-legacy_main: true
-expected_parent_sha: %s
-allowed_paths: ["openspec/changes/%s/%s", "openspec/changes/%s/%s-synthesis-notes.md"]
----
-
-# Packet %s-%s-synthesis
-
-## Goal
-Synthesize canonical %s artifact for change %s.
-
-## Preconditions
-- All required lenses are merged.
-
-## Done criteria
-- [ ] Canonical artifact openspec/changes/%s/%s is written and committed.
-
-## Hard stops
-- Required lenses are missing or unmerged.
-%s
-## Return
-Write the result envelope to .lucind/result.json in this worktree.
-Validate it against .lucind/result.schema.json before writing.
-After you commit, report success.
-`, normPhase, changeName, normPhase, headSHA, changeName, canonicalFilename, changeName, normPhase,
-					normPhase, changeName, normPhase, changeName, changeName, canonicalFilename,
-					skillsSection.String())
-				if err := os.WriteFile(packetPath, []byte(packetContent), 0644); err != nil {
-					return fmt.Errorf("write synthesis packet: %w", err)
-				}
-			}
-		}
-
-		code := runDispatch(ctx, []string{"--packet", packetPath}, stdout, stderr)
-		if code != 0 {
-			return fmt.Errorf("dispatch exit code %d", code)
-		}
-		return nil
-	}
-
-	changeName := strings.TrimSpace(*change)
-	if changeName == "" {
-		raw, err := querier.QueryStatus(ctx, "")
-		if err != nil {
-			fmt.Fprintf(stderr, "lucind-ai: query sdd status: %v\n", err)
-			return 1
-		}
-		st, err := phasespec.ParseStatus(raw)
-		if err != nil {
-			fmt.Fprintf(stderr, "lucind-ai: parse sdd status: %v\n", err)
-			return 1
-		}
-		changeName = st.ChangeName
-	}
-
-	res, err := adapter.Synthesize(ctx, phasespec.SynthesizeRequest{
-		ChangeName: changeName,
-		Phase:      phaseName,
-		Force:      *force,
-	})
-	if err != nil {
-		fmt.Fprintf(stderr, "lucind-ai: phase synthesis: %v\n", err)
-		return 1
-	}
-
-	if res.Written {
-		fmt.Fprintf(stdout, "phase %s synthesized: %s\n", res.Phase, res.ArtifactPath)
-	} else if res.Dispatched {
-		fmt.Fprintf(stdout, "phase %s synthesis dispatched: %s\n", res.Phase, res.ArtifactPath)
-	} else {
-		fmt.Fprintf(stdout, "phase %s is already complete: %s\n", res.Phase, res.ArtifactPath)
-	}
-	return 0
-}
-
-func resolveSynthesisSkillPaths(primaryRoot, phase string) ([]string, error) {
-	cfg, err := lucindconfig.Load(primaryRoot)
-	if err != nil {
-		return nil, fmt.Errorf("load repository config: %w", err)
-	}
-
-	budget := skillset.DefaultSkillBudget
-	if cfg.SkillBudget != nil {
-		budget = *cfg.SkillBudget
-	}
-
-	var resolver *skillroots.Resolver
-	rootsCfg, err := skillroots.LoadConfig(filepath.Join(primaryRoot, skillroots.DefaultConfigRelPath))
-	if err != nil {
-		if errors.Is(err, skillroots.ErrMissingConfig) {
-			resolver = skillroots.NewResolver(nil)
-		} else {
-			return nil, fmt.Errorf("load skill roots config: %w", err)
-		}
-	} else {
-		resolver = skillroots.NewResolver(rootsCfg.Roots)
-	}
-
-	stackSkills := cfg.StackSkills("synthesis")
-	derived, err := skillset.Derive(phase, "synthesis", stackSkills, nil)
-	if err != nil {
-		return nil, fmt.Errorf("derive synthesis skills: %w", err)
-	}
-
-	if len(derived) > budget {
-		return nil, fmt.Errorf("lucind-ai: synthesis required skills count %d exceeds budget %d (skills: %s)",
-			len(derived), budget, strings.Join(derived, ", "))
-	}
-
-	return resolver.ResolvePaths(derived)
 }
