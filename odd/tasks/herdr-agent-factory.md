@@ -149,7 +149,8 @@ Each task closes with a work-unit commit and records its commit id and review ti
 
 - [ ] **T22. Read-only lanes should skip integration.** Found by the real `lucind-ai explore` run in a sandbox repo: the integrate step attempted to integrate the read-only synthesis lane and reported it as `reverted` (no `lucind-checks.sh` in the repo), which is noise and looks like a failure. Read-only lanes carry no commits, so integration should be skipped for them. Also record the fixes the same run forced: derived required skills were never shown to the worker (`fix(run)`), and a repo needs `.lucind/skill-roots.yaml` (document it). Route: inline. Est. ~60 lines.
 
-- [ ] **T23. Declared router signals in typed packets.** T19 added `understood`, `open_design`, `estimated_lookups` to manual packet frontmatter only. Pass them through the typed contract (`internal/packetauthor` contract + compile + `cmd/lucind-ai/packet_authoring.go`) so typed packets can declare them too. Route: inline. Est. ~60 lines.
+- [x] **T23. Declared router signals in typed packets.** T19 added `understood`, `open_design`, `estimated_lookups` to manual packet frontmatter only. Pass them through the typed contract (`internal/packetauthor` contract + compile + `cmd/lucind-ai/packet_authoring.go`) so typed packets can declare them too. Route: inline. Est. ~60 lines.
+  - Route: inline. Contract struct, compile normalization and admission copy the three fields; they change the typed packet digest. Test added. Commit `a091cdc`.
 
 Order: T1, T1b, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20, T21, T22, T23.
 
