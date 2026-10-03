@@ -339,3 +339,118 @@ not a valid json line
 		}
 	})
 }
+
+func TestAppendRouterEvent(t *testing.T) {
+	tmpDir := t.TempDir()
+	logPath := filepath.Join(tmpDir, "events", "usage.jsonl")
+
+	ev := usagelog.RouterEvent{
+		TS:             time.Date(2026, 10, 3, 11, 0, 0, 0, time.UTC),
+		Kind:           "router_disagreement",
+		PrimaryRoute:   "inline",
+		CandidateRoute: "worker",
+		Confidence:     0.85,
+		Signals: &usagelog.RouterSignals{
+			AllowedPathCount: 2,
+			NewFile:          false,
+			RiskTierLevel:    1,
+			ReadOnly:         false,
+		},
+	}
+
+	if err := usagelog.AppendRouterEvent(logPath, ev); err != nil {
+		t.Fatalf("AppendRouterEvent error: %v", err)
+	}
+
+	// Verify permissions
+	dirInfo, err := os.Stat(filepath.Dir(logPath))
+	if err != nil {
+		t.Fatalf("stat parent dir: %v", err)
+	}
+	if perm := dirInfo.Mode().Perm(); perm != 0700 {
+		t.Errorf("parent dir perm = %04o; want 0700", perm)
+	}
+	fileInfo, err := os.Stat(logPath)
+	if err != nil {
+		t.Fatalf("stat file: %v", err)
+	}
+	if perm := fileInfo.Mode().Perm(); perm != 0600 {
+		t.Errorf("file perm = %04o; want 0600", perm)
+	}
+
+	// Append an error event
+	errEv := usagelog.RouterEvent{
+		TS:        time.Date(2026, 10, 3, 11, 1, 0, 0, time.UTC),
+		Kind:      "router_error",
+		ErrorKind: "unauthorized",
+	}
+	if err := usagelog.AppendRouterEvent(logPath, errEv); err != nil {
+		t.Fatalf("AppendRouterEvent error: %v", err)
+	}
+
+	records, skipped, err := usagelog.ReadAll(logPath)
+	if err != nil {
+		t.Fatalf("ReadAll error: %v", err)
+	}
+	if skipped != 0 {
+		t.Errorf("skipped = %d; want 0", skipped)
+	}
+	if len(records) != 2 {
+		t.Fatalf("len(records) = %d; want 2", len(records))
+	}
+	if records[0].Kind != "router_disagreement" || records[0].PrimaryRoute != "inline" || records[0].CandidateRoute != "worker" {
+		t.Errorf("unexpected record 0: %+v", records[0])
+	}
+	if records[0].Signals == nil || records[0].Signals.AllowedPathCount != 2 {
+		t.Errorf("unexpected record 0 signals: %+v", records[0].Signals)
+	}
+	if records[1].Kind != "router_error" || records[1].ErrorKind != "unauthorized" {
+		t.Errorf("unexpected record 1: %+v", records[1])
+	}
+}
+
+func TestConcurrentAppendRouterEvent(t *testing.T) {
+	tmpDir := t.TempDir()
+	logPath := filepath.Join(tmpDir, "concurrent_events", "usage.jsonl")
+
+	const goroutines = 40
+	const writesPerGoroutine = 10
+	var wg sync.WaitGroup
+	wg.Add(goroutines)
+
+	for i := 0; i < goroutines; i++ {
+		go func(g int) {
+			defer wg.Done()
+			for j := 0; j < writesPerGoroutine; j++ {
+				ev := usagelog.RouterEvent{
+					TS:             time.Now().UTC(),
+					Kind:           "router_disagreement",
+					PrimaryRoute:   "inline",
+					CandidateRoute: "worker",
+					Confidence:     0.8,
+					Signals: &usagelog.RouterSignals{
+						AllowedPathCount: g + 1,
+						NewFile:          j%2 == 0,
+					},
+				}
+				if err := usagelog.AppendRouterEvent(logPath, ev); err != nil {
+					t.Errorf("concurrent AppendRouterEvent error: %v", err)
+				}
+			}
+		}(i)
+	}
+
+	wg.Wait()
+
+	records, skipped, err := usagelog.ReadAll(logPath)
+	if err != nil {
+		t.Fatalf("ReadAll error: %v", err)
+	}
+	if skipped != 0 {
+		t.Fatalf("skipped = %d; want 0 (corrupted concurrent write detected)", skipped)
+	}
+	wantTotal := goroutines * writesPerGoroutine
+	if len(records) != wantTotal {
+		t.Fatalf("len(records) = %d; want %d", len(records), wantTotal)
+	}
+}

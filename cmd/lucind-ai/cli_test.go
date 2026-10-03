@@ -9,6 +9,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -28,6 +30,7 @@ import (
 	"github.com/LanzerDevCorp/lucind-ai/internal/reconcile"
 	"github.com/LanzerDevCorp/lucind-ai/internal/result"
 	lucindrun "github.com/LanzerDevCorp/lucind-ai/internal/run"
+	"github.com/LanzerDevCorp/lucind-ai/internal/usagelog"
 	"github.com/LanzerDevCorp/lucind-ai/internal/worktree"
 )
 
@@ -6277,6 +6280,189 @@ func TestRunMaxParallelAcceptedAndReachesDeps(t *testing.T) {
 		}
 		if capturedDeps.MaxParallelLanes != lucindrun.DefaultMaxParallelLanes {
 			t.Errorf("Deps.MaxParallelLanes = %d, want default %d", capturedDeps.MaxParallelLanes, lucindrun.DefaultMaxParallelLanes)
+		}
+	})
+}
+
+func TestValidateDispatchThresholds_JevShadow(t *testing.T) {
+	repo := initRepo(t)
+	baseSHA := currentHead(t, repo)
+
+	t.Run("both env vars: disagreement written to log and verdict unchanged", func(t *testing.T) {
+		tmpState := t.TempDir()
+		t.Setenv("XDG_STATE_HOME", tmpState)
+		t.Setenv("LUCIND_USAGE_LOG", "") // unset off
+
+		var hits int
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			hits++
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{
+				"model": "jev-latest",
+				"answers": {
+					"route": {
+						"type": "choice",
+						"choice": "worker",
+						"confidence": 0.88
+					}
+				}
+			}`))
+		}))
+		defer srv.Close()
+
+		t.Setenv("LUCIND_JEV_API_KEY", "test-api-key")
+		t.Setenv("LUCIND_JEV_SHADOW", "on")
+		t.Setenv("LUCIND_JEV_URL", srv.URL)
+
+		ps := []packet.Packet{
+			{
+				Path:         "packet-1.md",
+				Route:        "inline",
+				BaseSHA:      baseSHA,
+				AllowedPaths: []string{"README.md"},
+			},
+		}
+
+		var stderr bytes.Buffer
+		err := validateDispatchThresholds(context.Background(), repo, ps, &stderr)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		// Dispatch verdict unchanged: Route remains "inline"
+		if ps[0].Route != "inline" {
+			t.Errorf("ps[0].Route = %q; want inline", ps[0].Route)
+		}
+		if hits != 1 {
+			t.Fatalf("expected 1 hit on fake server, got %d", hits)
+		}
+
+		// Verify disagreement written to usage log
+		logPath := filepath.Join(tmpState, "lucind-ai", "usage.jsonl")
+		records, skipped, err := usagelog.ReadAll(logPath)
+		if err != nil {
+			t.Fatalf("ReadAll error: %v", err)
+		}
+		if skipped != 0 {
+			t.Errorf("skipped = %d; want 0", skipped)
+		}
+		if len(records) != 1 {
+			t.Fatalf("expected 1 record in usage log, got %d", len(records))
+		}
+		if records[0].Kind != "router_disagreement" {
+			t.Errorf("record kind = %q; want 'router_disagreement'", records[0].Kind)
+		}
+		if records[0].PrimaryRoute != "inline" {
+			t.Errorf("record primary_route = %q; want inline", records[0].PrimaryRoute)
+		}
+		if records[0].CandidateRoute != "worker" {
+			t.Errorf("record candidate_route = %q; want worker", records[0].CandidateRoute)
+		}
+		if records[0].Confidence != 0.88 {
+			t.Errorf("record confidence = %v; want 0.88", records[0].Confidence)
+		}
+		if records[0].Signals == nil || records[0].Signals.AllowedPathCount != 1 {
+			t.Errorf("record signals mismatch: %+v", records[0].Signals)
+		}
+	})
+
+	t.Run("only one env var: no request made", func(t *testing.T) {
+		tmpState := t.TempDir()
+		t.Setenv("XDG_STATE_HOME", tmpState)
+		t.Setenv("LUCIND_USAGE_LOG", "")
+
+		var hits int
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			hits++
+		}))
+		defer srv.Close()
+
+		t.Setenv("LUCIND_JEV_URL", srv.URL)
+
+		// Test case 1: only API key set
+		t.Setenv("LUCIND_JEV_API_KEY", "test-api-key")
+		t.Setenv("LUCIND_JEV_SHADOW", "")
+
+		ps := []packet.Packet{
+			{
+				Path:         "packet-1.md",
+				Route:        "inline",
+				BaseSHA:      baseSHA,
+				AllowedPaths: []string{"README.md"},
+			},
+		}
+
+		var stderr bytes.Buffer
+		err := validateDispatchThresholds(context.Background(), repo, ps, &stderr)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if hits != 0 {
+			t.Errorf("expected 0 hits with only API key, got %d", hits)
+		}
+
+		// Test case 2: only SHADOW set
+		t.Setenv("LUCIND_JEV_API_KEY", "")
+		t.Setenv("LUCIND_JEV_SHADOW", "on")
+
+		stderr.Reset()
+		err = validateDispatchThresholds(context.Background(), repo, ps, &stderr)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if hits != 0 {
+			t.Errorf("expected 0 hits with only SHADOW on, got %d", hits)
+		}
+	})
+
+	t.Run("failing fake server: dispatch still proceeds", func(t *testing.T) {
+		tmpState := t.TempDir()
+		t.Setenv("XDG_STATE_HOME", tmpState)
+		t.Setenv("LUCIND_USAGE_LOG", "")
+
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write([]byte(`server broke`))
+		}))
+		defer srv.Close()
+
+		t.Setenv("LUCIND_JEV_API_KEY", "test-api-key")
+		t.Setenv("LUCIND_JEV_SHADOW", "on")
+		t.Setenv("LUCIND_JEV_URL", srv.URL)
+
+		ps := []packet.Packet{
+			{
+				Path:         "packet-1.md",
+				Route:        "inline",
+				BaseSHA:      baseSHA,
+				AllowedPaths: []string{"README.md"},
+			},
+		}
+
+		var stderr bytes.Buffer
+		err := validateDispatchThresholds(context.Background(), repo, ps, &stderr)
+		if err != nil {
+			t.Fatalf("unexpected error when fake server fails: %v", err)
+		}
+		if ps[0].Route != "inline" {
+			t.Errorf("ps[0].Route = %q; want inline", ps[0].Route)
+		}
+
+		// Verify error event logged
+		logPath := filepath.Join(tmpState, "lucind-ai", "usage.jsonl")
+		records, _, err := usagelog.ReadAll(logPath)
+		if err != nil {
+			t.Fatalf("ReadAll error: %v", err)
+		}
+		if len(records) != 1 {
+			t.Fatalf("expected 1 record in usage log, got %d", len(records))
+		}
+		if records[0].Kind != "router_error" {
+			t.Errorf("record kind = %q; want 'router_error'", records[0].Kind)
+		}
+		if records[0].ErrorKind != "http" {
+			t.Errorf("record error_kind = %q; want 'http'", records[0].ErrorKind)
 		}
 	})
 }

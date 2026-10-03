@@ -31,7 +31,9 @@ import (
 	"github.com/LanzerDevCorp/lucind-ai/internal/packet"
 	"github.com/LanzerDevCorp/lucind-ai/internal/reconcile"
 	"github.com/LanzerDevCorp/lucind-ai/internal/result"
+	"github.com/LanzerDevCorp/lucind-ai/internal/router"
 	lucindrun "github.com/LanzerDevCorp/lucind-ai/internal/run"
+	"github.com/LanzerDevCorp/lucind-ai/internal/usagelog"
 	"github.com/LanzerDevCorp/lucind-ai/internal/worktree"
 )
 
@@ -911,6 +913,61 @@ func validateDispatchThresholds(ctx context.Context, primaryRoot string, ps []pa
 			fmt.Fprintf(stderr, "lucind-ai: packet %s route upgraded inline -> worker: %s\n", flagPath, strings.Join(verdict.Reasons, ", "))
 		case dispatchcheck.ActionAccept:
 			// nothing printed
+		}
+
+		// Opt-in shadow router check: runs only when both env vars are set
+		apiKey := os.Getenv("LUCIND_JEV_API_KEY")
+		shadowOn := os.Getenv("LUCIND_JEV_SHADOW") == "on"
+		if apiKey != "" && shadowOn {
+			func() {
+				defer func() {
+					_ = recover()
+				}()
+				baseURL := os.Getenv("LUCIND_JEV_URL")
+				jev, err := router.NewJev(baseURL, apiKey)
+				if err != nil {
+					// The error never contains the API key; tell the user why shadow mode is off.
+					fmt.Fprintf(stderr, "lucind-ai: jev shadow router disabled: %v\n", err)
+					return
+				}
+
+				chkSig := dispatchcheck.ComputeSignals(p, exists)
+				sig := router.Signals{
+					AllowedPathCount: chkSig.AllowedPathCount,
+					NewFile:          chkSig.NewFile,
+					RiskTierLevel:    router.SignalsFromRiskTier(chkSig.Tier),
+					ReadOnly:         p.ReadOnly,
+				}
+
+				shadow := router.Shadow{
+					Primary:   router.Deterministic{},
+					Candidate: jev,
+					Log: func(ev router.Event) {
+						if os.Getenv("LUCIND_USAGE_LOG") == "off" {
+							return
+						}
+						usagePath, err := usagelog.DefaultPath()
+						if err != nil || usagePath == "" {
+							return
+						}
+						_ = usagelog.AppendRouterEvent(usagePath, usagelog.RouterEvent{
+							TS:             ev.TS,
+							Kind:           ev.Kind,
+							PrimaryRoute:   ev.PrimaryRoute,
+							CandidateRoute: ev.CandidateRoute,
+							Confidence:     ev.Confidence,
+							ErrorKind:      ev.ErrorKind,
+							Signals: &usagelog.RouterSignals{
+								AllowedPathCount: ev.Signals.AllowedPathCount,
+								NewFile:          ev.Signals.NewFile,
+								RiskTierLevel:    ev.Signals.RiskTierLevel,
+								ReadOnly:         ev.Signals.ReadOnly,
+							},
+						})
+					},
+				}
+				_, _ = shadow.Route(ctx, sig)
+			}()
 		}
 	}
 	return nil

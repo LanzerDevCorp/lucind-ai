@@ -67,12 +67,15 @@ type TargetComparison struct {
 
 // Report holds aggregated usage data and target share comparisons.
 type Report struct {
-	Providers        []ProviderTotals `json:"providers"`
-	Models           []ModelTotals    `json:"models"`
-	LaneRoles        []LaneRoleTotals `json:"lane_roles"`
-	GrandTotal       GrandTotals      `json:"grand_total"`
-	SkippedLines     int              `json:"skipped_lines"`
-	TargetComparison TargetComparison `json:"target_comparison"`
+	Providers           []ProviderTotals `json:"providers"`
+	Models              []ModelTotals    `json:"models"`
+	LaneRoles           []LaneRoleTotals `json:"lane_roles"`
+	GrandTotal          GrandTotals      `json:"grand_total"`
+	SkippedLines        int              `json:"skipped_lines"`
+	TargetComparison    TargetComparison `json:"target_comparison"`
+	RouterDisagreements int              `json:"router_disagreements,omitempty"`
+	RouterErrors        int              `json:"router_errors,omitempty"`
+	HasRouterEvents     bool             `json:"has_router_events,omitempty"`
 }
 
 // BuildReport aggregates records filtered by since (zero since includes all)
@@ -92,6 +95,24 @@ func BuildReport(records []Record, since time.Time, skipped int) Report {
 
 	for _, r := range records {
 		if !since.IsZero() && r.TS.Before(since) {
+			continue
+		}
+
+		if r.Kind == "router_disagreement" {
+			rep.RouterDisagreements++
+			rep.HasRouterEvents = true
+			continue
+		}
+		if r.Kind == "router_error" {
+			rep.RouterErrors++
+			rep.HasRouterEvents = true
+			continue
+		}
+		if strings.HasPrefix(r.Kind, "router_") {
+			rep.HasRouterEvents = true
+			continue
+		}
+		if r.Kind != "" && r.Kind != "call" {
 			continue
 		}
 
@@ -277,6 +298,10 @@ func (r Report) Text() string {
 			sb.WriteString(fmt.Sprintf("  %-20s %6d %14d %10.4f\n", lr.LaneRole, lr.Calls, lr.TotalTokens, lr.CostUSD))
 		}
 		sb.WriteString("\n")
+	}
+
+	if r.HasRouterEvents {
+		sb.WriteString(fmt.Sprintf("Router shadow: %d disagreements, %d errors\n", r.RouterDisagreements, r.RouterErrors))
 	}
 
 	sb.WriteString(fmt.Sprintf("Skipped lines: %d\n\n", r.SkippedLines))

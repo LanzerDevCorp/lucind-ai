@@ -11,27 +11,52 @@ import (
 	"time"
 )
 
+// RouterSignals holds the numeric/boolean signals for a router event.
+type RouterSignals struct {
+	AllowedPathCount int  `json:"allowed_path_count"`
+	NewFile          bool `json:"new_file"`
+	RiskTierLevel    int  `json:"risk_tier_level"`
+	ReadOnly         bool `json:"read_only"`
+}
+
+// RouterEvent is a shadow router log entry written to usage.jsonl.
+type RouterEvent struct {
+	TS             time.Time      `json:"ts"`
+	Kind           string         `json:"kind"`
+	PrimaryRoute   string         `json:"primary_route,omitempty"`
+	CandidateRoute string         `json:"candidate_route,omitempty"`
+	Confidence     float64        `json:"confidence,omitempty"`
+	ErrorKind      string         `json:"error_kind,omitempty"`
+	Signals        *RouterSignals `json:"signals,omitempty"`
+}
+
 // Record is one executor attempt log entry in usage.jsonl.
 type Record struct {
-	TS              time.Time `json:"ts"`
-	RunID           string    `json:"run_id"`
-	LaneID          string    `json:"lane_id"`
-	Attempt         int       `json:"attempt"`
-	Executor        string    `json:"executor"`
-	Provider        string    `json:"provider"`
-	Model           string    `json:"model"`
-	LaneRole        string    `json:"lane_role"`
-	InputTokens     int64     `json:"input_tokens"`
-	OutputTokens    int64     `json:"output_tokens"`
-	ThinkingTokens  int64     `json:"thinking_tokens"`
-	CacheReadTokens int64     `json:"cache_read_tokens"`
-	TotalTokens     int64     `json:"total_tokens"`
-	CostUSD         float64   `json:"cost_usd"`
-	TokensKnown     bool      `json:"tokens_known"`
-	DurationMS      int64     `json:"duration_ms"`
-	ExitCode        int       `json:"exit_code"`
-	TimedOut        bool      `json:"timed_out"`
-	Status          string    `json:"status"`
+	Kind            string         `json:"kind,omitempty"`
+	PrimaryRoute    string         `json:"primary_route,omitempty"`
+	CandidateRoute  string         `json:"candidate_route,omitempty"`
+	Confidence      float64        `json:"confidence,omitempty"`
+	ErrorKind       string         `json:"error_kind,omitempty"`
+	Signals         *RouterSignals `json:"signals,omitempty"`
+	TS              time.Time      `json:"ts"`
+	RunID           string         `json:"run_id"`
+	LaneID          string         `json:"lane_id"`
+	Attempt         int            `json:"attempt"`
+	Executor        string         `json:"executor"`
+	Provider        string         `json:"provider"`
+	Model           string         `json:"model"`
+	LaneRole        string         `json:"lane_role"`
+	InputTokens     int64          `json:"input_tokens"`
+	OutputTokens    int64          `json:"output_tokens"`
+	ThinkingTokens  int64          `json:"thinking_tokens"`
+	CacheReadTokens int64          `json:"cache_read_tokens"`
+	TotalTokens     int64          `json:"total_tokens"`
+	CostUSD         float64        `json:"cost_usd"`
+	TokensKnown     bool           `json:"tokens_known"`
+	DurationMS      int64          `json:"duration_ms"`
+	ExitCode        int            `json:"exit_code"`
+	TimedOut        bool           `json:"timed_out"`
+	Status          string         `json:"status"`
 }
 
 // Usage holds parsed token and cost metrics extracted from an executor's stdout.
@@ -259,4 +284,37 @@ func ReadAll(path string) ([]Record, int, error) {
 		return records, skipped, fmt.Errorf("scan usage log %q: %w", path, err)
 	}
 	return records, skipped, nil
+}
+
+// AppendRouterEvent appends a single RouterEvent as a JSON line to path.
+// Directory is created with mode 0700 and file with mode 0600.
+// The event is written in a single Write call to prevent concurrent line interleaving.
+func AppendRouterEvent(path string, ev RouterEvent) error {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return fmt.Errorf("create usage log dir %q: %w", dir, err)
+	}
+
+	if ev.TS.IsZero() {
+		ev.TS = time.Now().UTC()
+	} else {
+		ev.TS = ev.TS.UTC()
+	}
+
+	data, err := json.Marshal(ev)
+	if err != nil {
+		return fmt.Errorf("marshal router event: %w", err)
+	}
+	data = append(data, '\n')
+
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
+	if err != nil {
+		return fmt.Errorf("open usage log file %q: %w", path, err)
+	}
+	defer f.Close()
+
+	if _, err := f.Write(data); err != nil {
+		return fmt.Errorf("write router event to %q: %w", path, err)
+	}
+	return nil
 }

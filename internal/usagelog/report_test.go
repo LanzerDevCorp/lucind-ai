@@ -260,3 +260,74 @@ func TestReportTextAndJSON(t *testing.T) {
 		t.Errorf("roundtrip Providers count = %d; want %d", len(roundtrip.Providers), len(rep.Providers))
 	}
 }
+
+func TestBuildReportRouterEvents(t *testing.T) {
+	baseTime := time.Date(2026, 10, 3, 12, 0, 0, 0, time.UTC)
+	records := []usagelog.Record{
+		{
+			TS:          baseTime,
+			Kind:        "call",
+			Executor:    "agy",
+			Provider:    "agy",
+			Model:       "gemini-3.8-flash-high",
+			TotalTokens: 1000,
+			CostUSD:     0.01,
+			TokensKnown: true,
+		},
+		{
+			TS:          baseTime.Add(time.Minute),
+			Kind:        "", // empty kind = normal call
+			Executor:    "claude",
+			Provider:    "claude",
+			Model:       "claude-3-7-sonnet",
+			TotalTokens: 2000,
+			CostUSD:     0.02,
+			TokensKnown: true,
+		},
+		{
+			TS:             baseTime.Add(2 * time.Minute),
+			Kind:           "router_disagreement",
+			PrimaryRoute:   "inline",
+			CandidateRoute: "worker",
+			Confidence:     0.8,
+			Signals: &usagelog.RouterSignals{
+				AllowedPathCount: 2,
+			},
+		},
+		{
+			TS:             baseTime.Add(3 * time.Minute),
+			Kind:           "router_disagreement",
+			PrimaryRoute:   "worker",
+			CandidateRoute: "inline",
+			Confidence:     0.9,
+		},
+		{
+			TS:        baseTime.Add(4 * time.Minute),
+			Kind:      "router_error",
+			ErrorKind: "rate_limited",
+		},
+	}
+
+	rep := usagelog.BuildReport(records, time.Time{}, 0)
+
+	// Router events MUST NOT affect calls or token totals
+	if rep.GrandTotal.Calls != 2 {
+		t.Errorf("GrandTotal.Calls = %d; want 2 (router events must not be counted)", rep.GrandTotal.Calls)
+	}
+	if rep.GrandTotal.TotalTokens != 3000 {
+		t.Errorf("GrandTotal.TotalTokens = %d; want 3000", rep.GrandTotal.TotalTokens)
+	}
+
+	text := rep.Text()
+	wantLine := "Router shadow: 2 disagreements, 1 errors"
+	if !strings.Contains(text, wantLine) {
+		t.Errorf("expected Text() to contain %q; got:\n%s", wantLine, text)
+	}
+
+	// When no router events exist, the line must not appear
+	repNoEvents := usagelog.BuildReport(records[:2], time.Time{}, 0)
+	textNoEvents := repNoEvents.Text()
+	if strings.Contains(textNoEvents, "Router shadow:") {
+		t.Errorf("expected Text() without router events to not contain 'Router shadow:'; got:\n%s", textNoEvents)
+	}
+}
