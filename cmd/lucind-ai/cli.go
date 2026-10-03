@@ -58,7 +58,7 @@ const attemptOwner = "lucind-ai run"
 // error, so a person driving the binary from a terminal always sees the one
 // invocation that works rather than a stack trace. --packet is repeatable:
 // each occurrence adds one more lane to the batch.
-const usage = "usage: lucind-ai run --packet <path> [--packet <path> ...] [--timeout <duration>] [--legacy-main --expected-parent-sha <sha>] [--min-quota <fraction>] [--max-parallel <n>]\n       lucind-ai split --dag <path> --out <dir>\n       lucind-ai check [--out <path>]\n       lucind-ai accept --run <run-id> --lane <lane-id>\n       lucind-ai feature create --id <id> --parent <ref> --base-sha <sha> [--expected-parent-sha <sha>]\n       lucind-ai feature status [--id <id>]\n       lucind-ai feature recover --attempt <id>\n       lucind-ai feature renew --id <id> --owner <owner> --fence <fence> [--ttl <duration>]\n       lucind-ai feature lease release --id <id> [--owner <owner>] [--fence <fence>] [--pid <pid>] [--force]\n       lucind-ai feature lease status --id <id>\n       lucind-ai feature disable --id <id>\n       lucind-ai reconcile approve --request <id> --source <feature> --target <feature> [--actor <name>]\n       lucind-ai reconcile decline --request <id> [--actor <name>] [--reason <reason>]\n       lucind-ai reconcile cancel --request <id> [--actor <name>] [--reason <reason>]\n       lucind-ai reconcile renew --request <id> [--base-sha <sha>] [--source-sha <sha>] [--target-sha <sha>] [--wait-stable <duration>]\n       lucind-ai reconcile resolve --candidate <id> --sha <sha> [--actor <name>] [--wait-stable <duration>]\n       lucind-ai defect record --id <id> --feature <id> --signature <sig> [--evidence <ev>] [--disposition <disp>] [--run <run-id>] [--lane <lane-id>]\n       lucind-ai defect list --feature <id>\n       lucind-ai defect resolve --id <id>\n       lucind-ai defect decline --id <id>\n       lucind-ai defect defer --id <id>\n       lucind-ai worktree cleanup --lane <id> [--force]\n       lucind-ai integrate retry --run <run-id> [--lane <id> ...] [--timeout <duration>]\n       lucind-ai attest run -- <command> [args...]\n       lucind-ai attest verify --command \"<exact command string>\"\n       lucind-ai usage report [--since <duration or YYYY-MM-DD>] [--file <path>] [--json]\n       lucind-ai rules init|generate [--root <dir>] [--check]\n       lucind-ai --version"
+const usage = "usage: lucind-ai run --packet <path> [--packet <path> ...] [--timeout <duration>] [--legacy-main --expected-parent-sha <sha>] [--min-quota <fraction>] [--max-parallel <n>]\n       lucind-ai explore --objective <text> [--scope <path> ...] [--id <prefix>] [--timeout <duration>]\n       lucind-ai split --dag <path> --out <dir>\n       lucind-ai check [--out <path>]\n       lucind-ai accept --run <run-id> --lane <lane-id>\n       lucind-ai feature create --id <id> --parent <ref> --base-sha <sha> [--expected-parent-sha <sha>]\n       lucind-ai feature status [--id <id>]\n       lucind-ai feature recover --attempt <id>\n       lucind-ai feature renew --id <id> --owner <owner> --fence <fence> [--ttl <duration>]\n       lucind-ai feature lease release --id <id> [--owner <owner>] [--fence <fence>] [--pid <pid>] [--force]\n       lucind-ai feature lease status --id <id>\n       lucind-ai feature disable --id <id>\n       lucind-ai reconcile approve --request <id> --source <feature> --target <feature> [--actor <name>]\n       lucind-ai reconcile decline --request <id> [--actor <name>] [--reason <reason>]\n       lucind-ai reconcile cancel --request <id> [--actor <name>] [--reason <reason>]\n       lucind-ai reconcile renew --request <id> [--base-sha <sha>] [--source-sha <sha>] [--target-sha <sha>] [--wait-stable <duration>]\n       lucind-ai reconcile resolve --candidate <id> --sha <sha> [--actor <name>] [--wait-stable <duration>]\n       lucind-ai defect record --id <id> --feature <id> --signature <sig> [--evidence <ev>] [--disposition <disp>] [--run <run-id>] [--lane <lane-id>]\n       lucind-ai defect list --feature <id>\n       lucind-ai defect resolve --id <id>\n       lucind-ai defect decline --id <id>\n       lucind-ai defect defer --id <id>\n       lucind-ai worktree cleanup --lane <id> [--force]\n       lucind-ai integrate retry --run <run-id> [--lane <id> ...] [--timeout <duration>]\n       lucind-ai attest run -- <command> [args...]\n       lucind-ai attest verify --command \"<exact command string>\"\n       lucind-ai usage report [--since <duration or YYYY-MM-DD>] [--file <path>] [--json]\n       lucind-ai rules init|generate [--root <dir>] [--check]\n       lucind-ai --version"
 
 // depsFactory constructs run.Deps for runDispatch. In production it is
 // productionDeps; tests may override it to inject test doubles or observe dependency calls.
@@ -149,6 +149,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	switch args[0] {
 	case "run":
 		return runDispatch(ctx, args[1:], stdout, stderr)
+	case "explore":
+		return exploreDispatch(ctx, args[1:], stdout, stderr)
 	case "split":
 		return runSplit(ctx, args[1:], stdout, stderr)
 	case "check":
@@ -216,31 +218,52 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 		return 1
 	}
 
-	ps := make([]packet.Packet, 0, len(packetFlags))
-	for _, path := range packetFlags {
+	_, exitCode := executePacketBatch(ctx, dispatchBatchConfig{
+		packetPaths:       packetFlags,
+		legacyMain:        *legacyMain,
+		expectedParentSHA: *expectedParentSHA,
+		minQuota:          *minQuota,
+		maxParallel:       *maxParallel,
+		timeout:           *timeout,
+	}, stdout, stderr)
+	return exitCode
+}
+
+type dispatchBatchConfig struct {
+	packetPaths       []string
+	legacyMain        bool
+	expectedParentSHA string
+	minQuota          float64
+	maxParallel       int
+	timeout           time.Duration
+}
+
+func executePacketBatch(ctx context.Context, cfg dispatchBatchConfig, stdout, stderr io.Writer) (lucindrun.BatchReport, int) {
+	ps := make([]packet.Packet, 0, len(cfg.packetPaths))
+	for _, path := range cfg.packetPaths {
 		p, err := loadPacket(path)
 		if err != nil {
 			fmt.Fprintf(stderr, "lucind-ai: %v\n", err)
-			return 1
+			return lucindrun.BatchReport{}, 1
 		}
 		ps = append(ps, p)
 	}
 
-	if *legacyMain && *expectedParentSHA == "" {
+	if cfg.legacyMain && cfg.expectedParentSHA == "" {
 		for i, p := range ps {
 			if p.ExpectedParentSHA == "" {
-				fmt.Fprintf(stderr, "lucind-ai: packet %q in legacy mode requires --expected-parent-sha or frontmatter expected_parent_sha\n", packetFlags[i])
-				return 1
+				fmt.Fprintf(stderr, "lucind-ai: packet %q in legacy mode requires --expected-parent-sha or frontmatter expected_parent_sha\n", cfg.packetPaths[i])
+				return lucindrun.BatchReport{}, 1
 			}
 		}
 	}
 
 	for i := range ps {
-		if *legacyMain {
+		if cfg.legacyMain {
 			ps[i].LegacyMain = true
 		}
-		if *expectedParentSHA != "" && ps[i].ExpectedParentSHA == "" {
-			ps[i].ExpectedParentSHA = *expectedParentSHA
+		if cfg.expectedParentSHA != "" && ps[i].ExpectedParentSHA == "" {
+			ps[i].ExpectedParentSHA = cfg.expectedParentSHA
 		}
 	}
 
@@ -253,8 +276,8 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 				names = append(names, name)
 			}
 			sort.Strings(names)
-			fmt.Fprintf(stderr, "lucind-ai: unsupported executor %q in packet %q (supported: %s)\n", p.Executor, packetFlags[i], strings.Join(names, ", "))
-			return 1
+			fmt.Fprintf(stderr, "lucind-ai: unsupported executor %q in packet %q (supported: %s)\n", p.Executor, cfg.packetPaths[i], strings.Join(names, ", "))
+			return lucindrun.BatchReport{}, 1
 		}
 		for _, rung := range p.Escalation {
 			if _, ok := supportedExecutors[rung.Executor]; !ok {
@@ -263,8 +286,8 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 					names = append(names, name)
 				}
 				sort.Strings(names)
-				fmt.Fprintf(stderr, "lucind-ai: unsupported executor %q in packet %q (supported: %s)\n", rung.Executor, packetFlags[i], strings.Join(names, ", "))
-				return 1
+				fmt.Fprintf(stderr, "lucind-ai: unsupported executor %q in packet %q (supported: %s)\n", rung.Executor, cfg.packetPaths[i], strings.Join(names, ", "))
+				return lucindrun.BatchReport{}, 1
 			}
 		}
 	}
@@ -280,8 +303,8 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 			continue
 		}
 		if p.Executor != "opencode" {
-			fmt.Fprintf(stderr, "lucind-ai: packet %q names agent %q, but agent is only meaningful for executor \"opencode\" (got executor %q)\n", packetFlags[i], p.Agent, p.Executor)
-			return 1
+			fmt.Fprintf(stderr, "lucind-ai: packet %q names agent %q, but agent is only meaningful for executor \"opencode\" (got executor %q)\n", cfg.packetPaths[i], p.Agent, p.Executor)
+			return lucindrun.BatchReport{}, 1
 		}
 	}
 
@@ -304,8 +327,8 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 				}
 			}
 			if !ok {
-				fmt.Fprintf(stderr, "lucind-ai: packet %q names model %q, not a known model for executor %q (known: %s)\n", packetFlags[i], p.Model, p.Executor, strings.Join(known, ", "))
-				return 1
+				fmt.Fprintf(stderr, "lucind-ai: packet %q names model %q, not a known model for executor %q (known: %s)\n", cfg.packetPaths[i], p.Model, p.Executor, strings.Join(known, ", "))
+				return lucindrun.BatchReport{}, 1
 			}
 		}
 		for _, rung := range p.Escalation {
@@ -320,8 +343,8 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 					}
 				}
 				if !ok {
-					fmt.Fprintf(stderr, "lucind-ai: packet %q names model %q, not a known model for executor %q (known: %s)\n", packetFlags[i], rung.Model, rung.Executor, strings.Join(known, ", "))
-					return 1
+					fmt.Fprintf(stderr, "lucind-ai: packet %q names model %q, not a known model for executor %q (known: %s)\n", cfg.packetPaths[i], rung.Model, rung.Executor, strings.Join(known, ", "))
+					return lucindrun.BatchReport{}, 1
 				}
 			}
 		}
@@ -331,17 +354,17 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 	// worktree.Create so Create is not the first overlap-failure side effect.
 	if err := packet.DisjointAllowedPaths(ps); err != nil {
 		fmt.Fprintf(stderr, "lucind-ai: %v\n", err)
-		return 1
+		return lucindrun.BatchReport{}, 1
 	}
 
 	primaryRoot, err := resolvePrimaryRoot(ctx)
 	if err != nil {
 		fmt.Fprintf(stderr, "lucind-ai: resolve primary repository root: %v\n", err)
-		return 1
+		return lucindrun.BatchReport{}, 1
 	}
 
 	if err := validateDispatchThresholds(ctx, primaryRoot, ps, stderr); err != nil {
-		return 1
+		return lucindrun.BatchReport{}, 1
 	}
 
 	inputs := make([]dispatchAuthoringInput, len(ps))
@@ -351,7 +374,7 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 	ps, err = admitDispatchBatch(ctx, primaryRoot, inputs)
 	if err != nil {
 		printAdmissionError(stderr, err)
-		return 1
+		return lucindrun.BatchReport{}, 1
 	}
 
 	// One batch produces one combined tree and promotes it once. This target
@@ -360,7 +383,7 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 	attemptTarget, featureTargeted, err := lucindrun.FeatureTarget(ps)
 	if err != nil {
 		fmt.Fprintf(stderr, "lucind-ai: %v\n", err)
-		return 1
+		return lucindrun.BatchReport{}, 1
 	}
 
 	// Wave-level agy quota gate: one runDispatch invocation is one wave (the
@@ -372,7 +395,7 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 	// wave leaves zero side effects. Skipped for a batch with no
 	// agy-executed packet: the pooled account's quota has nothing to do with
 	// another executor's billing.
-	if *minQuota > 0 {
+	if cfg.minQuota > 0 {
 		usesAgy := false
 		for _, p := range ps {
 			if p.Executor == "agy" {
@@ -381,9 +404,9 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 			}
 		}
 		if usesAgy {
-			if err := ensureAgyQuota(ctx, *minQuota); err != nil {
+			if err := ensureAgyQuota(ctx, cfg.minQuota); err != nil {
 				fmt.Fprintf(stderr, "lucind-ai: %v\n", err)
-				return 1
+				return lucindrun.BatchReport{}, 1
 			}
 		}
 	}
@@ -395,12 +418,12 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 	toplevel, err := gitShowToplevel(ctx)
 	if err == nil && worktree.IsLinkedWorktree(toplevel) {
 		fmt.Fprintf(stderr, "lucind-ai: refusing to run from inside a linked worktree (%s); run from the primary repository instead\n", toplevel)
-		return 1
+		return lucindrun.BatchReport{}, 1
 	}
 
 	if err := preflightOrchestratorContract(primaryRoot); err != nil {
 		fmt.Fprintf(stderr, "lucind-ai: %v\n", err)
-		return 1
+		return lucindrun.BatchReport{}, 1
 	}
 
 	runID := uuid.NewString()
@@ -409,12 +432,12 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 	ledg, err := ledger.Open(ctx, primaryRoot)
 	if err != nil {
 		fmt.Fprintf(stderr, "lucind-ai: open ledger: %v\n", err)
-		return 1
+		return lucindrun.BatchReport{}, 1
 	}
 	defer ledg.Close()
 
-	deps := depsFactory(runID, primaryRoot, ledg, *timeout)
-	deps.MaxParallelLanes = *maxParallel
+	deps := depsFactory(runID, primaryRoot, ledg, cfg.timeout)
+	deps.MaxParallelLanes = cfg.maxParallel
 
 	// Register this run before anything else touches the ledger: every lane
 	// and event ExecuteBatch is about to write carries this runID, and the
@@ -444,7 +467,7 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 		PID:       os.Getpid(),
 	}); err != nil {
 		fmt.Fprintf(stderr, "lucind-ai: register run: %v\n", err)
-		return 1
+		return lucindrun.BatchReport{}, 1
 	}
 
 	// finalStatus is recorded via the deferred UpdateRunStatus below no
@@ -476,7 +499,7 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 		// "run: ", so no second "run: " prefix is added here -- otherwise
 		// a user sees a doubled "lucind-ai: run: run: ..." on stderr.
 		fmt.Fprintf(stderr, "lucind-ai: %v\n", err)
-		return 1
+		return batch, 1
 	}
 
 	// A feature-targeted batch promotes by compare-and-swap on its named
@@ -498,7 +521,7 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 	}
 	if err != nil {
 		fmt.Fprintf(stderr, "lucind-ai: %v\n", err)
-		return 1
+		return batch, 1
 	}
 
 	integrated := make(map[string]bool, len(integrateReport.Integrated))
@@ -535,11 +558,11 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 	// deferred UpdateRunStatus above.
 	for _, r := range batch.Lanes {
 		if r.Status != lane.Done || reverted[r.LaneID] {
-			return 1
+			return batch, 1
 		}
 	}
 	finalStatus = string(lane.Done)
-	return 0
+	return batch, 0
 }
 
 // runSplit implements the "split" subcommand: parses an apply-dag.yaml sidecar,
