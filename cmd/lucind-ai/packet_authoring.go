@@ -175,6 +175,9 @@ func admitDispatchBatch(ctx context.Context, primaryRoot string, inputs []dispat
 			Route                      string                  `json:"route,omitempty"`
 			RouteEvidence              string                  `json:"route_evidence,omitempty"`
 			NamedSkillsOnly            bool                    `json:"named_skills_only,omitempty"`
+			Understood                 *bool                   `json:"understood,omitempty"`
+			OpenDesign                 bool                    `json:"open_design,omitempty"`
+			EstimatedLookups           int                     `json:"estimated_lookups,omitempty"`
 			Verification               []string                `json:"verification,omitempty"`
 			KnownEnvironmentalFailures []string                `json:"known_environmental_failures,omitempty"`
 			CommitMessage              string                  `json:"commit_message,omitempty"`
@@ -197,6 +200,9 @@ func admitDispatchBatch(ctx context.Context, primaryRoot string, inputs []dispat
 		packets[i].Route = normalized.Route
 		packets[i].RouteEvidence = normalized.RouteEvidence
 		packets[i].NamedSkillsOnly = normalized.NamedSkillsOnly
+		packets[i].Understood = normalized.Understood
+		packets[i].OpenDesign = normalized.OpenDesign
+		packets[i].EstimatedLookups = normalized.EstimatedLookups
 		packets[i].Verification = append([]string(nil), normalized.Verification...)
 		packets[i].KnownEnvironmentalFailures = append([]string(nil), normalized.KnownEnvironmentalFailures...)
 		packets[i].CommitMessage = normalized.CommitMessage

@@ -62,6 +62,9 @@ type Contract struct {
 	Route                      string                  `json:"route,omitempty"`
 	RouteEvidence              string                  `json:"route_evidence,omitempty"`
 	NamedSkillsOnly            bool                    `json:"named_skills_only,omitempty"`
+	Understood                 *bool                   `json:"understood,omitempty"`
+	OpenDesign                 bool                    `json:"open_design,omitempty"`
+	EstimatedLookups           int                     `json:"estimated_lookups,omitempty"`
 	Verification               []string                `json:"verification,omitempty"`
 	KnownEnvironmentalFailures []string                `json:"known_environmental_failures,omitempty"`
 	CommitMessage              string                  `json:"commit_message,omitempty"`

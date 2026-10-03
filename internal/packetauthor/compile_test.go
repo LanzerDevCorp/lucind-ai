@@ -433,3 +433,27 @@ func TestCompileLoopAndEscalation(t *testing.T) {
 		assertDiagnosticCode(t, err, packetauthor.CodeContractInvalid)
 	})
 }
+
+func TestCompileDeclaredRouterSignalsPropagate(t *testing.T) {
+	base, err := packetauthor.Compile(validContract(), validFeatureBinding())
+	if err != nil {
+		t.Fatalf("Compile(base) error = %v", err)
+	}
+	no := false
+	c := validContract()
+	c.Understood = &no
+	c.OpenDesign = true
+	c.EstimatedLookups = 7
+	art, err := packetauthor.Compile(c, validFeatureBinding())
+	if err != nil {
+		t.Fatalf("Compile() error = %v", err)
+	}
+	if art.Digest == base.Digest {
+		t.Error("declared signals must change the digest")
+	}
+	for _, want := range []string{`"understood":false`, `"open_design":true`, `"estimated_lookups":7`} {
+		if !bytes.Contains(art.ContractJSON, []byte(want)) {
+			t.Errorf("ContractJSON missing %s: %s", want, art.ContractJSON)
+		}
+	}
+}
