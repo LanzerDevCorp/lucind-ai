@@ -42,7 +42,8 @@ Forecast about 900-1,100 authored changed lines (T1-T6). Strategy `ask-on-risk`;
 
 ## Tasks
 
-- [ ] **T1. Workspace trust registry.** `internal/agytrust`: `Add(path)` / `Remove(path)` on `trustedWorkspaces`; atomic write (temp + rename, mode kept), refuses unparseable JSON, preserves unknown keys, file lock. Route: inline. ~120 lines.
+- [x] **T1. Workspace trust registry.** `internal/agytrust`: `Add(path)` / `Remove(path)` on `trustedWorkspaces`; atomic write (temp + rename, mode kept), refuses unparseable JSON, preserves unknown keys, file lock. Route: inline. ~120 lines.
+  - Route: inline (small, security-sensitive; ~230 lines with tests). RED: package did not compile before the implementation; GREEN: 8 tests, `-race -count=5`. Behavior: parse-preserving (unknown keys kept, indentation normalized), atomic temp+rename keeping the file mode, `flock` on `settings.json.lucind.lock`, never rewrites JSON it cannot parse or a wrongly typed `trustedWorkspaces`, no write when already trusted, `Remove` is a no-op for a missing file or entry, relative paths rejected. Tests only use temp dirs; the real settings file was not touched. Commit `62ce490`.
 - [ ] **T2. Lane hooks.** `lucind-ai hook stop` subcommand (reads the Stop payload on stdin, writes the sentinel, validates the envelope with `result.Read`, returns continue/stop with a bounded counter) and `internal/agyhooks` that writes the worktree's `.agents/hooks.json` plus the info/exclude entry. Route: delegated writer. ~300 lines.
 - [ ] **T3. Interactive HerdrAgy.** Run `agy -i` in the lane pane, wait for the sentinel file (poll, hard timeout), then end the session cleanly; trust the worktree first (T1), install hooks (T2); keep the headless path behind `Interactive=false`. Route: delegated writer. ~300 lines. Conflicts with `herdr-direct-dispatch` T3 on `internal/executor/herdr.go`.
 - [ ] **T4. Antigravity rules for lanes.** Extend `internal/rules` to emit `.agents/rules/lucind-*.md` with valid frontmatter (`always_on` write scope, `model_decision` guides), size and budget checks, excluded from the lane diff. Route: delegated writer. ~200 lines. Depends on T2 (exclude mechanism).
@@ -60,7 +61,8 @@ Forecast about 900-1,100 authored changed lines (T1-T6). Strategy `ask-on-risk`;
 ## Progress
 
 - 2026-10-03: feature document created from the spike (hooks schema, trust inheritance, `Stop` continue verified).
+- 2026-10-03: T1 closed (`62ce490`).
 
 ## Next step
 
-T1: RED tests for `internal/agytrust`, then implementation.
+T2: lane hooks (`lucind-ai hook stop` + `internal/agyhooks`).
