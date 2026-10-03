@@ -108,4 +108,4 @@ T17 (accept re-verifica los candidatos con commit del dispatcher), luego T16 (pa
 
 ### Lo que dejé en disco
 
-Worktrees `~/git_root/lucind-ai-worktrees/lane-*` y ramas `lane/*` se conservan todos (borrar está prohibido sin supervisión): hay más de 20; los commits ya están integrados en la rama de feature por cherry-pick, así que `git branch --no-merged` los mostrará hasta que decidas borrarlos. Estado de `herdr`: los workspaces temporales de los spikes se cerraron. El binario instalado en `$GOPATH/bin` corresponde a la rama de feature (`lucind-ai -v`).
+Worktrees `~/git_root/lucind-ai-worktrees/lane-*` y ramas `lane/*` se conservan todos (borrar está prohibido sin supervisión): hay 17 ramas `lane/*` con su worktree; los commits ya están integrados en la rama de feature por cherry-pick, así que `git branch --no-merged` los mostrará hasta que decidas borrarlos. Estado de `herdr`: los workspaces temporales de los spikes se cerraron. El binario instalado en `$GOPATH/bin` corresponde a la rama de feature (`lucind-ai -v`).
