@@ -1,0 +1,21 @@
+{
+  "lucind-hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "__LUCIND_BIN__ hook pre-tool-use"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "type": "command",
+        "command": "__LUCIND_BIN__ hook stop"
+      }
+    ]
+  }
+}
