@@ -677,11 +677,11 @@ func TestAcceptDispatcherCommitObligation(t *testing.T) {
 		}
 	})
 
-	t.Run("accepted when envelope commit equals candidate and candidate != base", func(t *testing.T) {
+	t.Run("rejected when envelope commit equals candidate (worker must not commit)", func(t *testing.T) {
 		v, req := setupCandidate(t, "@candidate", false, "write")
 		_, err := v.Verify(context.Background(), req)
-		if err != nil {
-			t.Fatalf("expected verification to succeed, got %v", err)
+		if err == nil || !strings.Contains(err.Error(), "write commit mismatch") {
+			t.Fatalf("expected write commit mismatch error, got %v", err)
 		}
 	})
 

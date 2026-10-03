@@ -374,7 +374,7 @@ func validateVersionedEvidence(c ledger.LaneCandidate, envelope result.Envelope,
 		}
 	}
 	if evidence.CommitObligation == "dispatcher" {
-		if evidence.Mode != "write" || (envelope.Commit != "" && envelope.Commit != c.CandidateCommit) || c.CandidateCommit == c.BaseCommit {
+		if evidence.Mode != "write" || envelope.Commit != "" || c.CandidateCommit == c.BaseCommit {
 			return errors.New("accept: write commit mismatch")
 		}
 	} else if evidence.Mode == "write" && (evidence.CommitObligation != "required" || envelope.Commit != c.CandidateCommit) {

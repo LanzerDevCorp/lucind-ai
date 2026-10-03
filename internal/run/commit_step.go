@@ -33,7 +33,13 @@ func dispatcherCommit(ctx context.Context, deps Deps, worktreePath, baseSHA stri
 		return lane.Failed, "nothing to commit"
 	}
 
-	// c. Verification under attestation
+	// c. Verification under attestation. The tree must be identical before and after
+	// the verification commands: a command that edits files would otherwise get its
+	// own side effects attested and committed.
+	treeBefore, err := attest.TreeHash(ctx, worktreePath)
+	if err != nil {
+		return lane.Blocked, fmt.Sprintf("compute tree hash before verification: %v", err)
+	}
 	runAttested := deps.RunAttested
 	if runAttested == nil {
 		runAttested = defaultRunAttested
@@ -51,6 +57,9 @@ func dispatcherCommit(ctx context.Context, deps Deps, worktreePath, baseSHA stri
 	treeHash, err := attest.TreeHash(ctx, worktreePath)
 	if err != nil {
 		return lane.Blocked, fmt.Sprintf("compute tree hash: %v", err)
+	}
+	if treeHash != treeBefore {
+		return lane.Failed, "verification changed the worktree (tree hash differs before and after); verification commands must not modify files"
 	}
 
 	hasValidAttestation := deps.HasValidAttestation
@@ -136,7 +145,10 @@ func defaultGitCommit(ctx context.Context, worktreePath, message string) error {
 	if !hasConfiguredGitIdentity(ctx, worktreePath) {
 		args = append(args, "-c", "user.name=lucind-ai", "-c", "user.email=lucind-ai@localhost")
 	}
-	args = append(args, "commit", "-m", message)
+	// --no-verify: the attested verification above replaces repository hooks, and a
+	// worker-controlled hook path (or a commit-msg hook adding trailers) must not run
+	// with the dispatcher's authority.
+	args = append(args, "commit", "--no-verify", "-m", message)
 
 	cmdCommit := exec.CommandContext(ctx, "git", args...)
 	if out, err := cmdCommit.CombinedOutput(); err != nil {

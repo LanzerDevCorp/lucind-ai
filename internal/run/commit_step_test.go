@@ -507,3 +507,62 @@ func TestCommitMessageChangesPacketDigest(t *testing.T) {
 		t.Fatalf("expected digest to change when CommitMessage is set, both are %q", baseDigest)
 	}
 }
+
+func TestDispatcherCommitVerificationThatModifiesTreeFailsClosed(t *testing.T) {
+	wtDir := t.TempDir()
+	baseSHA := initRealGitRepo(t, wtDir)
+	if err := os.WriteFile(filepath.Join(wtDir, "change.txt"), []byte("change\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	deps := run.Deps{
+		RunAttested: func(ctx context.Context, dir, cmd string) (int, error) {
+			// A "verification" that edits the tree after the worker finished.
+			return 0, os.WriteFile(filepath.Join(dir, "sneaky.txt"), []byte("injected\n"), 0o644)
+		},
+		HasValidAttestation: func(ctx context.Context, repoRoot, cmd, tree string) (bool, error) { return true, nil },
+	}
+	p := testPacket()
+	p.CommitMessage = "feat: x"
+	p.Verification = []string{"echo ok"}
+
+	status, reason := run.DispatcherCommitForTest(context.Background(), deps, wtDir, baseSHA, p)
+	if status != lane.Failed || !strings.Contains(reason, "changed the worktree") {
+		t.Fatalf("status=%v reason=%q, want failed with a tree-changed reason", status, reason)
+	}
+	out, err := exec.Command("git", "-C", wtDir, "rev-list", "--count", baseSHA+"..HEAD").Output()
+	if err != nil || strings.TrimSpace(string(out)) != "0" {
+		t.Fatalf("no commit may be made, rev-list=%q err=%v", out, err)
+	}
+}
+
+func TestDispatcherCommitSkipsRepositoryHooks(t *testing.T) {
+	wtDir := t.TempDir()
+	baseSHA := initRealGitRepo(t, wtDir)
+	hook := filepath.Join(wtDir, ".git", "hooks", "commit-msg")
+	if err := os.WriteFile(hook, []byte("#!/bin/sh\nprintf '\\nCo-Authored-By: Someone <x@y.z>\\n' >> \"$1\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wtDir, "change.txt"), []byte("change\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	deps := run.Deps{
+		RunAttested:         func(ctx context.Context, dir, cmd string) (int, error) { return 0, nil },
+		HasValidAttestation: func(ctx context.Context, repoRoot, cmd, tree string) (bool, error) { return true, nil },
+	}
+	p := testPacket()
+	p.CommitMessage = "feat: hooks must not run"
+	p.Verification = []string{"echo ok"}
+
+	status, reason := run.DispatcherCommitForTest(context.Background(), deps, wtDir, baseSHA, p)
+	if status != lane.Done {
+		t.Fatalf("status=%v reason=%q", status, reason)
+	}
+	msg, err := exec.Command("git", "-C", wtDir, "log", "-1", "--format=%B").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(strings.ToLower(string(msg)), "co-authored-by") {
+		t.Fatalf("a commit-msg hook ran and injected a trailer: %q", msg)
+	}
+}
