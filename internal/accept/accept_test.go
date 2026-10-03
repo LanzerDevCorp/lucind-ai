@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/LanzerDevCorp/lucind-ai/internal/attest"
 	"github.com/LanzerDevCorp/lucind-ai/internal/candidatechange"
 	"github.com/LanzerDevCorp/lucind-ai/internal/lane"
 	"github.com/LanzerDevCorp/lucind-ai/internal/ledger"
@@ -402,6 +403,160 @@ func TestVerifierNonApplyPhaseStillEnforcesScope(t *testing.T) {
 	if _, err := f.verifier.Verify(context.Background(), AcceptanceRequest{"run-1", "lane-1"}); err == nil {
 		t.Fatal("Verify() with a declared non-apply sdd_phase still accepted an out-of-scope change")
 	}
+}
+
+func TestVerifierAttestationReuse(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("valid attestation skips check and persists attested receipt", func(t *testing.T) {
+		f := newVerifierFixture(t, validResult("allowed.txt"), "", map[string]string{"allowed.txt": "candidate\n"}, []string{"allowed.txt"})
+		checkCalled := false
+		f.verifier.check = func(ctx context.Context, dir string) (bool, string, error) {
+			checkCalled = true
+			return true, "checks-ok", nil
+		}
+		f.verifier.hasAttestation = func(ctx context.Context, root, command, treeHash string) (bool, error) {
+			if command != "sh lucind-checks.sh" {
+				t.Errorf("expected command 'sh lucind-checks.sh', got %q", command)
+			}
+			if treeHash != f.candidateRow.CandidateTree {
+				t.Errorf("expected treeHash %q, got %q", f.candidateRow.CandidateTree, treeHash)
+			}
+			return true, nil
+		}
+
+		receipt, err := f.verifier.Verify(ctx, AcceptanceRequest{RunID: "run-1", LaneID: "lane-1"})
+		if err != nil {
+			t.Fatalf("Verify() error = %v", err)
+		}
+		if checkCalled {
+			t.Fatalf("expected v.check NOT to be called when valid attestation exists")
+		}
+		if receipt.ReceiptID == "" || receipt.Cleanup != "removed" {
+			t.Fatalf("unexpected receipt: %+v", receipt)
+		}
+		expectedChecksHash := hashValues("checks:v1", "attest:v1", "attested:"+f.candidateRow.CandidateTree)
+		if receipt.ChecksHash != expectedChecksHash {
+			t.Fatalf("expected ChecksHash %q, got %q", expectedChecksHash, receipt.ChecksHash)
+		}
+	})
+
+	t.Run("no attestation runs checks as fallback", func(t *testing.T) {
+		f := newVerifierFixture(t, validResult("allowed.txt"), "", map[string]string{"allowed.txt": "candidate\n"}, []string{"allowed.txt"})
+		checkCalled := false
+		f.verifier.check = func(ctx context.Context, dir string) (bool, string, error) {
+			checkCalled = true
+			return true, "checks-ok", nil
+		}
+		f.verifier.hasAttestation = func(ctx context.Context, root, command, treeHash string) (bool, error) {
+			return false, nil
+		}
+
+		receipt, err := f.verifier.Verify(ctx, AcceptanceRequest{RunID: "run-1", LaneID: "lane-1"})
+		if err != nil {
+			t.Fatalf("Verify() error = %v", err)
+		}
+		if !checkCalled {
+			t.Fatalf("expected v.check to be called when no attestation exists")
+		}
+		attestedChecksHash := hashValues("checks:v1", "attest:v1", "attested:"+f.candidateRow.CandidateTree)
+		if receipt.ChecksHash == attestedChecksHash {
+			t.Fatalf("ChecksHash must differ between attested and fallback check runs")
+		}
+	})
+
+	t.Run("attestation lookup error falls back to running checks", func(t *testing.T) {
+		f := newVerifierFixture(t, validResult("allowed.txt"), "", map[string]string{"allowed.txt": "candidate\n"}, []string{"allowed.txt"})
+		checkCalled := false
+		f.verifier.check = func(ctx context.Context, dir string) (bool, string, error) {
+			checkCalled = true
+			return true, "checks-ok", nil
+		}
+		f.verifier.hasAttestation = func(ctx context.Context, root, command, treeHash string) (bool, error) {
+			return false, errors.New("simulated lookup error")
+		}
+
+		_, err := f.verifier.Verify(ctx, AcceptanceRequest{RunID: "run-1", LaneID: "lane-1"})
+		if err != nil {
+			t.Fatalf("Verify() error = %v", err)
+		}
+		if !checkCalled {
+			t.Fatalf("expected v.check to be called on lookup error")
+		}
+	})
+
+	t.Run("attestation lookup error fails closed when fallback checks fail", func(t *testing.T) {
+		f := newVerifierFixture(t, validResult("allowed.txt"), "", map[string]string{"allowed.txt": "candidate\n"}, []string{"allowed.txt"})
+		checkCalled := false
+		f.verifier.check = func(ctx context.Context, dir string) (bool, string, error) {
+			checkCalled = true
+			return false, "tests failed", nil
+		}
+		f.verifier.hasAttestation = func(ctx context.Context, root, command, treeHash string) (bool, error) {
+			return false, errors.New("simulated lookup error")
+		}
+
+		_, err := f.verifier.Verify(ctx, AcceptanceRequest{RunID: "run-1", LaneID: "lane-1"})
+		if err == nil {
+			t.Fatalf("expected Verify() to fail when checks fail")
+		}
+		if !checkCalled {
+			t.Fatalf("expected v.check to be called")
+		}
+	})
+
+	t.Run("default wiring reads real attestation from state dir", func(t *testing.T) {
+		configDir := t.TempDir()
+		stateDir := t.TempDir()
+		t.Setenv("XDG_CONFIG_HOME", configDir)
+		t.Setenv("XDG_STATE_HOME", stateDir)
+
+		f := newVerifierFixture(t, validResult("allowed.txt"), "", map[string]string{"allowed.txt": "candidate\n"}, []string{"allowed.txt"})
+		checkCalled := false
+		f.verifier.check = func(ctx context.Context, dir string) (bool, string, error) {
+			checkCalled = true
+			return true, "checks-ok", nil
+		}
+
+		key, err := attest.LoadOrCreateKey("")
+		if err != nil {
+			t.Fatalf("LoadOrCreateKey failed: %v", err)
+		}
+		commonDir, err := attest.RepoCommonDir(ctx, f.root)
+		if err != nil {
+			t.Fatalf("RepoCommonDir failed: %v", err)
+		}
+		repoID := attest.RepoID(commonDir)
+		logDir, err := attest.ResolveStateDir(repoID)
+		if err != nil {
+			t.Fatalf("ResolveStateDir failed: %v", err)
+		}
+		entry := attest.Entry{
+			Version:    1,
+			RepoID:     repoID,
+			Command:    "sh lucind-checks.sh",
+			ExitCode:   0,
+			TreeHash:   f.candidateRow.CandidateTree,
+			StartedAt:  time.Now().Add(-1 * time.Second).Format(time.RFC3339Nano),
+			FinishedAt: time.Now().Format(time.RFC3339Nano),
+		}
+		entry.MAC = attest.ComputeMAC(entry, key)
+		if _, err := attest.WriteEntry(logDir, entry); err != nil {
+			t.Fatalf("WriteEntry failed: %v", err)
+		}
+
+		receipt, err := f.verifier.Verify(ctx, AcceptanceRequest{RunID: "run-1", LaneID: "lane-1"})
+		if err != nil {
+			t.Fatalf("Verify() error = %v", err)
+		}
+		if checkCalled {
+			t.Fatalf("expected v.check NOT to be called when real on-disk attestation exists")
+		}
+		expectedChecksHash := hashValues("checks:v1", "attest:v1", "attested:"+f.candidateRow.CandidateTree)
+		if receipt.ChecksHash != expectedChecksHash {
+			t.Fatalf("expected ChecksHash %q, got %q", expectedChecksHash, receipt.ChecksHash)
+		}
+	})
 }
 
 func bindingHashForCandidate(t *testing.T, f verifierFixture) string {

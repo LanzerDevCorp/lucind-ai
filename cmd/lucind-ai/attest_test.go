@@ -264,3 +264,50 @@ func TestCLIAttestUsageAndErrors(t *testing.T) {
 		t.Fatalf("expected code 1, got %d", code)
 	}
 }
+
+func TestCLIAttestWorktreeSharing(t *testing.T) {
+	repoDir := t.TempDir()
+	initTestGitRepo(t, repoDir)
+
+	worktreeDir := filepath.Join(t.TempDir(), "lane-wt")
+	cmd := exec.Command("git", "-C", repoDir, "worktree", "add", worktreeDir, "HEAD")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git worktree add failed: %v: %s", err, string(out))
+	}
+
+	configDir := t.TempDir()
+	stateDir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", configDir)
+	t.Setenv("XDG_STATE_HOME", stateDir)
+
+	origWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	defer func() {
+		_ = os.Chdir(origWd)
+	}()
+
+	ctx := context.Background()
+
+	// 1. Run attest in the worktree
+	if err := os.Chdir(worktreeDir); err != nil {
+		t.Fatalf("chdir worktreeDir: %v", err)
+	}
+	var stdout, stderr bytes.Buffer
+	code := run(ctx, []string{"attest", "run", "--", "echo", "worktree-ok"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("attest run in worktree failed: exit %d, stderr: %s", code, stderr.String())
+	}
+
+	// 2. Verify in the primary repo (shares same RepoID via RepoCommonDir)
+	if err := os.Chdir(repoDir); err != nil {
+		t.Fatalf("chdir repoDir: %v", err)
+	}
+	stdout.Reset()
+	stderr.Reset()
+	code = run(ctx, []string{"attest", "verify", "--command", "echo worktree-ok"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("expected verify in primary repo to succeed for worktree attestation, got %d, stderr: %s", code, stderr.String())
+	}
+}

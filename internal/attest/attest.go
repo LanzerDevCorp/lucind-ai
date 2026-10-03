@@ -103,6 +103,9 @@ func ResolveKeyPath() (string, error) {
 
 // LoadOrCreateKey loads a 32-byte secret key from path, generating and storing
 // 32 random bytes with mode 0600 on first use if it does not exist.
+// Key creation is atomic using O_CREATE|O_EXCL. If racing processes attempt first
+// use concurrently, the winner creates the key and any racing processes retry
+// until the key is completely written.
 func LoadOrCreateKey(path string) ([]byte, error) {
 	if path == "" {
 		var err error
@@ -113,28 +116,64 @@ func LoadOrCreateKey(path string) ([]byte, error) {
 	}
 
 	data, err := os.ReadFile(path)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			key := make([]byte, 32)
-			if _, err := rand.Read(key); err != nil {
-				return nil, fmt.Errorf("generate random key: %w", err)
-			}
-			if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
-				return nil, fmt.Errorf("create key directory: %w", err)
-			}
-			if err := os.WriteFile(path, key, 0600); err != nil {
-				return nil, fmt.Errorf("write key file: %w", err)
-			}
-			_ = os.Chmod(path, 0600)
-			return key, nil
+	if err == nil {
+		if len(data) == 32 {
+			return data, nil
 		}
+		// Mid-write by another process on first use: bounded retry.
+		return readKeyWithRetry(path)
+	}
+
+	if !errors.Is(err, os.ErrNotExist) {
 		return nil, fmt.Errorf("read key file: %w", err)
 	}
 
-	if len(data) != 32 {
-		return nil, fmt.Errorf("invalid key file length: expected 32 bytes, got %d", len(data))
+	key := make([]byte, 32)
+	if _, err := rand.Read(key); err != nil {
+		return nil, fmt.Errorf("generate random key: %w", err)
 	}
-	return data, nil
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		return nil, fmt.Errorf("create key directory: %w", err)
+	}
+
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+	if err == nil {
+		_, writeErr := f.Write(key)
+		closeErr := f.Close()
+		if writeErr != nil || closeErr != nil {
+			_ = os.Remove(path)
+			if writeErr != nil {
+				return nil, fmt.Errorf("write key file: %w", writeErr)
+			}
+			return nil, fmt.Errorf("close key file: %w", closeErr)
+		}
+		return key, nil
+	}
+
+	if errors.Is(err, os.ErrExist) {
+		return readKeyWithRetry(path)
+	}
+
+	return nil, fmt.Errorf("create key file: %w", err)
+}
+
+func readKeyWithRetry(path string) ([]byte, error) {
+	const maxAttempts = 30
+	const interval = 5 * time.Millisecond
+	var lastErr error
+	for i := 0; i < maxAttempts; i++ {
+		time.Sleep(interval)
+		data, err := os.ReadFile(path)
+		if err == nil {
+			if len(data) == 32 {
+				return data, nil
+			}
+			lastErr = fmt.Errorf("invalid key file length: expected 32 bytes, got %d", len(data))
+		} else {
+			lastErr = err
+		}
+	}
+	return nil, fmt.Errorf("read key file after bounded retry: %w", lastErr)
 }
 
 // RepoToplevel returns the absolute git repository top-level directory for dir.
@@ -155,10 +194,71 @@ func RepoToplevel(ctx context.Context, dir string) (string, error) {
 	return filepath.Clean(toplevel), nil
 }
 
-// RepoID returns the sha256 hex string of the absolute repository top-level path.
-func RepoID(toplevel string) string {
-	sum := sha256.Sum256([]byte(filepath.Clean(toplevel)))
+// RepoCommonDir returns the absolute git common directory for dir.
+// For a primary repository, this is the .git directory.
+// For a linked worktree, this is the main repository's .git directory.
+func RepoCommonDir(ctx context.Context, dir string) (string, error) {
+	cmd := exec.CommandContext(ctx, "git", "-C", dir, "rev-parse", "--git-common-dir")
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("git rev-parse --git-common-dir: %w", err)
+	}
+	commonDir := strings.TrimRight(string(out), "\r\n")
+	if !filepath.IsAbs(commonDir) {
+		absDir, err := filepath.Abs(dir)
+		if err != nil {
+			return "", fmt.Errorf("resolve dir path %q: %w", dir, err)
+		}
+		commonDir = filepath.Join(absDir, commonDir)
+	}
+	return filepath.Clean(commonDir), nil
+}
+
+// RepoID returns the sha256 hex string of the absolute repository git common directory path.
+func RepoID(commonDir string) string {
+	sum := sha256.Sum256([]byte(filepath.Clean(commonDir)))
 	return hex.EncodeToString(sum[:])
+}
+
+// HasValidAttestation checks if logDir contains a valid attestation entry matching command
+// and expectedTreeHash signed with key.
+// If key is empty, it loads the key via LoadOrCreateKey("").
+// If logDir is empty, it resolves logDir via RepoCommonDir and ResolveStateDir for repoRoot.
+// It returns (true, nil) if a valid attestation matching command, expectedTreeHash, exit code 0,
+// and valid MAC is found, or (false, nil) if no valid attestation exists.
+func HasValidAttestation(ctx context.Context, repoRoot, command, expectedTreeHash string, key []byte, logDir string) (bool, error) {
+	if len(key) == 0 {
+		var err error
+		key, err = LoadOrCreateKey("")
+		if err != nil {
+			return false, fmt.Errorf("load attestation key: %w", err)
+		}
+	}
+	if logDir == "" {
+		commonDir, err := RepoCommonDir(ctx, repoRoot)
+		if err != nil {
+			return false, fmt.Errorf("resolve repo common dir: %w", err)
+		}
+		repoID := RepoID(commonDir)
+		logDir, err = ResolveStateDir(repoID)
+		if err != nil {
+			return false, fmt.Errorf("resolve log dir: %w", err)
+		}
+	}
+
+	entries, err := ReadEntries(logDir)
+	if err != nil {
+		return false, fmt.Errorf("read entries: %w", err)
+	}
+
+	for _, e := range entries {
+		if e.Command == command && e.TreeHash == expectedTreeHash && e.ExitCode == 0 {
+			if VerifyMAC(e, key) {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
 }
 
 // TreeHash computes a git tree hash of the current working tree including uncommitted
@@ -254,11 +354,11 @@ func WriteEntry(dir string, e Entry) (string, error) {
 		return "", fmt.Errorf("close temp log file: %w", err)
 	}
 
+	if err := os.Chmod(tmpName, 0444); err != nil {
+		return "", fmt.Errorf("chmod temp log file: %w", err)
+	}
 	if err := os.Rename(tmpName, finalPath); err != nil {
 		return "", fmt.Errorf("rename log file: %w", err)
-	}
-	if err := os.Chmod(finalPath, 0444); err != nil {
-		return "", fmt.Errorf("chmod log file: %w", err)
 	}
 
 	return finalPath, nil

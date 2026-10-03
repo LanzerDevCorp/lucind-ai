@@ -23,6 +23,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/LanzerDevCorp/lucind-ai/internal/attest"
 	"github.com/LanzerDevCorp/lucind-ai/internal/candidatechange"
 	"github.com/LanzerDevCorp/lucind-ai/internal/integrate"
 	"github.com/LanzerDevCorp/lucind-ai/internal/ledger"
@@ -43,16 +44,26 @@ type AcceptanceReceipt = ledger.AcceptanceReceipt
 
 // Verifier owns identity loading, isolated checks, fenced cleanup, and receipt persistence.
 type Verifier struct {
-	primaryRoot   string
-	ledger        *ledger.Ledger
-	loadCandidate func(context.Context, string, string) (ledger.LaneCandidate, error)
-	check         func(context.Context, string) (bool, string, error)
-	now           func() time.Time
-	newID         func() string
+	primaryRoot    string
+	ledger         *ledger.Ledger
+	loadCandidate  func(context.Context, string, string) (ledger.LaneCandidate, error)
+	check          func(context.Context, string) (bool, string, error)
+	hasAttestation func(context.Context, string, string, string) (bool, error)
+	now            func() time.Time
+	newID          func() string
 }
 
 func NewVerifier(primaryRoot string, l *ledger.Ledger) *Verifier {
-	v := &Verifier{primaryRoot: primaryRoot, ledger: l, check: integrate.Check, now: time.Now, newID: uuid.NewString}
+	v := &Verifier{
+		primaryRoot: primaryRoot,
+		ledger:      l,
+		check:       integrate.Check,
+		hasAttestation: func(ctx context.Context, repoRoot, command, treeHash string) (bool, error) {
+			return attest.HasValidAttestation(ctx, repoRoot, command, treeHash, nil, "")
+		},
+		now:   time.Now,
+		newID: uuid.NewString,
+	}
 	v.loadCandidate = l.GetLaneCandidate
 	return v
 }
@@ -120,26 +131,44 @@ func (v *Verifier) Verify(ctx context.Context, req AcceptanceRequest) (Acceptanc
 	runSDDPhaseChecks := metadata.SDDPhase == "" || metadata.SDDPhase == "apply"
 	var version, output string
 	if runSDDPhaseChecks {
-		var timeout time.Duration
-		var err error
-		version, timeout, _, err = integrate.CheckPolicySnapshot()
-		if err != nil {
-			_ = cleanupOwnedIsolation(context.WithoutCancel(ctx), root, isolation, marker)
-			return AcceptanceReceipt{}, err
+		var hasAttest bool
+		if v.hasAttestation != nil {
+			var attestErr error
+			hasAttest, attestErr = v.hasAttestation(ctx, root, "sh lucind-checks.sh", candidate.CandidateTree)
+			if attestErr != nil {
+				hasAttest = false
+			}
 		}
-		checkCtx, cancel := context.WithTimeout(ctx, timeout)
-		passed, checkOutput, checkErr := v.check(checkCtx, isolation)
-		cancel()
-		output = checkOutput
-		cleanupErr := cleanupOwnedIsolation(context.WithoutCancel(ctx), root, isolation, marker)
-		if cleanupErr != nil {
-			return AcceptanceReceipt{}, fmt.Errorf("accept: cleanup failed: %w", cleanupErr)
-		}
-		if checkErr != nil {
-			return AcceptanceReceipt{}, fmt.Errorf("accept: checks could not execute: %w", checkErr)
-		}
-		if !passed {
-			return AcceptanceReceipt{}, fmt.Errorf("accept: required mechanical checks failed: %s", strings.TrimSpace(output))
+
+		if hasAttest {
+			version = "attest:v1"
+			output = "attested:" + candidate.CandidateTree
+			cleanupErr := cleanupOwnedIsolation(context.WithoutCancel(ctx), root, isolation, marker)
+			if cleanupErr != nil {
+				return AcceptanceReceipt{}, fmt.Errorf("accept: cleanup failed: %w", cleanupErr)
+			}
+		} else {
+			var timeout time.Duration
+			var err error
+			version, timeout, _, err = integrate.CheckPolicySnapshot()
+			if err != nil {
+				_ = cleanupOwnedIsolation(context.WithoutCancel(ctx), root, isolation, marker)
+				return AcceptanceReceipt{}, err
+			}
+			checkCtx, cancel := context.WithTimeout(ctx, timeout)
+			passed, checkOutput, checkErr := v.check(checkCtx, isolation)
+			cancel()
+			output = checkOutput
+			cleanupErr := cleanupOwnedIsolation(context.WithoutCancel(ctx), root, isolation, marker)
+			if cleanupErr != nil {
+				return AcceptanceReceipt{}, fmt.Errorf("accept: cleanup failed: %w", cleanupErr)
+			}
+			if checkErr != nil {
+				return AcceptanceReceipt{}, fmt.Errorf("accept: checks could not execute: %w", checkErr)
+			}
+			if !passed {
+				return AcceptanceReceipt{}, fmt.Errorf("accept: required mechanical checks failed: %s", strings.TrimSpace(output))
+			}
 		}
 	} else {
 		cleanupErr := cleanupOwnedIsolation(context.WithoutCancel(ctx), root, isolation, marker)

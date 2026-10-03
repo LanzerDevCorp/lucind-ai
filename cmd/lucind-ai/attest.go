@@ -61,7 +61,12 @@ func attestRunDispatch(ctx context.Context, args []string, stdout, stderr io.Wri
 		fmt.Fprintf(stderr, "lucind-ai: resolve repository toplevel: %v\n", err)
 		return 1
 	}
-	repoID := attest.RepoID(toplevel)
+	commonDir, err := attest.RepoCommonDir(ctx, wd)
+	if err != nil {
+		fmt.Fprintf(stderr, "lucind-ai: resolve repository common dir: %v\n", err)
+		return 1
+	}
+	repoID := attest.RepoID(commonDir)
 
 	key, err := attest.LoadOrCreateKey("")
 	if err != nil {
@@ -159,7 +164,12 @@ func attestVerifyDispatch(ctx context.Context, args []string, stdout, stderr io.
 		fmt.Fprintf(stderr, "lucind-ai: resolve repository toplevel: %v\n", err)
 		return 1
 	}
-	repoID := attest.RepoID(toplevel)
+	commonDir, err := attest.RepoCommonDir(ctx, wd)
+	if err != nil {
+		fmt.Fprintf(stderr, "lucind-ai: resolve repository common dir: %v\n", err)
+		return 1
+	}
+	repoID := attest.RepoID(commonDir)
 
 	key, err := attest.LoadOrCreateKey("")
 	if err != nil {

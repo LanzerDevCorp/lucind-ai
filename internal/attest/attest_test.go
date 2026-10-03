@@ -1,11 +1,14 @@
 package attest_test
 
 import (
+	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -391,5 +394,271 @@ func TestVerifyLogic(t *testing.T) {
 	}
 	if reason != attest.ReasonBadMAC {
 		t.Fatalf("expected %q, got %q", attest.ReasonBadMAC, reason)
+	}
+}
+
+func TestHelperProcess(t *testing.T) {
+	if os.Getenv("GO_WANT_HELPER_PROCESS") != "1" {
+		return
+	}
+	args := os.Args
+	for len(args) > 0 {
+		if args[0] == "--" {
+			args = args[1:]
+			break
+		}
+		args = args[1:]
+	}
+	if len(args) == 0 {
+		os.Exit(2)
+	}
+	switch args[0] {
+	case "create-key":
+		keyPath := os.Getenv("ATTEST_KEY_PATH")
+		key, err := attest.LoadOrCreateKey(keyPath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "LoadOrCreateKey failed: %v\n", err)
+			os.Exit(1)
+		}
+		if len(key) != 32 {
+			fmt.Fprintf(os.Stderr, "invalid key length: %d\n", len(key))
+			os.Exit(3)
+		}
+		os.Stdout.Write(key)
+		os.Exit(0)
+	default:
+		os.Exit(2)
+	}
+}
+
+func TestLoadOrCreateKey_Race(t *testing.T) {
+	tempDir := t.TempDir()
+	keyPath := filepath.Join(tempDir, "race.key")
+
+	const numProcs = 8
+	type result struct {
+		key []byte
+		err error
+	}
+	results := make([]result, numProcs)
+	var wg sync.WaitGroup
+	wg.Add(numProcs)
+
+	for i := 0; i < numProcs; i++ {
+		idx := i
+		go func() {
+			defer wg.Done()
+			cmd := exec.Command(os.Args[0], "-test.run=TestHelperProcess", "--", "create-key")
+			cmd.Env = append(os.Environ(),
+				"GO_WANT_HELPER_PROCESS=1",
+				"ATTEST_KEY_PATH="+keyPath,
+			)
+			out, err := cmd.CombinedOutput()
+			if err != nil {
+				results[idx] = result{err: fmt.Errorf("proc %d failed: %w: %s", idx, err, string(out))}
+				return
+			}
+			results[idx] = result{key: out}
+		}()
+	}
+	wg.Wait()
+
+	for i, res := range results {
+		if res.err != nil {
+			t.Fatalf("process %d failed: %v", i, res.err)
+		}
+		if len(res.key) != 32 {
+			t.Fatalf("process %d expected 32-byte key, got %d", i, len(res.key))
+		}
+		if !bytes.Equal(res.key, results[0].key) {
+			t.Fatalf("process %d key does not match process 0 key", i)
+		}
+	}
+
+	info, err := os.Stat(keyPath)
+	if err != nil {
+		t.Fatalf("stat key file: %v", err)
+	}
+	if info.Size() != 32 {
+		t.Fatalf("expected key file size 32, got %d", info.Size())
+	}
+	if perm := info.Mode().Perm(); perm != 0600 {
+		t.Fatalf("expected key file mode 0600, got %04o", perm)
+	}
+}
+
+func TestWriteEntryModeBeforeRename(t *testing.T) {
+	logDir := t.TempDir()
+	now := time.Now().UTC()
+	entry := attest.Entry{
+		Version:    1,
+		RepoID:     "repoid123",
+		Command:    "go test ./...",
+		ExitCode:   0,
+		TreeHash:   "4b825dc642cb6eb9a060e54bf8d69288fbee4904",
+		StartedAt:  now.Add(-1 * time.Second).Format(time.RFC3339Nano),
+		FinishedAt: now.Format(time.RFC3339Nano),
+		MAC:        "abcdef123456",
+	}
+
+	finalPath, err := attest.WriteEntry(logDir, entry)
+	if err != nil {
+		t.Fatalf("WriteEntry failed: %v", err)
+	}
+
+	// Verify final file is mode 0444
+	info, err := os.Stat(finalPath)
+	if err != nil {
+		t.Fatalf("stat final file: %v", err)
+	}
+	if perm := info.Mode().Perm(); perm != 0444 {
+		t.Fatalf("expected mode 0444, got %04o", perm)
+	}
+
+	// Verify no temporary files remain
+	entries, err := os.ReadDir(logDir)
+	if err != nil {
+		t.Fatalf("readdir logDir: %v", err)
+	}
+	for _, de := range entries {
+		if strings.HasSuffix(de.Name(), ".tmp") {
+			t.Errorf("leftover temporary file found: %s", de.Name())
+		}
+	}
+}
+
+func TestRepoID_WorktreeConsistency(t *testing.T) {
+	ctx := context.Background()
+	primaryDir := t.TempDir()
+	initGitRepo(t, primaryDir)
+
+	worktreeDir := filepath.Join(t.TempDir(), "wt")
+	cmd := exec.Command("git", "-C", primaryDir, "worktree", "add", worktreeDir, "HEAD")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git worktree add failed: %v: %s", err, string(out))
+	}
+
+	otherDir := t.TempDir()
+	initGitRepo(t, otherDir)
+
+	commonPrimary, err := attest.RepoCommonDir(ctx, primaryDir)
+	if err != nil {
+		t.Fatalf("RepoCommonDir(primary) error: %v", err)
+	}
+	commonWorktree, err := attest.RepoCommonDir(ctx, worktreeDir)
+	if err != nil {
+		t.Fatalf("RepoCommonDir(worktree) error: %v", err)
+	}
+	commonOther, err := attest.RepoCommonDir(ctx, otherDir)
+	if err != nil {
+		t.Fatalf("RepoCommonDir(other) error: %v", err)
+	}
+
+	idPrimary := attest.RepoID(commonPrimary)
+	idWorktree := attest.RepoID(commonWorktree)
+	idOther := attest.RepoID(commonOther)
+
+	if idPrimary != idWorktree {
+		t.Fatalf("expected RepoID to match between primary and worktree: %q vs %q", idPrimary, idWorktree)
+	}
+	if idPrimary == idOther {
+		t.Fatalf("expected RepoID to differ for different repository: %q", idPrimary)
+	}
+}
+
+func TestHasValidAttestation(t *testing.T) {
+	ctx := context.Background()
+	repoDir := t.TempDir()
+	initGitRepo(t, repoDir)
+
+	treeHash, err := attest.TreeHash(ctx, repoDir)
+	if err != nil {
+		t.Fatalf("TreeHash failed: %v", err)
+	}
+
+	logDir := t.TempDir()
+	key := []byte("01234567890123456789012345678901")
+	command := "sh lucind-checks.sh"
+
+	// 1. No attestation yet
+	valid, err := attest.HasValidAttestation(ctx, repoDir, command, treeHash, key, logDir)
+	if err != nil {
+		t.Fatalf("HasValidAttestation error: %v", err)
+	}
+	if valid {
+		t.Fatalf("expected valid=false for empty logDir")
+	}
+
+	// Write passing entry
+	entry := attest.Entry{
+		Version:    1,
+		RepoID:     "somerepoid",
+		Command:    command,
+		ExitCode:   0,
+		TreeHash:   treeHash,
+		StartedAt:  time.Now().Add(-1 * time.Second).Format(time.RFC3339Nano),
+		FinishedAt: time.Now().Format(time.RFC3339Nano),
+	}
+	entry.MAC = attest.ComputeMAC(entry, key)
+	if _, err := attest.WriteEntry(logDir, entry); err != nil {
+		t.Fatalf("WriteEntry failed: %v", err)
+	}
+
+	// 2. Passing entry matches
+	valid, err = attest.HasValidAttestation(ctx, repoDir, command, treeHash, key, logDir)
+	if err != nil {
+		t.Fatalf("HasValidAttestation error: %v", err)
+	}
+	if !valid {
+		t.Fatalf("expected valid=true for matching entry")
+	}
+
+	// 3. Different command
+	valid, err = attest.HasValidAttestation(ctx, repoDir, "sh other.sh", treeHash, key, logDir)
+	if err != nil {
+		t.Fatalf("HasValidAttestation error: %v", err)
+	}
+	if valid {
+		t.Fatalf("expected valid=false for different command")
+	}
+
+	// 4. Different tree hash
+	valid, err = attest.HasValidAttestation(ctx, repoDir, command, "0000000000000000000000000000000000000000", key, logDir)
+	if err != nil {
+		t.Fatalf("HasValidAttestation error: %v", err)
+	}
+	if valid {
+		t.Fatalf("expected valid=false for different tree hash")
+	}
+
+	// 5. Tampered MAC
+	tamperedLogDir := t.TempDir()
+	tamperedEntry := entry
+	tamperedEntry.MAC = "deadbeef"
+	if _, err := attest.WriteEntry(tamperedLogDir, tamperedEntry); err != nil {
+		t.Fatalf("WriteEntry failed: %v", err)
+	}
+	valid, err = attest.HasValidAttestation(ctx, repoDir, command, treeHash, key, tamperedLogDir)
+	if err != nil {
+		t.Fatalf("HasValidAttestation error: %v", err)
+	}
+	if valid {
+		t.Fatalf("expected valid=false for tampered MAC")
+	}
+
+	// 6. Failing exit code
+	failingLogDir := t.TempDir()
+	failingEntry := entry
+	failingEntry.ExitCode = 1
+	failingEntry.MAC = attest.ComputeMAC(failingEntry, key)
+	if _, err := attest.WriteEntry(failingLogDir, failingEntry); err != nil {
+		t.Fatalf("WriteEntry failed: %v", err)
+	}
+	valid, err = attest.HasValidAttestation(ctx, repoDir, command, treeHash, key, failingLogDir)
+	if err != nil {
+		t.Fatalf("HasValidAttestation error: %v", err)
+	}
+	if valid {
+		t.Fatalf("expected valid=false for failing entry")
 	}
 }
