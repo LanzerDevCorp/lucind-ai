@@ -1,12 +1,11 @@
 // Package executor dispatches a coding-agent CLI headlessly into a git
 // worktree, bounded by a wall clock the caller supplies via context. The
 // target CLI (agy) exposes its own --print-timeout, but that flag alone is
-// not trustworthy: it is not always present (cursor-agent has no timeout
-// flag at all), and even when present it defaults far above what a bounded
-// dispatch needs. The binary therefore owns the clock: every Run call is
-// bounded by ctx, and when a child CLI does expose its own timeout flag,
-// executor sets it strictly above the context deadline so the Go side is
-// always the one that decides, never the child process.
+// not trustworthy: it defaults far above what a bounded dispatch needs.
+// The binary therefore owns the clock: every Run call is bounded by ctx, and
+// when a child CLI does expose its own timeout flag, executor sets it strictly
+// above the context deadline so the Go side is always the one that decides,
+// never the child process.
 package executor
 
 import (
@@ -66,18 +65,8 @@ type Request struct {
 	WorktreePath string
 	// Model is optional; the flag is omitted entirely when this is empty.
 	Model string
-	// Agent is optional; only Opencode's Run reads it, sent as --agent.
-	// Other executors ignore it. Unlike Model there is no
-	// KnownModels-equivalent allow-list for agent names: an agent name only
-	// selects a system prompt / tool-permission profile within opencode's
-	// own account, never a different billed provider, so cross-executor
-	// misuse has no billing consequence the way a mismatched Model does --
-	// cli.go's pre-dispatch validation still rejects it on a non-opencode
-	// executor, but for clarity, not for cost safety.
-	Agent string
 	// SchemaPath is the path to the result schema on disk; --json-schema is
-	// omitted when empty (cursor-agent cannot be constrained at the
-	// source, so this is a belt, not the braces).
+	// omitted when empty.
 	SchemaPath string
 	// AllowedPaths is the lane's write scope. Only the interactive herdr-agy executor reads it
 	// (it becomes an always-on Antigravity rule); enforcement stays in the dispatcher's diff check.
