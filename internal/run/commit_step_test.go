@@ -128,8 +128,8 @@ func TestDispatcherCommitFailingVerificationFailed(t *testing.T) {
 		return fstest.MapFS{resultEnvelopePathForTest(): {Data: []byte(testDoneEnvelopeJSON)}}
 	}, fe, baseSHA)
 
-	deps.RunAttested = func(ctx context.Context, dir, cmd string) (int, error) {
-		return 42, nil // verification command failed with exit 42
+	deps.RunAttested = func(ctx context.Context, dir, cmd string) (int, string, error) {
+		return 42, "verification error log", nil // verification command failed with exit 42
 	}
 
 	p := testPacket()
@@ -162,8 +162,8 @@ func TestDispatcherCommitMissingAttestationBlocked(t *testing.T) {
 		return fstest.MapFS{resultEnvelopePathForTest(): {Data: []byte(testDoneEnvelopeJSON)}}
 	}, fe, baseSHA)
 
-	deps.RunAttested = func(ctx context.Context, dir, cmd string) (int, error) {
-		return 0, nil
+	deps.RunAttested = func(ctx context.Context, dir, cmd string) (int, string, error) {
+		return 0, "", nil
 	}
 	deps.HasValidAttestation = func(ctx context.Context, repoRoot, cmd, expectedTreeHash string) (bool, error) {
 		return false, nil // no valid attestation for current tree
@@ -199,8 +199,8 @@ func TestDispatcherCommitPreCommitGateBlocks(t *testing.T) {
 		return fstest.MapFS{resultEnvelopePathForTest(): {Data: []byte(testDoneEnvelopeJSON)}}
 	}, fe, baseSHA)
 
-	deps.RunAttested = func(ctx context.Context, dir, cmd string) (int, error) {
-		return 0, nil
+	deps.RunAttested = func(ctx context.Context, dir, cmd string) (int, string, error) {
+		return 0, "", nil
 	}
 	deps.HasValidAttestation = func(ctx context.Context, repoRoot, cmd, expectedTreeHash string) (bool, error) {
 		return true, nil
@@ -269,8 +269,8 @@ func TestDispatcherCommitSuccess(t *testing.T) {
 	}
 	deps.ResolveCandidateIdentity = run.ResolveCandidateIdentityFromGit
 
-	deps.RunAttested = func(ctx context.Context, dir, cmd string) (int, error) {
-		return 0, nil
+	deps.RunAttested = func(ctx context.Context, dir, cmd string) (int, string, error) {
+		return 0, "", nil
 	}
 	deps.HasValidAttestation = func(ctx context.Context, repoRoot, cmd, expectedTreeHash string) (bool, error) {
 		return true, nil
@@ -370,8 +370,8 @@ func TestDispatcherCommitDoesNotCommitUntrackedLucindDir(t *testing.T) {
 	}
 	deps.ResolveCandidateIdentity = run.ResolveCandidateIdentityFromGit
 
-	deps.RunAttested = func(ctx context.Context, dir, cmd string) (int, error) {
-		return 0, nil
+	deps.RunAttested = func(ctx context.Context, dir, cmd string) (int, string, error) {
+		return 0, "", nil
 	}
 	deps.HasValidAttestation = func(ctx context.Context, repoRoot, cmd, expectedTreeHash string) (bool, error) {
 		return true, nil
@@ -469,7 +469,7 @@ func TestDispatcherCommitIdentityFallback(t *testing.T) {
 	deps := newTestDeps(t, wtDir, func(string) fs.FS {
 		return fstest.MapFS{resultEnvelopePathForTest(): {Data: []byte(testDoneEnvelopeJSON)}}
 	}, fe, baseSHA)
-	deps.RunAttested = func(ctx context.Context, dir, cmd string) (int, error) { return 0, nil }
+	deps.RunAttested = func(ctx context.Context, dir, cmd string) (int, string, error) { return 0, "", nil }
 	deps.HasValidAttestation = func(ctx context.Context, repoRoot, cmd, expectedTreeHash string) (bool, error) { return true, nil }
 
 	p := testPacket()
@@ -508,6 +508,31 @@ func TestCommitMessageChangesPacketDigest(t *testing.T) {
 	}
 }
 
+func TestMaxIterationsChangesPacketDigest(t *testing.T) {
+	p := testPacket()
+	baseDigest := run.PacketDigest(p, []string{"internal/run"})
+
+	p.MaxIterations = 1
+	if d := run.PacketDigest(p, []string{"internal/run"}); d != baseDigest {
+		t.Fatalf("expected max_iterations 1 not to change digest: got %q, want %q", d, baseDigest)
+	}
+
+	p.MaxIterations = 2
+	if d := run.PacketDigest(p, []string{"internal/run"}); d == baseDigest {
+		t.Fatalf("expected max_iterations 2 to change digest: both %q", d)
+	}
+}
+
+func TestEscalationChangesPacketDigest(t *testing.T) {
+	p := testPacket()
+	baseDigest := run.PacketDigest(p, []string{"internal/run"})
+
+	p.Escalation = []packet.EscalationRung{{Executor: "herdr-agy"}}
+	if d := run.PacketDigest(p, []string{"internal/run"}); d == baseDigest {
+		t.Fatalf("expected escalation to change digest: both %q", d)
+	}
+}
+
 func TestDispatcherCommitVerificationThatModifiesTreeFailsClosed(t *testing.T) {
 	wtDir := t.TempDir()
 	baseSHA := initRealGitRepo(t, wtDir)
@@ -516,9 +541,9 @@ func TestDispatcherCommitVerificationThatModifiesTreeFailsClosed(t *testing.T) {
 	}
 
 	deps := run.Deps{
-		RunAttested: func(ctx context.Context, dir, cmd string) (int, error) {
+		RunAttested: func(ctx context.Context, dir, cmd string) (int, string, error) {
 			// A "verification" that edits the tree after the worker finished.
-			return 0, os.WriteFile(filepath.Join(dir, "sneaky.txt"), []byte("injected\n"), 0o644)
+			return 0, "", os.WriteFile(filepath.Join(dir, "sneaky.txt"), []byte("injected\n"), 0o644)
 		},
 		HasValidAttestation: func(ctx context.Context, repoRoot, cmd, tree string) (bool, error) { return true, nil },
 	}
@@ -547,7 +572,7 @@ func TestDispatcherCommitSkipsRepositoryHooks(t *testing.T) {
 		t.Fatal(err)
 	}
 	deps := run.Deps{
-		RunAttested:         func(ctx context.Context, dir, cmd string) (int, error) { return 0, nil },
+		RunAttested:         func(ctx context.Context, dir, cmd string) (int, string, error) { return 0, "", nil },
 		HasValidAttestation: func(ctx context.Context, repoRoot, cmd, tree string) (bool, error) { return true, nil },
 	}
 	p := testPacket()

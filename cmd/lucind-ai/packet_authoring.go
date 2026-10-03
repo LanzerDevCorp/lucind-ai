@@ -167,17 +167,19 @@ func admitDispatchBatch(ctx context.Context, primaryRoot string, inputs []dispat
 			continue
 		}
 		var normalized struct {
-			RouteIntent                string            `json:"route_intent"`
-			Mode                       packetauthor.Mode `json:"mode"`
-			RequiredSkills             []string          `json:"required_skills"`
-			WritePaths                 []string          `json:"write_paths"`
-			ReadOnlyPaths              []string          `json:"read_only_paths"`
-			Route                      string            `json:"route,omitempty"`
-			RouteEvidence              string            `json:"route_evidence,omitempty"`
-			NamedSkillsOnly            bool              `json:"named_skills_only,omitempty"`
-			Verification               []string          `json:"verification,omitempty"`
-			KnownEnvironmentalFailures []string          `json:"known_environmental_failures,omitempty"`
-			CommitMessage              string            `json:"commit_message,omitempty"`
+			RouteIntent                string                  `json:"route_intent"`
+			Mode                       packetauthor.Mode       `json:"mode"`
+			RequiredSkills             []string                `json:"required_skills"`
+			WritePaths                 []string                `json:"write_paths"`
+			ReadOnlyPaths              []string                `json:"read_only_paths"`
+			Route                      string                  `json:"route,omitempty"`
+			RouteEvidence              string                  `json:"route_evidence,omitempty"`
+			NamedSkillsOnly            bool                    `json:"named_skills_only,omitempty"`
+			Verification               []string                `json:"verification,omitempty"`
+			KnownEnvironmentalFailures []string                `json:"known_environmental_failures,omitempty"`
+			CommitMessage              string                  `json:"commit_message,omitempty"`
+			MaxIterations              int                     `json:"max_iterations,omitempty"`
+			Escalation                 []packet.EscalationRung `json:"escalation,omitempty"`
 		}
 		if err := json.Unmarshal(artifacts[i].ContractJSON, &normalized); err != nil {
 			return nil, fmt.Errorf("decode admitted packet[%d] contract: %w", i, err)
@@ -198,6 +200,10 @@ func admitDispatchBatch(ctx context.Context, primaryRoot string, inputs []dispat
 		packets[i].Verification = append([]string(nil), normalized.Verification...)
 		packets[i].KnownEnvironmentalFailures = append([]string(nil), normalized.KnownEnvironmentalFailures...)
 		packets[i].CommitMessage = normalized.CommitMessage
+		packets[i].MaxIterations = normalized.MaxIterations
+		if len(normalized.Escalation) > 0 {
+			packets[i].Escalation = append([]packet.EscalationRung(nil), normalized.Escalation...)
+		}
 		packets[i].Authoring = &packet.Authoring{
 			ContractVersion: artifacts[i].Version, Digest: artifacts[i].Digest,
 			ContractJSON: append([]byte(nil), artifacts[i].ContractJSON...),

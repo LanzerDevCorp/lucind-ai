@@ -16,24 +16,26 @@ import (
 )
 
 type normalizedContract struct {
-	Version                    string            `json:"version"`
-	RouteIntent                string            `json:"route_intent"`
-	Mode                       Mode              `json:"mode"`
-	LaneRole                   string            `json:"lane_role,omitempty"`
-	AdhocSkills                []string          `json:"adhoc_skills,omitempty"`
-	RequiredSkills             []string          `json:"required_skills,omitempty"`
-	WritePaths                 []string          `json:"write_paths"`
-	ReadOnlyPaths              []string          `json:"read_only_paths"`
-	Goal                       string            `json:"goal"`
-	DoneCriteria               []string          `json:"done_criteria"`
-	HardStops                  []string          `json:"hard_stops"`
-	Result                     ResultObligations `json:"result"`
-	Route                      string            `json:"route,omitempty"`
-	RouteEvidence              string            `json:"route_evidence,omitempty"`
-	NamedSkillsOnly            bool              `json:"named_skills_only,omitempty"`
-	Verification               []string          `json:"verification,omitempty"`
-	KnownEnvironmentalFailures []string          `json:"known_environmental_failures,omitempty"`
-	CommitMessage              string            `json:"commit_message,omitempty"`
+	Version                    string                  `json:"version"`
+	RouteIntent                string                  `json:"route_intent"`
+	Mode                       Mode                    `json:"mode"`
+	LaneRole                   string                  `json:"lane_role,omitempty"`
+	AdhocSkills                []string                `json:"adhoc_skills,omitempty"`
+	RequiredSkills             []string                `json:"required_skills,omitempty"`
+	WritePaths                 []string                `json:"write_paths"`
+	ReadOnlyPaths              []string                `json:"read_only_paths"`
+	Goal                       string                  `json:"goal"`
+	DoneCriteria               []string                `json:"done_criteria"`
+	HardStops                  []string                `json:"hard_stops"`
+	Result                     ResultObligations       `json:"result"`
+	Route                      string                  `json:"route,omitempty"`
+	RouteEvidence              string                  `json:"route_evidence,omitempty"`
+	NamedSkillsOnly            bool                    `json:"named_skills_only,omitempty"`
+	Verification               []string                `json:"verification,omitempty"`
+	KnownEnvironmentalFailures []string                `json:"known_environmental_failures,omitempty"`
+	CommitMessage              string                  `json:"commit_message,omitempty"`
+	MaxIterations              int                     `json:"max_iterations,omitempty"`
+	Escalation                 []packet.EscalationRung `json:"escalation,omitempty"`
 }
 type manifest struct {
 	Version      string      `json:"version"`
@@ -97,6 +99,26 @@ func validateContract(contract Contract) (normalizedContract, Diagnostics) {
 			diagnostics = append(diagnostics, diagnostic(10, "commit_message", CodeContractInvalid, "commit_message requires verification"))
 		}
 	}
+	if contract.MaxIterations != 0 {
+		if contract.MaxIterations < 1 || contract.MaxIterations > 4 {
+			diagnostics = append(diagnostics, diagnostic(10, "max_iterations", CodeContractInvalid, "max_iterations must be between 1 and 4"))
+		}
+	}
+	if len(contract.Escalation) > 0 {
+		if len(contract.Escalation) > 3 {
+			diagnostics = append(diagnostics, diagnostic(10, "escalation", CodeContractInvalid, "escalation at most 3 rungs"))
+		}
+		for _, rung := range contract.Escalation {
+			if strings.TrimSpace(rung.Executor) == "" {
+				diagnostics = append(diagnostics, diagnostic(10, "escalation", CodeContractInvalid, "escalation rung executor must be non-empty"))
+			}
+		}
+	}
+	if contract.MaxIterations > 1 || len(contract.Escalation) > 0 {
+		if len(contract.Verification) == 0 {
+			diagnostics = append(diagnostics, diagnostic(10, "verification", CodeContractInvalid, "loop and escalation require verification"))
+		}
+	}
 	claimKeys := make([]string, 0, len(contract.TargetClaims))
 	for key, value := range contract.TargetClaims {
 		if value != "" {
@@ -148,6 +170,11 @@ func validateContract(contract Contract) (normalizedContract, Diagnostics) {
 		knownFailures = append([]string(nil), contract.KnownEnvironmentalFailures...)
 	}
 
+	var escalation []packet.EscalationRung
+	if len(contract.Escalation) > 0 {
+		escalation = append([]packet.EscalationRung(nil), contract.Escalation...)
+	}
+
 	return normalizedContract{
 		Version: ContractVersion, RouteIntent: contract.RouteIntent, Mode: contract.Mode,
 		LaneRole: contract.LaneRole, AdhocSkills: adhocSkills, RequiredSkills: requiredSkills,
@@ -159,6 +186,8 @@ func validateContract(contract Contract) (normalizedContract, Diagnostics) {
 		Verification:               verification,
 		KnownEnvironmentalFailures: knownFailures,
 		CommitMessage:              contract.CommitMessage,
+		MaxIterations:              contract.MaxIterations,
+		Escalation:                 escalation,
 	}, diagnostics
 }
 

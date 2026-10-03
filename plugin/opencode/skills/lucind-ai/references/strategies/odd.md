@@ -17,7 +17,14 @@ Load this module when executing under the Organic Driven Development strategy fo
    - Dispatch (`worker` / `fanout`): required when touching 2+ non-trivial files, creating a new file, performing more than 5 lookups, or reading that prepares a write.
 4. **Worker boundary**: The worker never runs `git add`, `git commit`, or `git push`. It operates strictly within `allowed_paths` and returns the `.lucind/result.json` result envelope. If an instruction, path, or requirement is ambiguous, report `interaction_required` with concrete candidate choices instead of guessing.
 5. **Dispatcher verification and commit**: The dispatcher verifies candidate work (including HMAC test attestation) and commits approved results on the candidate branch.
-6. **Iteration budget**: Write/test/fix loops are capped at 4 iterations before escalating.
+
+## Loop and escalation
+
+When a packet declares `max_iterations` (> 1) or an `escalation` ladder (up to 3 rungs), the dispatcher executes a write/test/fix loop:
+- **Retry condition**: The loop retries only when the worker reported done but dispatcher verification failed (a declared `verification` command exited non-zero or the tree changed during verification). Any other non-done outcome (timeout, envelope blocked/deviated/failed/interaction_required, allowed_paths violation, missing skills, nothing to commit, HEAD moved) stops the loop immediately without retry.
+- **Same worktree**: Worker retries execute in the same worktree without reset so uncommitted changes persist. The subsequent attempt's prompt receives the failed command, exit code, and captured tail output.
+- **Attempt plan and total cap**: Rung 0 (the packet's declared executor/model) and each escalation rung receive `max(1, max_iterations)` attempts, subject to a hard cap of `MaxTotalAttempts = 4` executor runs across the entire lane.
+- **Exhaustion**: When all attempts on rung 0 fail with no ladder declared, the lane ends `failed` (`write/test/fix loop exhausted after N attempts: <reason>`). When all declared escalation rungs are exhausted (or the total cap of 4 attempts is reached on or after escalation), the lane ends `blocked` (`escalation ladder exhausted after N attempts: <reason>`) requiring human review.
 
 ## Route validation
 

@@ -3,6 +3,7 @@ package run
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strings"
@@ -12,25 +13,33 @@ import (
 	"github.com/LanzerDevCorp/lucind-ai/internal/packet"
 )
 
-// dispatcherCommit performs the verification under attestation and Conventional Commit
-// on behalf of the worker for packets declaring commit_message.
-func dispatcherCommit(ctx context.Context, deps Deps, worktreePath, baseSHA string, p packet.Packet) (lane.Status, string) {
+type verificationResult struct {
+	Status        lane.Status
+	Reason        string
+	FailedCommand string
+	ExitCode      int
+	Output        string
+	Retryable     bool
+}
+
+// dispatcherVerify executes the verification steps (a-c) without committing.
+func dispatcherVerify(ctx context.Context, deps Deps, worktreePath, baseSHA string, p packet.Packet) verificationResult {
 	// a. The worker must not have committed: worktree HEAD must equal baseSHA
 	headSHA, err := resolveWorktreeHead(ctx, worktreePath)
 	if err != nil {
-		return lane.Blocked, fmt.Sprintf("resolve worktree HEAD: %v", err)
+		return verificationResult{Status: lane.Blocked, Reason: fmt.Sprintf("resolve worktree HEAD: %v", err)}
 	}
 	if headSHA != baseSHA {
-		return lane.Deviated, "worker committed in a dispatcher-commit packet"
+		return verificationResult{Status: lane.Deviated, Reason: "worker committed in a dispatcher-commit packet"}
 	}
 
 	// b. There must be something to commit (non-empty change set)
 	hasChanges, err := checkWorktreeChanges(ctx, worktreePath)
 	if err != nil {
-		return lane.Blocked, fmt.Sprintf("check worktree changes: %v", err)
+		return verificationResult{Status: lane.Blocked, Reason: fmt.Sprintf("check worktree changes: %v", err)}
 	}
 	if !hasChanges {
-		return lane.Failed, "nothing to commit"
+		return verificationResult{Status: lane.Failed, Reason: "nothing to commit"}
 	}
 
 	// c. Verification under attestation. The tree must be identical before and after
@@ -38,28 +47,40 @@ func dispatcherCommit(ctx context.Context, deps Deps, worktreePath, baseSHA stri
 	// own side effects attested and committed.
 	treeBefore, err := attest.TreeHash(ctx, worktreePath)
 	if err != nil {
-		return lane.Blocked, fmt.Sprintf("compute tree hash before verification: %v", err)
+		return verificationResult{Status: lane.Blocked, Reason: fmt.Sprintf("compute tree hash before verification: %v", err)}
 	}
 	runAttested := deps.RunAttested
 	if runAttested == nil {
 		runAttested = defaultRunAttested
 	}
 	for _, cmd := range p.Verification {
-		exitCode, err := runAttested(ctx, worktreePath, cmd)
+		exitCode, output, err := runAttested(ctx, worktreePath, cmd)
 		if err != nil {
-			return lane.Blocked, fmt.Sprintf("run verification %s: %v", cmd, err)
+			return verificationResult{Status: lane.Blocked, Reason: fmt.Sprintf("run verification %s: %v", cmd, err)}
 		}
 		if exitCode != 0 {
-			return lane.Failed, fmt.Sprintf("verification failed: %s (exit %d)", cmd, exitCode)
+			return verificationResult{
+				Status:        lane.Failed,
+				Reason:        fmt.Sprintf("verification failed: %s (exit %d)", cmd, exitCode),
+				FailedCommand: cmd,
+				ExitCode:      exitCode,
+				Output:        output,
+				Retryable:     true,
+			}
 		}
 	}
 
 	treeHash, err := attest.TreeHash(ctx, worktreePath)
 	if err != nil {
-		return lane.Blocked, fmt.Sprintf("compute tree hash: %v", err)
+		return verificationResult{Status: lane.Blocked, Reason: fmt.Sprintf("compute tree hash: %v", err)}
 	}
 	if treeHash != treeBefore {
-		return lane.Failed, "verification changed the worktree (tree hash differs before and after); verification commands must not modify files"
+		return verificationResult{
+			Status:        lane.Failed,
+			Reason:        "verification changed the worktree (tree hash differs before and after); verification commands must not modify files",
+			FailedCommand: "tree changed during verification",
+			Retryable:     true,
+		}
 	}
 
 	hasValidAttestation := deps.HasValidAttestation
@@ -69,13 +90,28 @@ func dispatcherCommit(ctx context.Context, deps Deps, worktreePath, baseSHA stri
 	for _, cmd := range p.Verification {
 		valid, err := hasValidAttestation(ctx, worktreePath, cmd, treeHash)
 		if err != nil {
-			return lane.Blocked, fmt.Sprintf("check attestation for %s: %v", cmd, err)
+			return verificationResult{Status: lane.Blocked, Reason: fmt.Sprintf("check attestation for %s: %v", cmd, err)}
 		}
 		if !valid {
-			return lane.Blocked, fmt.Sprintf("missing attestation for: %s", cmd)
+			return verificationResult{Status: lane.Blocked, Reason: fmt.Sprintf("missing attestation for: %s", cmd)}
 		}
 	}
 
+	return verificationResult{Status: lane.Done}
+}
+
+// dispatcherCommit performs the verification under attestation and Conventional Commit
+// on behalf of the worker for packets declaring commit_message.
+func dispatcherCommit(ctx context.Context, deps Deps, worktreePath, baseSHA string, p packet.Packet) (lane.Status, string) {
+	vRes := dispatcherVerify(ctx, deps, worktreePath, baseSHA, p)
+	if vRes.Status != lane.Done {
+		return vRes.Status, vRes.Reason
+	}
+	return dispatcherCommitOnly(ctx, deps, worktreePath, p)
+}
+
+// dispatcherCommitOnly executes step (d) (PreCommitGate and git commit) without re-running verification.
+func dispatcherCommitOnly(ctx context.Context, deps Deps, worktreePath string, p packet.Packet) (lane.Status, string) {
 	// Optional pre-commit gate (e.g. judges in T10)
 	if deps.PreCommitGate != nil {
 		gateStatus, gateReason := deps.PreCommitGate(ctx, worktreePath, p)
@@ -93,16 +129,42 @@ func dispatcherCommit(ctx context.Context, deps Deps, worktreePath, baseSHA stri
 		return lane.Blocked, fmt.Sprintf("git commit: %v", err)
 	}
 
-	// e. Success
 	return lane.Done, ""
 }
 
-func defaultRunAttested(ctx context.Context, worktreePath, cmd string) (int, error) {
-	entry, err := attest.RunAndRecord(ctx, worktreePath, []string{"sh", "-c", cmd}, cmd, nil, os.Stderr, os.Stderr)
-	if err != nil {
-		return 0, err
+const maxVerificationOutput = 8192
+
+type tailBuffer struct {
+	limit int
+	data  []byte
+}
+
+func (b *tailBuffer) Write(p []byte) (int, error) {
+	if len(p) >= b.limit {
+		b.data = append(b.data[:0], p[len(p)-b.limit:]...)
+		return len(p), nil
 	}
-	return entry.ExitCode, nil
+	b.data = append(b.data, p...)
+	if len(b.data) > b.limit {
+		excess := len(b.data) - b.limit
+		copy(b.data, b.data[excess:])
+		b.data = b.data[:b.limit]
+	}
+	return len(p), nil
+}
+
+func (b *tailBuffer) String() string {
+	return string(b.data)
+}
+
+func defaultRunAttested(ctx context.Context, worktreePath, cmd string) (int, string, error) {
+	buf := &tailBuffer{limit: maxVerificationOutput}
+	w := io.MultiWriter(os.Stderr, buf)
+	entry, err := attest.RunAndRecord(ctx, worktreePath, []string{"sh", "-c", cmd}, cmd, nil, w, w)
+	if err != nil {
+		return 0, buf.String(), err
+	}
+	return entry.ExitCode, buf.String(), nil
 }
 
 func defaultHasValidAttestation(ctx context.Context, repoRoot, cmd, expectedTreeHash string) (bool, error) {

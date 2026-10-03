@@ -245,6 +245,63 @@ func TestRunKnownModelForExecutorPasses(t *testing.T) {
 	}
 }
 
+func TestRunEscalationUnsupportedExecutorRejected(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "packet.md")
+	content := "---\n" +
+		"id: lane-1\n" +
+		"executor: agy\n" +
+		"routed_by: test\n" +
+		"verification: [\"go test ./...\"]\n" +
+		"escalation: [{\"executor\":\"bogus-executor\"}]\n" +
+		"---\n" +
+		"Do the thing.\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write packet fixture: %v", err)
+	}
+
+	code := run(context.Background(), []string{"run", "--packet", path}, &stdout, &stderr)
+
+	if code != 1 {
+		t.Fatalf("run with unsupported escalation executor exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "bogus-executor") {
+		t.Fatalf("stderr = %q, want it to name the unsupported executor %q", stderr.String(), "bogus-executor")
+	}
+}
+
+func TestRunEscalationUnknownModelRejected(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "packet.md")
+	content := "---\n" +
+		"id: lane-1\n" +
+		"executor: agy\n" +
+		"routed_by: test\n" +
+		"verification: [\"go test ./...\"]\n" +
+		"escalation: [{\"executor\":\"cursor-agent\",\"model\":\"gemini-3.7-flash-high\"}]\n" +
+		"---\n" +
+		"Do the thing.\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write packet fixture: %v", err)
+	}
+
+	code := run(context.Background(), []string{"run", "--packet", path}, &stdout, &stderr)
+
+	if code != 1 {
+		t.Fatalf("run with unknown escalation model exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "gemini-3.7-flash-high") {
+		t.Fatalf("stderr = %q, want it to name the unknown model", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "cursor-agent") {
+		t.Fatalf("stderr = %q, want it to name the executor", stderr.String())
+	}
+}
+
 // TestRunOmittedModelSkipsModelCheck proves a packet that omits model
 // entirely is never subject to the known-model check, for any executor.
 func TestRunOmittedModelSkipsModelCheck(t *testing.T) {

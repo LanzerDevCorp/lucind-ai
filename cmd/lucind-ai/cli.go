@@ -250,6 +250,17 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 			fmt.Fprintf(stderr, "lucind-ai: unsupported executor %q in packet %q (supported: %s)\n", p.Executor, packetFlags[i], strings.Join(names, ", "))
 			return 1
 		}
+		for _, rung := range p.Escalation {
+			if _, ok := supportedExecutors[rung.Executor]; !ok {
+				names := make([]string, 0, len(supportedExecutors))
+				for name := range supportedExecutors {
+					names = append(names, name)
+				}
+				sort.Strings(names)
+				fmt.Fprintf(stderr, "lucind-ai: unsupported executor %q in packet %q (supported: %s)\n", rung.Executor, packetFlags[i], strings.Join(names, ", "))
+				return 1
+			}
+		}
 	}
 
 	// A named agent is only meaningful for the opencode executor -- checked
@@ -276,21 +287,37 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 	// billing -- as if it belonged to that executor. An omitted model is
 	// always fine: the executor supplies its own DefaultModel.
 	for i, p := range ps {
-		if p.Model == "" {
-			continue
-		}
-		factory := supportedExecutors[p.Executor] // already validated to exist above
-		known := factory().KnownModels()
-		ok := false
-		for _, m := range known {
-			if m == p.Model {
-				ok = true
-				break
+		if p.Model != "" {
+			factory := supportedExecutors[p.Executor] // already validated to exist above
+			known := factory().KnownModels()
+			ok := false
+			for _, m := range known {
+				if m == p.Model {
+					ok = true
+					break
+				}
+			}
+			if !ok {
+				fmt.Fprintf(stderr, "lucind-ai: packet %q names model %q, not a known model for executor %q (known: %s)\n", packetFlags[i], p.Model, p.Executor, strings.Join(known, ", "))
+				return 1
 			}
 		}
-		if !ok {
-			fmt.Fprintf(stderr, "lucind-ai: packet %q names model %q, not a known model for executor %q (known: %s)\n", packetFlags[i], p.Model, p.Executor, strings.Join(known, ", "))
-			return 1
+		for _, rung := range p.Escalation {
+			if rung.Model != "" {
+				factory := supportedExecutors[rung.Executor]
+				known := factory().KnownModels()
+				ok := false
+				for _, m := range known {
+					if m == rung.Model {
+						ok = true
+						break
+					}
+				}
+				if !ok {
+					fmt.Fprintf(stderr, "lucind-ai: packet %q names model %q, not a known model for executor %q (known: %s)\n", packetFlags[i], rung.Model, rung.Executor, strings.Join(known, ", "))
+					return 1
+				}
+			}
 		}
 	}
 
@@ -730,6 +757,9 @@ func renderAcceptanceReceipt(w io.Writer, receipt accept.AcceptanceReceipt) {
 func printReport(w io.Writer, r lucindrun.Report) {
 	fmt.Fprintf(w, "lane:      %s\n", r.LaneID)
 	fmt.Fprintf(w, "status:    %s\n", r.Status)
+	if r.Attempts > 1 {
+		fmt.Fprintf(w, "attempts:  %d\n", r.Attempts)
+	}
 	fmt.Fprintf(w, "worktree:  %s\n", r.Worktree)
 	if r.Envelope != nil {
 		fmt.Fprintf(w, "summary:   %s\n", r.Envelope.Summary)

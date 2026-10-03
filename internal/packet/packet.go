@@ -9,6 +9,7 @@ import (
 	"errors"
 	"io"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/LanzerDevCorp/lucind-ai/internal/skillset"
@@ -40,6 +41,9 @@ var (
 	ErrInvalidKnownEnvironmentalFailures = errors.New("packet: frontmatter known_environmental_failures must be a JSON array of strings")
 	ErrInvalidCommitMessage              = errors.New("packet: frontmatter commit_message is invalid")
 	ErrCommitMessageNeedsVerification    = errors.New("packet: frontmatter commit_message requires non-empty verification")
+	ErrInvalidMaxIterations              = errors.New("packet: frontmatter max_iterations must be an integer between 1 and 4")
+	ErrInvalidEscalation                 = errors.New("packet: frontmatter escalation is invalid")
+	ErrLoopNeedsVerification             = errors.New("packet: loop and escalation require non-empty verification")
 )
 
 var commitMessageRegex = regexp.MustCompile(`^(feat|fix|docs|refactor|test|chore|perf|build|ci|style|revert)(\([a-z0-9._/-]+\))?!?: \S.*$`)
@@ -70,6 +74,13 @@ type Authoring struct {
 	Digest          string
 	ContractJSON    []byte
 	BindingJSON     []byte
+}
+
+// EscalationRung defines an alternate executor and optional model to dispatch
+// if verification fails on earlier attempts.
+type EscalationRung struct {
+	Executor string `json:"executor"`
+	Model    string `json:"model,omitempty"`
 }
 
 // Packet is one unit of delegated work.
@@ -147,6 +158,10 @@ type Packet struct {
 	KnownEnvironmentalFailures []string
 	// CommitMessage is the optional Conventional Commit message for dispatcher commit.
 	CommitMessage string
+	// MaxIterations is the optional maximum write/test/fix iterations on a rung (1..4, absent means 1).
+	MaxIterations int
+	// Escalation is the optional ordered escalation ladder of up to 3 rungs.
+	Escalation []EscalationRung
 	// RequiredSkills is the derived list of required skills. Populated by admission
 	// or compilation, never parsed directly from frontmatter.
 	RequiredSkills []string
@@ -275,6 +290,37 @@ func Parse(r io.Reader) (Packet, error) {
 			p.KnownEnvironmentalFailures = failures
 		case "commit_message":
 			p.CommitMessage = strings.TrimSpace(value)
+		case "max_iterations":
+			val := strings.TrimSpace(value)
+			n, err := strconv.Atoi(val)
+			if err != nil || n < 1 || n > 4 {
+				return Packet{}, ErrInvalidMaxIterations
+			}
+			p.MaxIterations = n
+		case "escalation":
+			trimmed := strings.TrimSpace(value)
+			if len(trimmed) == 0 || trimmed[0] != '[' {
+				return Packet{}, ErrInvalidEscalation
+			}
+			dec := json.NewDecoder(strings.NewReader(trimmed))
+			dec.DisallowUnknownFields()
+			var rungs []EscalationRung
+			if err := dec.Decode(&rungs); err != nil {
+				return Packet{}, ErrInvalidEscalation
+			}
+			var extra json.RawMessage
+			if err := dec.Decode(&extra); err != io.EOF {
+				return Packet{}, ErrInvalidEscalation
+			}
+			if len(rungs) > 3 {
+				return Packet{}, ErrInvalidEscalation
+			}
+			for _, r := range rungs {
+				if strings.TrimSpace(r.Executor) == "" {
+					return Packet{}, ErrInvalidEscalation
+				}
+			}
+			p.Escalation = rungs
 		}
 	}
 
@@ -288,6 +334,12 @@ func Parse(r io.Reader) (Packet, error) {
 		}
 		if len(p.Verification) == 0 {
 			return Packet{}, ErrCommitMessageNeedsVerification
+		}
+	}
+
+	if p.MaxIterations > 1 || len(p.Escalation) > 0 {
+		if len(p.Verification) == 0 {
+			return Packet{}, ErrLoopNeedsVerification
 		}
 	}
 

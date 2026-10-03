@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/LanzerDevCorp/lucind-ai/internal/packet"
 	"github.com/LanzerDevCorp/lucind-ai/internal/packetauthor"
 )
 
@@ -352,5 +353,79 @@ func TestCompileCommitMessage(t *testing.T) {
 		if art1.Digest == art2.Digest {
 			t.Errorf("setting commit_message did not change digest: %q", art1.Digest)
 		}
+	})
+}
+
+func TestCompileLoopAndEscalation(t *testing.T) {
+	t.Run("max_iterations and escalation propagate and change digest", func(t *testing.T) {
+		baseContract := validContract()
+		baseContract.Verification = []string{"go test ./..."}
+		baseArt, err := packetauthor.Compile(baseContract, validFeatureBinding())
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		c := baseContract
+		c.MaxIterations = 2
+		c.Escalation = []packet.EscalationRung{{Executor: "herdr-agy", Model: "gemini-3.8-flash-high"}}
+		art, err := packetauthor.Compile(c, validFeatureBinding())
+		if err != nil {
+			t.Fatalf("Compile() error = %v", err)
+		}
+
+		if art.Digest == baseArt.Digest {
+			t.Errorf("art.Digest = %q, want different from baseArt.Digest", art.Digest)
+		}
+		if !bytes.Contains(art.ContractJSON, []byte(`"max_iterations":2`)) {
+			t.Errorf("ContractJSON missing max_iterations: %s", art.ContractJSON)
+		}
+		if !bytes.Contains(art.ContractJSON, []byte(`"escalation":[{"executor":"herdr-agy","model":"gemini-3.8-flash-high"}]`)) {
+			t.Errorf("ContractJSON missing escalation: %s", art.ContractJSON)
+		}
+	})
+
+	t.Run("max_iterations out of bounds rejected", func(t *testing.T) {
+		for _, bad := range []int{-1, 5} {
+			c := validContract()
+			c.Verification = []string{"go test ./..."}
+			c.MaxIterations = bad
+			_, err := packetauthor.Compile(c, validFeatureBinding())
+			assertDiagnosticCode(t, err, packetauthor.CodeContractInvalid)
+		}
+	})
+
+	t.Run("max_iterations > 1 requires verification", func(t *testing.T) {
+		c := validContract()
+		c.MaxIterations = 2
+		_, err := packetauthor.Compile(c, validFeatureBinding())
+		assertDiagnosticCode(t, err, packetauthor.CodeContractInvalid)
+	})
+
+	t.Run("escalation requires verification", func(t *testing.T) {
+		c := validContract()
+		c.Escalation = []packet.EscalationRung{{Executor: "herdr-agy"}}
+		_, err := packetauthor.Compile(c, validFeatureBinding())
+		assertDiagnosticCode(t, err, packetauthor.CodeContractInvalid)
+	})
+
+	t.Run("escalation with empty executor rejected", func(t *testing.T) {
+		c := validContract()
+		c.Verification = []string{"go test ./..."}
+		c.Escalation = []packet.EscalationRung{{Executor: ""}}
+		_, err := packetauthor.Compile(c, validFeatureBinding())
+		assertDiagnosticCode(t, err, packetauthor.CodeContractInvalid)
+	})
+
+	t.Run("escalation with more than 3 rungs rejected", func(t *testing.T) {
+		c := validContract()
+		c.Verification = []string{"go test ./..."}
+		c.Escalation = []packet.EscalationRung{
+			{Executor: "a"},
+			{Executor: "b"},
+			{Executor: "c"},
+			{Executor: "d"},
+		}
+		_, err := packetauthor.Compile(c, validFeatureBinding())
+		assertDiagnosticCode(t, err, packetauthor.CodeContractInvalid)
 	})
 }

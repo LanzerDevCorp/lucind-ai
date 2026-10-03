@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1719,6 +1720,136 @@ func TestParseCommitMessage(t *testing.T) {
 		}
 		if err := packet.ValidateCommitMessage("feat: line1\rline2"); !errors.Is(err, packet.ErrInvalidCommitMessage) {
 			t.Fatalf("expected ErrInvalidCommitMessage, got %v", err)
+		}
+	})
+}
+
+func TestParseMaxIterations(t *testing.T) {
+	for _, n := range []int{1, 2, 3, 4} {
+		t.Run(fmt.Sprintf("valid: %d", n), func(t *testing.T) {
+			src := fmt.Sprintf("---\nid: test-lane\nexecutor: agy\nrouted_by: test\nmax_iterations: %d\nverification: [\"go test ./...\"]\n---\n\n## Goal\nTest\n", n)
+			p, err := packet.Parse(strings.NewReader(src))
+			if err != nil {
+				t.Fatalf("Parse() error = %v, want nil", err)
+			}
+			if p.MaxIterations != n {
+				t.Errorf("MaxIterations = %d, want %d", p.MaxIterations, n)
+			}
+		})
+	}
+
+	t.Run("absent max_iterations defaults to 0", func(t *testing.T) {
+		src := "---\nid: test-lane\nexecutor: agy\nrouted_by: test\n---\n\n## Goal\nTest\n"
+		p, err := packet.Parse(strings.NewReader(src))
+		if err != nil {
+			t.Fatalf("Parse() error = %v, want nil", err)
+		}
+		if p.MaxIterations != 0 {
+			t.Errorf("MaxIterations = %d, want 0", p.MaxIterations)
+		}
+	})
+
+	invalid := []string{"0", "-1", "5", "abc", "1.5", ""}
+	for _, val := range invalid {
+		t.Run("invalid: "+val, func(t *testing.T) {
+			src := fmt.Sprintf("---\nid: test-lane\nexecutor: agy\nrouted_by: test\nmax_iterations: %s\nverification: [\"go test ./...\"]\n---\n\n## Goal\nTest\n", val)
+			_, err := packet.Parse(strings.NewReader(src))
+			if !errors.Is(err, packet.ErrInvalidMaxIterations) {
+				t.Fatalf("Parse() error = %v, want %v", err, packet.ErrInvalidMaxIterations)
+			}
+		})
+	}
+}
+
+func TestParseEscalation(t *testing.T) {
+	t.Run("valid single rung", func(t *testing.T) {
+		src := "---\nid: test-lane\nexecutor: agy\nrouted_by: test\nverification: [\"go test ./...\"]\nescalation: [{\"executor\":\"herdr-agy\",\"model\":\"gemini-3.8-flash-high\"}]\n---\n\n## Goal\nTest\n"
+		p, err := packet.Parse(strings.NewReader(src))
+		if err != nil {
+			t.Fatalf("Parse() error = %v, want nil", err)
+		}
+		if len(p.Escalation) != 1 {
+			t.Fatalf("len(Escalation) = %d, want 1", len(p.Escalation))
+		}
+		if p.Escalation[0].Executor != "herdr-agy" || p.Escalation[0].Model != "gemini-3.8-flash-high" {
+			t.Errorf("Escalation[0] = %+v, want {herdr-agy, gemini-3.8-flash-high}", p.Escalation[0])
+		}
+	})
+
+	t.Run("valid 3 rungs with empty models", func(t *testing.T) {
+		src := "---\nid: test-lane\nexecutor: agy\nrouted_by: test\nverification: [\"go test ./...\"]\nescalation: [{\"executor\":\"herdr-agy\"},{\"executor\":\"cursor-agent\",\"model\":\"claude-3.7-sonnet\"},{\"executor\":\"opencode\"}]\n---\n\n## Goal\nTest\n"
+		p, err := packet.Parse(strings.NewReader(src))
+		if err != nil {
+			t.Fatalf("Parse() error = %v, want nil", err)
+		}
+		if len(p.Escalation) != 3 {
+			t.Fatalf("len(Escalation) = %d, want 3", len(p.Escalation))
+		}
+		if p.Escalation[0].Executor != "herdr-agy" || p.Escalation[0].Model != "" {
+			t.Errorf("Escalation[0] = %+v, want {herdr-agy, empty}", p.Escalation[0])
+		}
+		if p.Escalation[2].Executor != "opencode" || p.Escalation[2].Model != "" {
+			t.Errorf("Escalation[2] = %+v, want {opencode, empty}", p.Escalation[2])
+		}
+	})
+
+	invalid := []struct {
+		name string
+		val  string
+	}{
+		{"empty string", ""},
+		{"not an array", "{\"executor\":\"herdr-agy\"}"},
+		{"array of strings", "[\"herdr-agy\"]"},
+		{"empty executor", "[{\"executor\":\"\"}]"},
+		{"missing executor", "[{\"model\":\"gemini-3.8-flash-high\"}]"},
+		{"unknown key", "[{\"executor\":\"herdr-agy\",\"unknown_field\":\"bogus\"}]"},
+		{"more than 3 rungs", "[{\"executor\":\"a\"},{\"executor\":\"b\"},{\"executor\":\"c\"},{\"executor\":\"d\"}]"},
+		{"trailing garbage", "[{\"executor\":\"herdr-agy\"}] trailing"},
+	}
+	for _, tc := range invalid {
+		t.Run("invalid: "+tc.name, func(t *testing.T) {
+			src := fmt.Sprintf("---\nid: test-lane\nexecutor: agy\nrouted_by: test\nverification: [\"go test ./...\"]\nescalation: %s\n---\n\n## Goal\nTest\n", tc.val)
+			_, err := packet.Parse(strings.NewReader(src))
+			if !errors.Is(err, packet.ErrInvalidEscalation) {
+				t.Fatalf("Parse() error = %v, want %v", err, packet.ErrInvalidEscalation)
+			}
+		})
+	}
+}
+
+func TestLoopNeedsVerification(t *testing.T) {
+	t.Run("max_iterations > 1 without verification rejected", func(t *testing.T) {
+		src := "---\nid: test-lane\nexecutor: agy\nrouted_by: test\nmax_iterations: 2\n---\n\n## Goal\nTest\n"
+		_, err := packet.Parse(strings.NewReader(src))
+		if !errors.Is(err, packet.ErrLoopNeedsVerification) {
+			t.Fatalf("Parse() error = %v, want %v", err, packet.ErrLoopNeedsVerification)
+		}
+	})
+
+	t.Run("max_iterations > 1 with empty verification array rejected", func(t *testing.T) {
+		src := "---\nid: test-lane\nexecutor: agy\nrouted_by: test\nmax_iterations: 2\nverification: []\n---\n\n## Goal\nTest\n"
+		_, err := packet.Parse(strings.NewReader(src))
+		if !errors.Is(err, packet.ErrLoopNeedsVerification) {
+			t.Fatalf("Parse() error = %v, want %v", err, packet.ErrLoopNeedsVerification)
+		}
+	})
+
+	t.Run("escalation without verification rejected", func(t *testing.T) {
+		src := "---\nid: test-lane\nexecutor: agy\nrouted_by: test\nescalation: [{\"executor\":\"herdr-agy\"}]\n---\n\n## Goal\nTest\n"
+		_, err := packet.Parse(strings.NewReader(src))
+		if !errors.Is(err, packet.ErrLoopNeedsVerification) {
+			t.Fatalf("Parse() error = %v, want %v", err, packet.ErrLoopNeedsVerification)
+		}
+	})
+
+	t.Run("max_iterations 1 without verification allowed", func(t *testing.T) {
+		src := "---\nid: test-lane\nexecutor: agy\nrouted_by: test\nmax_iterations: 1\n---\n\n## Goal\nTest\n"
+		p, err := packet.Parse(strings.NewReader(src))
+		if err != nil {
+			t.Fatalf("Parse() error = %v, want nil", err)
+		}
+		if p.MaxIterations != 1 {
+			t.Errorf("MaxIterations = %d, want 1", p.MaxIterations)
 		}
 	})
 }
