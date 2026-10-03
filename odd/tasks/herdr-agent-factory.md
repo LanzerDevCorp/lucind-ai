@@ -77,7 +77,10 @@ Each task closes with a work-unit commit and records its commit id and review ti
   - Evidence: structural readback of both files; `rg -i sdd` on both returns nothing; envelope field names checked against `result.schema.json` with `jq`; build, full tests and `make verify-plugin-content verify-opencode-plugin` green. No plugin bump was needed: `.agents/skills` is outside the hashed plugin tree (the verify target passed unchanged).
   - Commits: lane `3fe1e8c`; integrated as `3fe1e8c`.
 
-- [ ] **T7. Spike: herdr and agy facts.** Verify `herdr worktree open --path` on an externally created worktree, `herdr worktree remove` with live panes, `herdr agent wait` completion detection, exit-code sentinel and stream-json capture, and what `agy --sandbox` restricts. Output: findings note only. Route: delegated explorer (read-only plus scratch). No source writes.
+- [x] **T7. Spike: herdr and agy facts.** Verify `herdr worktree open --path` on an externally created worktree, `herdr worktree remove` with live panes, `herdr agent wait` completion detection, exit-code sentinel and stream-json capture, and what `agy --sandbox` restricts. Output: findings note only. Route: delegated explorer (read-only plus scratch). No source writes.
+  - Route: inline by the orchestrator (read-only plus throwaway repos/panes created for the spike; no source writes). Findings: `docs/herdr-spike-findings.md`. Key facts: `worktree open --path` needs `--cwd <repo>`; `worktree remove` kills live panes, refuses dirty trees, leaves the branch; `agent wait` is unreliable for headless runs (use the exit sentinel); stream-json final `result` equals the json output; usage has tokens but no cost; `--sandbox` made the add-dir read-only and did not restrict network or other writes.
+  - Commit: `06d1a00` (docs only, directly on the feature branch).
+
 - [ ] **T8. HerdrExecutor.** Implement `executor.Executor` over herdr panes: lucind-ai creates the worktree, herdr opens it, headless CLI runs in the pane with stream-json tee and an exit sentinel. Depends on T7. Route: delegated writer. Est. ~500 lines.
 - [ ] **T9. Dispatcher commit step.** After green attestation (T1) and judges, the dispatcher makes the Conventional Commit from the packet message. Depends on T1, T8. Route: delegated writer. Est. ~200 lines.
 - [ ] **T10. Risk classifier and judges.** Port a minimal `ClassifyRisk` (path tokens, risk signals, byte-proven passive content; failure is high); map tiers to verification (passive: readback; medium: attestation + 1 judge; high: attestation + 2 blind judges + Claude). Prove `cursor-agent` end to end. Route: delegated writer. Est. ~450 lines.
@@ -105,6 +108,7 @@ Order: T1, T1b, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15.
 ## Next step
 
 T2 (packet contract fields and `interaction_required`): delegate to agy in a new worktree `lane/t2-packet-fields` from `feature/herdr-agent-factory`. The T1 worktree `lane-t1-hmac-attestation` is kept until the follow-ups are decided; remove it only after confirming nothing unique remains (its commit was cherry-picked, so the SHA differs).
+- 2026-10-03: T7 closed (`06d1a00`).
 - 2026-10-03: T6 closed (`3fe1e8c`).
 - 2026-10-03: T5 closed (`10ef695`).
 - 2026-10-03: T4 closed (`85b4a24`).
