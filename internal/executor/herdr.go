@@ -224,15 +224,25 @@ func (h HerdrAgy) Run(ctx context.Context, req Request) (outcome Outcome, err er
 		}
 	}
 
+	// A failed cd must never fall through to running agy in the pane's default
+	// directory: skip agy, report status 1, and still emit the sentinel below.
+	cmdLine := fmt.Sprintf("%s > %s 2> %s", strings.Join(agyArgs, " "), shQuote(outPath), shQuote(errPath))
 	var scriptLines []string
 	scriptLines = append(scriptLines, "#!/bin/sh")
 	if req.WorktreePath != "" {
-		scriptLines = append(scriptLines, fmt.Sprintf("cd %s", shQuote(req.WorktreePath)))
+		scriptLines = append(scriptLines, fmt.Sprintf("if cd -- %s; then", shQuote(req.WorktreePath)))
+	} else {
+		scriptLines = append(scriptLines, "if true; then")
 	}
-	scriptLines = append(scriptLines, exports...)
-	cmdLine := fmt.Sprintf("%s > %s 2> %s", strings.Join(agyArgs, " "), shQuote(outPath), shQuote(errPath))
-	scriptLines = append(scriptLines, cmdLine)
-	scriptLines = append(scriptLines, "status=$?")
+	for _, e := range exports {
+		scriptLines = append(scriptLines, "  "+e)
+	}
+	scriptLines = append(scriptLines, "  "+cmdLine)
+	scriptLines = append(scriptLines, "  status=$?")
+	scriptLines = append(scriptLines, "else")
+	scriptLines = append(scriptLines, "  status=1")
+	scriptLines = append(scriptLines, fmt.Sprintf("  echo 'herdr-agy: cannot enter worktree' > %s", shQuote(errPath)))
+	scriptLines = append(scriptLines, "fi")
 	scriptLines = append(scriptLines, fmt.Sprintf("echo \"$status\" > %s", shQuote(exitCodePath)))
 	scriptLines = append(scriptLines, fmt.Sprintf("echo \"LUCIND_EXIT_%s=$status\"", nonce))
 
@@ -424,10 +434,12 @@ func (h HerdrAgy) Run(ctx context.Context, req Request) (outcome Outcome, err er
 
 	exitBytes, exitErr := os.ReadFile(exitCodePath)
 	if exitErr == nil {
-		codeStr := strings.TrimSpace(string(exitBytes))
-		if code, err := strconv.Atoi(codeStr); err == nil {
-			outcome.ExitCode = code
+		code, convErr := strconv.Atoi(strings.TrimSpace(string(exitBytes)))
+		if convErr != nil {
+			// Never report an unreadable status as success.
+			return Outcome{}, fmt.Errorf("parse exit.code %q: %w", strings.TrimSpace(string(exitBytes)), convErr)
 		}
+		outcome.ExitCode = code
 	} else if !outcome.TimedOut {
 		return Outcome{}, fmt.Errorf("read exit.code: %w", exitErr)
 	}

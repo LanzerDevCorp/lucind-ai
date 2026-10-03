@@ -610,3 +610,60 @@ func TestHerdrAgyModelDelegation(t *testing.T) {
 		}
 	}
 }
+
+func TestHerdrAgyFailedCdSkipsAgyAndReportsFailure(t *testing.T) {
+	worktreeDir, repoDir, _ := setupTestDirs(t)
+	fakeAgyDir := setupFakeAgy(t)
+	marker := filepath.Join(t.TempDir(), "agy-ran")
+	// A fake agy that records that it ran at all.
+	if err := os.WriteFile(filepath.Join(fakeAgyDir, "agy"), []byte("#!/bin/sh\ntouch '"+marker+"'\necho '{}'\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(worktreeDir); err != nil {
+		t.Fatal(err)
+	}
+
+	fHerdr := &fakeHerdr{fakeAgyDir: fakeAgyDir}
+	h := HerdrAgy{
+		cmd: fHerdr.cmd,
+		gitCommonDir: func(ctx context.Context, wt string) (string, error) {
+			return filepath.Join(repoDir, ".git"), nil
+		},
+	}
+	outcome, err := h.Run(context.Background(), Request{Prompt: "p", WorktreePath: worktreeDir})
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+	if outcome.ExitCode == 0 {
+		t.Fatal("a failed cd must not report success")
+	}
+	if _, statErr := os.Stat(marker); statErr == nil {
+		t.Fatal("agy must not run when the worktree cannot be entered")
+	}
+}
+
+func TestHerdrAgyUnparseableExitCodeIsAGoError(t *testing.T) {
+	worktreeDir, repoDir, stateBaseDir := setupTestDirs(t)
+	fakeAgyDir := setupFakeAgy(t)
+
+	fHerdr := &fakeHerdr{
+		fakeAgyDir: fakeAgyDir,
+		waitOutFunc: func(ctx context.Context, pane string, regex string) ([]byte, error) {
+			matches, _ := filepath.Glob(filepath.Join(stateBaseDir, "lucind-ai", "herdr", "run-*", "exit.code"))
+			for _, m := range matches {
+				_ = os.WriteFile(m, []byte("garbage"), 0o600)
+			}
+			return []byte("LUCIND_EXIT_sentinel=0\n"), nil
+		},
+	}
+	h := HerdrAgy{
+		cmd: fHerdr.cmd,
+		gitCommonDir: func(ctx context.Context, wt string) (string, error) {
+			return filepath.Join(repoDir, ".git"), nil
+		},
+	}
+	_, err := h.Run(context.Background(), Request{Prompt: "p", WorktreePath: worktreeDir})
+	if err == nil || !strings.Contains(err.Error(), "exit.code") {
+		t.Fatalf("expected an exit.code parse error, got %v", err)
+	}
+}
