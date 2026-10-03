@@ -244,7 +244,7 @@ Route for every task: delegated to agy via herdr (multi-file, deletion-heavy wor
 - D33: `dispatch` waits for agy to be idle after `agent start`, prompts with herdr's `--wait
   --until working|blocked`, and re-sends once only if the prompt text is absent from the pane.
 
-## Leftovers (follow-ups, not blocking)
+## Leftovers (follow-ups, not blocking) — resolved in `odd/tasks/lucind-cleanup.md`; orphan agy processes killed 2026-10-03
 
 - `KnownModels` drifts from agy's real models (e.g. `gemini-3.8-flash-low`); consider reading
   `agy models` instead of a static list.
