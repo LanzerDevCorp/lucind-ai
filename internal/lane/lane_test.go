@@ -551,3 +551,146 @@ func TestGlobMatching(t *testing.T) {
 		t.Errorf("MatchAny on nil patterns should return false")
 	}
 }
+
+func TestMarkStopped(t *testing.T) {
+	validDoneJSON := `{
+		"packet_id": "test-pkt",
+		"status": "done",
+		"summary": "Completed successfully",
+		"hard_stops": []
+	}`
+	validFailedJSON := `{
+		"packet_id": "test-pkt",
+		"status": "failed",
+		"summary": "Execution failed",
+		"hard_stops": []
+	}`
+	schemaInvalidJSON := `{
+		"packet_id": "test-pkt",
+		"status": "done"
+	}` // missing required hard_stops
+
+	t.Run("valid result.json with status done marks lane done", func(t *testing.T) {
+		dir := t.TempDir()
+		initGitRepo(t, dir)
+		l, err := lane.Create(context.Background(), dir, nil, "gemini-3.7-flash-high")
+		if err != nil {
+			t.Fatalf("Create lane: %v", err)
+		}
+		resPath := lane.ResultPath(dir, l.ID)
+		if err := os.WriteFile(resPath, []byte(validDoneJSON), 0644); err != nil {
+			t.Fatalf("write result.json: %v", err)
+		}
+
+		st, err := lane.MarkStopped(dir, l.ID)
+		if err != nil {
+			t.Fatalf("MarkStopped error = %v, want nil", err)
+		}
+		if st != lane.StatusDone {
+			t.Errorf("status = %v, want %v", st, lane.StatusDone)
+		}
+
+		loaded, err := lane.Load(dir, l.ID)
+		if err != nil {
+			t.Fatalf("Load lane: %v", err)
+		}
+		if loaded.Status != lane.StatusDone {
+			t.Errorf("loaded.Status = %v, want %v", loaded.Status, lane.StatusDone)
+		}
+	})
+
+	t.Run("missing result.json marks lane failed", func(t *testing.T) {
+		dir := t.TempDir()
+		initGitRepo(t, dir)
+		l, err := lane.Create(context.Background(), dir, nil, "gemini-3.7-flash-high")
+		if err != nil {
+			t.Fatalf("Create lane: %v", err)
+		}
+
+		st, err := lane.MarkStopped(dir, l.ID)
+		if err != nil {
+			t.Fatalf("MarkStopped error = %v, want nil", err)
+		}
+		if st != lane.StatusFailed {
+			t.Errorf("status = %v, want %v", st, lane.StatusFailed)
+		}
+
+		loaded, err := lane.Load(dir, l.ID)
+		if err != nil {
+			t.Fatalf("Load lane: %v", err)
+		}
+		if loaded.Status != lane.StatusFailed {
+			t.Errorf("loaded.Status = %v, want %v", loaded.Status, lane.StatusFailed)
+		}
+	})
+
+	t.Run("schema-invalid result.json marks lane failed", func(t *testing.T) {
+		dir := t.TempDir()
+		initGitRepo(t, dir)
+		l, err := lane.Create(context.Background(), dir, nil, "gemini-3.7-flash-high")
+		if err != nil {
+			t.Fatalf("Create lane: %v", err)
+		}
+		resPath := lane.ResultPath(dir, l.ID)
+		if err := os.WriteFile(resPath, []byte(schemaInvalidJSON), 0644); err != nil {
+			t.Fatalf("write result.json: %v", err)
+		}
+
+		st, err := lane.MarkStopped(dir, l.ID)
+		if err != nil {
+			t.Fatalf("MarkStopped error = %v, want nil", err)
+		}
+		if st != lane.StatusFailed {
+			t.Errorf("status = %v, want %v", st, lane.StatusFailed)
+		}
+
+		loaded, err := lane.Load(dir, l.ID)
+		if err != nil {
+			t.Fatalf("Load lane: %v", err)
+		}
+		if loaded.Status != lane.StatusFailed {
+			t.Errorf("loaded.Status = %v, want %v", loaded.Status, lane.StatusFailed)
+		}
+	})
+
+	t.Run("result.json with status != done marks lane failed", func(t *testing.T) {
+		dir := t.TempDir()
+		initGitRepo(t, dir)
+		l, err := lane.Create(context.Background(), dir, nil, "gemini-3.7-flash-high")
+		if err != nil {
+			t.Fatalf("Create lane: %v", err)
+		}
+		resPath := lane.ResultPath(dir, l.ID)
+		if err := os.WriteFile(resPath, []byte(validFailedJSON), 0644); err != nil {
+			t.Fatalf("write result.json: %v", err)
+		}
+
+		st, err := lane.MarkStopped(dir, l.ID)
+		if err != nil {
+			t.Fatalf("MarkStopped error = %v, want nil", err)
+		}
+		if st != lane.StatusFailed {
+			t.Errorf("status = %v, want %v", st, lane.StatusFailed)
+		}
+
+		loaded, err := lane.Load(dir, l.ID)
+		if err != nil {
+			t.Fatalf("Load lane: %v", err)
+		}
+		if loaded.Status != lane.StatusFailed {
+			t.Errorf("loaded.Status = %v, want %v", loaded.Status, lane.StatusFailed)
+		}
+	})
+
+	t.Run("lane load error returns empty status and error", func(t *testing.T) {
+		dir := t.TempDir()
+		st, err := lane.MarkStopped(dir, "non-existent-lane")
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if st != lane.Status("") {
+			t.Errorf("status = %v, want empty", st)
+		}
+	})
+}
+

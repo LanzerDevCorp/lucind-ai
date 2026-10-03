@@ -13,8 +13,6 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-
-	"github.com/LanzerDevCorp/lucind-ai/internal/lane"
 )
 
 // ErrSchemaInvalid is returned by Read when the envelope's JSON does not
@@ -126,27 +124,6 @@ type Envelope struct {
 	Interaction     *Interaction     `json:"interaction,omitempty"`
 }
 
-// LaneStatus maps the envelope's status field to the project's lane
-// vocabulary. The schema's status enum (done, blocked, deviated, failed,
-// interaction_required) maps onto the four terminal lane.Status values;
-// interaction_required maps to lane.Blocked because a terminal lane status
-// stays blocked while the structured question travels in the envelope.
-// Read having already validated the envelope against the schema is what makes
-// this mapping total in practice.
-func (e Envelope) LaneStatus() lane.Status {
-	switch e.Status {
-	case "done":
-		return lane.Done
-	case "blocked", "interaction_required":
-		return lane.Blocked
-	case "deviated":
-		return lane.Deviated
-	case "failed":
-		return lane.Failed
-	default:
-		return ""
-	}
-}
 
 // Read reads the result envelope at path in fsys, validates it against the
 // embedded schema, and unmarshals it into an Envelope. fsys is an fs.FS

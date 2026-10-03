@@ -8,7 +8,6 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/LanzerDevCorp/lucind-ai/internal/lane"
 	"github.com/LanzerDevCorp/lucind-ai/internal/result"
 	"github.com/santhosh-tekuri/jsonschema/v6"
 )
@@ -125,9 +124,6 @@ func TestReadFullyPopulatedEnvelopeRoundTrips(t *testing.T) {
 		t.Errorf("Findings[0] = %+v, want %+v", got, wantFinding)
 	}
 
-	if got, want := e.LaneStatus(), lane.Deviated; got != want {
-		t.Errorf("LaneStatus() = %v, want %v", got, want)
-	}
 }
 
 func TestReadExternalChangesRoundTrips(t *testing.T) {
@@ -334,54 +330,6 @@ func TestReadSchemaViolations(t *testing.T) {
 	}
 }
 
-func TestReadMinimalEnvelopeMapsLaneStatus(t *testing.T) {
-	tests := []struct {
-		name   string
-		status string
-		want   lane.Status
-	}{
-		{"done", "done", lane.Done},
-		{"blocked", "blocked", lane.Blocked},
-		{"deviated", "deviated", lane.Deviated},
-		{"failed", "failed", lane.Failed},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			src := `{
-				"packet_id": "fix-auth",
-				"status": "` + tt.status + `",
-				"summary": "Did the thing.",
-				"hard_stops": []
-			}`
-			fsys := fstest.MapFS{
-				"result.json": {Data: []byte(src)},
-			}
-
-			e, err := result.Read(fsys, "result.json")
-			if err != nil {
-				t.Fatalf("Read() error = %v, want nil", err)
-			}
-
-			if e.PacketID != "fix-auth" {
-				t.Errorf("PacketID = %q, want %q", e.PacketID, "fix-auth")
-			}
-			if e.Status != tt.status {
-				t.Errorf("Status = %q, want %q", e.Status, tt.status)
-			}
-			if e.Summary != "Did the thing." {
-				t.Errorf("Summary = %q, want %q", e.Summary, "Did the thing.")
-			}
-			if len(e.HardStops) != 0 {
-				t.Errorf("HardStops = %v, want empty", e.HardStops)
-			}
-
-			if got := e.LaneStatus(); got != tt.want {
-				t.Errorf("LaneStatus() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
 
 func TestEnvelopeCommitSchemaContract(t *testing.T) {
 	// A minimal envelope that omits commit still Reads successfully.
@@ -568,9 +516,7 @@ func TestReadInteractionRequiredValid(t *testing.T) {
 	if len(e.Interaction.Options) != 2 || e.Interaction.Options[0] != "postgres" || e.Interaction.Options[1] != "mysql" {
 		t.Errorf("Options = %v, want [postgres mysql]", e.Interaction.Options)
 	}
-	if got, want := e.LaneStatus(), lane.Blocked; got != want {
-		t.Errorf("LaneStatus() = %v, want %v", got, want)
-	}
+
 }
 
 func TestReadInteractionRequiredMissingInteractionFails(t *testing.T) {
