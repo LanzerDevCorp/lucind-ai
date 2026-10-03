@@ -56,3 +56,15 @@ So in this probe `--sandbox` made the working/add-dir tree read-only, did not re
 - `agy` exits 0 and prints `root agent idle; waiting up to 30m0s for 1 background task(s)` on stderr; not an error.
 - `agy-pool` profiles contain no `antigravity-oauth-token`, so account rotation is unavailable (decision D-ROT-0).
 - `--mode plan` produced read-only explorer and reviewer runs that left the worktree untouched in every case checked (`git status` clean afterwards).
+
+## 8. agy interactive mode and hooks (spike 2026-10-03)
+
+Source: Antigravity hooks documentation plus probes in a scratch repo (`agy -i` inside a herdr pane, `gemini-3.8-flash-medium`).
+
+- `agy -i "<prompt>"` (`--prompt-interactive`) runs the prompt in the TUI and keeps the session open. `--mode accept-edits --dangerously-skip-permissions --model ...` work as in print mode.
+- **Trust prompt.** On a folder agy has not seen, interactive mode blocks on "Do you trust the contents of this project?". `--dangerously-skip-permissions` does not skip it. Trust is stored in `~/.gemini/antigravity-cli/settings.json` (`trustedWorkspaces`). Every new lane worktree would hit it; pre-trusting means editing that global file (owner decision).
+- **Hooks.** `.agents/hooks.json` at the workspace root is loaded (`/hooks` in the TUI lists it). Schema: `{"<hook-name>": {"<Event>": [handlers]}}`; events `PreToolUse`, `PostToolUse` (with `matcher`), `PreInvocation`, `PostInvocation`, `Stop`. A handler is `{"type":"command","command":"<abs path>","timeout":N}`; input is JSON on stdin, output JSON on stdout. A Claude-style schema (`{"hooks":{"Stop":...}}`) is silently ignored.
+- **`Stop` fires at the end of every turn in interactive mode**, not only on exit. Observed sequence for one turn: `PreInvocation 0`, `PostToolUse write_to_file`, `PostInvocation 0`, `PreInvocation 1`, `PostInvocation 1`, `Stop {"terminationReason":"NO_TOOL_CALL","fullyIdle":true}`. `fullyIdle:true` means no background task is pending.
+- **`Stop` can force more work.** Returning `{"decision":"continue","reason":"..."}` re-enters the loop with `reason` injected; the agent then did the missing work and the next `Stop` (empty `{}`) let it finish. This can validate the result envelope in the hook and make the agent repair it itself, with a counter to bound the loop.
+- A `Stop` probe in `--print` mode did not log; not investigated (print lanes use the process exit instead).
+- Interactive runs give no `usage` JSON and no exit code; the end signal is the hook, the result is the envelope file.
