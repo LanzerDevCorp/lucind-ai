@@ -8,7 +8,7 @@ import (
 )
 
 func TestDefaultModel(t *testing.T) {
-	want := "gemini-3.7-flash-high"
+	want := "gemini-3.8-flash-high"
 	if got := executor.DefaultModel(); got != want {
 		t.Errorf("DefaultModel() = %q, want %q", got, want)
 	}
@@ -16,11 +16,24 @@ func TestDefaultModel(t *testing.T) {
 
 func TestKnownModels(t *testing.T) {
 	want := []string{
-		"gemini-3.7-flash-high",
 		"gemini-3.8-flash-high",
 		"gemini-3.8-flash-medium",
+		"gemini-3.8-flash-low",
+		"gemini-3.7-flash-high",
+		"gemini-3.7-flash-medium",
+		"gemini-3.7-flash-low",
+		"gemini-3.6-flash-high",
+		"gemini-3.6-flash-medium",
+		"gemini-3.6-flash-low",
 		"gemini-3.1-pro-high",
-		"claude-opus-4-6-thinking",
+		"gemini-3.1-pro-low",
+		"claude-opus-5-5-low",
+		"claude-opus-5-5-medium",
+		"claude-opus-5-5-high",
+		"claude-sonnet-5-5-low",
+		"claude-sonnet-5-5-medium",
+		"claude-sonnet-5-5-high",
+		"gpt-oss-120b-medium",
 	}
 	got := executor.KnownModels()
 	if !reflect.DeepEqual(got, want) {
@@ -66,12 +79,12 @@ func TestResolveModel(t *testing.T) {
 
 	t.Run("flag overrides env var", func(t *testing.T) {
 		t.Setenv("LUCIND_AGY_MODEL", "gemini-3.8-flash-high")
-		got, err := executor.ResolveModel("claude-opus-4-6-thinking")
+		got, err := executor.ResolveModel("claude-opus-5-5-high")
 		if err != nil {
 			t.Fatalf("ResolveModel flag error = %v, want nil", err)
 		}
-		if got != "claude-opus-4-6-thinking" {
-			t.Errorf("ResolveModel = %q, want %q", got, "claude-opus-4-6-thinking")
+		if got != "claude-opus-5-5-high" {
+			t.Errorf("ResolveModel = %q, want %q", got, "claude-opus-5-5-high")
 		}
 	})
 

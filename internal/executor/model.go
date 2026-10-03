@@ -5,14 +5,29 @@ import (
 	"os"
 )
 
-const defaultModel = "gemini-3.7-flash-high"
+const defaultModel = "gemini-3.8-flash-high"
 
+// knownModels mirrors the output of `agy models` as of 2026-10-03.
+// It is static and must be updated by hand when agy changes its model list.
 var knownModels = []string{
-	"gemini-3.7-flash-high",
 	"gemini-3.8-flash-high",
 	"gemini-3.8-flash-medium",
+	"gemini-3.8-flash-low",
+	"gemini-3.7-flash-high",
+	"gemini-3.7-flash-medium",
+	"gemini-3.7-flash-low",
+	"gemini-3.6-flash-high",
+	"gemini-3.6-flash-medium",
+	"gemini-3.6-flash-low",
 	"gemini-3.1-pro-high",
-	"claude-opus-4-6-thinking",
+	"gemini-3.1-pro-low",
+	"claude-opus-5-5-low",
+	"claude-opus-5-5-medium",
+	"claude-opus-5-5-high",
+	"claude-sonnet-5-5-low",
+	"claude-sonnet-5-5-medium",
+	"claude-sonnet-5-5-high",
+	"gpt-oss-120b-medium",
 }
 
 // DefaultModel returns the default model.

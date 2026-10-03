@@ -114,7 +114,7 @@ func TestDispatch_NewLane_HappyPath(t *testing.T) {
 	opts := dispatch.Options{
 		Cwd:      repoDir,
 		Allow:    []string{"internal/**", "cmd/**"},
-		Model:    "gemini-3.7-flash-high",
+		Model:    "gemini-3.8-flash-high",
 		Brief:    "# Implement Feature A\nPlease implement feature A carefully.",
 		Detach:   true,
 	}
@@ -144,8 +144,8 @@ func TestDispatch_NewLane_HappyPath(t *testing.T) {
 	if savedLane.PaneID != "w1:pLane1" {
 		t.Errorf("savedLane.PaneID = %q, want \"w1:pLane1\"", savedLane.PaneID)
 	}
-	if savedLane.Model != "gemini-3.7-flash-high" {
-		t.Errorf("savedLane.Model = %q, want \"gemini-3.7-flash-high\"", savedLane.Model)
+	if savedLane.Model != "gemini-3.8-flash-high" {
+		t.Errorf("savedLane.Model = %q, want \"gemini-3.8-flash-high\"", savedLane.Model)
 	}
 
 	// 2. Verify brief.md content
@@ -209,7 +209,7 @@ func TestDispatch_NewLane_HappyPath(t *testing.T) {
 	if !containsSlice(startArgs, []string{"--kind", "agy", "--pane", "w1:pLane1"}) {
 		t.Errorf("call 2 missing kind agy and pane: %v", startArgs)
 	}
-	if !containsSlice(startArgs, []string{"--", "--dangerously-skip-permissions", "--model", "gemini-3.7-flash-high"}) {
+	if !containsSlice(startArgs, []string{"--", "--dangerously-skip-permissions", "--model", "gemini-3.8-flash-high"}) {
 		t.Errorf("call 2 missing agent options: %v", startArgs)
 	}
 
@@ -259,7 +259,7 @@ func dispatchNew(t *testing.T, runner *fakeHerdrRunner) error {
 	repoDir := t.TempDir()
 	initGitRepo(t, repoDir)
 	_, _, err := dispatch.Dispatch(context.Background(), dispatch.Options{
-		Cwd: repoDir, Allow: []string{"x/**"}, Model: "gemini-3.7-flash-high", Brief: "b", Detach: true,
+		Cwd: repoDir, Allow: []string{"x/**"}, Model: "gemini-3.8-flash-high", Brief: "b", Detach: true,
 	}, runner)
 	return err
 }
@@ -344,7 +344,7 @@ func TestDispatch_Continuation(t *testing.T) {
 	initGitRepo(t, repoDir)
 
 	// Create initial lane
-	createdLane, err := lane.Create(context.Background(), repoDir, []string{"pkg/**"}, "gemini-3.7-flash-high")
+	createdLane, err := lane.Create(context.Background(), repoDir, []string{"pkg/**"}, "gemini-3.8-flash-high")
 	if err != nil {
 		t.Fatalf("lane.Create failed: %v", err)
 	}
@@ -417,7 +417,7 @@ func TestDispatch_Continuation_AcceptedOrRejectedErrors(t *testing.T) {
 
 	for _, status := range []lane.Status{lane.StatusAccepted, lane.StatusRejected} {
 		t.Run(string(status), func(t *testing.T) {
-			l, err := lane.Create(context.Background(), repoDir, []string{"pkg/**"}, "gemini-3.7-flash-high")
+			l, err := lane.Create(context.Background(), repoDir, []string{"pkg/**"}, "gemini-3.8-flash-high")
 			if err != nil {
 				t.Fatalf("lane.Create failed: %v", err)
 			}

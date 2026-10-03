@@ -573,7 +573,7 @@ func TestMarkStopped(t *testing.T) {
 	t.Run("valid result.json with status done marks lane done", func(t *testing.T) {
 		dir := t.TempDir()
 		initGitRepo(t, dir)
-		l, err := lane.Create(context.Background(), dir, nil, "gemini-3.7-flash-high")
+		l, err := lane.Create(context.Background(), dir, nil, "gemini-3.8-flash-high")
 		if err != nil {
 			t.Fatalf("Create lane: %v", err)
 		}
@@ -602,7 +602,7 @@ func TestMarkStopped(t *testing.T) {
 	t.Run("missing result.json marks lane failed", func(t *testing.T) {
 		dir := t.TempDir()
 		initGitRepo(t, dir)
-		l, err := lane.Create(context.Background(), dir, nil, "gemini-3.7-flash-high")
+		l, err := lane.Create(context.Background(), dir, nil, "gemini-3.8-flash-high")
 		if err != nil {
 			t.Fatalf("Create lane: %v", err)
 		}
@@ -627,7 +627,7 @@ func TestMarkStopped(t *testing.T) {
 	t.Run("schema-invalid result.json marks lane failed", func(t *testing.T) {
 		dir := t.TempDir()
 		initGitRepo(t, dir)
-		l, err := lane.Create(context.Background(), dir, nil, "gemini-3.7-flash-high")
+		l, err := lane.Create(context.Background(), dir, nil, "gemini-3.8-flash-high")
 		if err != nil {
 			t.Fatalf("Create lane: %v", err)
 		}
@@ -656,7 +656,7 @@ func TestMarkStopped(t *testing.T) {
 	t.Run("result.json with status != done marks lane failed", func(t *testing.T) {
 		dir := t.TempDir()
 		initGitRepo(t, dir)
-		l, err := lane.Create(context.Background(), dir, nil, "gemini-3.7-flash-high")
+		l, err := lane.Create(context.Background(), dir, nil, "gemini-3.8-flash-high")
 		if err != nil {
 			t.Fatalf("Create lane: %v", err)
 		}
