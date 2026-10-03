@@ -79,7 +79,8 @@ func TestUsageAndHelp(t *testing.T) {
        lucind-ai accept --lane <id>
        lucind-ai attest run -- <command> [args...]
        lucind-ai attest verify --command "<exact command string>"
-       lucind-ai hook stop --state-dir <dir> --result <path> [--max-continues <n>]
+       lucind-ai hook pre-tool-use|stop   (agy plugin handlers; stdin JSON)
+       lucind-ai plugin install [--dir <plugins root>]
        lucind-ai --version`
 
 	// 1. Missing args prints usage to stderr and exits 1
