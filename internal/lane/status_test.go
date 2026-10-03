@@ -9,13 +9,14 @@ func TestStatusTerminalAndValid(t *testing.T) {
 		wantTerminal bool
 		wantValid    bool
 	}{
-		{"pending is non-terminal", Pending, false, true},
-		{"running is non-terminal", Running, false, true},
-		{"done is terminal", Done, true, true},
-		{"blocked is terminal", Blocked, true, true},
-		{"deviated is terminal", Deviated, true, true},
-		{"failed is terminal", Failed, true, true},
+		{"running is non-terminal and valid", StatusRunning, false, true},
+		{"done is terminal and valid", StatusDone, true, true},
+		{"failed is terminal and valid", StatusFailed, true, true},
+		{"timeout is terminal and valid", StatusTimeout, true, true},
+		{"accepted is terminal and valid", StatusAccepted, true, true},
+		{"rejected is terminal and valid", StatusRejected, true, true},
 		{"invalid status is neither valid nor terminal", Status("bogus"), false, false},
+		{"empty status is neither valid nor terminal", Status(""), false, false},
 	}
 
 	for _, tt := range tests {
