@@ -28,6 +28,10 @@ type HerdrAgy struct {
 	// progress events. When zero, defaults to 1 second.
 	PollInterval time.Duration
 
+	// Grace bounds each wait for the exit sentinel after a C-c on timeout. When zero,
+	// defaults to 10 seconds.
+	Grace time.Duration
+
 	// Unexported seams for test isolation
 	cmd          herdrCmd
 	gitCommonDir gitCommonDirFunc
@@ -149,6 +153,7 @@ func (h HerdrAgy) Run(ctx context.Context, req Request) (outcome Outcome, err er
 	if err := os.MkdirAll(stateRoot, 0700); err != nil {
 		return Outcome{}, fmt.Errorf("create state root %q: %w", stateRoot, err)
 	}
+	reapOldRunDirs(stateRoot, runDirRetention, time.Now())
 
 	stateDir, err := os.MkdirTemp(stateRoot, "run-*")
 	if err != nil {
@@ -271,6 +276,11 @@ func (h HerdrAgy) Run(ctx context.Context, req Request) (outcome Outcome, err er
 		return Outcome{}, fmt.Errorf("herdr worktree open: %s: %s", code, message)
 	}
 	paneID := openResp.Result.RootPane.PaneID
+	// Only a workspace this executor opened may be closed by it, never a reused one.
+	ownedWorkspace := ""
+	if !openResp.Result.AlreadyOpen {
+		ownedWorkspace = openResp.Result.Workspace.WorkspaceID
+	}
 	if paneID == "" {
 		return Outcome{}, errors.New("herdr worktree open: missing root pane id")
 	}
@@ -378,13 +388,33 @@ func (h HerdrAgy) Run(ctx context.Context, req Request) (outcome Outcome, err er
 
 	// 6. Handle timeout or cancellation
 	if isTimedOut {
-		ctrlCtx, ctrlCancel := context.WithTimeout(context.Background(), 5*time.Second)
-		_, _ = h.execHerdr(ctrlCtx, "pane", "send-keys", paneID, "C-c")
-		ctrlCancel()
+		grace := h.Grace
+		if grace <= 0 {
+			grace = 10 * time.Second
+		}
+		sendCtrlC := func() {
+			ctrlCtx, ctrlCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			_, _ = h.execHerdr(ctrlCtx, "pane", "send-keys", paneID, "C-c")
+			ctrlCancel()
+		}
+		sentinelSeen := func(wait time.Duration) bool {
+			graceCtx, graceCancel := context.WithTimeout(context.Background(), wait)
+			defer graceCancel()
+			_, waitErr := h.execHerdr(graceCtx, "pane", "wait-output", paneID, "--regex", sentinelRegex, "--timeout", strconv.FormatInt(wait.Milliseconds(), 10))
+			return waitErr == nil
+		}
 
-		graceCtx, graceCancel := context.WithTimeout(context.Background(), 10*time.Second)
-		_, _ = h.execHerdr(graceCtx, "pane", "wait-output", paneID, "--regex", sentinelRegex, "--timeout", "10000")
-		graceCancel()
+		sendCtrlC()
+		if !sentinelSeen(grace) {
+			// agy ignored the first C-c: interrupt once more, then stop the pane for good,
+			// but only if this executor opened its workspace.
+			sendCtrlC()
+			if !sentinelSeen(grace/2) && ownedWorkspace != "" {
+				closeCtx, closeCancel := context.WithTimeout(context.Background(), 5*time.Second)
+				_, _ = h.execHerdr(closeCtx, "workspace", "close", ownedWorkspace)
+				closeCancel()
+			}
+		}
 
 		outcome.TimedOut = true
 	}
@@ -445,4 +475,27 @@ func (h HerdrAgy) Run(ctx context.Context, req Request) (outcome Outcome, err er
 	}
 
 	return outcome, nil
+}
+
+// runDirRetention is how long kept run-* state directories (failed or timed-out lanes)
+// survive before being reaped.
+const runDirRetention = 7 * 24 * time.Hour
+
+// reapOldRunDirs removes run-* directories under stateRoot whose mtime is older than maxAge.
+// Best effort. Symlinks and anything not named run-* are never touched.
+func reapOldRunDirs(stateRoot string, maxAge time.Duration, now time.Time) {
+	entries, err := os.ReadDir(stateRoot)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if !strings.HasPrefix(e.Name(), "run-") || e.Type()&os.ModeSymlink != 0 || !e.IsDir() {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil || now.Sub(info.ModTime()) < maxAge {
+			continue
+		}
+		_ = os.RemoveAll(filepath.Join(stateRoot, e.Name()))
+	}
 }

@@ -669,3 +669,114 @@ func TestHerdrAgyUnparseableExitCodeIsAGoError(t *testing.T) {
 		t.Fatalf("expected an exit.code parse error, got %v", err)
 	}
 }
+
+func herdrCallsMatching(f *fakeHerdr, a, b string) [][]string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out [][]string
+	for _, c := range f.calls {
+		if len(c.args) >= 2 && c.args[0] == a && c.args[1] == b {
+			out = append(out, c.args)
+		}
+	}
+	return out
+}
+
+// stuckHerdr never reports the sentinel: the agy process ignores C-c.
+func stuckHerdr(openResult string) *fakeHerdr {
+	return &fakeHerdr{
+		openResult: openResult,
+		waitOutFunc: func(ctx context.Context, pane string, regex string) ([]byte, error) {
+			<-ctx.Done()
+			return nil, ctx.Err()
+		},
+	}
+}
+
+func TestHerdrAgyHardStopClosesWorkspaceItOpened(t *testing.T) {
+	worktreeDir, repoDir, _ := setupTestDirs(t)
+	f := stuckHerdr("")
+	h := HerdrAgy{cmd: f.cmd, Grace: 20 * time.Millisecond, gitCommonDir: func(context.Context, string) (string, error) {
+		return filepath.Join(repoDir, ".git"), nil
+	}}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+
+	outcome, err := h.Run(ctx, Request{Prompt: "p", WorktreePath: worktreeDir})
+	if err != nil || !outcome.TimedOut {
+		t.Fatalf("outcome=%+v err=%v, want timed out without Go error", outcome, err)
+	}
+	if n := len(herdrCallsMatching(f, "pane", "send-keys")); n != 2 {
+		t.Errorf("send-keys calls = %d, want 2 (C-c twice)", n)
+	}
+	closes := herdrCallsMatching(f, "workspace", "close")
+	if len(closes) != 1 || closes[0][2] != "w1" {
+		t.Errorf("workspace close calls = %v, want exactly one for w1", closes)
+	}
+}
+
+func TestHerdrAgyHardStopNeverClosesReusedWorkspace(t *testing.T) {
+	worktreeDir, repoDir, _ := setupTestDirs(t)
+	f := stuckHerdr(`{"result":{"already_open":true,"workspace":{"workspace_id":"w9"},"root_pane":{"pane_id":"w9:p1"}}}`)
+	h := HerdrAgy{cmd: f.cmd, Grace: 20 * time.Millisecond, gitCommonDir: func(context.Context, string) (string, error) {
+		return filepath.Join(repoDir, ".git"), nil
+	}}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+
+	if _, err := h.Run(ctx, Request{Prompt: "p", WorktreePath: worktreeDir}); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(herdrCallsMatching(f, "workspace", "close")); n != 0 {
+		t.Errorf("workspace close calls = %d, want 0 for a workspace this executor did not open", n)
+	}
+}
+
+func TestHerdrAgyReapsOldRunDirsOnly(t *testing.T) {
+	worktreeDir, repoDir, stateBase := setupTestDirs(t)
+	fakeAgyDir := setupFakeAgy(t)
+	root := filepath.Join(stateBase, "lucind-ai", "herdr")
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-30 * 24 * time.Hour)
+	mk := func(name string, mtime time.Time) {
+		p := filepath.Join(root, name)
+		if err := os.MkdirAll(p, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(p, mtime, mtime); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mk("run-old", old)
+	mk("run-recent", time.Now())
+	mk("keep-old", old) // not a run-* dir
+	outside := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(root, "run-link")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(outside, old, old); err != nil {
+		t.Fatal(err)
+	}
+
+	f := &fakeHerdr{fakeAgyDir: fakeAgyDir}
+	h := HerdrAgy{cmd: f.cmd, gitCommonDir: func(context.Context, string) (string, error) {
+		return filepath.Join(repoDir, ".git"), nil
+	}}
+	if _, err := h.Run(context.Background(), Request{Prompt: "p", WorktreePath: worktreeDir}); err != nil {
+		t.Fatal(err)
+	}
+	exists := func(name string) bool { _, err := os.Lstat(filepath.Join(root, name)); return err == nil }
+	if exists("run-old") {
+		t.Error("run-old (30 days) should have been reaped")
+	}
+	for _, keep := range []string{"run-recent", "keep-old", "run-link"} {
+		if !exists(keep) {
+			t.Errorf("%s must not be reaped", keep)
+		}
+	}
+	if _, err := os.Stat(outside); err != nil {
+		t.Errorf("symlink target must be untouched: %v", err)
+	}
+}
