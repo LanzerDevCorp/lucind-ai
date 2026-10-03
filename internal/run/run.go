@@ -490,9 +490,9 @@ func Execute(ctx context.Context, deps Deps, p packet.Packet) (Report, error) {
 		}
 		prevRungIndex = attempt.RungIndex
 
-		prompt := p.Body
+		prompt := withRequiredSkills(p.Body, p.RequiredSkills)
 		if attemptIdx > 0 {
-			prompt = formatFeedback(p.Body, attemptIdx, lastVRes.FailedCommand, lastVRes.ExitCode, lastVRes.Output)
+			prompt = formatFeedback(withRequiredSkills(p.Body, p.RequiredSkills), attemptIdx, lastVRes.FailedCommand, lastVRes.ExitCode, lastVRes.Output)
 			// A stale envelope from the previous attempt must never be mistaken for
 			// this attempt's result if the worker writes none.
 			if rmErr := os.Remove(filepath.Join(wt.Path, resultEnvelopePath)); rmErr != nil && !errors.Is(rmErr, fs.ErrNotExist) {
@@ -1196,4 +1196,21 @@ func writeResultSchema(worktreePath string) (string, error) {
 	}
 
 	return path, nil
+}
+
+// withRequiredSkills makes derived required skills visible to the worker. The environment
+// variable alone is invisible to a headless agent, which then omits skills_loaded and is
+// demoted to deviated. A body that already carries the section (typed packets) is untouched.
+func withRequiredSkills(body string, skills []string) string {
+	if len(skills) == 0 || strings.Contains(body, "## Required skills") {
+		return body
+	}
+	var b strings.Builder
+	b.WriteString(strings.TrimRight(body, "\n"))
+	b.WriteString("\n\n## Required skills\n")
+	for _, s := range skills {
+		fmt.Fprintf(&b, "- %s\n", s)
+	}
+	b.WriteString("\nLoad each skill above before starting work and list each skill's name in `skills_loaded` of the result envelope.\n")
+	return b.String()
 }
