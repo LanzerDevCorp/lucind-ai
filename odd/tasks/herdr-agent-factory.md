@@ -109,7 +109,12 @@ Each task closes with a work-unit commit and records its commit id and review ti
     - Evidence: orchestrator re-ran build, vet, full suite and `go test -race` on run/cmd; real binary rejects `--max-parallel 0` and `-3`; fixed by hand: queued-lane failure persistence used the cancelled ctx (now `context.WithoutCancel`), with a ledger assertion proven by mutation (fails without the fix).
     - Commit: lane `be120f5`; integrated as `be120f5`. Decision D10.
 
-  - [ ] **T12b. Write/test/fix loop and escalation ladder.** Packet fields \`max_iterations\` (default 1 = today's behavior, cap 4) and \`escalation\` (ordered executor/model rungs); the dispatcher re-dispatches the worker with the failing verification output, then climbs the ladder deterministically; exhaustion ends blocked. Depends on T9. Est. ~350 lines.
+  - [x] **T12b. Write/test/fix loop and escalation ladder.** Packet fields \`max_iterations\` (default 1 = today's behavior, cap 4) and \`escalation\` (ordered executor/model rungs); the dispatcher re-dispatches the worker with the failing verification output, then climbs the ladder deterministically; exhaustion ends blocked. Depends on T9. Est. ~350 lines.
+    - Route: delegated writer (agy `gemini-3.8-flash-high`; trigger: 19 files in 5 packages, core dispatcher logic). Shipped packet/contract fields `max_iterations` (1..4) and `escalation` (<= 3 rungs; both need `verification` AND `commit_message`), `internal/run/loop.go` (attempt plan, total cap 4, feedback), `dispatcherVerify` split from the commit step, `Deps.RunAttested` now returns the output tail, ladder rung validation in the CLI, `Report.Attempts`, plugin docs bumped to 2.0.20.
+    - Evidence: orchestrator re-ran build, vet, full suite, `go test -race` on packet/packetauthor/run/cmd, plugin checks; real default-path e2e (real attestation + git; the real failing output reached the 2nd prompt; commit made; lane done after 2 attempts). Fixed by hand and proven by mutation: stale previous-attempt result envelope and stale verification result.
+    - Blind review: reviewer A (`gemini-3.1-pro-high`) found 5 issues, all reproduced and fixed with tests (loop packets without `commit_message` could end done with an uncommitted tree => now rejected at parse/compile; context ended between attempts kept the last failure status => now blocked with a reason; hostile verification output could close the markdown fence and was unbounded => longer fence + 8 KiB cap; a failed envelope removal was ignored => lane fails; progress errors of earlier attempts were dropped => accumulated). **Reviewer B (`claude-opus-4-6-thinking`) hit 429 quota and has NOT reviewed**: pending until the Claude/GPT 5h bucket resets (14:06Z); the integrated commits are marked unreviewed by B (see D11).
+    - Commits: lane `7f12d0e`, fix commit on the lane; integrated as the two commits ending at `f919168`.
+
   - [ ] **T12c. Explorer fan-out.** \`lucind-ai explore\`: 3 read-only lens lanes (structural, textual, historical) in parallel, then one synthesis lane fed with the bounded lens outputs; prints the handoff. Depends on T12a, T6. Est. ~350 lines.
 - [ ] **T13. Usage logging and report.** Per-call JSONL (provider, model, tokens, lane) and a report command against the 60/15/25 target. Route: delegated writer. Est. ~250 lines.
 - [ ] **T14. Router interface with Jev in shadow mode.** Router interface; deterministic implementation as baseline and permanent fallback; Jev adapter over plain HTTP (no Go SDK) that logs disagreements to the T13 JSONL and has no authority. Read `docs.typesafe.ai/api.md` and `legal.md` first. Route: delegated writer. Est. ~350 lines.
@@ -136,6 +141,7 @@ Order: T1, T1b, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T1
 ## Next step
 
 T2 (packet contract fields and `interaction_required`): delegate to agy in a new worktree `lane/t2-packet-fields` from `feature/herdr-agent-factory`. The T1 worktree `lane-t1-hmac-attestation` is kept until the follow-ups are decided; remove it only after confirming nothing unique remains (its commit was cherry-picked, so the SHA differs).
+- 2026-10-03: T12b closed (`f919168`), review B pending (quota).
 - 2026-10-03: T12a closed (`be120f5`).
 - 2026-10-03: T11 closed (`ebcd33c`).
 - 2026-10-03: T10 closed (`5563143`); T18 carved out.

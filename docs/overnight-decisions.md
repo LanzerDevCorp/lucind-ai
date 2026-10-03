@@ -24,6 +24,9 @@ D9 | 2026-10-03 | T11 | what to do when a declared route contradicts computed si
 
 D10 | 2026-10-03 | T12a | default lane concurrency: before this change ExecuteBatch started every lane at once | keep unlimited by default / default 3 / default 1 | default 3 with --max-parallel | the mission asks for a cap of 3 workers; behavior change for batches of more than 3 lanes (they now queue) | pass --max-parallel with a large value, or set DefaultMaxParallelLanes | be120f5
 
+D11 | 2026-10-03 | T12b | mission requires two blind reviewers from different families; the Claude-family reviewer hit the quota wall (resets 14:06Z) | wait ~3h idle / integrate with one reviewer and finish the second later / skip | integrated T12b after applying every reproduced finding of reviewer A; second review kept as pending work (run it after 14:06Z or tomorrow, on commit range 7f12d0e..f919168) | idle waiting would waste the Gemini window; the feature branch is not pushed, so a late finding costs one follow-up commit | revert the T12b commits on the feature branch | f919168
+D12 | 2026-10-03 | T12b | loop semantics: loops require commit_message (dispatcher commits), retry only on verification failure, total cap 4, ladder exhaustion blocks, no-ladder exhaustion fails | allow loops without dispatcher commit | require commit_message | worker commits conflict with the shared-worktree loop (HEAD must stay at base); a single owner of the commit | relax ErrLoopNeedsCommitMessage and dispatcherVerify's HEAD check | f919168
+
 Note for tomorrow: the T1 worktree `~/git_root/lucind-ai-worktrees/lane-t1-hmac-attestation` and branch `lane/t1-hmac-attestation` are kept (deletion is forbidden overnight).
 
 ## Registro de rotaciones
