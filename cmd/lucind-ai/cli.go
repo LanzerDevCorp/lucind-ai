@@ -88,10 +88,10 @@ var ensureAgyQuota = executor.AgyQuota{}.Ensure
 // how to dispatch. Unlisted values are a routing error, never a silent
 // fallback to agy — see internal/run's Deps.LookupExecutor field.
 var supportedExecutors = map[string]func() executor.Executor{
-	"agy":          func() executor.Executor { return executor.Agy{} },
+	"agy":          agyExecutor,
 	"claude":       func() executor.Executor { return executor.Claude{} },
 	"cursor-agent": func() executor.Executor { return executor.CursorAgent{} },
-	"herdr-agy":    func() executor.Executor { return executor.HerdrAgy{} },
+	"herdr-agy":    herdrAgyExecutor,
 	"opencode":     func() executor.Executor { return executor.Opencode{} },
 }
 
