@@ -47,6 +47,11 @@ Each task closes with a work-unit commit and records its commit id and review ti
   - Commits: lane `87d2676` on `lane/t1-hmac-attestation`; integrated into the feature branch as `880665b` (cherry-pick).
   - Review: assessed `high` (`process_boundary`: `attest.go` starts processes; 1571 lines for the range since `dev`); consent declined for this candidate (owner, 2026-10-03). The accept-time binding of the attestation to `lucind-ai accept` is not wired yet.
   - Follow-ups (not blocking): key creation is not atomic if two first runs race (`os.WriteFile` then `Chmod`); log file is renamed before `chmod 0444`, leaving a short window with default mode; wire `attest verify` into `accept` and the dispatcher commit step (T9).
+- [x] **T1b. Attestation hardening and accept wiring.** Closes the T1 follow-ups: atomic key creation, `0444` before rename, `lucind-ai accept` reuses a valid attestation (command `sh lucind-checks.sh`, exit 0, MAC ok, tree hash == frozen candidate tree) and falls back to running the checks; `RepoID` now derives from the git common dir so lane worktrees share one attestation namespace.
+  - Route: delegated writer (agy `gemini-3.8-flash-high`; trigger: 7 files across 3 packages). Then 2 sequential blind read-only reviewers (`gemini-3.1-pro-high`, `claude-opus-4-6-thinking`) because the task touches keys and processes.
+  - Evidence: worker exit 0; orchestrator re-ran build, vet, tests; end-to-end in a throwaway repo (attest in primary, verify passes from a `git worktree`, `tree changed` after an edit, 6 concurrent first runs end with one 32-byte 0600 key). Reviewers agreed on one finding (a creator dying mid-write leaves a partial key file that bricks `LoadOrCreateKey`); fixed by temp file + `os.Link` (no retry loop). Also fixed: `RepoCommonDir` resolves symlinks, `HasValidAttestation` checks `RepoID` explicitly, shared `attestedCheckCommand` const. Regression tests added for each. Full `go build ./... && go test ./...` green on the feature branch (a single unexplained `FAIL` count of 3 appeared once right after `make install` and did not reproduce in 3 reruns).
+  - Commits: lane `45f0443`, `f23a5df` on `lane/t1b-attest-hardening`; integrated as `6b82c49`, `aa8a693`.
+  - Review: assessed by hand as high (keys, process, accept); RDD is off, so no native review; blind reviewers per the mission. Decision D1 in `docs/overnight-decisions.md`.
 - [ ] **T2. Packet contract fields.** Add `verification`, `known_environmental_failures`, `route`, `route_evidence`, injected skills by exact path to `internal/packet` and `packetauthor`; add `interaction_required` to `result.schema.json`. Route: delegated writer. Est. ~300 lines.
 - [ ] **T3. Neutralize SDD gates.** Replace `SDDPhase == "" || == "apply"` in `internal/accept/accept.go:120` and `internal/run/attempt.go:391` with a lane-role / `read_only` predicate (fail closed). Route: delegated writer. Est. ~120 lines.
 - [ ] **T4. SDD removal, docs and derivation.** Retire the 21 SDD packet templates and `references/strategies/sdd.md`; make `sdd-*` derivation in `internal/skillset` optional; add `odd.md` strategy. Plugin bump. Route: delegated writer. Est. ~400 lines (mostly deletions).
@@ -62,7 +67,7 @@ Each task closes with a work-unit commit and records its commit id and review ti
 - [ ] **T14. Router interface with Jev in shadow mode.** Router interface; deterministic implementation as baseline and permanent fallback; Jev adapter over plain HTTP (no Go SDK) that logs disagreements to the T13 JSONL and has no authority. Read `docs.typesafe.ai/api.md` and `legal.md` first. Route: delegated writer. Est. ~350 lines.
 - [ ] **T15. Rules source and generated files.** Single rules source generating `CLAUDE.md`, `GEMINI.md`, `AGENTS.md` per workspace; workspace `CLAUDE.md` states that delegation goes through the dispatcher. Route: delegated writer. Est. ~200 lines.
 
-Order: T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15.
+Order: T1, T1b, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15.
 
 ## Acceptance criteria
 
@@ -80,3 +85,4 @@ Order: T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15.
 ## Next step
 
 T2 (packet contract fields and `interaction_required`): delegate to agy in a new worktree `lane/t2-packet-fields` from `feature/herdr-agent-factory`. The T1 worktree `lane-t1-hmac-attestation` is kept until the follow-ups are decided; remove it only after confirming nothing unique remains (its commit was cherry-picked, so the SHA differs).
+- 2026-10-03: T1b closed. Slice 1 now = `880665b`, `6b82c49`, `aa8a693`. Engram mirror update pending.
