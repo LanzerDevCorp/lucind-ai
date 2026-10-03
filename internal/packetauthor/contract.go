@@ -60,6 +60,7 @@ type Contract struct {
 	NamedSkillsOnly            bool              `json:"named_skills_only,omitempty"`
 	Verification               []string          `json:"verification,omitempty"`
 	KnownEnvironmentalFailures []string          `json:"known_environmental_failures,omitempty"`
+	CommitMessage              string            `json:"commit_message,omitempty"`
 	TargetClaims               map[string]string `json:"-"`
 }
 type FeatureTarget struct {

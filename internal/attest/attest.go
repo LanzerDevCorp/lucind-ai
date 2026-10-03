@@ -500,3 +500,78 @@ func parseTime(s string) (time.Time, error) {
 	}
 	return time.Parse(time.RFC3339, s)
 }
+
+// RunAndRecord executes argv in dir, computes the TreeHash of the repository toplevel,
+// builds and MACs an attestation entry, and writes it to the attestation log directory.
+// Non-zero command exits are recorded in Entry.ExitCode and do not return a Go error.
+func RunAndRecord(ctx context.Context, dir string, argv []string, commandString string, stdin io.Reader, stdout, stderr io.Writer) (Entry, error) {
+	if len(argv) == 0 {
+		return Entry{}, errors.New("command is required")
+	}
+
+	toplevel, err := RepoToplevel(ctx, dir)
+	if err != nil {
+		return Entry{}, fmt.Errorf("resolve repository toplevel: %w", err)
+	}
+	commonDir, err := RepoCommonDir(ctx, dir)
+	if err != nil {
+		return Entry{}, fmt.Errorf("resolve repository common dir: %w", err)
+	}
+	repoID := RepoID(commonDir)
+
+	key, err := LoadOrCreateKey("")
+	if err != nil {
+		return Entry{}, fmt.Errorf("load attestation key: %w", err)
+	}
+
+	logDir, err := ResolveStateDir(repoID)
+	if err != nil {
+		return Entry{}, fmt.Errorf("resolve attestation log dir: %w", err)
+	}
+
+	if commandString == "" {
+		commandString = strings.Join(argv, " ")
+	}
+
+	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+	cmd.Dir = dir
+	cmd.Stdin = stdin
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+
+	startedAt := time.Now().UTC()
+	runErr := cmd.Run()
+	finishedAt := time.Now().UTC()
+
+	exitCode := 0
+	if runErr != nil {
+		var exitErr *exec.ExitError
+		if errors.As(runErr, &exitErr) {
+			exitCode = exitErr.ExitCode()
+		} else {
+			return Entry{}, fmt.Errorf("run command: %w", runErr)
+		}
+	}
+
+	treeHash, err := TreeHash(ctx, toplevel)
+	if err != nil {
+		return Entry{}, fmt.Errorf("compute tree hash: %w", err)
+	}
+
+	entry := Entry{
+		Version:    1,
+		RepoID:     repoID,
+		Command:    commandString,
+		ExitCode:   exitCode,
+		TreeHash:   treeHash,
+		StartedAt:  startedAt.Format(time.RFC3339Nano),
+		FinishedAt: finishedAt.Format(time.RFC3339Nano),
+	}
+	entry.MAC = ComputeMAC(entry, key)
+
+	if _, err := WriteEntry(logDir, entry); err != nil {
+		return Entry{}, fmt.Errorf("write attestation entry: %w", err)
+	}
+
+	return entry, nil
+}

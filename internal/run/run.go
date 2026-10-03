@@ -237,6 +237,12 @@ type Deps struct {
 	// cmd/lucind-ai/cli.go's productionDeps).
 	IsAncestorSHA   func(ctx context.Context, primaryRoot, ancestorSHA, descendantSHA string) (bool, error)
 	FeatureLeaseTTL time.Duration
+	// Dispatcher commit seams
+	RunAttested         func(ctx context.Context, worktreePath, cmd string) (exitCode int, err error)
+	HasValidAttestation func(ctx context.Context, repoRoot, cmd, expectedTreeHash string) (bool, error)
+	PreCommitGate       func(ctx context.Context, worktreePath string, p packet.Packet) (lane.Status, string)
+	GitCommit           func(ctx context.Context, worktreePath, message string) error
+
 	// RenewInterval controls how often driveAttemptFromLeased renews the
 	// feature lease while checkFunc (integrate.Check) runs during the
 	// CHECKING phase -- see the lease-renewal loop there. Zero means the
@@ -492,6 +498,10 @@ func Execute(ctx context.Context, deps Deps, p packet.Packet) (Report, error) {
 		status, reason = enforceRequiredSkills(p, envelope)
 	}
 
+	if status == lane.Done && p.CommitMessage != "" {
+		status, reason = dispatcherCommit(ctx, deps, wt.Path, wt.BaseSHA, p)
+	}
+
 	if status == lane.Done {
 		status, reason = enforceCompletionMode(ctx, deps, wt.Path, wt.BaseSHA, p)
 	}
@@ -592,6 +602,7 @@ func setDoneCandidate(ctx context.Context, deps Deps, p packet.Packet, worktreeP
 		var contract struct {
 			Version       string                        `json:"version"`
 			Mode          string                        `json:"mode"`
+			CommitMessage string                        `json:"commit_message,omitempty"`
 			WritePaths    []string                      `json:"write_paths"`
 			ReadOnlyPaths []string                      `json:"read_only_paths"`
 			DoneCriteria  []string                      `json:"done_criteria"`
@@ -612,6 +623,8 @@ func setDoneCandidate(ctx context.Context, deps Deps, p packet.Packet, worktreeP
 		commit := "required"
 		if contract.Mode == "read-only" {
 			commit = "forbidden"
+		} else if contract.CommitMessage != "" || p.CommitMessage != "" {
+			commit = "dispatcher"
 		}
 		digest = p.Authoring.Digest
 		encoded, hash, err := ledger.FreezeAuthoringEvidence(ledger.AuthoringEvidence{
@@ -712,6 +725,9 @@ func packetDigest(p packet.Packet, paths []string) string {
 	if len(p.KnownEnvironmentalFailures) > 0 {
 		raw, _ := json.Marshal(p.KnownEnvironmentalFailures)
 		parts = append(parts, "known_env_failures:"+string(raw))
+	}
+	if p.CommitMessage != "" {
+		parts = append(parts, "commit_message:"+p.CommitMessage)
 	}
 
 	return versionedHash(parts...)

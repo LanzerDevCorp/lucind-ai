@@ -1612,3 +1612,113 @@ func TestParseNewFrontmatterValidation(t *testing.T) {
 		}
 	})
 }
+
+func TestParseCommitMessage(t *testing.T) {
+	validCases := []struct {
+		name string
+		msg  string
+	}{
+		{"standard feat", "feat: implement user auth"},
+		{"with scope", "fix(auth): handle expired token"},
+		{"with scope having slash and dash", "refactor(core/run-engine): simplify lifecycle"},
+		{"breaking with exclamation", "feat!: breaking api change"},
+		{"scope and breaking exclamation", "fix(db)!: change schema primary key"},
+		{"docs", "docs: update readme"},
+		{"chore", "chore(deps): bump go version"},
+		{"style", "style: format imports"},
+		{"perf", "perf(cache): optimize lookup"},
+		{"test", "test: add unit tests"},
+		{"build", "build(ci): update build step"},
+		{"ci", "ci: fix linting pipeline"},
+		{"revert", "revert: rollback commit 12345"},
+		{"max 100 characters", "feat: " + strings.Repeat("a", 94)}, // 6 + 94 = 100
+	}
+
+	for _, tc := range validCases {
+		t.Run("valid: "+tc.name, func(t *testing.T) {
+			src := "---\n" +
+				"id: test-lane\n" +
+				"executor: agy\n" +
+				"routed_by: test\n" +
+				"verification: [\"go test ./...\"]\n" +
+				"commit_message: " + tc.msg + "\n" +
+				"---\n\n## Goal\nTest\n"
+			p, err := packet.Parse(strings.NewReader(src))
+			if err != nil {
+				t.Fatalf("Parse() error = %v, want nil", err)
+			}
+			if p.CommitMessage != tc.msg {
+				t.Errorf("CommitMessage = %q, want %q", p.CommitMessage, tc.msg)
+			}
+		})
+	}
+
+	invalidCases := []struct {
+		name    string
+		msg     string
+		wantErr error
+	}{
+		{"invalid header Update stuff", "Update stuff", packet.ErrInvalidCommitMessage},
+		{"missing colon", "feat implement login", packet.ErrInvalidCommitMessage},
+		{"missing description", "feat:", packet.ErrInvalidCommitMessage},
+		{"empty description after space", "feat: ", packet.ErrInvalidCommitMessage},
+		{"unknown type", "unknown: implement login", packet.ErrInvalidCommitMessage},
+		{"101 characters", "feat: " + strings.Repeat("a", 95), packet.ErrInvalidCommitMessage}, // 6 + 95 = 101
+		{"co-authored-by case insensitive", "feat: add login Co-Authored-By: AI", packet.ErrInvalidCommitMessage},
+		{"co-authored-by lower", "feat: add login co-authored-by: helper", packet.ErrInvalidCommitMessage},
+		{"generated with case insensitive", "feat: add login (generated with LLM)", packet.ErrInvalidCommitMessage},
+		{"generated with capital", "feat: add login Generated With Claude", packet.ErrInvalidCommitMessage},
+	}
+
+	for _, tc := range invalidCases {
+		t.Run("invalid: "+tc.name, func(t *testing.T) {
+			src := "---\n" +
+				"id: test-lane\n" +
+				"executor: agy\n" +
+				"routed_by: test\n" +
+				"verification: [\"go test ./...\"]\n" +
+				"commit_message: " + tc.msg + "\n" +
+				"---\n\n## Goal\nTest\n"
+			_, err := packet.Parse(strings.NewReader(src))
+			if !errors.Is(err, tc.wantErr) {
+				t.Fatalf("Parse() error = %v, want %v", err, tc.wantErr)
+			}
+		})
+	}
+
+	t.Run("commit_message without verification rejected", func(t *testing.T) {
+		src := "---\n" +
+			"id: test-lane\n" +
+			"executor: agy\n" +
+			"routed_by: test\n" +
+			"commit_message: feat: implement user auth\n" +
+			"---\n\n## Goal\nTest\n"
+		_, err := packet.Parse(strings.NewReader(src))
+		if !errors.Is(err, packet.ErrCommitMessageNeedsVerification) {
+			t.Fatalf("Parse() error = %v, want %v", err, packet.ErrCommitMessageNeedsVerification)
+		}
+	})
+
+	t.Run("commit_message with empty verification array rejected", func(t *testing.T) {
+		src := "---\n" +
+			"id: test-lane\n" +
+			"executor: agy\n" +
+			"routed_by: test\n" +
+			"verification: []\n" +
+			"commit_message: feat: implement user auth\n" +
+			"---\n\n## Goal\nTest\n"
+		_, err := packet.Parse(strings.NewReader(src))
+		if !errors.Is(err, packet.ErrCommitMessageNeedsVerification) {
+			t.Fatalf("Parse() error = %v, want %v", err, packet.ErrCommitMessageNeedsVerification)
+		}
+	})
+
+	t.Run("ValidateCommitMessage with newline or carriage return", func(t *testing.T) {
+		if err := packet.ValidateCommitMessage("feat: line1\nline2"); !errors.Is(err, packet.ErrInvalidCommitMessage) {
+			t.Fatalf("expected ErrInvalidCommitMessage, got %v", err)
+		}
+		if err := packet.ValidateCommitMessage("feat: line1\rline2"); !errors.Is(err, packet.ErrInvalidCommitMessage) {
+			t.Fatalf("expected ErrInvalidCommitMessage, got %v", err)
+		}
+	})
+}

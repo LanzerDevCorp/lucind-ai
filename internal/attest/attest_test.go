@@ -747,3 +747,59 @@ func TestHasValidAttestation_RejectsForeignRepoID(t *testing.T) {
 		t.Fatal("an entry carrying another repository's RepoID must not count as an attestation")
 	}
 }
+
+func TestRunAndRecord(t *testing.T) {
+	ctx := context.Background()
+	repoDir := t.TempDir()
+	initGitRepo(t, repoDir)
+
+	configDir := t.TempDir()
+	stateDir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", configDir)
+	t.Setenv("XDG_STATE_HOME", stateDir)
+
+	key, err := attest.LoadOrCreateKey("")
+	if err != nil {
+		t.Fatalf("LoadOrCreateKey failed: %v", err)
+	}
+
+	// 1. Exit 0 command
+	var stdout, stderr bytes.Buffer
+	entry0, err := attest.RunAndRecord(ctx, repoDir, []string{"echo", "hello"}, "echo hello", nil, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("RunAndRecord exit 0 failed: %v", err)
+	}
+	if entry0.ExitCode != 0 {
+		t.Fatalf("expected exit code 0, got %d", entry0.ExitCode)
+	}
+	if !strings.Contains(stdout.String(), "hello") {
+		t.Fatalf("expected stdout to contain 'hello', got %q", stdout.String())
+	}
+	if !attest.VerifyMAC(entry0, key) {
+		t.Fatalf("expected entry0 MAC to verify")
+	}
+	wantTreeHash, err := attest.TreeHash(ctx, repoDir)
+	if err != nil {
+		t.Fatalf("TreeHash failed: %v", err)
+	}
+	if entry0.TreeHash != wantTreeHash {
+		t.Fatalf("expected entry0 TreeHash %q, got %q", wantTreeHash, entry0.TreeHash)
+	}
+
+	// 2. Exit non-zero command (e.g. sh -c "exit 42")
+	stdout.Reset()
+	stderr.Reset()
+	entry42, err := attest.RunAndRecord(ctx, repoDir, []string{"sh", "-c", "exit 42"}, "sh -c exit 42", nil, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("RunAndRecord non-zero exit returned error: %v (should be nil)", err)
+	}
+	if entry42.ExitCode != 42 {
+		t.Fatalf("expected exit code 42, got %d", entry42.ExitCode)
+	}
+	if !attest.VerifyMAC(entry42, key) {
+		t.Fatalf("expected entry42 MAC to verify")
+	}
+	if entry42.TreeHash != wantTreeHash {
+		t.Fatalf("expected entry42 TreeHash %q, got %q", wantTreeHash, entry42.TreeHash)
+	}
+}

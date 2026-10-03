@@ -177,6 +177,7 @@ func admitDispatchBatch(ctx context.Context, primaryRoot string, inputs []dispat
 			NamedSkillsOnly            bool              `json:"named_skills_only,omitempty"`
 			Verification               []string          `json:"verification,omitempty"`
 			KnownEnvironmentalFailures []string          `json:"known_environmental_failures,omitempty"`
+			CommitMessage              string            `json:"commit_message,omitempty"`
 		}
 		if err := json.Unmarshal(artifacts[i].ContractJSON, &normalized); err != nil {
 			return nil, fmt.Errorf("decode admitted packet[%d] contract: %w", i, err)
@@ -196,6 +197,7 @@ func admitDispatchBatch(ctx context.Context, primaryRoot string, inputs []dispat
 		packets[i].NamedSkillsOnly = normalized.NamedSkillsOnly
 		packets[i].Verification = append([]string(nil), normalized.Verification...)
 		packets[i].KnownEnvironmentalFailures = append([]string(nil), normalized.KnownEnvironmentalFailures...)
+		packets[i].CommitMessage = normalized.CommitMessage
 		packets[i].Authoring = &packet.Authoring{
 			ContractVersion: artifacts[i].Version, Digest: artifacts[i].Digest,
 			ContractJSON: append([]byte(nil), artifacts[i].ContractJSON...),

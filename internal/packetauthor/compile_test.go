@@ -268,3 +268,89 @@ func TestCompileRejectsInvalidRoute(t *testing.T) {
 		}
 	}
 }
+
+func TestCompileCommitMessage(t *testing.T) {
+	t.Run("valid commit_message yields dispatcher commit obligation", func(t *testing.T) {
+		c := validContract()
+		c.Verification = []string{"go test ./..."}
+		c.CommitMessage = "feat(auth): add login flow"
+		art, err := packetauthor.Compile(c, validFeatureBinding())
+		if err != nil {
+			t.Fatalf("Compile() error = %v", err)
+		}
+		if !strings.Contains(string(art.Body), "commit: dispatcher") {
+			t.Errorf("expected body to contain 'commit: dispatcher', got:\n%s", string(art.Body))
+		}
+		if !bytes.Contains(art.ContractJSON, []byte(`"commit_message":"feat(auth): add login flow"`)) {
+			t.Errorf("ContractJSON missing commit_message: %s", art.ContractJSON)
+		}
+	})
+
+	t.Run("empty commit_message write mode yields required commit obligation", func(t *testing.T) {
+		c := validContract()
+		art, err := packetauthor.Compile(c, validFeatureBinding())
+		if err != nil {
+			t.Fatalf("Compile() error = %v", err)
+		}
+		if !strings.Contains(string(art.Body), "commit: required") {
+			t.Errorf("expected body to contain 'commit: required', got:\n%s", string(art.Body))
+		}
+	})
+
+	t.Run("read-only mode yields forbidden commit obligation even if commit_message set", func(t *testing.T) {
+		c := validContract()
+		c.Mode = packetauthor.ModeReadOnly
+		c.WritePaths = nil
+		c.Verification = []string{"go test ./..."}
+		c.CommitMessage = "feat: add login"
+		art, err := packetauthor.Compile(c, validFeatureBinding())
+		if err != nil {
+			t.Fatalf("Compile() error = %v", err)
+		}
+		if !strings.Contains(string(art.Body), "commit: forbidden") {
+			t.Errorf("expected body to contain 'commit: forbidden', got:\n%s", string(art.Body))
+		}
+	})
+
+	t.Run("commit_message requires verification", func(t *testing.T) {
+		c := validContract()
+		c.CommitMessage = "feat: add login"
+		_, err := packetauthor.Compile(c, validFeatureBinding())
+		assertDiagnosticCode(t, err, packetauthor.CodeContractInvalid)
+	})
+
+	t.Run("invalid commit_message rejected", func(t *testing.T) {
+		for _, bad := range []string{
+			"Update stuff",
+			"feat implement login",
+			"feat: " + strings.Repeat("a", 95),
+			"feat: login\nnewline",
+			"feat: login Co-Authored-By: AI",
+			"feat: login (generated with LLM)",
+		} {
+			c := validContract()
+			c.Verification = []string{"go test ./..."}
+			c.CommitMessage = bad
+			_, err := packetauthor.Compile(c, validFeatureBinding())
+			assertDiagnosticCode(t, err, packetauthor.CodeContractInvalid)
+		}
+	})
+
+	t.Run("setting commit_message changes artifact digest", func(t *testing.T) {
+		c1 := validContract()
+		c1.Verification = []string{"go test ./..."}
+		art1, err := packetauthor.Compile(c1, validFeatureBinding())
+		if err != nil {
+			t.Fatal(err)
+		}
+		c2 := c1
+		c2.CommitMessage = "feat: add login"
+		art2, err := packetauthor.Compile(c2, validFeatureBinding())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if art1.Digest == art2.Digest {
+			t.Errorf("setting commit_message did not change digest: %q", art1.Digest)
+		}
+	})
+}

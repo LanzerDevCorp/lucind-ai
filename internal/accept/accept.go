@@ -373,7 +373,11 @@ func validateVersionedEvidence(c ledger.LaneCandidate, envelope result.Envelope,
 			}
 		}
 	}
-	if evidence.Mode == "write" && (evidence.CommitObligation != "required" || envelope.Commit != c.CandidateCommit) {
+	if evidence.CommitObligation == "dispatcher" {
+		if evidence.Mode != "write" || (envelope.Commit != "" && envelope.Commit != c.CandidateCommit) || c.CandidateCommit == c.BaseCommit {
+			return errors.New("accept: write commit mismatch")
+		}
+	} else if evidence.Mode == "write" && (evidence.CommitObligation != "required" || envelope.Commit != c.CandidateCommit) {
 		return errors.New("accept: write commit mismatch")
 	}
 	if evidence.Mode == "read-only" && (evidence.CommitObligation != "forbidden" || envelope.Commit != "" || len(actual) != 0) {

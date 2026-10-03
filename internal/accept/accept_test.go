@@ -592,6 +592,124 @@ func TestVerifierAttestationReuse(t *testing.T) {
 	})
 }
 
+func TestAcceptDispatcherCommitObligation(t *testing.T) {
+	contract := `{"version":"packet-author/v1","mode":"write","commit_message":"feat: add allowed","verification":["sh lucind-checks.sh"],"write_paths":["allowed.txt"],"done_criteria":["implemented"],"hard_stops":["stop"],"result":{"path":".lucind/result.json","schema":".lucind/result.schema.json"}}`
+
+	setupCandidate := func(t *testing.T, envelopeCommit string, candidateCommitEqualBase bool, mode string) (*Verifier, AcceptanceRequest) {
+		t.Helper()
+		f := newVerifierFixture(t, "", "", map[string]string{"allowed.txt": "candidate\n"}, []string{"allowed.txt"})
+		candidateSHA := f.candidate
+		candidateTree := f.candidateRow.CandidateTree
+		changes := []candidatechange.Change{{Change: candidatechange.Created, Path: "allowed.txt"}}
+		filesJSON := `[{"path":"allowed.txt","change":"created"}]`
+		if candidateCommitEqualBase {
+			candidateSHA = f.base
+			candidateTree = f.candidateRow.BaseTree
+			changes = []candidatechange.Change{}
+			filesJSON = `[]`
+		}
+		if envelopeCommit == "@candidate" {
+			envelopeCommit = candidateSHA
+		}
+		resultJSON := `{"packet_id":"lane-disp","status":"done","summary":"done","hard_stops":[{"hard_stop":"stop","fired":false}],"files_changed":` + filesJSON + `,"done_criteria":[{"criterion":"implemented","met":true}],"commit":"` + envelopeCommit + `"}`
+		bindingJSON := `{"kind":"feature","feature":"feat-test","parent_ref":"refs/heads/feature-1","base_sha":"` + f.base + `","expected_parent_sha":"` + f.base + `"}`
+		e := ledger.AuthoringEvidence{
+			PacketDigest:     "packet-digest-disp",
+			AuthoringMode:    "versioned",
+			ContractVersion:  "packet-author/v1",
+			Contract:         json.RawMessage(contract),
+			Binding:          json.RawMessage(bindingJSON),
+			Mode:             mode,
+			CommitObligation: "dispatcher",
+			WritePaths:       []string{"allowed.txt"},
+			DoneCriteria:     []string{"implemented"},
+			HardStops:        []string{"stop"},
+			ResultPath:       ".lucind/result.json",
+			ResultSchema:     ".lucind/result.schema.json",
+			BaseCommit:       f.base,
+			BaseTree:         f.candidateRow.BaseTree,
+			CandidateCommit:  candidateSHA,
+			CandidateTree:    candidateTree,
+			Changes:          changes,
+			ResultHash:       hashValues("result:v1", resultJSON),
+		}
+		encoded, hash, err := ledger.FreezeAuthoringEvidence(e)
+		if err != nil {
+			t.Fatal(err)
+		}
+		row := ledger.LaneCandidate{
+			RunID:                    "run-1",
+			LaneID:                   "lane-disp",
+			PacketID:                 "lane-disp",
+			PacketDigest:             "packet-digest-disp",
+			PrimaryRoot:              f.root,
+			WorktreePath:             filepath.Join(f.root+"-worktrees", "lane-disp"),
+			BaseCommit:               f.base,
+			BaseTree:                 f.candidateRow.BaseTree,
+			CandidateCommit:          candidateSHA,
+			CandidateTree:            candidateTree,
+			AllowedPaths:             []string{"allowed.txt"},
+			ResultPath:               ".lucind/result.json",
+			ResultJSON:               resultJSON,
+			ResultHash:               hashValues("result:v1", resultJSON),
+			AuthoringEvidenceVersion: ledger.AuthoringEvidenceVersion,
+			AuthoringEvidenceJSON:    encoded,
+			AuthoringEvidenceHash:    hash,
+			RecordedAt:               time.Now().UTC(),
+		}
+		if err := f.ledger.RegisterLane(context.Background(), ledger.Lane{RunID: "run-1", LaneID: "lane-disp", PacketID: "lane-disp", Executor: "agy", RoutingCondition: "test", Status: lane.Running}); err != nil {
+			t.Fatal(err)
+		}
+		if err := f.ledger.UpdateLaneMetadata(context.Background(), ledger.LaneMetadata{RunID: "run-1", LaneID: "lane-disp", Feature: "feat-test", ParentRef: "refs/heads/feature-1", BaseSHA: f.base, ExpectedParentSHA: f.base}, time.Now().UTC()); err != nil {
+			t.Fatal(err)
+		}
+		if err := f.ledger.SetDoneCandidate(context.Background(), row); err != nil {
+			t.Fatal(err)
+		}
+		return f.verifier, AcceptanceRequest{"run-1", "lane-disp"}
+	}
+
+	t.Run("accepted when envelope commit is empty and candidate != base", func(t *testing.T) {
+		v, req := setupCandidate(t, "", false, "write")
+		_, err := v.Verify(context.Background(), req)
+		if err != nil {
+			t.Fatalf("expected verification to succeed, got %v", err)
+		}
+	})
+
+	t.Run("accepted when envelope commit equals candidate and candidate != base", func(t *testing.T) {
+		v, req := setupCandidate(t, "@candidate", false, "write")
+		_, err := v.Verify(context.Background(), req)
+		if err != nil {
+			t.Fatalf("expected verification to succeed, got %v", err)
+		}
+	})
+
+	t.Run("rejected when candidate == base", func(t *testing.T) {
+		v, req := setupCandidate(t, "", true, "write")
+		_, err := v.Verify(context.Background(), req)
+		if err == nil || !strings.Contains(err.Error(), "write commit mismatch") {
+			t.Fatalf("expected write commit mismatch error, got %v", err)
+		}
+	})
+
+	t.Run("rejected when envelope commit does not match candidate", func(t *testing.T) {
+		v, req := setupCandidate(t, "wrong-commit-sha", false, "write")
+		_, err := v.Verify(context.Background(), req)
+		if err == nil || !strings.Contains(err.Error(), "write commit mismatch") {
+			t.Fatalf("expected write commit mismatch error, got %v", err)
+		}
+	})
+
+	t.Run("rejected when mode is not write", func(t *testing.T) {
+		v, req := setupCandidate(t, "", false, "read-only")
+		_, err := v.Verify(context.Background(), req)
+		if err == nil {
+			t.Fatal("expected error when mode is read-only for dispatcher commit obligation")
+		}
+	})
+}
+
 func bindingHashForCandidate(t *testing.T, f verifierFixture) string {
 	t.Helper()
 	binding, err := f.verifier.binding(f.candidateRow)

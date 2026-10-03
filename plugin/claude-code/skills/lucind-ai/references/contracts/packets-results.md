@@ -23,6 +23,7 @@ Every packet starts with YAML frontmatter and a non-empty prompt body.
 | `named_skills_only` | Optional strict boolean; when `true`, derives only explicitly named stack and ad-hoc skills plus `lucind-executor` (no lane-role and no `sdd-*` skills). |
 | `verification` | Optional single-line JSON array of exact foreground verification command strings to execute. |
 | `known_environmental_failures` | Optional single-line JSON array of baseline test failure names or commands that do not block acceptance. |
+| `commit_message` | Optional single-line Conventional Commit message string (<= 100 chars, matching `^(feat|fix|docs|refactor|test|chore|perf|build|ci|style|revert)(\([a-z0-9._/-]+\))?!?: \S.*$`). Requires non-empty `verification`. When declared, the worker does NOT commit; after the worker reports done, the dispatcher executes verification under attestation and commits with this message. Forbidden from containing `co-authored-by` or `generated with`. |
 
 ## Body structure
 
@@ -30,7 +31,7 @@ Include Goal, Why safe now, Preconditions, Allowed paths, allowed outside-reposi
 
 Mandatory criterion 1: every introduced indirection names and proves a terminal consumer.
 
-*Mandatory criterion 2*: write work is committed conventionally with no AI attribution, `git status --porcelain` empty, and `git log --oneline -1` evidence. For `read_only: true`, replace commit evidence with clean status and `HEAD` equal to `git merge-base HEAD <primary HEAD>`.
+*Mandatory criterion 2*: write work is committed conventionally with no AI attribution, `git status --porcelain` empty, and `git log --oneline -1` evidence. For `read_only: true`, replace commit evidence with clean status and `HEAD` equal to `git merge-base HEAD <primary HEAD>`. For packets declaring `commit_message` (obligation: `dispatcher`), the worker must NOT commit (`commit: ""` in envelope, `HEAD` equal to base SHA); the dispatcher executes verification under attestation, verifies valid attestation on the current tree hash, and commits with `commit_message` without AI attribution trailers.
 
 Every hard stop must be evaluated in the result whether or not it fired. A fired stop returns `blocked`; the Agent does not guess.
 

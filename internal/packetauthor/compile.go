@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/LanzerDevCorp/lucind-ai/internal/packet"
 	"github.com/LanzerDevCorp/lucind-ai/internal/skillset"
 )
 
@@ -32,6 +33,7 @@ type normalizedContract struct {
 	NamedSkillsOnly            bool              `json:"named_skills_only,omitempty"`
 	Verification               []string          `json:"verification,omitempty"`
 	KnownEnvironmentalFailures []string          `json:"known_environmental_failures,omitempty"`
+	CommitMessage              string            `json:"commit_message,omitempty"`
 }
 type manifest struct {
 	Version      string      `json:"version"`
@@ -86,6 +88,14 @@ func validateContract(contract Contract) (normalizedContract, Diagnostics) {
 	}
 	if contract.Mode == ModeReadOnly && len(contract.WritePaths) > 0 {
 		diagnostics = append(diagnostics, diagnostic(50, "mode", CodeModeCommitConflict, "read-only contracts cannot declare write paths"))
+	}
+	if contract.CommitMessage != "" {
+		if err := packet.ValidateCommitMessage(contract.CommitMessage); err != nil {
+			diagnostics = append(diagnostics, diagnostic(10, "commit_message", CodeContractInvalid, "commit_message is invalid"))
+		}
+		if len(contract.Verification) == 0 {
+			diagnostics = append(diagnostics, diagnostic(10, "commit_message", CodeContractInvalid, "commit_message requires verification"))
+		}
 	}
 	claimKeys := make([]string, 0, len(contract.TargetClaims))
 	for key, value := range contract.TargetClaims {
@@ -148,6 +158,7 @@ func validateContract(contract Contract) (normalizedContract, Diagnostics) {
 		NamedSkillsOnly:            contract.NamedSkillsOnly,
 		Verification:               verification,
 		KnownEnvironmentalFailures: knownFailures,
+		CommitMessage:              contract.CommitMessage,
 	}, diagnostics
 }
 
@@ -261,13 +272,16 @@ func renderBody(contract normalizedContract, skillPaths []string) []byte {
 			fmt.Fprintf(&out, "- %s\n", sp)
 		}
 	}
-	fmt.Fprintf(&out, "\n## Return\n```lucind-result-contract\nversion: 1\npath: %s\nschema: %s\nmode: %s\ncommit: %s\n```\n", contract.Result.Path, contract.Result.Schema, contract.Mode, commitForMode(contract.Mode))
+	fmt.Fprintf(&out, "\n## Return\n```lucind-result-contract\nversion: 1\npath: %s\nschema: %s\nmode: %s\ncommit: %s\n```\n", contract.Result.Path, contract.Result.Schema, contract.Mode, commitForMode(contract.Mode, contract.CommitMessage))
 	return []byte(out.String())
 }
 
-func commitForMode(mode Mode) string {
+func commitForMode(mode Mode, commitMessage string) string {
 	if mode == ModeReadOnly {
 		return "forbidden"
+	}
+	if commitMessage != "" {
+		return "dispatcher"
 	}
 	return "required"
 }

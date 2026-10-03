@@ -2,14 +2,11 @@ package main
 
 import (
 	"context"
-	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"strings"
-	"time"
 
 	"github.com/LanzerDevCorp/lucind-ai/internal/attest"
 )
@@ -56,83 +53,13 @@ func attestRunDispatch(ctx context.Context, args []string, stdout, stderr io.Wri
 		return 1
 	}
 
-	toplevel, err := attest.RepoToplevel(ctx, wd)
+	entry, err := attest.RunAndRecord(ctx, wd, args, strings.Join(args, " "), os.Stdin, stdout, stderr)
 	if err != nil {
-		fmt.Fprintf(stderr, "lucind-ai: resolve repository toplevel: %v\n", err)
-		return 1
-	}
-	commonDir, err := attest.RepoCommonDir(ctx, wd)
-	if err != nil {
-		fmt.Fprintf(stderr, "lucind-ai: resolve repository common dir: %v\n", err)
-		return 1
-	}
-	repoID := attest.RepoID(commonDir)
-
-	key, err := attest.LoadOrCreateKey("")
-	if err != nil {
-		fmt.Fprintf(stderr, "lucind-ai: load attestation key: %v\n", err)
+		fmt.Fprintf(stderr, "lucind-ai: %v\n", err)
 		return 1
 	}
 
-	logDir, err := attest.ResolveStateDir(repoID)
-	if err != nil {
-		fmt.Fprintf(stderr, "lucind-ai: resolve attestation log dir: %v\n", err)
-		return 1
-	}
-
-	cmdName := args[0]
-	cmdArgs := args[1:]
-	commandString := strings.Join(args, " ")
-
-	cmd := exec.CommandContext(ctx, cmdName, cmdArgs...)
-	cmd.Dir = wd
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = stdout
-	cmd.Stderr = stderr
-
-	startedAt := time.Now().UTC()
-	runErr := cmd.Run()
-	finishedAt := time.Now().UTC()
-
-	exitCode := 0
-	if runErr != nil {
-		var exitErr *exec.ExitError
-		if errors.As(runErr, &exitErr) {
-			exitCode = exitErr.ExitCode()
-		} else {
-			exitCode = 1
-		}
-	}
-
-	treeHash, err := attest.TreeHash(ctx, toplevel)
-	if err != nil {
-		fmt.Fprintf(stderr, "lucind-ai: compute tree hash: %v\n", err)
-		if exitCode != 0 {
-			return exitCode
-		}
-		return 1
-	}
-
-	entry := attest.Entry{
-		Version:    1,
-		RepoID:     repoID,
-		Command:    commandString,
-		ExitCode:   exitCode,
-		TreeHash:   treeHash,
-		StartedAt:  startedAt.Format(time.RFC3339Nano),
-		FinishedAt: finishedAt.Format(time.RFC3339Nano),
-	}
-	entry.MAC = attest.ComputeMAC(entry, key)
-
-	if _, err := attest.WriteEntry(logDir, entry); err != nil {
-		fmt.Fprintf(stderr, "lucind-ai: write attestation entry: %v\n", err)
-		if exitCode != 0 {
-			return exitCode
-		}
-		return 1
-	}
-
-	return exitCode
+	return entry.ExitCode
 }
 
 func attestVerifyDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) int {

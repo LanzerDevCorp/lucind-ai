@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"regexp"
 	"strings"
 
 	"github.com/LanzerDevCorp/lucind-ai/internal/skillset"
@@ -37,7 +38,30 @@ var (
 	ErrInvalidNamedSkillsOnly            = errors.New("packet: frontmatter named_skills_only must be a boolean (true or false)")
 	ErrInvalidVerification               = errors.New("packet: frontmatter verification must be a JSON array of strings")
 	ErrInvalidKnownEnvironmentalFailures = errors.New("packet: frontmatter known_environmental_failures must be a JSON array of strings")
+	ErrInvalidCommitMessage              = errors.New("packet: frontmatter commit_message is invalid")
+	ErrCommitMessageNeedsVerification    = errors.New("packet: frontmatter commit_message requires non-empty verification")
 )
+
+var commitMessageRegex = regexp.MustCompile(`^(feat|fix|docs|refactor|test|chore|perf|build|ci|style|revert)(\([a-z0-9._/-]+\))?!?: \S.*$`)
+
+// ValidateCommitMessage validates that msg matches Conventional Commit header rules,
+// is at most 100 characters, contains no newlines, and contains no attribution trailers.
+func ValidateCommitMessage(msg string) error {
+	if strings.ContainsAny(msg, "\r\n") {
+		return ErrInvalidCommitMessage
+	}
+	if len(msg) > 100 {
+		return ErrInvalidCommitMessage
+	}
+	lower := strings.ToLower(msg)
+	if strings.Contains(lower, "co-authored-by") || strings.Contains(lower, "generated with") {
+		return ErrInvalidCommitMessage
+	}
+	if !commitMessageRegex.MatchString(msg) {
+		return ErrInvalidCommitMessage
+	}
+	return nil
+}
 
 // Authoring is immutable typed input retained for candidate evidence. It is
 // nil for manually authored packets, which remain on the legacy evidence path.
@@ -121,6 +145,8 @@ type Packet struct {
 	Verification []string
 	// KnownEnvironmentalFailures is the optional JSON array of baseline failure names or commands.
 	KnownEnvironmentalFailures []string
+	// CommitMessage is the optional Conventional Commit message for dispatcher commit.
+	CommitMessage string
 	// RequiredSkills is the derived list of required skills. Populated by admission
 	// or compilation, never parsed directly from frontmatter.
 	RequiredSkills []string
@@ -247,11 +273,22 @@ func Parse(r io.Reader) (Packet, error) {
 				return Packet{}, ErrInvalidKnownEnvironmentalFailures
 			}
 			p.KnownEnvironmentalFailures = failures
+		case "commit_message":
+			p.CommitMessage = strings.TrimSpace(value)
 		}
 	}
 
 	if !closed {
 		return Packet{}, ErrNoFrontmatter
+	}
+
+	if p.CommitMessage != "" {
+		if err := ValidateCommitMessage(p.CommitMessage); err != nil {
+			return Packet{}, err
+		}
+		if len(p.Verification) == 0 {
+			return Packet{}, ErrCommitMessageNeedsVerification
+		}
 	}
 
 	if p.LaneRole != "" {
