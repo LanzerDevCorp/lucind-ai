@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -808,7 +809,7 @@ func TestSkillAssetContract(t *testing.T) {
 		"references/modes/isolated.md",
 		"references/modes/exclusive.md",
 		"references/strategies/direct.md",
-		"references/strategies/sdd.md",
+		"references/strategies/odd.md",
 		"references/strategies/fan-out.md",
 		"references/coordination/dependencies-defects.md",
 		"references/coordination/recovery-reconciliation.md",
@@ -827,11 +828,6 @@ func TestSkillAssetContract(t *testing.T) {
 		}
 	}
 
-	// Explore is documented as dispatchable via lucind-ai run.
-	if !strings.Contains(content, "Dispatch via `lucind-ai run`") {
-		t.Errorf("SKILL.md does not document explore dispatch via lucind-ai run")
-	}
-
 	// Mandatory criterion 2 states the read-only exception.
 	if !strings.Contains(content, "*Mandatory criterion 2*") {
 		t.Errorf("SKILL.md missing mandatory criterion 2")
@@ -840,19 +836,9 @@ func TestSkillAssetContract(t *testing.T) {
 		t.Errorf("SKILL.md mandatory criterion 2 missing read-only exception with merge-base check")
 	}
 
-	// Explore blocker row no longer says the exception is missing.
-	if strings.Contains(content, "Needs an explicit read-only-packet exception") {
-		t.Errorf("SKILL.md explore blocker row still states the exception is missing")
-	}
-
-	// Apply row now documents the built DAG-split loop (apply-dag-dispatch
-	// Phase 6); verify row remains untouched until verify-dual-dispatch's
-	// own SKILL.md documentation phase runs.
-	if !strings.Contains(content, "lucind-ai split --dag") {
-		t.Errorf("SKILL.md apply row does not document the built split loop")
-	}
-	if !strings.Contains(content, "Dual-dispatch `agy` + `cursor-agent` for the *qualitative* half of verification") {
-		t.Errorf("SKILL.md verify row was modified or removed")
+	// ODD strategy is documented.
+	if !strings.Contains(content, "odd/tasks/<feature>.md") {
+		t.Errorf("skill package missing ODD feature document checklist guidance")
 	}
 
 	// The dirty-primary-root hazard remains explicit after modularization.
@@ -1163,119 +1149,6 @@ func TestPacketTemplateVerifyPointerNote(t *testing.T) {
 	}
 }
 
-func TestSkillMDVerifyOperationalWorkflow(t *testing.T) {
-	skillPath := filepath.Join("..", "..", "plugin", "claude-code", "skills", "lucind-ai", "references", "strategies", "sdd.md")
-	data, err := os.ReadFile(skillPath)
-	if err != nil {
-		t.Fatalf("ReadFile(%s) error = %v", skillPath, err)
-	}
-	content := string(data)
-
-	verifyRow, ok := skillMDTableRow(content, "`verify`")
-	if !ok {
-		t.Fatal("SKILL.md target-direction table missing `verify` row")
-	}
-
-	// Target-direction verify row: operational two-stage dispatch, not a blocker.
-	if !strings.Contains(verifyRow, "lucind-ai check") {
-		t.Errorf("verify row does not document Stage 1 mechanical check via lucind-ai check:\n%s", verifyRow)
-	}
-	if !strings.Contains(verifyRow, "agy") || !strings.Contains(verifyRow, "cursor-agent") {
-		t.Errorf("verify row does not document Stage 2 qualitative judgment dual-dispatched to agy + cursor-agent:\n%s", verifyRow)
-	}
-	if !strings.Contains(verifyRow, "Built. See **Verify dispatch** below.") {
-		t.Errorf("verify row is not marked built / does not point at Verify dispatch:\n%s", verifyRow)
-	}
-	for _, blocked := range []string{
-		"once tooling exists",
-		"not yet built",
-		"Needs an explicit",
-	} {
-		if strings.Contains(verifyRow, blocked) {
-			t.Errorf("verify row still contains blocked/unbuilt language %q:\n%s", blocked, verifyRow)
-		}
-	}
-
-	// Stage 1: Mechanical Check
-	if !strings.Contains(content, "Stage 1: Mechanical Check") {
-		t.Error("SKILL.md missing Stage 1: Mechanical Check")
-	}
-	if !strings.Contains(content, "lucind-ai check --out openspec/changes/<change-id>/verify-mechanical.log") {
-		t.Error("SKILL.md missing lucind-ai check --out openspec/changes/<change-id>/verify-mechanical.log")
-	}
-	if !strings.Contains(content, "Halts immediately") && !strings.Contains(content, "halt immediately") {
-		t.Error("SKILL.md Stage 1 does not say verification halts immediately if checks fail")
-	}
-	if !strings.Contains(content, "candidate branch") || !strings.Contains(strings.ToLower(content), "commit") {
-		t.Error("SKILL.md Stage 1 does not say the log is committed to the candidate branch HEAD on pass")
-	}
-
-	// Stage 2: Dual Qualitative Judgment Dispatch
-	if !strings.Contains(content, "Stage 2: Dual Qualitative Judgment Dispatch") {
-		t.Error("SKILL.md missing Stage 2: Dual Qualitative Judgment Dispatch")
-	}
-	if !strings.Contains(content, "packets/verify-<id>-agy.md") {
-		t.Error("SKILL.md missing packets/verify-<id>-agy.md")
-	}
-	if !strings.Contains(content, "packets/verify-<id>-cursor-agent.md") {
-		t.Error("SKILL.md missing packets/verify-<id>-cursor-agent.md")
-	}
-	if !strings.Contains(content, "verify-packet-template.md") {
-		t.Error("SKILL.md missing verify-packet-template.md")
-	}
-	if !strings.Contains(content, "read_only: true") {
-		t.Error("SKILL.md missing read_only: true")
-	}
-	if !strings.Contains(content, "## Context") {
-		t.Error("SKILL.md missing frozen mechanical summary in ## Context")
-	}
-	if !strings.Contains(content, "lucind-ai run --packet") || !strings.Contains(content, "verify-<id>-agy.md") || !strings.Contains(content, "verify-<id>-cursor-agent.md") {
-		t.Error("SKILL.md missing parallel lucind-ai run --packet dispatch of both verify lanes")
-	}
-	if !strings.Contains(strings.ToLower(content), "barrier") || !strings.Contains(strings.ToLower(content), "terminal") {
-		t.Error("SKILL.md Stage 2 does not document barrier join when both lanes reach terminal status")
-	}
-
-	// Stage 3: Evidence Cross-Checking & Verdict Reconciliation
-	if !strings.Contains(content, "Stage 3: Evidence Cross-Checking & Verdict Reconciliation") {
-		t.Error("SKILL.md missing Stage 3: Evidence Cross-Checking & Verdict Reconciliation")
-	}
-	if !strings.Contains(content, ".lucind/result.json") {
-		t.Error("SKILL.md Stage 3 does not read both .lucind/result.json envelopes")
-	}
-	if !strings.Contains(content, "file:line") {
-		t.Error("SKILL.md Stage 3 does not independently verify cited file:line evidence")
-	}
-
-	for _, want := range []string{
-		"Unanimous Pass",
-		"`done`/`done`",
-		"openspec/changes/<id>/verify.md",
-		"PASSED",
-		"verify: { status: done }",
-		"Disagreement / Disputed Defects",
-		"`blocked`/`deviated`",
-		"BLOCKED",
-		"Lane Failure",
-		"`failed`",
-		"Irreconcilable Ambiguity",
-	} {
-		if !strings.Contains(content, want) {
-			t.Errorf("SKILL.md Stage 3 missing %q", want)
-		}
-	}
-}
-
-func skillMDTableRow(content, phaseCell string) (string, bool) {
-	needle := "| " + phaseCell + " |"
-	for _, line := range strings.Split(content, "\n") {
-		if strings.HasPrefix(line, needle) {
-			return line, true
-		}
-	}
-	return "", false
-}
-
 func TestHumanPacketTemplateUntouched(t *testing.T) {
 	const rel = "plugin/claude-code/skills/lucind-ai/assets/human-packet-template.md"
 	repoRoot := filepath.Join("..", "..")
@@ -1443,822 +1316,61 @@ func TestParseLegacyMainFrontmatter(t *testing.T) {
 	}
 }
 
-func TestExplorePacketTemplatesContract(t *testing.T) {
-	assetsDir := filepath.Join("..", "..", "plugin", "claude-code", "skills", "lucind-ai", "assets")
-	templates := []struct {
-		filename      string
-		wantID        string
-		wantExecutor  string
-		wantPaths     []string
-		wantStrings   []string
-		forbidStrings []string
-	}{
-		{
-			filename:     "explore-lens-a-packet-template.md",
-			wantID:       "explore-<change-id>-lens-a",
-			wantExecutor: "agy",
-			wantPaths:    []string{"openspec/changes/<change-id>/explore-lens-a.md"},
-			wantStrings: []string{
-				"problem and candidates",
-				"<sdd-explore>",
-				"Explore Lens A — Problem & Candidates",
-				"Lens B owns",
-				"Lens C owns",
-				"1000 words",
-			},
-		},
-		{
-			filename:     "explore-lens-b-packet-template.md",
-			wantID:       "explore-<change-id>-lens-b",
-			wantExecutor: "agy",
-			wantPaths:    []string{"openspec/changes/<change-id>/explore-lens-b.md"},
-			wantStrings: []string{
-				"capabilities and scenarios",
-				"<sdd-explore>",
-				"Explore Lens B — Capabilities & Scenarios",
-				"Lens A owns",
-				"Lens C owns",
-				"1000 words",
-			},
-		},
-		{
-			filename:     "explore-lens-c-packet-template.md",
-			wantID:       "explore-<change-id>-lens-c",
-			wantExecutor: "agy",
-			wantPaths:    []string{"openspec/changes/<change-id>/explore-lens-c.md"},
-			wantStrings: []string{
-				"risks, trade-offs",
-				"<sdd-explore>",
-				"Explore Lens C — Risks, Trade-offs & Spikes",
-				"Lens A owns",
-				"Lens B owns",
-				"1000 words",
-			},
-		},
-		{
-			filename:     "explore-synthesis-packet-template.md",
-			wantID:       "explore-<change-id>-synthesis",
-			wantExecutor: "cursor-agent",
-			wantPaths: []string{
-				"openspec/changes/<change-id>/explore.md",
-				"openspec/changes/<change-id>/explore-synthesis-notes.md",
-			},
-			wantStrings: []string{
-				"explore-lens-a.md",
-				"explore-lens-b.md",
-				"explore-lens-c.md",
-				"explore.md",
-				"explore-synthesis-notes.md",
-				"## Unresolved Contradictions",
-				"## Coverage Gaps",
-				"## Dropped Citations",
-				"## Approach Divergence",
-				"1800 words",
-			},
-			forbidStrings: []string{
-				"## Architecture Divergence",
-				"architecture divergence",
-			},
-		},
+// TestRemainingPacketTemplatesContract asserts that only the authorized non-SDD
+// templates remain in both plugin asset directories and that they parse cleanly.
+func TestRemainingPacketTemplatesContract(t *testing.T) {
+	wantTemplates := []string{
+		"human-packet-template.md",
+		"packet-template.md",
+		"ultrafixer-packet-template.md",
+		"verify-packet-template.md",
 	}
 
-	var lensPackets []packet.Packet
-	for _, tt := range templates {
-		t.Run(tt.filename, func(t *testing.T) {
-			path := filepath.Join(assetsDir, tt.filename)
+	roots := []string{
+		filepath.Join("..", "..", "plugin", "claude-code", "skills", "lucind-ai", "assets"),
+		filepath.Join("..", "..", "plugin", "opencode", "skills", "lucind-ai", "assets"),
+	}
+
+	for _, assetsDir := range roots {
+		entries, err := os.ReadDir(assetsDir)
+		if err != nil {
+			t.Fatalf("ReadDir(%s) error = %v", assetsDir, err)
+		}
+
+		var gotFiles []string
+		for _, e := range entries {
+			if !e.IsDir() && strings.HasSuffix(e.Name(), ".md") {
+				gotFiles = append(gotFiles, e.Name())
+			}
+		}
+		slices.Sort(gotFiles)
+
+		if !slices.Equal(gotFiles, wantTemplates) {
+			t.Errorf("assets in %s: got %v, want %v", assetsDir, gotFiles, wantTemplates)
+		}
+
+		for _, name := range wantTemplates {
+			path := filepath.Join(assetsDir, name)
 			data, err := os.ReadFile(path)
 			if err != nil {
-				t.Fatalf("ReadFile(%s) error = %v", path, err)
+				t.Errorf("ReadFile(%s) error = %v", path, err)
+				continue
 			}
-			content := string(data)
-
-			p, err := packet.Parse(strings.NewReader(content))
+			if name == "human-packet-template.md" {
+				if !strings.HasPrefix(string(data), "# Human packet") {
+					t.Errorf("template %s missing expected heading", name)
+				}
+				continue
+			}
+			p, err := packet.Parse(strings.NewReader(string(data)))
 			if err != nil {
-				t.Fatalf("packet.Parse(%s) error = %v", tt.filename, err)
+				t.Errorf("packet.Parse(%s) error = %v", path, err)
+				continue
 			}
-
-			if p.ID != tt.wantID {
-				t.Errorf("ID = %q, want %q", p.ID, tt.wantID)
+			if p.ID == "" {
+				t.Errorf("template %s has empty ID", name)
 			}
-			if p.Executor != tt.wantExecutor {
-				t.Errorf("Executor = %q, want %q", p.Executor, tt.wantExecutor)
-			}
-			if p.RoutedBy == "" {
-				t.Errorf("RoutedBy is empty")
-			}
-			if !slices.Equal(p.AllowedPaths, tt.wantPaths) {
-				t.Errorf("AllowedPaths = %v, want %v", p.AllowedPaths, tt.wantPaths)
-			}
-			for _, ws := range tt.wantStrings {
-				if !strings.Contains(content, ws) {
-					t.Errorf("template %s missing expected string %q", tt.filename, ws)
-				}
-			}
-			for _, fs := range tt.forbidStrings {
-				if strings.Contains(content, fs) {
-					t.Errorf("template %s contains forbidden string %q", tt.filename, fs)
-				}
-			}
-
-			// The amended Planning Fan-Out Template Assets requirement makes
-			// "declares no dispatch target" the default for a reusable
-			// template, and this is the assertion that defends it. A template
-			// that bakes legacy_main: true silently targets main even when the
-			// change runs against a named feature parent -- the exact coupling
-			// the amendment removed. Without this check, reintroducing that
-			// field would pass every other assertion in this table.
-			if p.LegacyMain {
-				t.Errorf("template %s declares legacy_main: true; a reusable template must declare no dispatch target", tt.filename)
-			}
-			if p.Feature != "" || p.ParentRef != "" || p.BaseSHA != "" || p.ExpectedParentSHA != "" {
-				t.Errorf("template %s declares feature-target fields (feature=%q parent_ref=%q base_sha=%q expected_parent_sha=%q); a reusable template must declare no dispatch target",
-					tt.filename, p.Feature, p.ParentRef, p.BaseSHA, p.ExpectedParentSHA)
-			}
-
-			if strings.Contains(tt.filename, "lens") {
-				lensPackets = append(lensPackets, p)
-			}
-		})
-	}
-
-	if len(lensPackets) == 3 {
-		if err := packet.DisjointAllowedPaths(lensPackets); err != nil {
-			t.Errorf("DisjointAllowedPaths(explore lenses) error = %v", err)
 		}
-	}
-}
-
-func TestProposePacketTemplatesContract(t *testing.T) {
-	assetsDir := filepath.Join("..", "..", "plugin", "claude-code", "skills", "lucind-ai", "assets")
-	templates := []struct {
-		filename      string
-		wantID        string
-		wantExecutor  string
-		wantPaths     []string
-		wantStrings   []string
-		forbidStrings []string
-	}{
-		{
-			filename:     "propose-lens-a-packet-template.md",
-			wantID:       "propose-<change-id>-lens-a",
-			wantExecutor: "agy",
-			wantPaths:    []string{"openspec/changes/<change-id>/propose-lens-a.md"},
-			wantStrings: []string{
-				"candidate and approach",
-				"<sdd-propose>",
-				"Proposal Lens A — Candidate & Approach",
-				"Lens B owns",
-				"Lens C owns",
-				"1000 words",
-			},
-		},
-		{
-			filename:     "propose-lens-b-packet-template.md",
-			wantID:       "propose-<change-id>-lens-b",
-			wantExecutor: "agy",
-			wantPaths:    []string{"openspec/changes/<change-id>/propose-lens-b.md"},
-			wantStrings: []string{
-				"capability impact and delta specs",
-				"<sdd-propose>",
-				"Proposal Lens B — Capability Impact & Specs",
-				"Lens A owns",
-				"Lens C owns",
-				"1000 words",
-			},
-		},
-		{
-			filename:     "propose-lens-c-packet-template.md",
-			wantID:       "propose-<change-id>-lens-c",
-			wantExecutor: "agy",
-			wantPaths:    []string{"openspec/changes/<change-id>/propose-lens-c.md"},
-			wantStrings: []string{
-				"risks, rollback, and test impact",
-				"<sdd-propose>",
-				"Proposal Lens C — Risks, Rollback & Test Impact",
-				"Lens A owns",
-				"Lens B owns",
-				"1000 words",
-			},
-		},
-		{
-			filename:     "propose-synthesis-packet-template.md",
-			wantID:       "propose-<change-id>-synthesis",
-			wantExecutor: "cursor-agent",
-			wantPaths: []string{
-				"openspec/changes/<change-id>/proposal.md",
-				"openspec/changes/<change-id>/proposal-synthesis-notes.md",
-			},
-			wantStrings: []string{
-				"propose-lens-a.md",
-				"propose-lens-b.md",
-				"propose-lens-c.md",
-				"proposal.md",
-				"proposal-synthesis-notes.md",
-				"## Unresolved Contradictions",
-				"## Coverage Gaps",
-				"## Dropped Citations",
-				"## Scope Divergence",
-				"1800 words",
-			},
-			forbidStrings: []string{
-				"## Architecture Divergence",
-			},
-		},
-	}
-
-	var lensPackets []packet.Packet
-	for _, tt := range templates {
-		t.Run(tt.filename, func(t *testing.T) {
-			path := filepath.Join(assetsDir, tt.filename)
-			data, err := os.ReadFile(path)
-			if err != nil {
-				t.Fatalf("ReadFile(%s) error = %v", path, err)
-			}
-			content := string(data)
-
-			p, err := packet.Parse(strings.NewReader(content))
-			if err != nil {
-				t.Fatalf("packet.Parse(%s) error = %v", tt.filename, err)
-			}
-
-			if p.ID != tt.wantID {
-				t.Errorf("ID = %q, want %q", p.ID, tt.wantID)
-			}
-			if p.Executor != tt.wantExecutor {
-				t.Errorf("Executor = %q, want %q", p.Executor, tt.wantExecutor)
-			}
-			if p.RoutedBy == "" {
-				t.Errorf("RoutedBy is empty")
-			}
-			if !slices.Equal(p.AllowedPaths, tt.wantPaths) {
-				t.Errorf("AllowedPaths = %v, want %v", p.AllowedPaths, tt.wantPaths)
-			}
-			for _, ws := range tt.wantStrings {
-				if !strings.Contains(content, ws) {
-					t.Errorf("template %s missing expected string %q", tt.filename, ws)
-				}
-			}
-			for _, fs := range tt.forbidStrings {
-				if strings.Contains(content, fs) {
-					t.Errorf("template %s contains forbidden string %q", tt.filename, fs)
-				}
-			}
-
-			// The amended Planning Fan-Out Template Assets requirement makes
-			// "declares no dispatch target" the default for a reusable
-			// template, and this is the assertion that defends it. A template
-			// that bakes legacy_main: true silently targets main even when the
-			// change runs against a named feature parent -- the exact coupling
-			// the amendment removed. Without this check, reintroducing that
-			// field would pass every other assertion in this table.
-			if p.LegacyMain {
-				t.Errorf("template %s declares legacy_main: true; a reusable template must declare no dispatch target", tt.filename)
-			}
-			if p.Feature != "" || p.ParentRef != "" || p.BaseSHA != "" || p.ExpectedParentSHA != "" {
-				t.Errorf("template %s declares feature-target fields (feature=%q parent_ref=%q base_sha=%q expected_parent_sha=%q); a reusable template must declare no dispatch target",
-					tt.filename, p.Feature, p.ParentRef, p.BaseSHA, p.ExpectedParentSHA)
-			}
-
-			if strings.Contains(tt.filename, "lens") {
-				lensPackets = append(lensPackets, p)
-			}
-		})
-	}
-
-	if len(lensPackets) == 3 {
-		if err := packet.DisjointAllowedPaths(lensPackets); err != nil {
-			t.Errorf("DisjointAllowedPaths(propose lenses) error = %v", err)
-		}
-	}
-}
-
-func TestDesignPacketTemplatesContract(t *testing.T) {
-	assetsDir := filepath.Join("..", "..", "plugin", "claude-code", "skills", "lucind-ai", "assets")
-	templates := []struct {
-		filename      string
-		wantID        string
-		wantExecutor  string
-		wantPaths     []string
-		wantStrings   []string
-		forbidStrings []string
-	}{
-		{
-			filename:     "design-lens-a-packet-template.md",
-			wantID:       "design-<change-id>-lens-a",
-			wantExecutor: "agy",
-			wantPaths:    []string{"openspec/changes/<change-id>/design-lens-a.md"},
-			wantStrings: []string{
-				"decisions lens",
-				"<sdd-design>",
-				"Design Lens A — Decisions",
-				"Lens B owns",
-				"Lens C owns",
-				"1000 words",
-			},
-		},
-		{
-			filename:     "design-lens-b-packet-template.md",
-			wantID:       "design-<change-id>-lens-b",
-			wantExecutor: "agy",
-			wantPaths:    []string{"openspec/changes/<change-id>/design-lens-b.md"},
-			wantStrings: []string{
-				"surface-and-flow lens",
-				"<sdd-design>",
-				"Design Lens B — Surface & Flow",
-				"Lens A owns",
-				"Lens C owns",
-				"1000 words",
-			},
-		},
-		{
-			filename:     "design-lens-c-packet-template.md",
-			wantID:       "design-<change-id>-lens-c",
-			wantExecutor: "agy",
-			wantPaths:    []string{"openspec/changes/<change-id>/design-lens-c.md"},
-			wantStrings: []string{
-				"failure-test-rollback lens",
-				"<sdd-design>",
-				"Design Lens C — Failure, Test & Rollback",
-				"Lens A owns",
-				"Lens B owns",
-				"1000 words",
-			},
-		},
-		{
-			filename:     "design-synthesis-packet-template.md",
-			wantID:       "design-<change-id>-synthesis",
-			wantExecutor: "cursor-agent",
-			wantPaths: []string{
-				"openspec/changes/<change-id>/design.md",
-				"openspec/changes/<change-id>/design-synthesis-notes.md",
-			},
-			wantStrings: []string{
-				"design-lens-a.md",
-				"design-lens-b.md",
-				"design-lens-c.md",
-				"design.md",
-				"design-synthesis-notes.md",
-				"## Unresolved Contradictions",
-				"## Coverage Gaps",
-				"## Dropped Citations",
-				"1800 words",
-			},
-		},
-	}
-
-	var lensPackets []packet.Packet
-	for _, tt := range templates {
-		t.Run(tt.filename, func(t *testing.T) {
-			path := filepath.Join(assetsDir, tt.filename)
-			data, err := os.ReadFile(path)
-			if err != nil {
-				t.Fatalf("ReadFile(%s) error = %v", path, err)
-			}
-			content := string(data)
-
-			p, err := packet.Parse(strings.NewReader(content))
-			if err != nil {
-				t.Fatalf("packet.Parse(%s) error = %v", tt.filename, err)
-			}
-
-			if p.ID != tt.wantID {
-				t.Errorf("ID = %q, want %q", p.ID, tt.wantID)
-			}
-			if p.Executor != tt.wantExecutor {
-				t.Errorf("Executor = %q, want %q", p.Executor, tt.wantExecutor)
-			}
-			if p.RoutedBy == "" {
-				t.Errorf("RoutedBy is empty")
-			}
-			if !slices.Equal(p.AllowedPaths, tt.wantPaths) {
-				t.Errorf("AllowedPaths = %v, want %v", p.AllowedPaths, tt.wantPaths)
-			}
-			for _, ws := range tt.wantStrings {
-				if !strings.Contains(content, ws) {
-					t.Errorf("template %s missing expected string %q", tt.filename, ws)
-				}
-			}
-			for _, fs := range tt.forbidStrings {
-				if strings.Contains(content, fs) {
-					t.Errorf("template %s contains forbidden string %q", tt.filename, fs)
-				}
-			}
-
-			// The amended Planning Fan-Out Template Assets requirement makes
-			// "declares no dispatch target" the default for a reusable
-			// template, and this is the assertion that defends it. A template
-			// that bakes legacy_main: true silently targets main even when the
-			// change runs against a named feature parent -- the exact coupling
-			// the amendment removed. Without this check, reintroducing that
-			// field would pass every other assertion in this table.
-			if p.LegacyMain {
-				t.Errorf("template %s declares legacy_main: true; a reusable template must declare no dispatch target", tt.filename)
-			}
-			if p.Feature != "" || p.ParentRef != "" || p.BaseSHA != "" || p.ExpectedParentSHA != "" {
-				t.Errorf("template %s declares feature-target fields (feature=%q parent_ref=%q base_sha=%q expected_parent_sha=%q); a reusable template must declare no dispatch target",
-					tt.filename, p.Feature, p.ParentRef, p.BaseSHA, p.ExpectedParentSHA)
-			}
-
-			if strings.Contains(tt.filename, "lens") {
-				lensPackets = append(lensPackets, p)
-			}
-		})
-	}
-
-	if len(lensPackets) == 3 {
-		if err := packet.DisjointAllowedPaths(lensPackets); err != nil {
-			t.Errorf("DisjointAllowedPaths(design lenses) error = %v", err)
-		}
-	}
-}
-
-func TestSpecPacketTemplatesContract(t *testing.T) {
-	assetsDir := filepath.Join("..", "..", "plugin", "claude-code", "skills", "lucind-ai", "assets")
-	templates := []struct {
-		filename      string
-		wantID        string
-		wantExecutor  string
-		wantPaths     []string
-		wantStrings   []string
-		forbidStrings []string
-	}{
-		{
-			filename:     "spec-lens-a-packet-template.md",
-			wantID:       "spec-<change-id>-lens-a",
-			wantExecutor: "agy",
-			wantPaths:    []string{"openspec/changes/<change-id>/spec-lens-a.md"},
-			wantStrings: []string{
-				"capabilities and requirements",
-				"<sdd-spec>",
-				"Spec Lens A — Capabilities & Requirements",
-				"Lens B owns",
-				"Lens C owns",
-				"1000 words",
-			},
-		},
-		{
-			filename:     "spec-lens-b-packet-template.md",
-			wantID:       "spec-<change-id>-lens-b",
-			wantExecutor: "agy",
-			wantPaths:    []string{"openspec/changes/<change-id>/spec-lens-b.md"},
-			wantStrings: []string{
-				"scenarios and coverage",
-				"<sdd-spec>",
-				"Spec Lens B — Scenarios & Coverage",
-				"Lens A owns",
-				"Lens C owns",
-				"1000 words",
-			},
-		},
-		{
-			filename:     "spec-lens-c-packet-template.md",
-			wantID:       "spec-<change-id>-lens-c",
-			wantExecutor: "agy",
-			wantPaths:    []string{"openspec/changes/<change-id>/spec-lens-c.md"},
-			wantStrings: []string{
-				"live-spec conflict and migration",
-				"<sdd-spec>",
-				"Spec Lens C — Live-Spec Conflicts & Migration",
-				"Lens A owns",
-				"Lens B owns",
-				"1000 words",
-				// Lens C is the only lane that opens the live specs in full, so
-				// the verbatim full-block section is the property that keeps
-				// archive from silently deleting scenarios a partial MODIFIED
-				// block failed to copy. Losing this heading loses the lens.
-				"## MODIFIED Full Blocks",
-			},
-		},
-		{
-			filename:     "spec-synthesis-packet-template.md",
-			wantID:       "spec-<change-id>-synthesis",
-			wantExecutor: "cursor-agent",
-			wantPaths: []string{
-				"openspec/changes/<change-id>/specs/",
-				"openspec/changes/<change-id>/spec-synthesis-notes.md",
-			},
-			wantStrings: []string{
-				"spec-lens-a.md",
-				"spec-lens-b.md",
-				"spec-lens-c.md",
-				"spec-synthesis-notes.md",
-				"## Unresolved Contradictions",
-				"## Coverage Gaps",
-				"## Dropped Citations",
-				"## Requirement Divergence",
-				"1800 words",
-			},
-			forbidStrings: []string{
-				"## Architecture Divergence",
-			},
-		},
-	}
-
-	var lensPackets []packet.Packet
-	for _, tt := range templates {
-		t.Run(tt.filename, func(t *testing.T) {
-			path := filepath.Join(assetsDir, tt.filename)
-			data, err := os.ReadFile(path)
-			if err != nil {
-				t.Fatalf("ReadFile(%s) error = %v", path, err)
-			}
-			content := string(data)
-
-			p, err := packet.Parse(strings.NewReader(content))
-			if err != nil {
-				t.Fatalf("packet.Parse(%s) error = %v", tt.filename, err)
-			}
-
-			if p.ID != tt.wantID {
-				t.Errorf("ID = %q, want %q", p.ID, tt.wantID)
-			}
-			if p.Executor != tt.wantExecutor {
-				t.Errorf("Executor = %q, want %q", p.Executor, tt.wantExecutor)
-			}
-			if p.RoutedBy == "" {
-				t.Errorf("RoutedBy is empty")
-			}
-			if !slices.Equal(p.AllowedPaths, tt.wantPaths) {
-				t.Errorf("AllowedPaths = %v, want %v", p.AllowedPaths, tt.wantPaths)
-			}
-			for _, ws := range tt.wantStrings {
-				if !strings.Contains(content, ws) {
-					t.Errorf("template %s missing expected string %q", tt.filename, ws)
-				}
-			}
-			for _, fs := range tt.forbidStrings {
-				if strings.Contains(content, fs) {
-					t.Errorf("template %s contains forbidden string %q", tt.filename, fs)
-				}
-			}
-
-			// The amended Planning Fan-Out Template Assets requirement makes
-			// "declares no dispatch target" the default for a reusable
-			// template, and this is the assertion that defends it. A template
-			// that bakes legacy_main: true silently targets main even when the
-			// change runs against a named feature parent -- the exact coupling
-			// the amendment removed. Without this check, reintroducing that
-			// field would pass every other assertion in this table.
-			if p.LegacyMain {
-				t.Errorf("template %s declares legacy_main: true; a reusable template must declare no dispatch target", tt.filename)
-			}
-			if p.Feature != "" || p.ParentRef != "" || p.BaseSHA != "" || p.ExpectedParentSHA != "" {
-				t.Errorf("template %s declares feature-target fields (feature=%q parent_ref=%q base_sha=%q expected_parent_sha=%q); a reusable template must declare no dispatch target",
-					tt.filename, p.Feature, p.ParentRef, p.BaseSHA, p.ExpectedParentSHA)
-			}
-
-			if strings.Contains(tt.filename, "lens") {
-				lensPackets = append(lensPackets, p)
-			}
-		})
-	}
-
-	if len(lensPackets) == 3 {
-		if err := packet.DisjointAllowedPaths(lensPackets); err != nil {
-			t.Errorf("DisjointAllowedPaths(spec lenses) error = %v", err)
-		}
-	}
-}
-
-func TestTasksPacketTemplatesContract(t *testing.T) {
-	assetsDir := filepath.Join("..", "..", "plugin", "claude-code", "skills", "lucind-ai", "assets")
-	templates := []struct {
-		filename      string
-		wantID        string
-		wantExecutor  string
-		wantPaths     []string
-		wantStrings   []string
-		forbidStrings []string
-	}{
-		{
-			filename:     "tasks-lens-a-packet-template.md",
-			wantID:       "tasks-<change-id>-lens-a",
-			wantExecutor: "agy",
-			wantPaths:    []string{"openspec/changes/<change-id>/tasks-lens-a.md"},
-			wantStrings: []string{
-				"decomposition and ordering",
-				"<sdd-tasks>",
-				"Tasks Lens A — Decomposition & Ordering",
-				"Lens B owns",
-				"Lens C owns",
-				"1000 words",
-			},
-		},
-		{
-			filename:     "tasks-lens-b-packet-template.md",
-			wantID:       "tasks-<change-id>-lens-b",
-			wantExecutor: "agy",
-			wantPaths:    []string{"openspec/changes/<change-id>/tasks-lens-b.md"},
-			wantStrings: []string{
-				"partition and dispatch-shape",
-				"<sdd-tasks>",
-				"Tasks Lens B — Partition & Dispatch Shape",
-				"Lens A owns",
-				"Lens C owns",
-				"1000 words",
-				// The two repository-specific traps this lens exists to catch.
-				// Without both citations the lane has no reason to hand-check a
-				// partition, and an unviable wave plan reaches apply, where
-				// Integrate reverts it.
-				"internal/run/integrate.go:50-59",
-				"internal/packet/disjoint.go",
-			},
-		},
-		{
-			filename:     "tasks-lens-c-packet-template.md",
-			wantID:       "tasks-<change-id>-lens-c",
-			wantExecutor: "agy",
-			wantPaths:    []string{"openspec/changes/<change-id>/tasks-lens-c.md"},
-			wantStrings: []string{
-				"proof and review-burden",
-				"<sdd-tasks>",
-				"Tasks Lens C — Proof & Review Burden",
-				"Lens A owns",
-				"Lens B owns",
-				"1000 words",
-				"## Review Workload Forecast",
-			},
-		},
-		{
-			filename:     "tasks-synthesis-packet-template.md",
-			wantID:       "tasks-<change-id>-synthesis",
-			wantExecutor: "cursor-agent",
-			wantPaths: []string{
-				"openspec/changes/<change-id>/tasks.md",
-				"openspec/changes/<change-id>/tasks-synthesis-notes.md",
-			},
-			wantStrings: []string{
-				"tasks-lens-a.md",
-				"tasks-lens-b.md",
-				"tasks-lens-c.md",
-				"tasks-synthesis-notes.md",
-				"## Unresolved Contradictions",
-				"## Coverage Gaps",
-				"## Dropped Citations",
-				"## Decomposition Divergence",
-				"1800 words",
-				// The synthesizer must re-derive wave viability instead of
-				// trusting lens B's column; these are the citations that make
-				// that check performable rather than rhetorical.
-				"internal/run/integrate.go:50-59",
-				"internal/packet/disjoint.go",
-			},
-			forbidStrings: []string{
-				"## Architecture Divergence",
-			},
-		},
-	}
-
-	var lensPackets []packet.Packet
-	for _, tt := range templates {
-		t.Run(tt.filename, func(t *testing.T) {
-			path := filepath.Join(assetsDir, tt.filename)
-			data, err := os.ReadFile(path)
-			if err != nil {
-				t.Fatalf("ReadFile(%s) error = %v", path, err)
-			}
-			content := string(data)
-
-			p, err := packet.Parse(strings.NewReader(content))
-			if err != nil {
-				t.Fatalf("packet.Parse(%s) error = %v", tt.filename, err)
-			}
-
-			if p.ID != tt.wantID {
-				t.Errorf("ID = %q, want %q", p.ID, tt.wantID)
-			}
-			if p.Executor != tt.wantExecutor {
-				t.Errorf("Executor = %q, want %q", p.Executor, tt.wantExecutor)
-			}
-			if p.RoutedBy == "" {
-				t.Errorf("RoutedBy is empty")
-			}
-			if !slices.Equal(p.AllowedPaths, tt.wantPaths) {
-				t.Errorf("AllowedPaths = %v, want %v", p.AllowedPaths, tt.wantPaths)
-			}
-			for _, ws := range tt.wantStrings {
-				if !strings.Contains(content, ws) {
-					t.Errorf("template %s missing expected string %q", tt.filename, ws)
-				}
-			}
-			for _, fs := range tt.forbidStrings {
-				if strings.Contains(content, fs) {
-					t.Errorf("template %s contains forbidden string %q", tt.filename, fs)
-				}
-			}
-
-			// The amended Planning Fan-Out Template Assets requirement makes
-			// "declares no dispatch target" the default for a reusable
-			// template, and this is the assertion that defends it. A template
-			// that bakes legacy_main: true silently targets main even when the
-			// change runs against a named feature parent -- the exact coupling
-			// the amendment removed. Without this check, reintroducing that
-			// field would pass every other assertion in this table.
-			if p.LegacyMain {
-				t.Errorf("template %s declares legacy_main: true; a reusable template must declare no dispatch target", tt.filename)
-			}
-			if p.Feature != "" || p.ParentRef != "" || p.BaseSHA != "" || p.ExpectedParentSHA != "" {
-				t.Errorf("template %s declares feature-target fields (feature=%q parent_ref=%q base_sha=%q expected_parent_sha=%q); a reusable template must declare no dispatch target",
-					tt.filename, p.Feature, p.ParentRef, p.BaseSHA, p.ExpectedParentSHA)
-			}
-
-			if strings.Contains(tt.filename, "lens") {
-				lensPackets = append(lensPackets, p)
-			}
-		})
-	}
-
-	if len(lensPackets) == 3 {
-		if err := packet.DisjointAllowedPaths(lensPackets); err != nil {
-			t.Errorf("DisjointAllowedPaths(tasks lenses) error = %v", err)
-		}
-	}
-}
-
-// Archive is deliberately not a fan-out: one agy lane, no lens split, no
-// synthesizer, and no word budget. This contract pins the properties that make
-// it safe to run mechanically -- the shell-only copy rule with its diff -r
-// readback, the two gates that can refuse to close the cycle, and allowed
-// paths that name this change's folder rather than all of openspec/changes/.
-func TestArchivePacketTemplateContract(t *testing.T) {
-	path := filepath.Join("..", "..", "plugin", "claude-code", "skills", "lucind-ai", "assets", "archive-packet-template.md")
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("ReadFile(%s) error = %v", path, err)
-	}
-	content := string(data)
-
-	p, err := packet.Parse(strings.NewReader(content))
-	if err != nil {
-		t.Fatalf("packet.Parse() error = %v", err)
-	}
-
-	if p.ID != "archive-<change-id>" {
-		t.Errorf("ID = %q, want %q", p.ID, "archive-<change-id>")
-	}
-	if p.Executor != "agy" {
-		t.Errorf("Executor = %q, want %q", p.Executor, "agy")
-	}
-	if p.RoutedBy == "" {
-		t.Errorf("RoutedBy is empty")
-	}
-
-	wantPaths := []string{
-		"openspec/specs/",
-		"openspec/changes/<change-id>/",
-		"openspec/changes/archive/",
-	}
-	if !slices.Equal(p.AllowedPaths, wantPaths) {
-		t.Errorf("AllowedPaths = %v, want %v", p.AllowedPaths, wantPaths)
-	}
-	// Granting all of openspec/changes/ would put every other in-flight
-	// change inside this lane's scope, which matters once two changes are
-	// open at once.
-	for _, ap := range p.AllowedPaths {
-		if strings.TrimRight(ap, "/") == "openspec/changes" {
-			t.Errorf("AllowedPaths grants %q, which covers every other in-flight change", ap)
-		}
-	}
-
-	wantStrings := []string{
-		"<sdd-archive>",
-		// The copy rule and its only acceptable evidence.
-		"cp -R",
-		"git mv",
-		"diff -r",
-		"MUST NEVER pass through the model's Read/Write path",
-		// The session dispatch record this template exists to preserve --
-		// gitignored, so nothing else in the cycle saves it.
-		".lucind/packets/",
-		".lucind/results/",
-		".gitignore:2",
-		// The two gates that can refuse to close the cycle.
-		"Task completion",
-		"CRITICAL",
-		// MODIFIED semantics: archive writes what the capability becomes.
-		"replace the entire live requirement block",
-		"archive-report.md",
-	}
-	for _, ws := range wantStrings {
-		if !strings.Contains(content, ws) {
-			t.Errorf("template missing expected string %q", ws)
-		}
-	}
-
-	// Archive is single-lane by design. Lens or synthesis vocabulary here
-	// would mean the fan-out convention leaked into a phase that must not
-	// compress anything.
-	for _, fs := range []string{"lens-a", "Lens A owns", "synthesis notes", "1800 words", "1000 words"} {
-		if strings.Contains(content, fs) {
-			t.Errorf("template contains fan-out string %q; archive is one mechanical lane", fs)
-		}
-	}
-
-	if p.LegacyMain {
-		t.Errorf("template declares legacy_main: true; a reusable template must declare no dispatch target")
-	}
-	if p.Feature != "" || p.ParentRef != "" || p.BaseSHA != "" || p.ExpectedParentSHA != "" {
-		t.Errorf("template declares feature-target fields; a reusable template must declare no dispatch target")
 	}
 }
 
@@ -2329,5 +1441,457 @@ func TestUltrafixerPacketTemplateContract(t *testing.T) {
 	}
 	if !strings.Contains(content, "lucind-ai defect decline") && !strings.Contains(content, "disposition=declined") {
 		t.Errorf("template missing declined disposition instruction")
+	}
+}
+
+func TestParseNewFrontmatterFields(t *testing.T) {
+	src := "---\n" +
+		"id: test-new-fields\n" +
+		"executor: agy\n" +
+		"routed_by: test route\n" +
+		"route: worker\n" +
+		"route_evidence: touches auth, 2+ non-trivial files\n" +
+		"named_skills_only: true\n" +
+		"verification: [\"go build ./...\", \"go test ./...\"]\n" +
+		"known_environmental_failures: [\"TestFlakyNetwork\"]\n" +
+		"---\n\n## Goal\nTest\n"
+
+	p, err := packet.Parse(strings.NewReader(src))
+	if err != nil {
+		t.Fatalf("Parse() error = %v, want nil", err)
+	}
+
+	if p.Route != "worker" {
+		t.Errorf("Route = %q, want %q", p.Route, "worker")
+	}
+	if p.RouteEvidence != "touches auth, 2+ non-trivial files" {
+		t.Errorf("RouteEvidence = %q, want %q", p.RouteEvidence, "touches auth, 2+ non-trivial files")
+	}
+	if !p.NamedSkillsOnly {
+		t.Errorf("NamedSkillsOnly = %v, want true", p.NamedSkillsOnly)
+	}
+	wantVerification := []string{"go build ./...", "go test ./..."}
+	if !slices.Equal(p.Verification, wantVerification) {
+		t.Errorf("Verification = %v, want %v", p.Verification, wantVerification)
+	}
+	wantKnownFailures := []string{"TestFlakyNetwork"}
+	if !slices.Equal(p.KnownEnvironmentalFailures, wantKnownFailures) {
+		t.Errorf("KnownEnvironmentalFailures = %v, want %v", p.KnownEnvironmentalFailures, wantKnownFailures)
+	}
+}
+
+func TestParseNewFrontmatterValidation(t *testing.T) {
+	validRoutes := []string{"", "inline", "worker", "fanout"}
+	for _, r := range validRoutes {
+		t.Run("valid route "+r, func(t *testing.T) {
+			src := "---\n" +
+				"id: test-route\n" +
+				"executor: agy\n" +
+				"routed_by: test\n" +
+				"route: " + r + "\n" +
+				"---\n\n## Goal\nTest\n"
+			p, err := packet.Parse(strings.NewReader(src))
+			if err != nil {
+				t.Fatalf("Parse() error = %v, want nil", err)
+			}
+			if p.Route != r {
+				t.Errorf("Route = %q, want %q", p.Route, r)
+			}
+		})
+	}
+
+	t.Run("invalid route rejected", func(t *testing.T) {
+		src := "---\n" +
+			"id: test-route\n" +
+			"executor: agy\n" +
+			"routed_by: test\n" +
+			"route: invalid_route\n" +
+			"---\n\n## Goal\nTest\n"
+		_, err := packet.Parse(strings.NewReader(src))
+		if !errors.Is(err, packet.ErrInvalidRoute) {
+			t.Fatalf("Parse() error = %v, want %v", err, packet.ErrInvalidRoute)
+		}
+	})
+
+	t.Run("invalid named_skills_only non-boolean rejected", func(t *testing.T) {
+		src := "---\n" +
+			"id: test-named\n" +
+			"executor: agy\n" +
+			"routed_by: test\n" +
+			"named_skills_only: yes\n" +
+			"---\n\n## Goal\nTest\n"
+		_, err := packet.Parse(strings.NewReader(src))
+		if !errors.Is(err, packet.ErrInvalidNamedSkillsOnly) {
+			t.Fatalf("Parse() error = %v, want %v", err, packet.ErrInvalidNamedSkillsOnly)
+		}
+	})
+
+	t.Run("valid named_skills_only false", func(t *testing.T) {
+		src := "---\n" +
+			"id: test-named\n" +
+			"executor: agy\n" +
+			"routed_by: test\n" +
+			"named_skills_only: false\n" +
+			"---\n\n## Goal\nTest\n"
+		p, err := packet.Parse(strings.NewReader(src))
+		if err != nil {
+			t.Fatalf("Parse() error = %v, want nil", err)
+		}
+		if p.NamedSkillsOnly {
+			t.Errorf("NamedSkillsOnly = true, want false")
+		}
+	})
+
+	t.Run("invalid verification non-array rejected", func(t *testing.T) {
+		src := "---\n" +
+			"id: test-verif\n" +
+			"executor: agy\n" +
+			"routed_by: test\n" +
+			"verification: bare-string\n" +
+			"---\n\n## Goal\nTest\n"
+		_, err := packet.Parse(strings.NewReader(src))
+		if !errors.Is(err, packet.ErrInvalidVerification) {
+			t.Fatalf("Parse() error = %v, want %v", err, packet.ErrInvalidVerification)
+		}
+	})
+
+	t.Run("invalid verification non-string array rejected", func(t *testing.T) {
+		src := "---\n" +
+			"id: test-verif\n" +
+			"executor: agy\n" +
+			"routed_by: test\n" +
+			"verification: [123]\n" +
+			"---\n\n## Goal\nTest\n"
+		_, err := packet.Parse(strings.NewReader(src))
+		if !errors.Is(err, packet.ErrInvalidVerification) {
+			t.Fatalf("Parse() error = %v, want %v", err, packet.ErrInvalidVerification)
+		}
+	})
+
+	t.Run("invalid known_environmental_failures non-array rejected", func(t *testing.T) {
+		src := "---\n" +
+			"id: test-kef\n" +
+			"executor: agy\n" +
+			"routed_by: test\n" +
+			"known_environmental_failures: bare-string\n" +
+			"---\n\n## Goal\nTest\n"
+		_, err := packet.Parse(strings.NewReader(src))
+		if !errors.Is(err, packet.ErrInvalidKnownEnvironmentalFailures) {
+			t.Fatalf("Parse() error = %v, want %v", err, packet.ErrInvalidKnownEnvironmentalFailures)
+		}
+	})
+
+	t.Run("invalid known_environmental_failures non-string array rejected", func(t *testing.T) {
+		src := "---\n" +
+			"id: test-kef\n" +
+			"executor: agy\n" +
+			"routed_by: test\n" +
+			"known_environmental_failures: [123]\n" +
+			"---\n\n## Goal\nTest\n"
+		_, err := packet.Parse(strings.NewReader(src))
+		if !errors.Is(err, packet.ErrInvalidKnownEnvironmentalFailures) {
+			t.Fatalf("Parse() error = %v, want %v", err, packet.ErrInvalidKnownEnvironmentalFailures)
+		}
+	})
+
+	t.Run("legacy packet with sdd_phase parses cleanly", func(t *testing.T) {
+		src := "---\n" +
+			"id: test-legacy\n" +
+			"executor: agy\n" +
+			"routed_by: test\n" +
+			"sdd_phase: apply\n" +
+			"---\n\n## Goal\nTest\n"
+		p, err := packet.Parse(strings.NewReader(src))
+		if err != nil {
+			t.Fatalf("Parse() error = %v, want nil", err)
+		}
+		if p.SDDPhase != "apply" {
+			t.Errorf("SDDPhase = %q, want apply", p.SDDPhase)
+		}
+		if p.Route != "" || p.RouteEvidence != "" || p.NamedSkillsOnly != false || len(p.Verification) != 0 || len(p.KnownEnvironmentalFailures) != 0 {
+			t.Errorf("unexpected non-zero fields in legacy packet: %+v", p)
+		}
+	})
+}
+
+func TestParseCommitMessage(t *testing.T) {
+	validCases := []struct {
+		name string
+		msg  string
+	}{
+		{"standard feat", "feat: implement user auth"},
+		{"with scope", "fix(auth): handle expired token"},
+		{"with scope having slash and dash", "refactor(core/run-engine): simplify lifecycle"},
+		{"breaking with exclamation", "feat!: breaking api change"},
+		{"scope and breaking exclamation", "fix(db)!: change schema primary key"},
+		{"docs", "docs: update readme"},
+		{"chore", "chore(deps): bump go version"},
+		{"style", "style: format imports"},
+		{"perf", "perf(cache): optimize lookup"},
+		{"test", "test: add unit tests"},
+		{"build", "build(ci): update build step"},
+		{"ci", "ci: fix linting pipeline"},
+		{"revert", "revert: rollback commit 12345"},
+		{"max 100 characters", "feat: " + strings.Repeat("a", 94)}, // 6 + 94 = 100
+	}
+
+	for _, tc := range validCases {
+		t.Run("valid: "+tc.name, func(t *testing.T) {
+			src := "---\n" +
+				"id: test-lane\n" +
+				"executor: agy\n" +
+				"routed_by: test\n" +
+				"verification: [\"go test ./...\"]\n" +
+				"commit_message: " + tc.msg + "\n" +
+				"---\n\n## Goal\nTest\n"
+			p, err := packet.Parse(strings.NewReader(src))
+			if err != nil {
+				t.Fatalf("Parse() error = %v, want nil", err)
+			}
+			if p.CommitMessage != tc.msg {
+				t.Errorf("CommitMessage = %q, want %q", p.CommitMessage, tc.msg)
+			}
+		})
+	}
+
+	invalidCases := []struct {
+		name    string
+		msg     string
+		wantErr error
+	}{
+		{"invalid header Update stuff", "Update stuff", packet.ErrInvalidCommitMessage},
+		{"missing colon", "feat implement login", packet.ErrInvalidCommitMessage},
+		{"missing description", "feat:", packet.ErrInvalidCommitMessage},
+		{"empty description after space", "feat: ", packet.ErrInvalidCommitMessage},
+		{"unknown type", "unknown: implement login", packet.ErrInvalidCommitMessage},
+		{"101 characters", "feat: " + strings.Repeat("a", 95), packet.ErrInvalidCommitMessage}, // 6 + 95 = 101
+		{"co-authored-by case insensitive", "feat: add login Co-Authored-By: AI", packet.ErrInvalidCommitMessage},
+		{"co-authored-by lower", "feat: add login co-authored-by: helper", packet.ErrInvalidCommitMessage},
+		{"generated with case insensitive", "feat: add login (generated with LLM)", packet.ErrInvalidCommitMessage},
+		{"generated with capital", "feat: add login Generated With Claude", packet.ErrInvalidCommitMessage},
+	}
+
+	for _, tc := range invalidCases {
+		t.Run("invalid: "+tc.name, func(t *testing.T) {
+			src := "---\n" +
+				"id: test-lane\n" +
+				"executor: agy\n" +
+				"routed_by: test\n" +
+				"verification: [\"go test ./...\"]\n" +
+				"commit_message: " + tc.msg + "\n" +
+				"---\n\n## Goal\nTest\n"
+			_, err := packet.Parse(strings.NewReader(src))
+			if !errors.Is(err, tc.wantErr) {
+				t.Fatalf("Parse() error = %v, want %v", err, tc.wantErr)
+			}
+		})
+	}
+
+	t.Run("commit_message without verification rejected", func(t *testing.T) {
+		src := "---\n" +
+			"id: test-lane\n" +
+			"executor: agy\n" +
+			"routed_by: test\n" +
+			"commit_message: feat: implement user auth\n" +
+			"---\n\n## Goal\nTest\n"
+		_, err := packet.Parse(strings.NewReader(src))
+		if !errors.Is(err, packet.ErrCommitMessageNeedsVerification) {
+			t.Fatalf("Parse() error = %v, want %v", err, packet.ErrCommitMessageNeedsVerification)
+		}
+	})
+
+	t.Run("commit_message with empty verification array rejected", func(t *testing.T) {
+		src := "---\n" +
+			"id: test-lane\n" +
+			"executor: agy\n" +
+			"routed_by: test\n" +
+			"verification: []\n" +
+			"commit_message: feat: implement user auth\n" +
+			"---\n\n## Goal\nTest\n"
+		_, err := packet.Parse(strings.NewReader(src))
+		if !errors.Is(err, packet.ErrCommitMessageNeedsVerification) {
+			t.Fatalf("Parse() error = %v, want %v", err, packet.ErrCommitMessageNeedsVerification)
+		}
+	})
+
+	t.Run("ValidateCommitMessage with newline or carriage return", func(t *testing.T) {
+		if err := packet.ValidateCommitMessage("feat: line1\nline2"); !errors.Is(err, packet.ErrInvalidCommitMessage) {
+			t.Fatalf("expected ErrInvalidCommitMessage, got %v", err)
+		}
+		if err := packet.ValidateCommitMessage("feat: line1\rline2"); !errors.Is(err, packet.ErrInvalidCommitMessage) {
+			t.Fatalf("expected ErrInvalidCommitMessage, got %v", err)
+		}
+	})
+}
+
+func TestParseMaxIterations(t *testing.T) {
+	for _, n := range []int{1, 2, 3, 4} {
+		t.Run(fmt.Sprintf("valid: %d", n), func(t *testing.T) {
+			src := fmt.Sprintf("---\nid: test-lane\nexecutor: agy\nrouted_by: test\nmax_iterations: %d\nverification: [\"go test ./...\"]\ncommit_message: feat: x\n---\n\n## Goal\nTest\n", n)
+			p, err := packet.Parse(strings.NewReader(src))
+			if err != nil {
+				t.Fatalf("Parse() error = %v, want nil", err)
+			}
+			if p.MaxIterations != n {
+				t.Errorf("MaxIterations = %d, want %d", p.MaxIterations, n)
+			}
+		})
+	}
+
+	t.Run("absent max_iterations defaults to 0", func(t *testing.T) {
+		src := "---\nid: test-lane\nexecutor: agy\nrouted_by: test\n---\n\n## Goal\nTest\n"
+		p, err := packet.Parse(strings.NewReader(src))
+		if err != nil {
+			t.Fatalf("Parse() error = %v, want nil", err)
+		}
+		if p.MaxIterations != 0 {
+			t.Errorf("MaxIterations = %d, want 0", p.MaxIterations)
+		}
+	})
+
+	invalid := []string{"0", "-1", "5", "abc", "1.5", ""}
+	for _, val := range invalid {
+		t.Run("invalid: "+val, func(t *testing.T) {
+			src := fmt.Sprintf("---\nid: test-lane\nexecutor: agy\nrouted_by: test\nmax_iterations: %s\nverification: [\"go test ./...\"]\ncommit_message: feat: x\n---\n\n## Goal\nTest\n", val)
+			_, err := packet.Parse(strings.NewReader(src))
+			if !errors.Is(err, packet.ErrInvalidMaxIterations) {
+				t.Fatalf("Parse() error = %v, want %v", err, packet.ErrInvalidMaxIterations)
+			}
+		})
+	}
+}
+
+func TestParseEscalation(t *testing.T) {
+	t.Run("valid single rung", func(t *testing.T) {
+		src := "---\nid: test-lane\nexecutor: agy\nrouted_by: test\nverification: [\"go test ./...\"]\ncommit_message: feat: x\nescalation: [{\"executor\":\"herdr-agy\",\"model\":\"gemini-3.8-flash-high\"}]\n---\n\n## Goal\nTest\n"
+		p, err := packet.Parse(strings.NewReader(src))
+		if err != nil {
+			t.Fatalf("Parse() error = %v, want nil", err)
+		}
+		if len(p.Escalation) != 1 {
+			t.Fatalf("len(Escalation) = %d, want 1", len(p.Escalation))
+		}
+		if p.Escalation[0].Executor != "herdr-agy" || p.Escalation[0].Model != "gemini-3.8-flash-high" {
+			t.Errorf("Escalation[0] = %+v, want {herdr-agy, gemini-3.8-flash-high}", p.Escalation[0])
+		}
+	})
+
+	t.Run("valid 3 rungs with empty models", func(t *testing.T) {
+		src := "---\nid: test-lane\nexecutor: agy\nrouted_by: test\nverification: [\"go test ./...\"]\ncommit_message: feat: x\nescalation: [{\"executor\":\"herdr-agy\"},{\"executor\":\"cursor-agent\",\"model\":\"claude-3.7-sonnet\"},{\"executor\":\"opencode\"}]\n---\n\n## Goal\nTest\n"
+		p, err := packet.Parse(strings.NewReader(src))
+		if err != nil {
+			t.Fatalf("Parse() error = %v, want nil", err)
+		}
+		if len(p.Escalation) != 3 {
+			t.Fatalf("len(Escalation) = %d, want 3", len(p.Escalation))
+		}
+		if p.Escalation[0].Executor != "herdr-agy" || p.Escalation[0].Model != "" {
+			t.Errorf("Escalation[0] = %+v, want {herdr-agy, empty}", p.Escalation[0])
+		}
+		if p.Escalation[2].Executor != "opencode" || p.Escalation[2].Model != "" {
+			t.Errorf("Escalation[2] = %+v, want {opencode, empty}", p.Escalation[2])
+		}
+	})
+
+	invalid := []struct {
+		name string
+		val  string
+	}{
+		{"empty string", ""},
+		{"not an array", "{\"executor\":\"herdr-agy\"}"},
+		{"array of strings", "[\"herdr-agy\"]"},
+		{"empty executor", "[{\"executor\":\"\"}]"},
+		{"missing executor", "[{\"model\":\"gemini-3.8-flash-high\"}]"},
+		{"unknown key", "[{\"executor\":\"herdr-agy\",\"unknown_field\":\"bogus\"}]"},
+		{"more than 3 rungs", "[{\"executor\":\"a\"},{\"executor\":\"b\"},{\"executor\":\"c\"},{\"executor\":\"d\"}]"},
+		{"trailing garbage", "[{\"executor\":\"herdr-agy\"}] trailing"},
+	}
+	for _, tc := range invalid {
+		t.Run("invalid: "+tc.name, func(t *testing.T) {
+			src := fmt.Sprintf("---\nid: test-lane\nexecutor: agy\nrouted_by: test\nverification: [\"go test ./...\"]\ncommit_message: feat: x\nescalation: %s\n---\n\n## Goal\nTest\n", tc.val)
+			_, err := packet.Parse(strings.NewReader(src))
+			if !errors.Is(err, packet.ErrInvalidEscalation) {
+				t.Fatalf("Parse() error = %v, want %v", err, packet.ErrInvalidEscalation)
+			}
+		})
+	}
+}
+
+func TestLoopNeedsVerification(t *testing.T) {
+	t.Run("max_iterations > 1 without verification rejected", func(t *testing.T) {
+		src := "---\nid: test-lane\nexecutor: agy\nrouted_by: test\nmax_iterations: 2\n---\n\n## Goal\nTest\n"
+		_, err := packet.Parse(strings.NewReader(src))
+		if !errors.Is(err, packet.ErrLoopNeedsVerification) {
+			t.Fatalf("Parse() error = %v, want %v", err, packet.ErrLoopNeedsVerification)
+		}
+	})
+
+	t.Run("max_iterations > 1 with empty verification array rejected", func(t *testing.T) {
+		src := "---\nid: test-lane\nexecutor: agy\nrouted_by: test\nmax_iterations: 2\nverification: []\n---\n\n## Goal\nTest\n"
+		_, err := packet.Parse(strings.NewReader(src))
+		if !errors.Is(err, packet.ErrLoopNeedsVerification) {
+			t.Fatalf("Parse() error = %v, want %v", err, packet.ErrLoopNeedsVerification)
+		}
+	})
+
+	t.Run("escalation without verification rejected", func(t *testing.T) {
+		src := "---\nid: test-lane\nexecutor: agy\nrouted_by: test\nescalation: [{\"executor\":\"herdr-agy\"}]\n---\n\n## Goal\nTest\n"
+		_, err := packet.Parse(strings.NewReader(src))
+		if !errors.Is(err, packet.ErrLoopNeedsVerification) {
+			t.Fatalf("Parse() error = %v, want %v", err, packet.ErrLoopNeedsVerification)
+		}
+	})
+
+	t.Run("max_iterations 1 without verification allowed", func(t *testing.T) {
+		src := "---\nid: test-lane\nexecutor: agy\nrouted_by: test\nmax_iterations: 1\n---\n\n## Goal\nTest\n"
+		p, err := packet.Parse(strings.NewReader(src))
+		if err != nil {
+			t.Fatalf("Parse() error = %v, want nil", err)
+		}
+		if p.MaxIterations != 1 {
+			t.Errorf("MaxIterations = %d, want 1", p.MaxIterations)
+		}
+	})
+}
+
+func TestParseLoopRequiresCommitMessage(t *testing.T) {
+	base := "---\nid: lane-a\nexecutor: agy\nrouted_by: manual\nmax_iterations: 2\nverification: [\"go test ./...\"]\n---\nbody\n"
+	if _, err := packet.Parse(strings.NewReader(base)); !errors.Is(err, packet.ErrLoopNeedsCommitMessage) {
+		t.Fatalf("Parse() error = %v, want %v", err, packet.ErrLoopNeedsCommitMessage)
+	}
+	withCommit := strings.Replace(base, "---\nbody", "commit_message: fix: x\n---\nbody", 1)
+	if _, err := packet.Parse(strings.NewReader(withCommit)); err != nil {
+		t.Fatalf("Parse() with commit_message error = %v", err)
+	}
+}
+
+func TestParseDeclaredRouterSignals(t *testing.T) {
+	parse := func(extra string) (packet.Packet, error) {
+		return packet.Parse(strings.NewReader("---\nid: sig\nexecutor: agy\nrouted_by: test\n" + extra + "---\n\n## Goal\nx\n"))
+	}
+	p, err := parse("understood: false\nopen_design: true\nestimated_lookups: 7\n")
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+	if p.Understood == nil || *p.Understood || !p.OpenDesign || p.EstimatedLookups != 7 {
+		t.Errorf("got understood=%v open_design=%v lookups=%d", p.Understood, p.OpenDesign, p.EstimatedLookups)
+	}
+	p, err = parse("")
+	if err != nil || p.Understood != nil || p.OpenDesign || p.EstimatedLookups != 0 {
+		t.Errorf("defaults wrong: %+v err=%v", p, err)
+	}
+	for _, tc := range []struct {
+		extra string
+		want  error
+	}{
+		{"understood: maybe\n", packet.ErrInvalidUnderstood},
+		{"open_design: 1\n", packet.ErrInvalidOpenDesign},
+		{"estimated_lookups: -1\n", packet.ErrInvalidEstimatedLookups},
+		{"estimated_lookups: lots\n", packet.ErrInvalidEstimatedLookups},
+		{"estimated_lookups: 1001\n", packet.ErrInvalidEstimatedLookups},
+	} {
+		if _, err := parse(tc.extra); !errors.Is(err, tc.want) {
+			t.Errorf("Parse(%q) error = %v, want %v", tc.extra, err, tc.want)
+		}
 	}
 }

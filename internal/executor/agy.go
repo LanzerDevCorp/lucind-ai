@@ -92,7 +92,15 @@ func (a Agy) DefaultModel() string {
 // real agy CLI -- see internal/executor.Executor.KnownModels's doc comment
 // for why this is not free text.
 func (a Agy) KnownModels() []string {
-	return []string{"gemini-3.7-flash-high"}
+	// The set of the herdr agent factory design (section 3.9): writers on
+	// flash-high, explorers on flash-medium, hard work on pro or opus-thinking.
+	return []string{
+		"gemini-3.7-flash-high",
+		"gemini-3.8-flash-high",
+		"gemini-3.8-flash-medium",
+		"gemini-3.1-pro-high",
+		"claude-opus-4-6-thinking",
+	}
 }
 
 // Run execs agy with req.Prompt, in req.WorktreePath, bounded by ctx.

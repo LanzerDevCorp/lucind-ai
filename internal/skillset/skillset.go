@@ -75,11 +75,19 @@ func Derive(sddPhase, laneRole string, stackSkills, adhocSkills []string) ([]str
 			derived = append(derived, "sdd-"+sddPhase)
 		}
 	case "apply":
-		derived = append(derived, "lucind-apply", "sdd-apply")
+		derived = append(derived, "lucind-apply")
+		if sddPhase != "" {
+			derived = append(derived, "sdd-apply")
+		}
 	case "verify":
-		derived = append(derived, "lucind-verify", "sdd-verify")
+		derived = append(derived, "lucind-verify")
+		if sddPhase != "" {
+			derived = append(derived, "sdd-verify")
+		}
 	case "archive":
-		derived = append(derived, "sdd-archive")
+		if sddPhase != "" {
+			derived = append(derived, "sdd-archive")
+		}
 	case "ultrafixer", "human":
 		// No child or phase skill derived.
 	case "":
@@ -112,6 +120,32 @@ func Derive(sddPhase, laneRole string, stackSkills, adhocSkills []string) ([]str
 	}
 
 	add(derived)
+	add(stackSkills)
+	add(adhocSkills)
+
+	sort.Strings(result)
+	return result, nil
+}
+
+// DeriveNamed deterministically derives required skills for lanes with named_skills_only set.
+// It returns lucind-executor plus the explicitly named stack and ad-hoc skills,
+// de-duplicated and sorted lexicographically, with no lane-role skill and no sdd-* skill.
+func DeriveNamed(stackSkills, adhocSkills []string) ([]string, error) {
+	seen := make(map[string]bool)
+	var result []string
+
+	add := func(skills []string) {
+		for _, s := range skills {
+			s = strings.TrimSpace(s)
+			if s == "" || seen[s] {
+				continue
+			}
+			seen[s] = true
+			result = append(result, s)
+		}
+	}
+
+	add([]string{"lucind-executor"})
 	add(stackSkills)
 	add(adhocSkills)
 

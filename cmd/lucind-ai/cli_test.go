@@ -9,6 +9,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -25,10 +27,10 @@ import (
 	"github.com/LanzerDevCorp/lucind-ai/internal/overlap"
 	"github.com/LanzerDevCorp/lucind-ai/internal/packet"
 	"github.com/LanzerDevCorp/lucind-ai/internal/packetauthor"
-	"github.com/LanzerDevCorp/lucind-ai/internal/phasespec"
 	"github.com/LanzerDevCorp/lucind-ai/internal/reconcile"
 	"github.com/LanzerDevCorp/lucind-ai/internal/result"
 	lucindrun "github.com/LanzerDevCorp/lucind-ai/internal/run"
+	"github.com/LanzerDevCorp/lucind-ai/internal/usagelog"
 	"github.com/LanzerDevCorp/lucind-ai/internal/worktree"
 )
 
@@ -246,6 +248,65 @@ func TestRunKnownModelForExecutorPasses(t *testing.T) {
 	}
 }
 
+func TestRunEscalationUnsupportedExecutorRejected(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "packet.md")
+	content := "---\n" +
+		"id: lane-1\n" +
+		"executor: agy\n" +
+		"routed_by: test\n" +
+		"verification: [\"go test ./...\"]\n" +
+		"commit_message: feat: x\n" +
+		"escalation: [{\"executor\":\"bogus-executor\"}]\n" +
+		"---\n" +
+		"Do the thing.\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write packet fixture: %v", err)
+	}
+
+	code := run(context.Background(), []string{"run", "--packet", path}, &stdout, &stderr)
+
+	if code != 1 {
+		t.Fatalf("run with unsupported escalation executor exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "bogus-executor") {
+		t.Fatalf("stderr = %q, want it to name the unsupported executor %q", stderr.String(), "bogus-executor")
+	}
+}
+
+func TestRunEscalationUnknownModelRejected(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "packet.md")
+	content := "---\n" +
+		"id: lane-1\n" +
+		"executor: agy\n" +
+		"routed_by: test\n" +
+		"verification: [\"go test ./...\"]\n" +
+		"commit_message: feat: x\n" +
+		"escalation: [{\"executor\":\"cursor-agent\",\"model\":\"gemini-3.7-flash-high\"}]\n" +
+		"---\n" +
+		"Do the thing.\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write packet fixture: %v", err)
+	}
+
+	code := run(context.Background(), []string{"run", "--packet", path}, &stdout, &stderr)
+
+	if code != 1 {
+		t.Fatalf("run with unknown escalation model exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "gemini-3.7-flash-high") {
+		t.Fatalf("stderr = %q, want it to name the unknown model", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "cursor-agent") {
+		t.Fatalf("stderr = %q, want it to name the executor", stderr.String())
+	}
+}
+
 // TestRunOmittedModelSkipsModelCheck proves a packet that omits model
 // entirely is never subject to the known-model check, for any executor.
 func TestRunOmittedModelSkipsModelCheck(t *testing.T) {
@@ -369,20 +430,44 @@ func TestRunAcceptsClaudeExecutor(t *testing.T) {
 	}
 }
 
+// TestRunAcceptsHerdrAgyExecutor proves that a packet specifying
+// "executor: herdr-agy" passes the pre-dispatch unsupported executor check
+// and that its default model equals executor.Agy's.
+func TestRunAcceptsHerdrAgyExecutor(t *testing.T) {
+	factory, ok := supportedExecutors["herdr-agy"]
+	if !ok {
+		t.Fatalf("supportedExecutors[%q] not found, want herdr-agy to be accepted as a supported executor", "herdr-agy")
+	}
+	if factory == nil || factory() == nil {
+		t.Fatalf("supportedExecutors[%q] factory returned nil", "herdr-agy")
+	}
+	if got, want := factory().DefaultModel(), (executor.Agy{}).DefaultModel(); got != want {
+		t.Errorf("DefaultModel() = %q, want %q (same as agy)", got, want)
+	}
+}
+
 // TestEveryExecutorOwnsExactlyOneProviderFamily pins the invariant that made
-// adding a fourth executor safe: each registered executor may run on its own
+// adding an executor safe: each registered executor may run on its own
 // models only, so a model string copied from a sibling packet can never
 // silently dispatch -- and bill -- against a different provider. Adding an
-// executor whose KnownModels overlaps another's would break this.
+// executor whose KnownModels overlaps another provider family would break this.
+// Note: herdr-agy runs the same agy CLI and shares agy's provider family and models.
 func TestEveryExecutorOwnsExactlyOneProviderFamily(t *testing.T) {
+	familyOf := func(execName string) string {
+		if execName == "herdr-agy" {
+			return "agy"
+		}
+		return execName
+	}
 	owner := map[string]string{}
 	for name, factory := range supportedExecutors {
 		for _, model := range factory().KnownModels() {
-			if prior, clash := owner[model]; clash {
-				t.Errorf("model %q is claimed by both %q and %q; every model must belong to exactly one executor", model, prior, name)
+			fam := familyOf(name)
+			if prior, clash := owner[model]; clash && prior != fam {
+				t.Errorf("model %q is claimed by both %q and %q; every model must belong to exactly one provider family", model, prior, fam)
 				continue
 			}
-			owner[model] = name
+			owner[model] = fam
 		}
 	}
 }
@@ -5625,366 +5710,19 @@ func TestDefectResolveCLINotFound(t *testing.T) {
 	}
 }
 
-type mockCLIStatusQuerier struct {
-	output []byte
-	err    error
-}
-
-func (m *mockCLIStatusQuerier) QueryStatus(_ context.Context, _ string) ([]byte, error) {
-	if m.err != nil {
-		return nil, m.err
-	}
-	return m.output, nil
-}
-
-func TestPhaseSubcommandRequiresPhaseName(t *testing.T) {
-	ctx := context.Background()
-	var stdout, stderr bytes.Buffer
-	code := run(ctx, []string{"phase"}, &stdout, &stderr)
-	if code == 0 {
-		t.Fatalf("run(phase) = %d, want non-zero", code)
-	}
-	if !strings.Contains(stderr.String(), "phase name is required") {
-		t.Fatalf("expected stderr to say 'phase name is required', got %q", stderr.String())
-	}
-}
-
-func TestPhaseSubcommandGatesPrematureSynthesis(t *testing.T) {
-	primaryRoot := initRepo(t)
-	cwd, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chdir(primaryRoot); err != nil {
-		t.Fatal(err)
-	}
-	defer os.Chdir(cwd)
-
-	change := "test-change"
-	statusJSON := []byte(`{
-  "schemaName": "gentle-ai.sdd-status",
-  "schemaVersion": 1,
-  "changeName": "` + change + `",
-  "artifactPaths": {},
-  "artifacts": {
-    "proposal": "missing"
-  },
-  "dependencies": {
-    "proposal": "ready"
-  },
-  "nextRecommended": "propose"
-}`)
-
-	origQuerier := defaultStatusQuerier
-	defer func() { defaultStatusQuerier = origQuerier }()
-	defaultStatusQuerier = func(string) phasespec.StatusQuerier {
-		return &mockCLIStatusQuerier{output: statusJSON}
-	}
-
-	ctx := context.Background()
-	var stdout, stderr bytes.Buffer
-	// propose synthesis requires lens-a, lens-b, lens-c merged; with mock querier (no merged lenses), it must fail
-	code := run(ctx, []string{"phase", "propose", "--change", change}, &stdout, &stderr)
-	if code == 0 {
-		t.Fatalf("expected run(phase propose) to fail when lenses unmerged, got code 0; stdout=%q, stderr=%q", stdout.String(), stderr.String())
-	}
-
-	// Verify no artifact was created
-	artifactPath := filepath.Join(primaryRoot, "openspec", "changes", change, "proposal.md")
-	if _, err := os.Stat(artifactPath); err == nil {
-		t.Fatalf("expected artifact %s to NOT exist, but it was created", artifactPath)
-	}
-}
-
-func TestPhaseSubcommandFailsClosedOnMalformedStatusJSON(t *testing.T) {
-	primaryRoot := initRepo(t)
-	cwd, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chdir(primaryRoot); err != nil {
-		t.Fatal(err)
-	}
-	defer os.Chdir(cwd)
-
-	origQuerier := defaultStatusQuerier
-	defer func() { defaultStatusQuerier = origQuerier }()
-	defaultStatusQuerier = func(string) phasespec.StatusQuerier {
-		return &mockCLIStatusQuerier{output: []byte(`{ invalid json `)}
-	}
-
+func TestPhaseSubcommandUnknown(t *testing.T) {
 	ctx := context.Background()
 	var stdout, stderr bytes.Buffer
 	code := run(ctx, []string{"phase", "propose"}, &stdout, &stderr)
 	if code == 0 {
-		t.Fatalf("expected run(phase) on malformed status to fail, got 0")
+		t.Fatalf("run(phase, propose) code = %d, want non-zero", code)
 	}
-}
-
-func TestPhaseSubcommandPhaseAlreadyComplete(t *testing.T) {
-	primaryRoot := initRepo(t)
-	cwd, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
+	errStr := stderr.String()
+	if !strings.Contains(errStr, `unknown subcommand "phase"`) {
+		t.Fatalf("expected stderr to report unknown subcommand \"phase\", got %q", errStr)
 	}
-	if err := os.Chdir(primaryRoot); err != nil {
-		t.Fatal(err)
-	}
-	defer os.Chdir(cwd)
-
-	change := "test-change"
-	statusJSON := []byte(`{
-  "schemaName": "gentle-ai.sdd-status",
-  "schemaVersion": 1,
-  "changeName": "` + change + `",
-  "artifactPaths": {},
-  "artifacts": {
-    "proposal": "done"
-  },
-  "dependencies": {
-    "proposal": "all_done"
-  },
-  "nextRecommended": "spec"
-}`)
-
-	origQuerier := defaultStatusQuerier
-	defer func() { defaultStatusQuerier = origQuerier }()
-	defaultStatusQuerier = func(string) phasespec.StatusQuerier {
-		return &mockCLIStatusQuerier{output: statusJSON}
-	}
-
-	// Create canonical artifact on disk
-	artifactDir := filepath.Join(primaryRoot, "openspec", "changes", change)
-	if err := os.MkdirAll(artifactDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	artifactPath := filepath.Join(artifactDir, "proposal.md")
-	if err := os.WriteFile(artifactPath, []byte("# Proposal\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	ctx := context.Background()
-	var stdout, stderr bytes.Buffer
-	code := run(ctx, []string{"phase", "propose", "--change", change}, &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("expected run(phase propose) on complete phase to exit 0, got %d; stderr=%s", code, stderr.String())
-	}
-	if !strings.Contains(stdout.String(), "already complete") {
-		t.Fatalf("expected stdout to report already complete, got %q", stdout.String())
-	}
-}
-
-func TestPhaseSubcommandPhaseNotCompleteIfFileMissingOnDisk(t *testing.T) {
-	primaryRoot := initRepo(t)
-	cwd, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chdir(primaryRoot); err != nil {
-		t.Fatal(err)
-	}
-	defer os.Chdir(cwd)
-
-	change := "test-change"
-	// Status says proposal: done, but we do NOT create propose.md on disk, and lenses are unmerged -> must gate synthesis and fail
-	statusJSON := []byte(`{
-  "schemaName": "gentle-ai.sdd-status",
-  "schemaVersion": 1,
-  "changeName": "` + change + `",
-  "artifacts": {
-    "proposal": "done"
-  },
-  "dependencies": {
-    "proposal": "all_done"
-  },
-  "nextRecommended": "spec"
-}`)
-
-	origQuerier := defaultStatusQuerier
-	defer func() { defaultStatusQuerier = origQuerier }()
-	defaultStatusQuerier = func(string) phasespec.StatusQuerier {
-		return &mockCLIStatusQuerier{output: statusJSON}
-	}
-
-	ctx := context.Background()
-	var stdout, stderr bytes.Buffer
-	code := run(ctx, []string{"phase", "propose", "--change", change}, &stdout, &stderr)
-	// Because file is missing from disk, it treats phase as incomplete; and because lenses are unmerged, it returns 1 (cannot start synthesis)
-	if code == 0 {
-		t.Fatalf("expected run(phase propose) to fail when artifact missing from disk and lenses unmerged, got 0; stdout=%s", stdout.String())
-	}
-	if strings.Contains(stdout.String(), "already complete") {
-		t.Fatalf("expected stdout to NOT say already complete, got %q", stdout.String())
-	}
-}
-
-func TestPhaseSubcommandDispatchesSynthesisWhenLensesMerged(t *testing.T) {
-	primaryRoot := initRepo(t)
-	cwd, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chdir(primaryRoot); err != nil {
-		t.Fatal(err)
-	}
-	defer os.Chdir(cwd)
-
-	change := "test-change"
-	statusJSON := []byte(`{
-  "schemaName": "gentle-ai.sdd-status",
-  "schemaVersion": 1,
-  "changeName": "` + change + `",
-  "lenses": {
-    "lens-a": {"id": "lens-a", "accepted": true, "merged": true},
-    "lens-b": {"id": "lens-b", "accepted": true, "merged": true},
-    "lens-c": {"id": "lens-c", "accepted": true, "merged": true}
-  },
-  "artifacts": {
-    "proposal": "missing"
-  },
-  "dependencies": {
-    "proposal": "ready"
-  },
-  "nextRecommended": "propose"
-}`)
-
-	origQuerier := defaultStatusQuerier
-	defer func() { defaultStatusQuerier = origQuerier }()
-	defaultStatusQuerier = func(string) phasespec.StatusQuerier {
-		return &mockCLIStatusQuerier{output: statusJSON}
-	}
-
-	overrideDispatchDeps(t, testDoneExecutor{
-		envelope: fmt.Sprintf(`{"packet_id": "propose-%s-synthesis", "status": "done", "summary": "done", "hard_stops": [], "skills_loaded": ["lucind-executor", "lucind-fan-out-lens", "sdd-propose"]}`, change),
-	})
-
-	ctx := context.Background()
-	var stdout, stderr bytes.Buffer
-	code := run(ctx, []string{"phase", "propose", "--change", change}, &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("expected run(phase propose) to exit 0, got %d; stderr=%s, stdout=%s", code, stderr.String(), stdout.String())
-	}
-	if !strings.Contains(stdout.String(), "synthesis dispatched") {
-		t.Fatalf("expected stdout to report synthesis dispatched, got %q", stdout.String())
-	}
-}
-
-func TestPhaseSubcommandSpecialistPacketHasRequiredSkills(t *testing.T) {
-	primaryRoot := initRepo(t)
-	cwd, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chdir(primaryRoot); err != nil {
-		t.Fatal(err)
-	}
-	defer os.Chdir(cwd)
-
-	change := "test-skills-change"
-	statusJSON := []byte(`{
-  "schemaName": "gentle-ai.sdd-status",
-  "schemaVersion": 1,
-  "changeName": "` + change + `",
-  "lenses": {
-    "lens-a": {"id": "lens-a", "accepted": true, "merged": true},
-    "lens-b": {"id": "lens-b", "accepted": true, "merged": true},
-    "lens-c": {"id": "lens-c", "accepted": true, "merged": true}
-  },
-  "artifacts": {
-    "proposal": "missing"
-  },
-  "dependencies": {
-    "proposal": "ready"
-  },
-  "nextRecommended": "propose"
-}`)
-
-	origQuerier := defaultStatusQuerier
-	defer func() { defaultStatusQuerier = origQuerier }()
-	defaultStatusQuerier = func(string) phasespec.StatusQuerier {
-		return &mockCLIStatusQuerier{output: statusJSON}
-	}
-
-	overrideDispatchDeps(t, testDoneExecutor{
-		envelope: fmt.Sprintf(`{"packet_id": "propose-%s-synthesis", "status": "done", "summary": "done", "hard_stops": [], "skills_loaded": ["lucind-executor", "lucind-fan-out-lens", "sdd-propose"]}`, change),
-	})
-
-	ctx := context.Background()
-	var stdout, stderr bytes.Buffer
-	code := run(ctx, []string{"phase", "propose", "--change", change}, &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("expected run(phase propose) to exit 0, got %d; stderr=%s, stdout=%s", code, stderr.String(), stdout.String())
-	}
-
-	packetPath := filepath.Join(primaryRoot, ".lucind", "packets", fmt.Sprintf("propose-%s-synthesis.md", change))
-	packetBytes, err := os.ReadFile(packetPath)
-	if err != nil {
-		t.Fatalf("failed to read generated packet at %s: %v", packetPath, err)
-	}
-	packetContent := string(packetBytes)
-
-	// 1. Verify ## Required skills heading exists
-	if !strings.Contains(packetContent, "\n## Required skills\n") {
-		t.Fatalf("expected generated packet to contain '## Required skills' section, got:\n%s", packetContent)
-	}
-
-	// 2. Verify all expected resolved skill paths are listed
-	expectedSkills := []string{
-		filepath.Join(primaryRoot, ".agents", "skills", "lucind-executor", "SKILL.md"),
-		filepath.Join(primaryRoot, ".agents", "skills", "lucind-fan-out-lens", "SKILL.md"),
-		filepath.Join(primaryRoot, ".agents", "skills", "sdd-propose", "SKILL.md"),
-	}
-	for _, expectedSkill := range expectedSkills {
-		expectedLine := "- " + expectedSkill
-		if !strings.Contains(packetContent, expectedLine) {
-			t.Errorf("expected packet to contain %q, but was missing from:\n%s", expectedLine, packetContent)
-		}
-	}
-
-	// 3. Verify ordering: ## Hard stops comes before ## Required skills, which comes before ## Return
-	hardStopsIdx := strings.Index(packetContent, "## Hard stops")
-	reqSkillsIdx := strings.Index(packetContent, "## Required skills")
-	returnIdx := strings.Index(packetContent, "## Return")
-	if hardStopsIdx == -1 || reqSkillsIdx == -1 || returnIdx == -1 {
-		t.Fatalf("missing section headings: hardStops=%d, reqSkills=%d, return=%d", hardStopsIdx, reqSkillsIdx, returnIdx)
-	}
-	if !(hardStopsIdx < reqSkillsIdx && reqSkillsIdx < returnIdx) {
-		t.Fatalf("incorrect section order: hardStops=%d, reqSkills=%d, return=%d", hardStopsIdx, reqSkillsIdx, returnIdx)
-	}
-}
-
-func TestPhaseSubcommandUnknownPhase(t *testing.T) {
-	primaryRoot := initRepo(t)
-	cwd, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chdir(primaryRoot); err != nil {
-		t.Fatal(err)
-	}
-	defer os.Chdir(cwd)
-
-	change := "test-change"
-	statusJSON := []byte(`{
-  "schemaName": "gentle-ai.sdd-status",
-  "schemaVersion": 1,
-  "changeName": "` + change + `",
-  "artifactPaths": {},
-  "artifacts": {},
-  "dependencies": {}
-}`)
-
-	origQuerier := defaultStatusQuerier
-	defer func() { defaultStatusQuerier = origQuerier }()
-	defaultStatusQuerier = func(string) phasespec.StatusQuerier {
-		return &mockCLIStatusQuerier{output: statusJSON}
-	}
-
-	ctx := context.Background()
-	var stdout, stderr bytes.Buffer
-	code := run(ctx, []string{"phase", "unrecognized-phase", "--change", change}, &stdout, &stderr)
-	if code == 0 {
-		t.Fatalf("expected run(phase unrecognized) to return non-zero, got 0")
+	if strings.Contains(errStr, "phase <name>") {
+		t.Fatalf("expected usage text to no longer mention 'phase <name>', got %q", errStr)
 	}
 }
 
@@ -6297,4 +6035,469 @@ func chdirRepo(t *testing.T, dir string) string {
 		t.Fatal(err)
 	}
 	return cwd
+}
+
+func TestGitPathExists(t *testing.T) {
+	if testing.Short() {
+		t.Skip("shells out to real git")
+	}
+	repo := initRepo(t)
+	baseSHA := currentHead(t, repo)
+
+	// In baseSHA, README.md exists, new_file.txt does not.
+	exists, err := gitPathExists(context.Background(), repo, baseSHA, "README.md")
+	if err != nil {
+		t.Fatalf("gitPathExists(README.md) error = %v", err)
+	}
+	if !exists {
+		t.Errorf("gitPathExists(README.md) = false, want true (existing file => not new)")
+	}
+
+	exists, err = gitPathExists(context.Background(), repo, baseSHA, "new_file.txt")
+	if err != nil {
+		t.Fatalf("gitPathExists(new_file.txt) error = %v", err)
+	}
+	if exists {
+		t.Errorf("gitPathExists(new_file.txt) = true, want false (missing file => new)")
+	}
+
+	// Commit new_file.txt to HEAD
+	if err := os.WriteFile(filepath.Join(repo, "new_file.txt"), []byte("new\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repo, "add", "new_file.txt")
+	runGit(t, repo, "commit", "-m", "add new_file.txt")
+	headSHA := currentHead(t, repo)
+
+	// BaseSHA honored: new_file.txt exists in HEAD, but not in baseSHA
+	exists, err = gitPathExists(context.Background(), repo, headSHA, "new_file.txt")
+	if err != nil || !exists {
+		t.Errorf("gitPathExists(headSHA, new_file.txt) = %t, %v, want true, nil", exists, err)
+	}
+	exists, err = gitPathExists(context.Background(), repo, baseSHA, "new_file.txt")
+	if err != nil || exists {
+		t.Errorf("gitPathExists(baseSHA, new_file.txt) = %t, %v, want false, nil (BaseSHA honored)", exists, err)
+	}
+
+	// Invalid object/SHA returns error
+	_, err = gitPathExists(context.Background(), repo, "deadbeef1234", "README.md")
+	if err == nil {
+		t.Errorf("gitPathExists(invalid SHA) error = nil, want error")
+	}
+}
+
+func TestValidateDispatchThresholds(t *testing.T) {
+	if testing.Short() {
+		t.Skip("shells out to real git")
+	}
+	repo := initRepo(t)
+	baseSHA := currentHead(t, repo)
+
+	t.Run("upgrades inline packet and updates route to worker", func(t *testing.T) {
+		ps := []packet.Packet{
+			{
+				Path:         "packet-upgrade.md",
+				Route:        "inline",
+				BaseSHA:      baseSHA,
+				AllowedPaths: []string{"README.md", "other.txt"},
+			},
+		}
+		var stderr bytes.Buffer
+		err := validateDispatchThresholds(context.Background(), repo, ps, &stderr)
+		if err != nil {
+			t.Fatalf("validateDispatchThresholds error = %v", err)
+		}
+		if ps[0].Route != "worker" {
+			t.Errorf("ps[0].Route = %q, want worker", ps[0].Route)
+		}
+		if !strings.Contains(stderr.String(), "lucind-ai: packet packet-upgrade.md route upgraded inline -> worker:") {
+			t.Errorf("stderr = %q, want upgrade message", stderr.String())
+		}
+	})
+
+	t.Run("accepts inline packet below threshold and prints nothing", func(t *testing.T) {
+		ps := []packet.Packet{
+			{
+				Path:         "packet-accept.md",
+				Route:        "inline",
+				BaseSHA:      baseSHA,
+				AllowedPaths: []string{"README.md"},
+			},
+		}
+		var stderr bytes.Buffer
+		err := validateDispatchThresholds(context.Background(), repo, ps, &stderr)
+		if err != nil {
+			t.Fatalf("validateDispatchThresholds error = %v", err)
+		}
+		if ps[0].Route != "inline" {
+			t.Errorf("ps[0].Route = %q, want inline", ps[0].Route)
+		}
+		if stderr.Len() != 0 {
+			t.Errorf("stderr = %q, want empty", stderr.String())
+		}
+	})
+
+	t.Run("rejects packet missing required route evidence", func(t *testing.T) {
+		ps := []packet.Packet{
+			{
+				Path:          "packet-reject.md",
+				Route:         "worker",
+				RouteEvidence: "",
+				BaseSHA:       baseSHA,
+				AllowedPaths:  []string{"README.md"},
+			},
+		}
+		var stderr bytes.Buffer
+		err := validateDispatchThresholds(context.Background(), repo, ps, &stderr)
+		if err == nil {
+			t.Fatalf("validateDispatchThresholds error = nil, want error")
+		}
+		if !strings.Contains(stderr.String(), "lucind-ai: packet packet-reject.md rejected by dispatch-threshold validator:") {
+			t.Errorf("stderr = %q, want reject message", stderr.String())
+		}
+	})
+
+	t.Run("batch with one rejected packet returns exit 1 before dispatch", func(t *testing.T) {
+		pValid := filepath.Join(repo, "p-valid.md")
+		pValidContent := "---\n" +
+			"id: lane-valid\n" +
+			"executor: agy\n" +
+			"routed_by: test\n" +
+			"route: worker\n" +
+			"route_evidence: necessary worker\n" +
+			"allowed_paths: [\"README.md\"]\n" +
+			"---\n" +
+			"Do valid work.\n"
+		if err := os.WriteFile(pValid, []byte(pValidContent), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		pInvalid := filepath.Join(repo, "p-invalid.md")
+		pInvalidContent := "---\n" +
+			"id: lane-invalid\n" +
+			"executor: agy\n" +
+			"routed_by: test\n" +
+			"route: worker\n" +
+			"allowed_paths: [\"other.txt\"]\n" +
+			"---\n" +
+			"Do invalid work.\n"
+		if err := os.WriteFile(pInvalid, []byte(pInvalidContent), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		cwd := chdirRepo(t, repo)
+		defer os.Chdir(cwd)
+
+		var stdout, stderr bytes.Buffer
+		code := run(context.Background(), []string{"run", "--packet", pValid, "--packet", pInvalid}, &stdout, &stderr)
+		if code != 1 {
+			t.Fatalf("run exit code = %d, want 1", code)
+		}
+		if !strings.Contains(stderr.String(), "rejected by dispatch-threshold validator") {
+			t.Errorf("stderr = %q, want rejection error", stderr.String())
+		}
+	})
+}
+
+func TestRunMaxParallelValidation(t *testing.T) {
+	tests := []struct {
+		name string
+		val  string
+	}{
+		{"zero", "0"},
+		{"negative", "-1"},
+		{"negative multi", "-5"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			dir := t.TempDir()
+			p := filepath.Join(dir, "packet.md")
+			content := "---\n" +
+				"id: lane-1\n" +
+				"executor: agy\n" +
+				"routed_by: test\n" +
+				"---\n" +
+				"Do the thing.\n"
+			if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+				t.Fatalf("write packet: %v", err)
+			}
+
+			code := run(context.Background(), []string{"run", "--packet", p, "--max-parallel", tt.val}, &stdout, &stderr)
+			if code != 1 {
+				t.Fatalf("run with --max-parallel %s exit code = %d, want 1", tt.val, code)
+			}
+			if !strings.Contains(stderr.String(), "--max-parallel") {
+				t.Fatalf("stderr = %q, want mention of --max-parallel", stderr.String())
+			}
+			if !strings.Contains(stderr.String(), "at least 1") {
+				t.Fatalf("stderr = %q, want clear message stating --max-parallel must be at least 1", stderr.String())
+			}
+		})
+	}
+}
+
+func TestRunMaxParallelAcceptedAndReachesDeps(t *testing.T) {
+	primaryRoot := initRepo(t)
+	overrideDispatchDeps(t, testDoneExecutor{})
+
+	var capturedDeps lucindrun.Deps
+	origExecuteBatch := executeBatch
+	defer func() { executeBatch = origExecuteBatch }()
+	executeBatch = func(ctx context.Context, deps lucindrun.Deps, ps []packet.Packet) (lucindrun.BatchReport, error) {
+		capturedDeps = deps
+		return origExecuteBatch(ctx, deps, ps)
+	}
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(primaryRoot); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(cwd)
+
+	t.Run("explicit max-parallel 2", func(t *testing.T) {
+		p1 := writeAgyPacket(t, primaryRoot, "lane-1", "agy")
+		var stdout, stderr bytes.Buffer
+		code := run(context.Background(), []string{"run", "--packet", p1, "--max-parallel", "2"}, &stdout, &stderr)
+		if code != 0 {
+			t.Fatalf("run exit code = %d, want 0; stderr = %q", code, stderr.String())
+		}
+		if capturedDeps.MaxParallelLanes != 2 {
+			t.Errorf("Deps.MaxParallelLanes = %d, want 2", capturedDeps.MaxParallelLanes)
+		}
+	})
+
+	t.Run("default max-parallel", func(t *testing.T) {
+		p2 := writeAgyPacket(t, primaryRoot, "lane-2", "agy")
+		var stdout, stderr bytes.Buffer
+		code := run(context.Background(), []string{"run", "--packet", p2}, &stdout, &stderr)
+		if code != 0 {
+			t.Fatalf("run exit code = %d, want 0; stderr = %q", code, stderr.String())
+		}
+		if capturedDeps.MaxParallelLanes != lucindrun.DefaultMaxParallelLanes {
+			t.Errorf("Deps.MaxParallelLanes = %d, want default %d", capturedDeps.MaxParallelLanes, lucindrun.DefaultMaxParallelLanes)
+		}
+	})
+}
+
+func TestValidateDispatchThresholds_JevShadow(t *testing.T) {
+	repo := initRepo(t)
+	baseSHA := currentHead(t, repo)
+
+	t.Run("both env vars: disagreement written to log and verdict unchanged", func(t *testing.T) {
+		tmpState := t.TempDir()
+		t.Setenv("XDG_STATE_HOME", tmpState)
+		t.Setenv("LUCIND_USAGE_LOG", "") // unset off
+
+		var hits int
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			hits++
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{
+				"model": "jev-latest",
+				"answers": {
+					"route": {
+						"type": "choice",
+						"choice": "worker",
+						"confidence": 0.88
+					}
+				}
+			}`))
+		}))
+		defer srv.Close()
+
+		t.Setenv("LUCIND_JEV_API_KEY", "test-api-key")
+		t.Setenv("LUCIND_JEV_SHADOW", "on")
+		t.Setenv("LUCIND_JEV_URL", srv.URL)
+
+		ps := []packet.Packet{
+			{
+				Path:         "packet-1.md",
+				Route:        "inline",
+				BaseSHA:      baseSHA,
+				AllowedPaths: []string{"README.md"},
+			},
+		}
+
+		var stderr bytes.Buffer
+		err := validateDispatchThresholds(context.Background(), repo, ps, &stderr)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		// Dispatch verdict unchanged: Route remains "inline"
+		if ps[0].Route != "inline" {
+			t.Errorf("ps[0].Route = %q; want inline", ps[0].Route)
+		}
+		if hits != 1 {
+			t.Fatalf("expected 1 hit on fake server, got %d", hits)
+		}
+
+		// Verify disagreement written to usage log
+		logPath := filepath.Join(tmpState, "lucind-ai", "usage.jsonl")
+		records, skipped, err := usagelog.ReadAll(logPath)
+		if err != nil {
+			t.Fatalf("ReadAll error: %v", err)
+		}
+		if skipped != 0 {
+			t.Errorf("skipped = %d; want 0", skipped)
+		}
+		if len(records) != 1 {
+			t.Fatalf("expected 1 record in usage log, got %d", len(records))
+		}
+		if records[0].Kind != "router_disagreement" {
+			t.Errorf("record kind = %q; want 'router_disagreement'", records[0].Kind)
+		}
+		if records[0].PrimaryRoute != "inline" {
+			t.Errorf("record primary_route = %q; want inline", records[0].PrimaryRoute)
+		}
+		if records[0].CandidateRoute != "worker" {
+			t.Errorf("record candidate_route = %q; want worker", records[0].CandidateRoute)
+		}
+		if records[0].Confidence != 0.88 {
+			t.Errorf("record confidence = %v; want 0.88", records[0].Confidence)
+		}
+		if records[0].Signals == nil || records[0].Signals.AllowedPathCount != 1 {
+			t.Errorf("record signals mismatch: %+v", records[0].Signals)
+		}
+	})
+
+	t.Run("JEV_API_KEY fallback enables shadow and agreement is logged", func(t *testing.T) {
+		tmpState := t.TempDir()
+		t.Setenv("XDG_STATE_HOME", tmpState)
+		t.Setenv("LUCIND_USAGE_LOG", "")
+
+		var gotAuth string
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			gotAuth = r.Header.Get("Authorization")
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"model":"jev-latest","answers":{"route":{"type":"choice","choice":"inline","confidence":0.9}}}`))
+		}))
+		defer srv.Close()
+
+		t.Setenv("LUCIND_JEV_API_KEY", "")
+		t.Setenv("JEV_API_KEY", "fallback-key")
+		t.Setenv("LUCIND_JEV_SHADOW", "on")
+		t.Setenv("LUCIND_JEV_URL", srv.URL)
+
+		ps := []packet.Packet{{Path: "packet-1.md", Route: "inline", BaseSHA: baseSHA, AllowedPaths: []string{"README.md"}}}
+		var stderr bytes.Buffer
+		if err := validateDispatchThresholds(context.Background(), repo, ps, &stderr); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if gotAuth != "Bearer fallback-key" {
+			t.Errorf("Authorization = %q; want the JEV_API_KEY fallback", gotAuth)
+		}
+		records, _, err := usagelog.ReadAll(filepath.Join(tmpState, "lucind-ai", "usage.jsonl"))
+		if err != nil || len(records) != 1 || records[0].Kind != "router_agreement" {
+			t.Fatalf("records = %+v, err = %v; want one router_agreement", records, err)
+		}
+		if strings.Contains(stderr.String(), "fallback-key") {
+			t.Errorf("stderr leaks the key: %s", stderr.String())
+		}
+	})
+
+	t.Run("only one env var: no request made", func(t *testing.T) {
+		tmpState := t.TempDir()
+		t.Setenv("XDG_STATE_HOME", tmpState)
+		t.Setenv("LUCIND_USAGE_LOG", "")
+
+		var hits int
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			hits++
+		}))
+		defer srv.Close()
+
+		t.Setenv("LUCIND_JEV_URL", srv.URL)
+
+		// Test case 1: only API key set
+		t.Setenv("LUCIND_JEV_API_KEY", "test-api-key")
+		t.Setenv("LUCIND_JEV_SHADOW", "")
+
+		ps := []packet.Packet{
+			{
+				Path:         "packet-1.md",
+				Route:        "inline",
+				BaseSHA:      baseSHA,
+				AllowedPaths: []string{"README.md"},
+			},
+		}
+
+		var stderr bytes.Buffer
+		err := validateDispatchThresholds(context.Background(), repo, ps, &stderr)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if hits != 0 {
+			t.Errorf("expected 0 hits with only API key, got %d", hits)
+		}
+
+		// Test case 2: only SHADOW set
+		t.Setenv("LUCIND_JEV_API_KEY", "")
+		t.Setenv("LUCIND_JEV_SHADOW", "on")
+
+		stderr.Reset()
+		err = validateDispatchThresholds(context.Background(), repo, ps, &stderr)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if hits != 0 {
+			t.Errorf("expected 0 hits with only SHADOW on, got %d", hits)
+		}
+	})
+
+	t.Run("failing fake server: dispatch still proceeds", func(t *testing.T) {
+		tmpState := t.TempDir()
+		t.Setenv("XDG_STATE_HOME", tmpState)
+		t.Setenv("LUCIND_USAGE_LOG", "")
+
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write([]byte(`server broke`))
+		}))
+		defer srv.Close()
+
+		t.Setenv("LUCIND_JEV_API_KEY", "test-api-key")
+		t.Setenv("LUCIND_JEV_SHADOW", "on")
+		t.Setenv("LUCIND_JEV_URL", srv.URL)
+
+		ps := []packet.Packet{
+			{
+				Path:         "packet-1.md",
+				Route:        "inline",
+				BaseSHA:      baseSHA,
+				AllowedPaths: []string{"README.md"},
+			},
+		}
+
+		var stderr bytes.Buffer
+		err := validateDispatchThresholds(context.Background(), repo, ps, &stderr)
+		if err != nil {
+			t.Fatalf("unexpected error when fake server fails: %v", err)
+		}
+		if ps[0].Route != "inline" {
+			t.Errorf("ps[0].Route = %q; want inline", ps[0].Route)
+		}
+
+		// Verify error event logged
+		logPath := filepath.Join(tmpState, "lucind-ai", "usage.jsonl")
+		records, _, err := usagelog.ReadAll(logPath)
+		if err != nil {
+			t.Fatalf("ReadAll error: %v", err)
+		}
+		if len(records) != 1 {
+			t.Fatalf("expected 1 record in usage log, got %d", len(records))
+		}
+		if records[0].Kind != "router_error" {
+			t.Errorf("record kind = %q; want 'router_error'", records[0].Kind)
+		}
+		if records[0].ErrorKind != "http" {
+			t.Errorf("record error_kind = %q; want 'http'", records[0].ErrorKind)
+		}
+	})
 }

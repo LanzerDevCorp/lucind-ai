@@ -113,15 +113,15 @@ drained:
 		CostUSD     float64
 		ToolCalls   int64
 	}{
-		{0, 0, 0},       // text delta
-		{23459, 0, 0},   // step usage
-		{0, 0, 1},       // Tool started: run_command
-		{0, 0, 1},       // Tool finished: run_command
-		{0, 0, 2},       // Edit started: write_to_file
-		{0, 0, 2},       // Edit finished: write_to_file
-		{0, 0, 3},       // Edit started: replace_file_content
-		{0, 0, 3},       // Edit finished: replace_file_content
-		{67032, 0, 3},   // result usage
+		{0, 0, 0},     // text delta
+		{23459, 0, 0}, // step usage
+		{0, 0, 1},     // Tool started: run_command
+		{0, 0, 1},     // Tool finished: run_command
+		{0, 0, 2},     // Edit started: write_to_file
+		{0, 0, 2},     // Edit finished: write_to_file
+		{0, 0, 3},     // Edit started: replace_file_content
+		{0, 0, 3},     // Edit finished: replace_file_content
+		{67032, 0, 3}, // result usage
 	}
 	if len(events) != len(wantTelemetry) {
 		t.Fatalf("progress event count = %d, want %d", len(events), len(wantTelemetry))

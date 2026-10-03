@@ -11,8 +11,8 @@
     },
     "status": {
       "type": "string",
-      "enum": ["done", "blocked", "deviated", "failed"],
-      "description": "done = every done-criterion met AND every hard stop declared as not fired. blocked = a decision is needed that the packet does not authorize, or a hard stop fired; stop, do not guess. deviated = the work was completed but required departing from the stated approach or touching a path outside allowed_paths. failed = could not complete for a technical reason."
+      "enum": ["done", "blocked", "deviated", "failed", "interaction_required"],
+      "description": "done = every done-criterion met AND every hard stop declared as not fired. blocked = a decision is needed that the packet does not authorize, or a hard stop fired; stop, do not guess. deviated = the work was completed but required departing from the stated approach or touching a path outside allowed_paths. failed = could not complete for a technical reason. interaction_required = the worker needs a human/orchestrator answer to proceed and has stopped."
     },
     "summary": {
       "type": "string",
@@ -165,6 +165,42 @@
     "session_id": {
       "type": "string",
       "description": "Conversation or session id needed to resume this packet."
+    },
+    "interaction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["question", "reason", "unblock_response"],
+      "properties": {
+        "question": {
+          "type": "string",
+          "minLength": 1
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        },
+        "unblock_response": {
+          "type": "string",
+          "minLength": 1
+        },
+        "options": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "status": { "const": "interaction_required" } }
+      },
+      "then": {
+        "required": ["interaction"]
+      },
+      "else": {
+        "not": { "required": ["interaction"] }
+      }
+    }
+  ]
 }

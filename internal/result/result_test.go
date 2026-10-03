@@ -13,7 +13,6 @@ import (
 	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
-
 func TestReadFullyPopulatedEnvelopeRoundTrips(t *testing.T) {
 	src := `{
 		"packet_id": "fix-auth",
@@ -529,4 +528,97 @@ func TestVerifyResultEnvelopeSchemaCompliance(t *testing.T) {
 	}
 }
 
+func TestReadInteractionRequiredValid(t *testing.T) {
+	src := `{
+		"packet_id": "test-interaction",
+		"status": "interaction_required",
+		"summary": "Worker needs clarification on database.",
+		"hard_stops": [],
+		"interaction": {
+			"question": "Which database engine should be used?",
+			"reason": "Specification does not select between postgres and sqlite",
+			"unblock_response": "Specify postgres or sqlite in packet options",
+			"options": ["postgres", "sqlite"]
+		}
+	}`
+	fsys := fstest.MapFS{
+		"result.json": {Data: []byte(src)},
+	}
 
+	e, err := result.Read(fsys, "result.json")
+	if err != nil {
+		t.Fatalf("Read() error = %v, want nil", err)
+	}
+
+	if e.Status != "interaction_required" {
+		t.Errorf("Status = %q, want %q", e.Status, "interaction_required")
+	}
+	if e.Interaction == nil {
+		t.Fatal("Interaction is nil, want populated struct")
+	}
+	if e.Interaction.Question != "Which database engine should be used?" {
+		t.Errorf("Question = %q, want expected", e.Interaction.Question)
+	}
+	if e.Interaction.Reason != "Specification does not select between postgres and sqlite" {
+		t.Errorf("Reason = %q, want expected", e.Interaction.Reason)
+	}
+	if e.Interaction.UnblockResponse != "Specify postgres or sqlite in packet options" {
+		t.Errorf("UnblockResponse = %q, want expected", e.Interaction.UnblockResponse)
+	}
+	if len(e.Interaction.Options) != 2 || e.Interaction.Options[0] != "postgres" || e.Interaction.Options[1] != "sqlite" {
+		t.Errorf("Options = %v, want [postgres sqlite]", e.Interaction.Options)
+	}
+	if got, want := e.LaneStatus(), lane.Blocked; got != want {
+		t.Errorf("LaneStatus() = %v, want %v", got, want)
+	}
+}
+
+func TestReadInteractionRequiredMissingInteractionFails(t *testing.T) {
+	src := `{
+		"packet_id": "test-interaction",
+		"status": "interaction_required",
+		"summary": "Worker needs clarification.",
+		"hard_stops": []
+	}`
+	fsys := fstest.MapFS{
+		"result.json": {Data: []byte(src)},
+	}
+
+	_, err := result.Read(fsys, "result.json")
+	if err == nil {
+		t.Fatal("Read() error = nil, want ErrSchemaInvalid when interaction is missing")
+	}
+	if !errors.Is(err, result.ErrSchemaInvalid) {
+		t.Errorf("Read() error = %v, want ErrSchemaInvalid", err)
+	}
+}
+
+func TestReadDoneWithInteractionForbiddenFails(t *testing.T) {
+	statuses := []string{"done", "blocked", "deviated", "failed"}
+	for _, st := range statuses {
+		t.Run("status_"+st+"_forbids_interaction", func(t *testing.T) {
+			src := `{
+				"packet_id": "test-interaction",
+				"status": "` + st + `",
+				"summary": "Work status.",
+				"hard_stops": [],
+				"interaction": {
+					"question": "Unwarranted question?",
+					"reason": "some reason",
+					"unblock_response": "some answer"
+				}
+			}`
+			fsys := fstest.MapFS{
+				"result.json": {Data: []byte(src)},
+			}
+
+			_, err := result.Read(fsys, "result.json")
+			if err == nil {
+				t.Fatalf("Read() error = nil, want ErrSchemaInvalid when interaction present on status %s", st)
+			}
+			if !errors.Is(err, result.ErrSchemaInvalid) {
+				t.Errorf("Read() error = %v, want ErrSchemaInvalid", err)
+			}
+		})
+	}
+}

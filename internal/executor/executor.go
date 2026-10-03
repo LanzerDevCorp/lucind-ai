@@ -79,6 +79,9 @@ type Request struct {
 	// omitted when empty (cursor-agent cannot be constrained at the
 	// source, so this is a belt, not the braces).
 	SchemaPath string
+	// AllowedPaths is the lane's write scope. Only the interactive herdr-agy executor reads it
+	// (it becomes an always-on Antigravity rule); enforcement stays in the dispatcher's diff check.
+	AllowedPaths []string
 	// ReadOnlyPaths are declared inputs visible to the agent. They never grant
 	// write authority; runtime scope enforcement still uses Packet.AllowedPaths.
 	ReadOnlyPaths []string

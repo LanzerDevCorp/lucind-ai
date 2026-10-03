@@ -1,0 +1,83 @@
+# Misión nocturna autónoma: herdr agent factory (lucind-ai)
+
+> Documento de misión para una sesión sin supervisión. Referenciarlo desde el goal de la sesión (por ejemplo: "Ejecutá la misión de `docs/overnight-mission.md`"). Leelo completo antes de actuar.
+
+Sos el orquestador (Claude). Vas a trabajar SIN supervisión durante toda la noche. Nadie contesta preguntas: no uses AskUserQuestion ni te frenes a esperar. Respondé/registrá en español, artefactos de código y docs en inglés. Herramientas: bat/rg/fd/eza (nunca cat/grep/find/ls). Commits: Conventional Commits, sin atribución de IA.
+
+## Norte (no lo pierdas)
+lucind-ai pasa a ser una fábrica multi-proveedor: Claude orquesta y verifica (~25% del trabajo), `agy` (Antigravity CLI) implementa (~60%+), herdr es el ejecutor principal. Sin SDD: flujo ODD (feature doc + task packets). Un fix chico y entendido lo hacés vos inline; solo despachás con 2+ archivos no triviales, archivo nuevo, >5 búsquedas o lectura que prepara escritura. Esta noche NO hay Cursor.
+
+## Leé primero
+`docs/herdr-agent-factory-design.md` (decisiones; sección 7 = receta de despacho, sección 8 = registro) y `odd/tasks/herdr-agent-factory.md` (checklist autoritativo). Repo `~/git_root/lucind-ai`, rama `feature/herdr-agent-factory` (estrategia `feature-branch-chain`). Hecho: T1 (`880665b`). RDD ya está desactivado en este clon y NO se reactiva nunca: no ejecutes ningún `gentle-ai review ...` ni `gentle-ai review mode ...`.
+
+## Reglas duras (cinturón de seguridad, no negociables)
+- Trabajá solo en este repo: rama de feature y worktrees `lane/<id>` bajo `~/git_root/lucind-ai-worktrees/`. Nada de `/tmp` para worktrees.
+- Prohibido: `git push`, crear PRs, merge a `dev`/`main`, `git reset --hard`, `git clean`, force-push, borrar ramas o worktrees (incluido el de T1; anotalo en el doc de decisiones para mañana), tocar `~/.claude`, `~/.gemini` o cualquier config global, correr `gentle-ai sync`, instalar o actualizar dependencias globales, leer secretos o `.env`, operar sobre máquinas remotas. Única excepción en `~/.gemini`: los cambios de cuenta que hace `agy-pool use` según el protocolo de rotación de abajo.
+- Prohibido llamar a servicios externos de terceros con datos reales (Jev, Fastino u otros). T14 se implementa solo contra una interfaz y un servidor falso en tests.
+- La rama de feature debe compilar y pasar tests en cada commit: `go build ./... && go test ./...` (ejecutá la suite completa en un worker o con salida acotada a `tail`).
+- **Un solo proceso `agy` a la vez durante toda la noche** (workers, explorers y revisores en secuencia, nunca en paralelo): cambiar de cuenta reemplaza el token global que leen todos los procesos `agy`.
+- Cuota de `agy`: seguí el protocolo de rotación de cuentas de abajo.
+- Cap por tarea: máximo 4 iteraciones de write/test/fix. Tres intentos fallidos seguidos en una tarea => marcarla `blocked` en el feature doc con el motivo, continuar con la siguiente tarea independiente. No hagas loops infinitos.
+- Mantené liviano tu contexto (tu presupuesto es ~25%): delegá lectura y escritura a `agy`, leé salidas con `tail`/`--stat`, y pará a hacer checkpoint si tu contexto supera ~150k tokens.
+
+## Protocolo de rotación de cuentas agy (agy-pool)
+Fuente de verdad: el script instalado `~/.local/bin/agy-pool` (el del PATH), no el README (está desactualizado). Subcomandos permitidos: `list`, `current`, `usage` (con `--refresh` solo en el preflight), `best [min-fraction]`, `use <email>`. **Prohibidos:** `next` y `agyr` (si la siguiente cuenta del pool no tiene perfil guardado, `swap_in` sale antes de avanzar el estado y `next` queda trabado en esa cuenta; `agyr` usa `next`), `init`, `add`, `save`, editar o borrar a mano archivos de credenciales, y cualquier login por navegador. Rotá siempre con el proceso `agy` detenido (`pgrep -x agy` vacío).
+
+**R0. Preflight (una vez, antes de la primera tarea).**
+1. `agy-pool list` y `agy-pool current` (solo lectura). Registrá el resultado en `docs/overnight-decisions.md`, sección "Registro de rotaciones".
+2. La rotación solo es utilizable si al menos 2 cuentas con "guardado: sí" tienen el archivo `~/.gemini/profiles/<slug>/antigravity-oauth-token` (slug = parte local del email) y sus `sha256sum` son distintos. Motivo: `agy` lee `~/.gemini/antigravity-cli/antigravity-oauth-token`; un perfil que solo tiene `oauth_creds.json` y `google_accounts.json` (formato viejo del Gemini CLI) no cambia la cuenta que usa `agy`. Al escribir este documento (2026-10-03) los tres perfiles guardados NO tenían ese archivo y sus cachés de uso eran del 2026-08-29, con el mismo valor en los tres.
+3. Si no cumple: **ROTACIÓN DESACTIVADA** toda la noche. No ejecutes `use` ni `usage --refresh`. Anotá `D-ROT-0` con la causa en el doc de decisiones y trabajá solo con backoff (R4).
+4. Si cumple: `agy-pool usage --refresh` (refresca cachés; cambia y restaura la cuenta activa) y verificá con `agy-pool current` que volvió a la cuenta original.
+
+**R1. Antes de cada despacho** (sin `agy` corriendo, rotación activa): `agy-pool best 0.15`. Si imprime una cuenta distinta de `agy-pool current`, hacé R3 hacia esa cuenta. Si sale con código 1 (ninguna supera 0.15 de cuota de 5 h) hacé R4.
+
+**R2. Detección de cuota.** Un worker terminó con exit distinto de 0 y su `ERR.log` u `OUT.json` coinciden con `429|RESOURCE_EXHAUSTED|quota exceeded|rate limit exceeded` (sin distinguir mayúsculas). Registrá la cuenta como agotada con la hora, esperá a que el pane haya terminado, hacé R1 y reintentá el mismo packet agregando esta frase: "Un intento previo pudo dejar cambios parciales dentro de las superficies permitidas; inspeccioná `git status`, continuá o corregí, y no descartes trabajo que no entendés". Un intento reintentado por cuota no cuenta para el cap de 4 iteraciones ni para los 3 fallos seguidos.
+
+**R3. Cambio de cuenta.** `agy-pool use <email>`; luego verificá las tres cosas: (a) `agy-pool current` es ese email; (b) el `sha256sum` de `~/.gemini/antigravity-cli/antigravity-oauth-token` es igual al de `~/.gemini/profiles/<slug>/antigravity-oauth-token`; (c) un smoke test `agy --print "/usage" --output-format json` devuelve JSON sin error de autenticación. Si algo falla: `agy-pool use <cuenta anterior>`, marcá la cuenta como inutilizable esta noche, y si ya no quedan 2 cuentas utilizables, pasá a ROTACIÓN DESACTIVADA (`D-ROT-1`).
+
+**R4. Sin cuota disponible.** Con rotación activa: repetí `agy-pool best 0.15` cada 15 minutos con un bucle en segundo plano (la ventana de cuota es de 5 horas). Con rotación desactivada: backoff de 1, 2, 4, 8, 16 y 30 minutos y luego cada 30 minutos. En ambos casos, tras 6 horas acumuladas de espera sin cuota, hacé checkpoint y terminá con el reporte matutino. Mientras esperás, avanzá en trabajo que no necesite `agy` solo si es una tarea inline según el umbral de despacho.
+
+**R5. Registro.** Cada evento de rotación (preflight, `use`, cuenta agotada, fallo de verificación, entrada o salida de espera) es una línea en la sección "Registro de rotaciones" de `docs/overnight-decisions.md`: hora, cuenta, evento, motivo.
+
+## Decisiones de producto/diseño: las tomás vos y las anotás
+Si aparece una decisión que normalmente sería del dueño (producto, alcance, nombres públicos, formato de un contrato, tradeoff de diseño no trivial), NO frenes: elegí la opción más conservadora y reversible que sea coherente con el norte y las decisiones del design doc, seguí, y anotala en `docs/overnight-decisions.md` con este formato por entrada:
+`D<n> | fecha-hora | tarea | contexto | opciones consideradas | elegida | por qué | cómo revertir | commits afectados`.
+Contradecir una decisión ya tomada en el design doc está prohibido: en ese caso bloqueá la tarea y anotalo como `BLOCKED-DECISION`. Al final dejá en ese mismo doc una sección "Reporte matutino" (ver abajo).
+
+## Patrón de cada tarea: despachar a agy, verificar con Claude
+1. Worktree: `git worktree add -b lane/<id> ~/git_root/lucind-ai-worktrees/lane-<id> feature/herdr-agent-factory` + `gentle-ai codegraph init --cwd <worktree>`.
+2. Packet en un archivo del scratchpad con encabezados: `## Skills to load before work`, `## Feature document` (`odd/tasks/herdr-agent-factory.md`), `## Allowed edit surfaces` (rutas exactas, una por línea; derivalas de un explorador previo), `## Objective`, `## Design`, `## Acceptance criteria`, `## Test discipline` (TDD estricto + runner exacto), `## Verification` (comandos exactos), `## Known environmental failures`, `## Constraints` (sin deps nuevas, inglés, el worker NO commitea), `## Return` (contrato de retorno + `## Key Learnings`).
+3. Antes de lanzar: protocolo R1 (cuenta con cuota). Pane: `herdr pane split --current --direction right --cwd <worktree> --no-focus | jq -r '.result.pane.pane_id'`. Usá solo panes que creaste vos; nunca cierres los ajenos.
+4. Lanzar headless: `herdr pane run <pane> "agy --print \"\$(<PACKET)\" --output-format json --mode accept-edits --dangerously-skip-permissions --model gemini-3.8-flash-high --add-dir <worktree> --print-timeout 30m > OUT.json 2> ERR.log; echo \$? > EXIT.code; echo LUCIND_EXIT=\$(<EXIT.code)"`.
+5. Esperar en segundo plano con `herdr pane wait-output <pane> --regex 'LUCIND_EXIT=[0-9]+' --timeout 1800000` (la regex es obligatoria: un `--match` literal coincide con el comando escrito). `herdr pane read` devuelve texto plano, no JSON. Si falló por cuota, aplicá R2.
+6. Verificar vos, sin confiar en el reporte del worker: exit code y `status`; `git -C <worktree> status --short` y `git diff --name-only` dentro de las superficies permitidas (si salió algo fuera, descartá el cambio de ese archivo y reintentá); `go build ./...`, `go vet` y `go test` de los paquetes tocados; una prueba de comportamiento real del feature en un repo descartable con `XDG_CONFIG_HOME`/`XDG_STATE_HOME` temporales; leé el diff completo vos mismo.
+7. Revisión ciega para tareas riesgosas (lanzan procesos, tocan claves, permisos, git, borrados, ledger o red): dos revisores de solo lectura en `agy`, uno después del otro, con modelos de familias distintas (`gemini-3.1-pro-high` y `claude-opus-4-6-thinking`), con el mismo diff congelado y un packet que prohíbe editar (verificá luego que `git status` no cambió). Aplicá solo hallazgos que confirmen ambos o que vos reproduzcas; máximo 2 rondas de corrección.
+8. Commit en la rama del lane (Conventional Commit), `git cherry-pick` a `feature/herdr-agent-factory`, marcar la tarea en el feature doc (ruta, evidencia, commits, hallazgos) y commitear ese doc, y actualizar el espejo Engram `odd/herdr-agent-factory/tasks` (proyecto `lucind-ai`) si Engram responde; si no, marcá el espejo como pendiente en el doc.
+9. Ninguna tarea se cierra con cabos sueltos: todo hallazgo se corrige en la misma tarea, o se convierte en una tarea numerada del feature doc con orden. Nada de "pendientes menores".
+
+## Cola de trabajo (en este orden)
+**T1b** (cerrar T1): superficies `internal/attest/`, `internal/accept/`, `cmd/lucind-ai/attest.go`, `cmd/lucind-ai/attest_test.go`, `docs/attestation.md`. (1) Clave atómica: `os.OpenFile(path, O_CREATE|O_EXCL|O_WRONLY, 0600)`, y si existe (`EEXIST`) releerla; test con dos procesos compitiendo que terminan con la misma clave. (2) Los logs se crean con modo 0444 o se hace `chmod` antes del `rename`, nunca se renombra un archivo escribible. (3) `lucind-ai accept` reutiliza una atestación válida (mismo comando, exit 0, mismo hash de árbol del candidato congelado, MAC ok) en vez de re-correr `lucind-checks.sh`; si no hay, corre los checks vía `attest run`. Resolvé en la misma tarea si el hash del worktree aislado coincide con el candidato (archivos ignorados) y documentá la regla.
+**T2** campos del packet e `interaction_required`: frontmatter nuevo `verification`, `known_environmental_failures`, `route` (`inline|worker|fanout`), `route_evidence` y modo "solo skills nombradas" (hoy `required_skills` se deriva en `internal/skillset/skillset.go:59-95`); nuevo status `interaction_required` en `internal/result/result.schema.json` con payload `{question, reason, options, unblock_response}` mapeado en `decideStatus` (`internal/run/run.go`). Los packets existentes (incluso con `sdd_phase`) deben seguir parseando y no cambiar el digest de identidad (`run.go:682`) sin test. Mandá antes un explorador de solo lectura para derivar superficies.
+**T3** neutralizar los gates SDD en `internal/accept/accept.go:120` y `internal/run/attempt.go:391` hacia un predicado por `lane_role`/`read_only` que falle cerrado.
+**T4** SDD fuera: docs/plantillas (las 21 plantillas SDD y `references/strategies/sdd.md`), derivación `sdd-*` opcional, nueva estrategia `odd.md`; `make bump-plugin-version` con la copia de OpenCode idéntica.
+**T5** aceptar e ignorar `sdd_phase`; borrar el subcomando `phase` y `internal/phasespec` (`rg phasespec` antes de cortar). NO borrar los campos `SDDPhase`/`FanoutGroup` (diferido).
+**T6** portar las reglas de `gentle-ai-worker` (ver `~/.gemini/GEMINI.md` y `docs/herdr-agent-factory-design.md` 3.6) a `lucind-apply`; reescribir `lucind-fan-out-lens` como skill de explorer sin SDD (lentes estructural/textual/histórica); bump del plugin.
+**T7** spike de solo hechos (sin cambiar código fuente del repo): `herdr worktree open --path` sobre un worktree externo, `herdr worktree remove` con panes vivos (solo con panes y repos temporales que creaste), `herdr agent wait`, sentinel de exit y `--output-format stream-json`, qué restringe `agy --sandbox`, qué campos de tokens/costo trae el JSON de `agy`. Resultado: `docs/herdr-spike-findings.md` con evidencia.
+**T8** `HerdrExecutor` detrás de `executor.Executor` (depende de T7). **T9** paso de commit del dispatcher tras atestación verde. **T10** solo el port del clasificador de riesgo y el mapeo de tiers (NO `cursor-agent` esta noche). **T11** validador del umbral de despacho. **T12** fan-out de explorers + loop write/test/fix + escalera declarada en el packet. **T13** log JSONL de uso + reporte. **T14** interfaz `Router` + base determinista + adaptador de Jev solo contra servidor falso. **T15** fuente única de reglas que genera `CLAUDE.md`/`GEMINI.md`/`AGENTS.md` por workspace (no escribir en `~/.claude` ni `~/.gemini`: generar en el repo).
+Orden de dependencias: respetá el del feature doc; si una tarea queda `blocked`, saltá a la siguiente que no dependa de ella. Parar al terminar T15 o cuando todo lo restante esté bloqueado.
+
+## Trampas conocidas
+`agy` imprime "root agent idle; waiting up to 30m0s for 1 background task(s)" en stderr y sale 0: no es error. Tras tocar el binario: `make install` y `lucind-ai -v`. No uses `sleep` largo en primer plano (lo bloquea tu sesión): esperá con `wait-output` en background. El `GEMINI.md` global ya es el rol worker; no lo edites. Los ejecutores Go de lucind-ai pueden tener su propia lógica de cuota (`internal/executor/agy_quota.go`); la receta manual con herdr no la usa, así que la rotación la hacés vos con el protocolo de arriba.
+
+## Cierre y reporte matutino
+Al terminar (o al quedar bloqueado todo), escribí en `docs/overnight-decisions.md` una sección "Reporte matutino": tabla de tareas (hecha / bloqueada / saltada) con commit ids; estado de `go build ./... && go test ./...` en la rama de feature; decisiones D<n> que esperan revisión (con la más riesgosa primero); `BLOCKED-DECISION` y su motivo; estado de la rotación de cuentas (activa o desactivada y por qué); cosas que no pudiste verificar; y la siguiente tarea recomendada. Dejá el feature doc y su espejo al día y commiteá. No hagas push.
+
+## Estado de ejecución
+
+Misión ejecutada y cerrada el 2026-10-03. Se completó la cola hasta T15 (incluida T12c, la parte de explorador de T12); T16-T20 son seguimientos nuevos que quedaron fuera de esta misión. Los detalles están en `docs/overnight-decisions.md`: tabla de tareas con commits, estado de verificación, decisiones D1-D17, estado de la rotación de cuentas (desactivada, D-ROT-0) y la sección "Reporte matutino". El checklist autoritativo es `odd/tasks/herdr-agent-factory.md`.
+
+Condición de parada de la misión ("parar al terminar T15 o cuando todo lo restante esté bloqueado"): cumplida. No se hizo push, ni PR, ni merge, y RDD siguió apagado.
+
+### Seguimiento (2026-10-03, sesión posterior)
+
+Con las decisiones D1-D17 y los términos de retención de Jev aprobados por el dueño, se cerraron T16-T23 (T22 sin código, ver Decisión 3). Se probaron `lucind-ai explore`, `herdr-agy` y `cursor-agent` con agentes reales en un repo descartable, y se borraron las 17 ramas y worktrees `lane/*`. Detalle por tarea en `odd/tasks/herdr-agent-factory.md`, sección "Real-agy end-to-end evidence".

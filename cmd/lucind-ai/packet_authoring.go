@@ -70,6 +70,7 @@ func admitDispatchBatch(ctx context.Context, primaryRoot string, inputs []dispat
 		sddPhase := input.Packet.SDDPhase
 		laneRole := input.Packet.LaneRole
 		adhocSkills := input.Packet.AdhocSkills
+		namedSkillsOnly := input.Packet.NamedSkillsOnly
 
 		if input.Contract != nil {
 			if sddPhase == "" && skillset.IsValidSDDPhase(input.Contract.RouteIntent) {
@@ -80,6 +81,9 @@ func admitDispatchBatch(ctx context.Context, primaryRoot string, inputs []dispat
 			}
 			if len(adhocSkills) == 0 {
 				adhocSkills = input.Contract.AdhocSkills
+			}
+			if !namedSkillsOnly {
+				namedSkillsOnly = input.Contract.NamedSkillsOnly
 			}
 		} else {
 			if sddPhase == "" && skillset.IsValidSDDPhase(input.Packet.RoutedBy) {
@@ -95,7 +99,25 @@ func admitDispatchBatch(ctx context.Context, primaryRoot string, inputs []dispat
 		stackSkills := cfg.StackSkills(laneRole)
 		var derived []string
 		var resolvedPaths []string
-		if sddPhase != "" || laneRole != "" || len(adhocSkills) > 0 || len(stackSkills) > 0 {
+		if namedSkillsOnly {
+			var err error
+			derived, err = skillset.DeriveNamed(stackSkills, adhocSkills)
+			if err != nil {
+				return nil, fmt.Errorf("derive named skills for packet[%d]: %w", i, err)
+			}
+
+			if len(derived) > budget {
+				return nil, fmt.Errorf("lucind-ai: packet[%d] (%s) required skills count %d exceeds budget %d (skills: %s)",
+					i, input.Packet.ID, len(derived), budget, strings.Join(derived, ", "))
+			}
+
+			resolvedPaths, err = resolver.ResolvePaths(derived)
+			if err != nil {
+				return nil, err
+			}
+
+			derivedSkillsPerItem[i] = derived
+		} else if sddPhase != "" || laneRole != "" || len(adhocSkills) > 0 || len(stackSkills) > 0 {
 			var err error
 			derived, err = skillset.Derive(effectivePhase, laneRole, stackSkills, adhocSkills)
 			if err != nil {
@@ -145,11 +167,22 @@ func admitDispatchBatch(ctx context.Context, primaryRoot string, inputs []dispat
 			continue
 		}
 		var normalized struct {
-			RouteIntent    string            `json:"route_intent"`
-			Mode           packetauthor.Mode `json:"mode"`
-			RequiredSkills []string          `json:"required_skills"`
-			WritePaths     []string          `json:"write_paths"`
-			ReadOnlyPaths  []string          `json:"read_only_paths"`
+			RouteIntent                string                  `json:"route_intent"`
+			Mode                       packetauthor.Mode       `json:"mode"`
+			RequiredSkills             []string                `json:"required_skills"`
+			WritePaths                 []string                `json:"write_paths"`
+			ReadOnlyPaths              []string                `json:"read_only_paths"`
+			Route                      string                  `json:"route,omitempty"`
+			RouteEvidence              string                  `json:"route_evidence,omitempty"`
+			NamedSkillsOnly            bool                    `json:"named_skills_only,omitempty"`
+			Understood                 *bool                   `json:"understood,omitempty"`
+			OpenDesign                 bool                    `json:"open_design,omitempty"`
+			EstimatedLookups           int                     `json:"estimated_lookups,omitempty"`
+			Verification               []string                `json:"verification,omitempty"`
+			KnownEnvironmentalFailures []string                `json:"known_environmental_failures,omitempty"`
+			CommitMessage              string                  `json:"commit_message,omitempty"`
+			MaxIterations              int                     `json:"max_iterations,omitempty"`
+			Escalation                 []packet.EscalationRung `json:"escalation,omitempty"`
 		}
 		if err := json.Unmarshal(artifacts[i].ContractJSON, &normalized); err != nil {
 			return nil, fmt.Errorf("decode admitted packet[%d] contract: %w", i, err)
@@ -164,6 +197,19 @@ func admitDispatchBatch(ctx context.Context, primaryRoot string, inputs []dispat
 		packets[i].RequiredSkills = append([]string(nil), normalized.RequiredSkills...)
 		packets[i].AllowedPaths = append([]string(nil), normalized.WritePaths...)
 		packets[i].ReadOnlyPaths = append([]string(nil), normalized.ReadOnlyPaths...)
+		packets[i].Route = normalized.Route
+		packets[i].RouteEvidence = normalized.RouteEvidence
+		packets[i].NamedSkillsOnly = normalized.NamedSkillsOnly
+		packets[i].Understood = normalized.Understood
+		packets[i].OpenDesign = normalized.OpenDesign
+		packets[i].EstimatedLookups = normalized.EstimatedLookups
+		packets[i].Verification = append([]string(nil), normalized.Verification...)
+		packets[i].KnownEnvironmentalFailures = append([]string(nil), normalized.KnownEnvironmentalFailures...)
+		packets[i].CommitMessage = normalized.CommitMessage
+		packets[i].MaxIterations = normalized.MaxIterations
+		if len(normalized.Escalation) > 0 {
+			packets[i].Escalation = append([]packet.EscalationRung(nil), normalized.Escalation...)
+		}
 		packets[i].Authoring = &packet.Authoring{
 			ContractVersion: artifacts[i].Version, Digest: artifacts[i].Digest,
 			ContractJSON: append([]byte(nil), artifacts[i].ContractJSON...),

@@ -807,7 +807,3 @@ func TestFindUniqueMergeBase_Errors(t *testing.T) {
 		t.Errorf("FindUniqueMergeBase on criss-cross merge = %v, want ErrMultipleMergeBases", err)
 	}
 }
-
-
-
-

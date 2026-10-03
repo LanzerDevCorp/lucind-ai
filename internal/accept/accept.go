@@ -23,6 +23,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/LanzerDevCorp/lucind-ai/internal/attest"
 	"github.com/LanzerDevCorp/lucind-ai/internal/candidatechange"
 	"github.com/LanzerDevCorp/lucind-ai/internal/integrate"
 	"github.com/LanzerDevCorp/lucind-ai/internal/ledger"
@@ -31,6 +32,10 @@ import (
 )
 
 const ownerMarkerName = ".lucind-accept-owner.json"
+
+// attestedCheckCommand is the exact command string `lucind-ai attest run` must have recorded for
+// accept to reuse the attestation; it mirrors how integrate.Check executes lucind-checks.sh.
+const attestedCheckCommand = "sh lucind-checks.sh"
 
 // AcceptanceRequest deliberately contains no refs or caller-supplied identity.
 type AcceptanceRequest struct {
@@ -43,16 +48,26 @@ type AcceptanceReceipt = ledger.AcceptanceReceipt
 
 // Verifier owns identity loading, isolated checks, fenced cleanup, and receipt persistence.
 type Verifier struct {
-	primaryRoot   string
-	ledger        *ledger.Ledger
-	loadCandidate func(context.Context, string, string) (ledger.LaneCandidate, error)
-	check         func(context.Context, string) (bool, string, error)
-	now           func() time.Time
-	newID         func() string
+	primaryRoot    string
+	ledger         *ledger.Ledger
+	loadCandidate  func(context.Context, string, string) (ledger.LaneCandidate, error)
+	check          func(context.Context, string) (bool, string, error)
+	hasAttestation func(context.Context, string, string, string) (bool, error)
+	now            func() time.Time
+	newID          func() string
 }
 
 func NewVerifier(primaryRoot string, l *ledger.Ledger) *Verifier {
-	v := &Verifier{primaryRoot: primaryRoot, ledger: l, check: integrate.Check, now: time.Now, newID: uuid.NewString}
+	v := &Verifier{
+		primaryRoot: primaryRoot,
+		ledger:      l,
+		check:       integrate.Check,
+		hasAttestation: func(ctx context.Context, repoRoot, command, treeHash string) (bool, error) {
+			return attest.HasValidAttestation(ctx, repoRoot, command, treeHash, nil, "")
+		},
+		now:   time.Now,
+		newID: uuid.NewString,
+	}
 	v.loadCandidate = l.GetLaneCandidate
 	return v
 }
@@ -97,6 +112,9 @@ func (v *Verifier) Verify(ctx context.Context, req AcceptanceRequest) (Acceptanc
 	if err := validateResultAndScope(ctx, root, candidate); err != nil {
 		return AcceptanceReceipt{}, err
 	}
+	if err := v.requireDispatcherAttestations(ctx, root, candidate); err != nil {
+		return AcceptanceReceipt{}, err
+	}
 	binding, err := v.binding(candidate)
 	if err != nil {
 		return AcceptanceReceipt{}, err
@@ -117,29 +135,47 @@ func (v *Verifier) Verify(ctx context.Context, req AcceptanceRequest) (Acceptanc
 	if err := createOwnedIsolation(ctx, root, isolation, candidate, marker); err != nil {
 		return AcceptanceReceipt{}, err
 	}
-	runSDDPhaseChecks := metadata.SDDPhase == "" || metadata.SDDPhase == "apply"
+	runChecks := metadata.RequiresMechanicalChecks()
 	var version, output string
-	if runSDDPhaseChecks {
-		var timeout time.Duration
-		var err error
-		version, timeout, _, err = integrate.CheckPolicySnapshot()
-		if err != nil {
-			_ = cleanupOwnedIsolation(context.WithoutCancel(ctx), root, isolation, marker)
-			return AcceptanceReceipt{}, err
+	if runChecks {
+		var hasAttest bool
+		if v.hasAttestation != nil {
+			var attestErr error
+			hasAttest, attestErr = v.hasAttestation(ctx, root, attestedCheckCommand, candidate.CandidateTree)
+			if attestErr != nil {
+				hasAttest = false
+			}
 		}
-		checkCtx, cancel := context.WithTimeout(ctx, timeout)
-		passed, checkOutput, checkErr := v.check(checkCtx, isolation)
-		cancel()
-		output = checkOutput
-		cleanupErr := cleanupOwnedIsolation(context.WithoutCancel(ctx), root, isolation, marker)
-		if cleanupErr != nil {
-			return AcceptanceReceipt{}, fmt.Errorf("accept: cleanup failed: %w", cleanupErr)
-		}
-		if checkErr != nil {
-			return AcceptanceReceipt{}, fmt.Errorf("accept: checks could not execute: %w", checkErr)
-		}
-		if !passed {
-			return AcceptanceReceipt{}, fmt.Errorf("accept: required mechanical checks failed: %s", strings.TrimSpace(output))
+
+		if hasAttest {
+			version = "attest:v1"
+			output = "attested:" + candidate.CandidateTree
+			cleanupErr := cleanupOwnedIsolation(context.WithoutCancel(ctx), root, isolation, marker)
+			if cleanupErr != nil {
+				return AcceptanceReceipt{}, fmt.Errorf("accept: cleanup failed: %w", cleanupErr)
+			}
+		} else {
+			var timeout time.Duration
+			var err error
+			version, timeout, _, err = integrate.CheckPolicySnapshot()
+			if err != nil {
+				_ = cleanupOwnedIsolation(context.WithoutCancel(ctx), root, isolation, marker)
+				return AcceptanceReceipt{}, err
+			}
+			checkCtx, cancel := context.WithTimeout(ctx, timeout)
+			passed, checkOutput, checkErr := v.check(checkCtx, isolation)
+			cancel()
+			output = checkOutput
+			cleanupErr := cleanupOwnedIsolation(context.WithoutCancel(ctx), root, isolation, marker)
+			if cleanupErr != nil {
+				return AcceptanceReceipt{}, fmt.Errorf("accept: cleanup failed: %w", cleanupErr)
+			}
+			if checkErr != nil {
+				return AcceptanceReceipt{}, fmt.Errorf("accept: checks could not execute: %w", checkErr)
+			}
+			if !passed {
+				return AcceptanceReceipt{}, fmt.Errorf("accept: required mechanical checks failed: %s", strings.TrimSpace(output))
+			}
 		}
 	} else {
 		cleanupErr := cleanupOwnedIsolation(context.WithoutCancel(ctx), root, isolation, marker)
@@ -340,7 +376,11 @@ func validateVersionedEvidence(c ledger.LaneCandidate, envelope result.Envelope,
 			}
 		}
 	}
-	if evidence.Mode == "write" && (evidence.CommitObligation != "required" || envelope.Commit != c.CandidateCommit) {
+	if evidence.CommitObligation == "dispatcher" {
+		if evidence.Mode != "write" || envelope.Commit != "" || c.CandidateCommit == c.BaseCommit {
+			return errors.New("accept: write commit mismatch")
+		}
+	} else if evidence.Mode == "write" && (evidence.CommitObligation != "required" || envelope.Commit != c.CandidateCommit) {
 		return errors.New("accept: write commit mismatch")
 	}
 	if evidence.Mode == "read-only" && (evidence.CommitObligation != "forbidden" || envelope.Commit != "" || len(actual) != 0) {
@@ -351,6 +391,36 @@ func validateVersionedEvidence(c ledger.LaneCandidate, envelope result.Envelope,
 	}
 	if outside := candidatechange.OutOfScope(actual, c.AllowedPaths); len(outside) > 0 {
 		return fmt.Errorf("accept: out-of-scope changes %v", outside)
+	}
+	return nil
+}
+
+// requireDispatcherAttestations enforces that, for a dispatcher-commit lane, every declared
+// verification command has a valid attestation bound to the candidate tree. The dispatcher
+// commit step records them; accept re-checks instead of trusting the frozen evidence. Fails
+// closed: no declared command, a lookup error, or a missing attestation all reject.
+func (v *Verifier) requireDispatcherAttestations(ctx context.Context, root string, c ledger.LaneCandidate) error {
+	if c.AuthoringEvidenceVersion != ledger.AuthoringEvidenceVersion {
+		return nil
+	}
+	evidence, err := ledger.DecodeAuthoringEvidence(c.AuthoringEvidenceVersion, c.AuthoringEvidenceJSON, c.AuthoringEvidenceHash)
+	if err != nil {
+		return fmt.Errorf("accept: invalid authoring evidence: %w", err)
+	}
+	if evidence.CommitObligation != "dispatcher" {
+		return nil
+	}
+	var contract struct {
+		Verification []string `json:"verification"`
+	}
+	if json.Unmarshal(evidence.Contract, &contract) != nil || len(contract.Verification) == 0 || v.hasAttestation == nil {
+		return errors.New("accept: missing attestation: dispatcher commit declares no verifiable command")
+	}
+	for _, command := range contract.Verification {
+		ok, err := v.hasAttestation(ctx, root, command, c.CandidateTree)
+		if err != nil || !ok {
+			return fmt.Errorf("accept: missing attestation for %q on tree %s", command, c.CandidateTree)
+		}
 	}
 	return nil
 }

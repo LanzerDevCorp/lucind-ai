@@ -46,6 +46,8 @@ Two are mandatory in every packet:
 
 *(Qualitative verification lanes: see `verify-packet-template.md` for the standardized read-only judgment packet template.)*
 
+*(Optional frontmatter keys: `route` [inline|worker|fanout], `route_evidence`, `understood`/`open_design` [true|false], `estimated_lookups` [integer], `named_skills_only` [true|false to load only explicitly named stack and ad-hoc skills plus lucind-executor], `verification` [JSON array of exact command strings], `known_environmental_failures` [JSON array of baseline test failure names or commands].)*
+
 
 Then the packet's own:
 
@@ -114,3 +116,5 @@ writing — an envelope that fails schema validation makes the lane `blocked` re
 well the work went.
 
 Report `done` only when every done-criterion carries evidence and every hard stop is declared.
+When a decision is needed that the packet does not authorize, or if human/orchestrator input is required to proceed, report `interaction_required` with the structured `interaction` payload (`question`, `reason`, `unblock_response`, and optional `options`).
+

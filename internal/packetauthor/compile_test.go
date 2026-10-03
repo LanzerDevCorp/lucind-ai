@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/LanzerDevCorp/lucind-ai/internal/packet"
 	"github.com/LanzerDevCorp/lucind-ai/internal/packetauthor"
 )
 
@@ -123,6 +124,9 @@ func TestCompileDigestExcludesResolvedPaths(t *testing.T) {
 	if !strings.Contains(bodyA, "## Required skills\n- /var/tmp/root-a/lucind-executor/SKILL.md\n- /var/tmp/root-a/lucind-apply/SKILL.md") {
 		t.Errorf("artA.Body missing expected ## Required skills section: %s", bodyA)
 	}
+	if !strings.Contains(bodyA, "Read each SKILL.md above before starting work and list each skill's directory name in `skills_loaded` of the result envelope.") {
+		t.Errorf("artA.Body missing the instruction to load and declare required skills: %s", bodyA)
+	}
 	hardStopsIdx := strings.Index(bodyA, "## Hard stops")
 	reqSkillsIdx := strings.Index(bodyA, "## Required skills")
 	returnIdx := strings.Index(bodyA, "## Return")
@@ -195,4 +199,261 @@ func mutateContract(change func(*packetauthor.Contract)) packetauthor.Contract {
 	c.HardStops = append([]string(nil), c.HardStops...)
 	change(&c)
 	return c
+}
+
+func TestCompileNamedSkillsOnly(t *testing.T) {
+	c := validContract()
+	c.LaneRole = "apply"
+	c.AdhocSkills = []string{"custom-tool"}
+	c.NamedSkillsOnly = true
+
+	art, err := packetauthor.Compile(c, validFeatureBinding())
+	if err != nil {
+		t.Fatalf("Compile() error = %v", err)
+	}
+
+	// Should derive only lucind-executor and custom-tool, no lucind-apply and no sdd-apply
+	wantReq := []byte(`"required_skills":["custom-tool","lucind-executor"]`)
+	if !bytes.Contains(art.ContractJSON, wantReq) {
+		t.Fatalf("ContractJSON = %s, want required_skills with only custom-tool and lucind-executor", art.ContractJSON)
+	}
+	if bytes.Contains(art.ContractJSON, []byte("lucind-apply")) || bytes.Contains(art.ContractJSON, []byte("sdd-apply")) {
+		t.Fatalf("ContractJSON contains lane-role or sdd skills: %s", art.ContractJSON)
+	}
+}
+
+func TestCompileNewFieldsPropagate(t *testing.T) {
+	base, err := packetauthor.Compile(validContract(), validFeatureBinding())
+	if err != nil {
+		t.Fatalf("Compile(base) error = %v", err)
+	}
+
+	c := validContract()
+	c.Route = "worker"
+	c.RouteEvidence = "touches auth"
+	c.NamedSkillsOnly = true
+	c.Verification = []string{"go test ./..."}
+	c.KnownEnvironmentalFailures = []string{"TestFlaky"}
+
+	art, err := packetauthor.Compile(c, validFeatureBinding())
+	if err != nil {
+		t.Fatalf("Compile() error = %v", err)
+	}
+
+	if art.Digest == base.Digest {
+		t.Errorf("art.Digest = %q, want different from base", art.Digest)
+	}
+	if !bytes.Contains(art.ContractJSON, []byte(`"route":"worker"`)) {
+		t.Errorf("ContractJSON missing route: %s", art.ContractJSON)
+	}
+	if !bytes.Contains(art.ContractJSON, []byte(`"route_evidence":"touches auth"`)) {
+		t.Errorf("ContractJSON missing route_evidence: %s", art.ContractJSON)
+	}
+	if !bytes.Contains(art.ContractJSON, []byte(`"named_skills_only":true`)) {
+		t.Errorf("ContractJSON missing named_skills_only: %s", art.ContractJSON)
+	}
+	if !bytes.Contains(art.ContractJSON, []byte(`"verification":["go test ./..."]`)) {
+		t.Errorf("ContractJSON missing verification: %s", art.ContractJSON)
+	}
+	if !bytes.Contains(art.ContractJSON, []byte(`"known_environmental_failures":["TestFlaky"]`)) {
+		t.Errorf("ContractJSON missing known_environmental_failures: %s", art.ContractJSON)
+	}
+}
+
+func TestCompileRejectsInvalidRoute(t *testing.T) {
+	c := validContract()
+	c.Route = "turbo"
+	_, err := packetauthor.Compile(c, validFeatureBinding())
+	assertDiagnosticCode(t, err, packetauthor.CodeContractInvalid)
+	for _, ok := range []string{"", "inline", "worker", "fanout"} {
+		c.Route = ok
+		if _, err := packetauthor.Compile(c, validFeatureBinding()); err != nil {
+			t.Fatalf("route %q must be accepted: %v", ok, err)
+		}
+	}
+}
+
+func TestCompileCommitMessage(t *testing.T) {
+	t.Run("valid commit_message yields dispatcher commit obligation", func(t *testing.T) {
+		c := validContract()
+		c.Verification = []string{"go test ./..."}
+		c.CommitMessage = "feat(auth): add login flow"
+		art, err := packetauthor.Compile(c, validFeatureBinding())
+		if err != nil {
+			t.Fatalf("Compile() error = %v", err)
+		}
+		if !strings.Contains(string(art.Body), "commit: dispatcher") {
+			t.Errorf("expected body to contain 'commit: dispatcher', got:\n%s", string(art.Body))
+		}
+		if !bytes.Contains(art.ContractJSON, []byte(`"commit_message":"feat(auth): add login flow"`)) {
+			t.Errorf("ContractJSON missing commit_message: %s", art.ContractJSON)
+		}
+	})
+
+	t.Run("empty commit_message write mode yields required commit obligation", func(t *testing.T) {
+		c := validContract()
+		art, err := packetauthor.Compile(c, validFeatureBinding())
+		if err != nil {
+			t.Fatalf("Compile() error = %v", err)
+		}
+		if !strings.Contains(string(art.Body), "commit: required") {
+			t.Errorf("expected body to contain 'commit: required', got:\n%s", string(art.Body))
+		}
+	})
+
+	t.Run("read-only mode yields forbidden commit obligation even if commit_message set", func(t *testing.T) {
+		c := validContract()
+		c.Mode = packetauthor.ModeReadOnly
+		c.WritePaths = nil
+		c.Verification = []string{"go test ./..."}
+		c.CommitMessage = "feat: add login"
+		art, err := packetauthor.Compile(c, validFeatureBinding())
+		if err != nil {
+			t.Fatalf("Compile() error = %v", err)
+		}
+		if !strings.Contains(string(art.Body), "commit: forbidden") {
+			t.Errorf("expected body to contain 'commit: forbidden', got:\n%s", string(art.Body))
+		}
+	})
+
+	t.Run("commit_message requires verification", func(t *testing.T) {
+		c := validContract()
+		c.CommitMessage = "feat: add login"
+		_, err := packetauthor.Compile(c, validFeatureBinding())
+		assertDiagnosticCode(t, err, packetauthor.CodeContractInvalid)
+	})
+
+	t.Run("invalid commit_message rejected", func(t *testing.T) {
+		for _, bad := range []string{
+			"Update stuff",
+			"feat implement login",
+			"feat: " + strings.Repeat("a", 95),
+			"feat: login\nnewline",
+			"feat: login Co-Authored-By: AI",
+			"feat: login (generated with LLM)",
+		} {
+			c := validContract()
+			c.Verification = []string{"go test ./..."}
+			c.CommitMessage = bad
+			_, err := packetauthor.Compile(c, validFeatureBinding())
+			assertDiagnosticCode(t, err, packetauthor.CodeContractInvalid)
+		}
+	})
+
+	t.Run("setting commit_message changes artifact digest", func(t *testing.T) {
+		c1 := validContract()
+		c1.Verification = []string{"go test ./..."}
+		art1, err := packetauthor.Compile(c1, validFeatureBinding())
+		if err != nil {
+			t.Fatal(err)
+		}
+		c2 := c1
+		c2.CommitMessage = "feat: add login"
+		art2, err := packetauthor.Compile(c2, validFeatureBinding())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if art1.Digest == art2.Digest {
+			t.Errorf("setting commit_message did not change digest: %q", art1.Digest)
+		}
+	})
+}
+
+func TestCompileLoopAndEscalation(t *testing.T) {
+	t.Run("max_iterations and escalation propagate and change digest", func(t *testing.T) {
+		baseContract := validContract()
+		baseContract.Verification = []string{"go test ./..."}
+		baseContract.CommitMessage = "feat: x"
+		baseArt, err := packetauthor.Compile(baseContract, validFeatureBinding())
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		c := baseContract
+		c.MaxIterations = 2
+		c.Escalation = []packet.EscalationRung{{Executor: "herdr-agy", Model: "gemini-3.8-flash-high"}}
+		art, err := packetauthor.Compile(c, validFeatureBinding())
+		if err != nil {
+			t.Fatalf("Compile() error = %v", err)
+		}
+
+		if art.Digest == baseArt.Digest {
+			t.Errorf("art.Digest = %q, want different from baseArt.Digest", art.Digest)
+		}
+		if !bytes.Contains(art.ContractJSON, []byte(`"max_iterations":2`)) {
+			t.Errorf("ContractJSON missing max_iterations: %s", art.ContractJSON)
+		}
+		if !bytes.Contains(art.ContractJSON, []byte(`"escalation":[{"executor":"herdr-agy","model":"gemini-3.8-flash-high"}]`)) {
+			t.Errorf("ContractJSON missing escalation: %s", art.ContractJSON)
+		}
+	})
+
+	t.Run("max_iterations out of bounds rejected", func(t *testing.T) {
+		for _, bad := range []int{-1, 5} {
+			c := validContract()
+			c.Verification = []string{"go test ./..."}
+			c.MaxIterations = bad
+			_, err := packetauthor.Compile(c, validFeatureBinding())
+			assertDiagnosticCode(t, err, packetauthor.CodeContractInvalid)
+		}
+	})
+
+	t.Run("max_iterations > 1 requires verification", func(t *testing.T) {
+		c := validContract()
+		c.MaxIterations = 2
+		_, err := packetauthor.Compile(c, validFeatureBinding())
+		assertDiagnosticCode(t, err, packetauthor.CodeContractInvalid)
+	})
+
+	t.Run("escalation requires verification", func(t *testing.T) {
+		c := validContract()
+		c.Escalation = []packet.EscalationRung{{Executor: "herdr-agy"}}
+		_, err := packetauthor.Compile(c, validFeatureBinding())
+		assertDiagnosticCode(t, err, packetauthor.CodeContractInvalid)
+	})
+
+	t.Run("escalation with empty executor rejected", func(t *testing.T) {
+		c := validContract()
+		c.Verification = []string{"go test ./..."}
+		c.Escalation = []packet.EscalationRung{{Executor: ""}}
+		_, err := packetauthor.Compile(c, validFeatureBinding())
+		assertDiagnosticCode(t, err, packetauthor.CodeContractInvalid)
+	})
+
+	t.Run("escalation with more than 3 rungs rejected", func(t *testing.T) {
+		c := validContract()
+		c.Verification = []string{"go test ./..."}
+		c.Escalation = []packet.EscalationRung{
+			{Executor: "a"},
+			{Executor: "b"},
+			{Executor: "c"},
+			{Executor: "d"},
+		}
+		_, err := packetauthor.Compile(c, validFeatureBinding())
+		assertDiagnosticCode(t, err, packetauthor.CodeContractInvalid)
+	})
+}
+
+func TestCompileDeclaredRouterSignalsPropagate(t *testing.T) {
+	base, err := packetauthor.Compile(validContract(), validFeatureBinding())
+	if err != nil {
+		t.Fatalf("Compile(base) error = %v", err)
+	}
+	no := false
+	c := validContract()
+	c.Understood = &no
+	c.OpenDesign = true
+	c.EstimatedLookups = 7
+	art, err := packetauthor.Compile(c, validFeatureBinding())
+	if err != nil {
+		t.Fatalf("Compile() error = %v", err)
+	}
+	if art.Digest == base.Digest {
+		t.Error("declared signals must change the digest")
+	}
+	for _, want := range []string{`"understood":false`, `"open_design":true`, `"estimated_lookups":7`} {
+		if !bytes.Contains(art.ContractJSON, []byte(want)) {
+			t.Errorf("ContractJSON missing %s: %s", want, art.ContractJSON)
+		}
+	}
 }

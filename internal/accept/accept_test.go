@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/LanzerDevCorp/lucind-ai/internal/attest"
 	"github.com/LanzerDevCorp/lucind-ai/internal/candidatechange"
 	"github.com/LanzerDevCorp/lucind-ai/internal/lane"
 	"github.com/LanzerDevCorp/lucind-ai/internal/ledger"
@@ -359,31 +360,64 @@ func TestVerifierCleanupMarkerMismatchRejectsAndPreservesIsolation(t *testing.T)
 	}
 }
 
-func TestVerifierSkipsChecksForDeclaredNonApplyPhase(t *testing.T) {
-	f := newVerifierFixture(t, validResult("allowed.txt"), "#!/bin/sh\nexit 7\n", map[string]string{"allowed.txt": "candidate\n"}, []string{"allowed.txt"})
-	if err := f.ledger.UpdateLaneMetadata(context.Background(), ledger.LaneMetadata{RunID: "run-1", LaneID: "lane-1", SDDPhase: "propose"}, time.Now().UTC()); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := f.verifier.Verify(context.Background(), AcceptanceRequest{"run-1", "lane-1"}); err != nil {
-		t.Fatalf("Verify() with declared non-apply sdd_phase should skip the failing checks script: %v", err)
-	}
-}
-
-func TestVerifierRunsChecksForApplyEmptyOrMissingSDDPhase(t *testing.T) {
+func TestVerifierSkipsChecksForNonWritingLanes(t *testing.T) {
 	tests := []struct {
 		name     string
-		setPhase bool
-		phase    string
+		metadata ledger.LaneMetadata
 	}{
-		{name: "declared apply", setPhase: true, phase: "apply"},
-		{name: "explicit empty sdd_phase", setPhase: true, phase: ""},
-		{name: "missing lane metadata", setPhase: false},
+		{
+			name:     "lens lane role skips checks",
+			metadata: ledger.LaneMetadata{RunID: "run-1", LaneID: "lane-1", LaneRole: "lens"},
+		},
+		{
+			name:     "read-only true skips checks",
+			metadata: ledger.LaneMetadata{RunID: "run-1", LaneID: "lane-1", LaneRole: "apply", ReadOnly: true},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			f := newVerifierFixture(t, validResult("allowed.txt"), "#!/bin/sh\nexit 7\n", map[string]string{"allowed.txt": "candidate\n"}, []string{"allowed.txt"})
-			if tt.setPhase {
-				if err := f.ledger.UpdateLaneMetadata(context.Background(), ledger.LaneMetadata{RunID: "run-1", LaneID: "lane-1", SDDPhase: tt.phase}, time.Now().UTC()); err != nil {
+			if err := f.ledger.UpdateLaneMetadata(context.Background(), tt.metadata, time.Now().UTC()); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := f.verifier.Verify(context.Background(), AcceptanceRequest{"run-1", "lane-1"}); err != nil {
+				t.Fatalf("Verify() for %s should skip the failing checks script: %v", tt.name, err)
+			}
+		})
+	}
+}
+
+func TestVerifierRunsChecksForWritingOrUnspecifiedLanes(t *testing.T) {
+	tests := []struct {
+		name        string
+		setMetadata bool
+		metadata    ledger.LaneMetadata
+	}{
+		{
+			name:        "declared apply role",
+			setMetadata: true,
+			metadata:    ledger.LaneMetadata{RunID: "run-1", LaneID: "lane-1", LaneRole: "apply"},
+		},
+		{
+			name:        "explicit empty role",
+			setMetadata: true,
+			metadata:    ledger.LaneMetadata{RunID: "run-1", LaneID: "lane-1", LaneRole: ""},
+		},
+		{
+			name:        "missing lane metadata",
+			setMetadata: false,
+		},
+		{
+			name:        "legacy sdd_phase explore without role fails closed and runs checks",
+			setMetadata: true,
+			metadata:    ledger.LaneMetadata{RunID: "run-1", LaneID: "lane-1", SDDPhase: "explore"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := newVerifierFixture(t, validResult("allowed.txt"), "#!/bin/sh\nexit 7\n", map[string]string{"allowed.txt": "candidate\n"}, []string{"allowed.txt"})
+			if tt.setMetadata {
+				if err := f.ledger.UpdateLaneMetadata(context.Background(), tt.metadata, time.Now().UTC()); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -394,14 +428,325 @@ func TestVerifierRunsChecksForApplyEmptyOrMissingSDDPhase(t *testing.T) {
 	}
 }
 
-func TestVerifierNonApplyPhaseStillEnforcesScope(t *testing.T) {
+func TestVerifierNonWritingLaneStillEnforcesScope(t *testing.T) {
 	f := newVerifierFixture(t, validResult("allowed.txt"), "#!/bin/sh\necho checks-ok\n", map[string]string{"allowed.txt": "candidate\n"}, []string{"other.txt"})
-	if err := f.ledger.UpdateLaneMetadata(context.Background(), ledger.LaneMetadata{RunID: "run-1", LaneID: "lane-1", SDDPhase: "propose"}, time.Now().UTC()); err != nil {
+	if err := f.ledger.UpdateLaneMetadata(context.Background(), ledger.LaneMetadata{RunID: "run-1", LaneID: "lane-1", LaneRole: "lens"}, time.Now().UTC()); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := f.verifier.Verify(context.Background(), AcceptanceRequest{"run-1", "lane-1"}); err == nil {
-		t.Fatal("Verify() with a declared non-apply sdd_phase still accepted an out-of-scope change")
+		t.Fatal("Verify() with a non-writing lane role still accepted an out-of-scope change")
 	}
+}
+
+func TestVerifierAttestationReuse(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("valid attestation skips check and persists attested receipt", func(t *testing.T) {
+		f := newVerifierFixture(t, validResult("allowed.txt"), "", map[string]string{"allowed.txt": "candidate\n"}, []string{"allowed.txt"})
+		checkCalled := false
+		f.verifier.check = func(ctx context.Context, dir string) (bool, string, error) {
+			checkCalled = true
+			return true, "checks-ok", nil
+		}
+		f.verifier.hasAttestation = func(ctx context.Context, root, command, treeHash string) (bool, error) {
+			if command != "sh lucind-checks.sh" {
+				t.Errorf("expected command 'sh lucind-checks.sh', got %q", command)
+			}
+			if treeHash != f.candidateRow.CandidateTree {
+				t.Errorf("expected treeHash %q, got %q", f.candidateRow.CandidateTree, treeHash)
+			}
+			return true, nil
+		}
+
+		receipt, err := f.verifier.Verify(ctx, AcceptanceRequest{RunID: "run-1", LaneID: "lane-1"})
+		if err != nil {
+			t.Fatalf("Verify() error = %v", err)
+		}
+		if checkCalled {
+			t.Fatalf("expected v.check NOT to be called when valid attestation exists")
+		}
+		if receipt.ReceiptID == "" || receipt.Cleanup != "removed" {
+			t.Fatalf("unexpected receipt: %+v", receipt)
+		}
+		expectedChecksHash := hashValues("checks:v1", "attest:v1", "attested:"+f.candidateRow.CandidateTree)
+		if receipt.ChecksHash != expectedChecksHash {
+			t.Fatalf("expected ChecksHash %q, got %q", expectedChecksHash, receipt.ChecksHash)
+		}
+	})
+
+	t.Run("no attestation runs checks as fallback", func(t *testing.T) {
+		f := newVerifierFixture(t, validResult("allowed.txt"), "", map[string]string{"allowed.txt": "candidate\n"}, []string{"allowed.txt"})
+		checkCalled := false
+		f.verifier.check = func(ctx context.Context, dir string) (bool, string, error) {
+			checkCalled = true
+			return true, "checks-ok", nil
+		}
+		f.verifier.hasAttestation = func(ctx context.Context, root, command, treeHash string) (bool, error) {
+			return false, nil
+		}
+
+		receipt, err := f.verifier.Verify(ctx, AcceptanceRequest{RunID: "run-1", LaneID: "lane-1"})
+		if err != nil {
+			t.Fatalf("Verify() error = %v", err)
+		}
+		if !checkCalled {
+			t.Fatalf("expected v.check to be called when no attestation exists")
+		}
+		attestedChecksHash := hashValues("checks:v1", "attest:v1", "attested:"+f.candidateRow.CandidateTree)
+		if receipt.ChecksHash == attestedChecksHash {
+			t.Fatalf("ChecksHash must differ between attested and fallback check runs")
+		}
+	})
+
+	t.Run("attestation lookup error falls back to running checks", func(t *testing.T) {
+		f := newVerifierFixture(t, validResult("allowed.txt"), "", map[string]string{"allowed.txt": "candidate\n"}, []string{"allowed.txt"})
+		checkCalled := false
+		f.verifier.check = func(ctx context.Context, dir string) (bool, string, error) {
+			checkCalled = true
+			return true, "checks-ok", nil
+		}
+		f.verifier.hasAttestation = func(ctx context.Context, root, command, treeHash string) (bool, error) {
+			return false, errors.New("simulated lookup error")
+		}
+
+		_, err := f.verifier.Verify(ctx, AcceptanceRequest{RunID: "run-1", LaneID: "lane-1"})
+		if err != nil {
+			t.Fatalf("Verify() error = %v", err)
+		}
+		if !checkCalled {
+			t.Fatalf("expected v.check to be called on lookup error")
+		}
+	})
+
+	t.Run("attestation lookup error fails closed when fallback checks fail", func(t *testing.T) {
+		f := newVerifierFixture(t, validResult("allowed.txt"), "", map[string]string{"allowed.txt": "candidate\n"}, []string{"allowed.txt"})
+		checkCalled := false
+		f.verifier.check = func(ctx context.Context, dir string) (bool, string, error) {
+			checkCalled = true
+			return false, "tests failed", nil
+		}
+		f.verifier.hasAttestation = func(ctx context.Context, root, command, treeHash string) (bool, error) {
+			return false, errors.New("simulated lookup error")
+		}
+
+		_, err := f.verifier.Verify(ctx, AcceptanceRequest{RunID: "run-1", LaneID: "lane-1"})
+		if err == nil {
+			t.Fatalf("expected Verify() to fail when checks fail")
+		}
+		if !checkCalled {
+			t.Fatalf("expected v.check to be called")
+		}
+	})
+
+	t.Run("default wiring reads real attestation from state dir", func(t *testing.T) {
+		configDir := t.TempDir()
+		stateDir := t.TempDir()
+		t.Setenv("XDG_CONFIG_HOME", configDir)
+		t.Setenv("XDG_STATE_HOME", stateDir)
+
+		f := newVerifierFixture(t, validResult("allowed.txt"), "", map[string]string{"allowed.txt": "candidate\n"}, []string{"allowed.txt"})
+		checkCalled := false
+		f.verifier.check = func(ctx context.Context, dir string) (bool, string, error) {
+			checkCalled = true
+			return true, "checks-ok", nil
+		}
+
+		key, err := attest.LoadOrCreateKey("")
+		if err != nil {
+			t.Fatalf("LoadOrCreateKey failed: %v", err)
+		}
+		commonDir, err := attest.RepoCommonDir(ctx, f.root)
+		if err != nil {
+			t.Fatalf("RepoCommonDir failed: %v", err)
+		}
+		repoID := attest.RepoID(commonDir)
+		logDir, err := attest.ResolveStateDir(repoID)
+		if err != nil {
+			t.Fatalf("ResolveStateDir failed: %v", err)
+		}
+		entry := attest.Entry{
+			Version:    1,
+			RepoID:     repoID,
+			Command:    "sh lucind-checks.sh",
+			ExitCode:   0,
+			TreeHash:   f.candidateRow.CandidateTree,
+			StartedAt:  time.Now().Add(-1 * time.Second).Format(time.RFC3339Nano),
+			FinishedAt: time.Now().Format(time.RFC3339Nano),
+		}
+		entry.MAC = attest.ComputeMAC(entry, key)
+		if _, err := attest.WriteEntry(logDir, entry); err != nil {
+			t.Fatalf("WriteEntry failed: %v", err)
+		}
+
+		receipt, err := f.verifier.Verify(ctx, AcceptanceRequest{RunID: "run-1", LaneID: "lane-1"})
+		if err != nil {
+			t.Fatalf("Verify() error = %v", err)
+		}
+		if checkCalled {
+			t.Fatalf("expected v.check NOT to be called when real on-disk attestation exists")
+		}
+		expectedChecksHash := hashValues("checks:v1", "attest:v1", "attested:"+f.candidateRow.CandidateTree)
+		if receipt.ChecksHash != expectedChecksHash {
+			t.Fatalf("expected ChecksHash %q, got %q", expectedChecksHash, receipt.ChecksHash)
+		}
+	})
+}
+
+func TestAcceptDispatcherCommitObligation(t *testing.T) {
+	contract := `{"version":"packet-author/v1","mode":"write","commit_message":"feat: add allowed","verification":["sh lucind-checks.sh"],"write_paths":["allowed.txt"],"done_criteria":["implemented"],"hard_stops":["stop"],"result":{"path":".lucind/result.json","schema":".lucind/result.schema.json"}}`
+
+	// attestFn stands in for attest.HasValidAttestation; default: every declared command is attested.
+	attestFn := func(context.Context, string, string, string) (bool, error) { return true, nil }
+	setupCandidate := func(t *testing.T, envelopeCommit string, candidateCommitEqualBase bool, mode string) (*Verifier, AcceptanceRequest) {
+		t.Helper()
+		f := newVerifierFixture(t, "", "", map[string]string{"allowed.txt": "candidate\n"}, []string{"allowed.txt"})
+		candidateSHA := f.candidate
+		candidateTree := f.candidateRow.CandidateTree
+		changes := []candidatechange.Change{{Change: candidatechange.Created, Path: "allowed.txt"}}
+		filesJSON := `[{"path":"allowed.txt","change":"created"}]`
+		if candidateCommitEqualBase {
+			candidateSHA = f.base
+			candidateTree = f.candidateRow.BaseTree
+			changes = []candidatechange.Change{}
+			filesJSON = `[]`
+		}
+		if envelopeCommit == "@candidate" {
+			envelopeCommit = candidateSHA
+		}
+		resultJSON := `{"packet_id":"lane-disp","status":"done","summary":"done","hard_stops":[{"hard_stop":"stop","fired":false}],"files_changed":` + filesJSON + `,"done_criteria":[{"criterion":"implemented","met":true}],"commit":"` + envelopeCommit + `"}`
+		bindingJSON := `{"kind":"feature","feature":"feat-test","parent_ref":"refs/heads/feature-1","base_sha":"` + f.base + `","expected_parent_sha":"` + f.base + `"}`
+		e := ledger.AuthoringEvidence{
+			PacketDigest:     "packet-digest-disp",
+			AuthoringMode:    "versioned",
+			ContractVersion:  "packet-author/v1",
+			Contract:         json.RawMessage(contract),
+			Binding:          json.RawMessage(bindingJSON),
+			Mode:             mode,
+			CommitObligation: "dispatcher",
+			WritePaths:       []string{"allowed.txt"},
+			DoneCriteria:     []string{"implemented"},
+			HardStops:        []string{"stop"},
+			ResultPath:       ".lucind/result.json",
+			ResultSchema:     ".lucind/result.schema.json",
+			BaseCommit:       f.base,
+			BaseTree:         f.candidateRow.BaseTree,
+			CandidateCommit:  candidateSHA,
+			CandidateTree:    candidateTree,
+			Changes:          changes,
+			ResultHash:       hashValues("result:v1", resultJSON),
+		}
+		encoded, hash, err := ledger.FreezeAuthoringEvidence(e)
+		if err != nil {
+			t.Fatal(err)
+		}
+		row := ledger.LaneCandidate{
+			RunID:                    "run-1",
+			LaneID:                   "lane-disp",
+			PacketID:                 "lane-disp",
+			PacketDigest:             "packet-digest-disp",
+			PrimaryRoot:              f.root,
+			WorktreePath:             filepath.Join(f.root+"-worktrees", "lane-disp"),
+			BaseCommit:               f.base,
+			BaseTree:                 f.candidateRow.BaseTree,
+			CandidateCommit:          candidateSHA,
+			CandidateTree:            candidateTree,
+			AllowedPaths:             []string{"allowed.txt"},
+			ResultPath:               ".lucind/result.json",
+			ResultJSON:               resultJSON,
+			ResultHash:               hashValues("result:v1", resultJSON),
+			AuthoringEvidenceVersion: ledger.AuthoringEvidenceVersion,
+			AuthoringEvidenceJSON:    encoded,
+			AuthoringEvidenceHash:    hash,
+			RecordedAt:               time.Now().UTC(),
+		}
+		if err := f.ledger.RegisterLane(context.Background(), ledger.Lane{RunID: "run-1", LaneID: "lane-disp", PacketID: "lane-disp", Executor: "agy", RoutingCondition: "test", Status: lane.Running}); err != nil {
+			t.Fatal(err)
+		}
+		if err := f.ledger.UpdateLaneMetadata(context.Background(), ledger.LaneMetadata{RunID: "run-1", LaneID: "lane-disp", Feature: "feat-test", ParentRef: "refs/heads/feature-1", BaseSHA: f.base, ExpectedParentSHA: f.base}, time.Now().UTC()); err != nil {
+			t.Fatal(err)
+		}
+		if err := f.ledger.SetDoneCandidate(context.Background(), row); err != nil {
+			t.Fatal(err)
+		}
+		f.verifier.hasAttestation = attestFn
+		return f.verifier, AcceptanceRequest{"run-1", "lane-disp"}
+	}
+
+	t.Run("accepted when envelope commit is empty and candidate != base", func(t *testing.T) {
+		v, req := setupCandidate(t, "", false, "write")
+		_, err := v.Verify(context.Background(), req)
+		if err != nil {
+			t.Fatalf("expected verification to succeed, got %v", err)
+		}
+	})
+
+	t.Run("rejected when envelope commit equals candidate (worker must not commit)", func(t *testing.T) {
+		v, req := setupCandidate(t, "@candidate", false, "write")
+		_, err := v.Verify(context.Background(), req)
+		if err == nil || !strings.Contains(err.Error(), "write commit mismatch") {
+			t.Fatalf("expected write commit mismatch error, got %v", err)
+		}
+	})
+
+	t.Run("rejected when candidate == base", func(t *testing.T) {
+		v, req := setupCandidate(t, "", true, "write")
+		_, err := v.Verify(context.Background(), req)
+		if err == nil || !strings.Contains(err.Error(), "write commit mismatch") {
+			t.Fatalf("expected write commit mismatch error, got %v", err)
+		}
+	})
+
+	t.Run("rejected when envelope commit does not match candidate", func(t *testing.T) {
+		v, req := setupCandidate(t, "wrong-commit-sha", false, "write")
+		_, err := v.Verify(context.Background(), req)
+		if err == nil || !strings.Contains(err.Error(), "write commit mismatch") {
+			t.Fatalf("expected write commit mismatch error, got %v", err)
+		}
+	})
+
+	t.Run("rejected when a declared verification command has no attestation for the candidate tree", func(t *testing.T) {
+		var gotCmd, gotTree string
+		attestFn = func(_ context.Context, _ string, cmd, tree string) (bool, error) {
+			gotCmd, gotTree = cmd, tree
+			return false, nil
+		}
+		defer func() { attestFn = func(context.Context, string, string, string) (bool, error) { return true, nil } }()
+		v, req := setupCandidate(t, "", false, "write")
+		_, err := v.Verify(context.Background(), req)
+		if err == nil || !strings.Contains(err.Error(), "missing attestation") {
+			t.Fatalf("expected missing attestation error, got %v", err)
+		}
+		if gotCmd != "sh lucind-checks.sh" || gotTree == "" {
+			t.Fatalf("attestation looked up with cmd=%q tree=%q", gotCmd, gotTree)
+		}
+	})
+
+	t.Run("rejected when the attestation lookup errors (fail closed)", func(t *testing.T) {
+		attestFn = func(context.Context, string, string, string) (bool, error) { return false, errors.New("boom") }
+		defer func() { attestFn = func(context.Context, string, string, string) (bool, error) { return true, nil } }()
+		v, req := setupCandidate(t, "", false, "write")
+		if _, err := v.Verify(context.Background(), req); err == nil || !strings.Contains(err.Error(), "missing attestation") {
+			t.Fatalf("expected missing attestation error, got %v", err)
+		}
+	})
+
+	t.Run("rejected when the dispatcher contract declares no verification", func(t *testing.T) {
+		saved := contract
+		contract = strings.Replace(contract, `"verification":["sh lucind-checks.sh"],`, "", 1)
+		defer func() { contract = saved }()
+		v, req := setupCandidate(t, "", false, "write")
+		if _, err := v.Verify(context.Background(), req); err == nil || !strings.Contains(err.Error(), "missing attestation") {
+			t.Fatalf("expected missing attestation error, got %v", err)
+		}
+	})
+
+	t.Run("rejected when mode is not write", func(t *testing.T) {
+		v, req := setupCandidate(t, "", false, "read-only")
+		_, err := v.Verify(context.Background(), req)
+		if err == nil {
+			t.Fatal("expected error when mode is read-only for dispatcher commit obligation")
+		}
+	})
 }
 
 func bindingHashForCandidate(t *testing.T, f verifierFixture) string {

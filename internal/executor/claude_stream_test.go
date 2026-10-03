@@ -125,11 +125,11 @@ drained:
 		CostUSD     float64
 		ToolCalls   int64
 	}{
-		{0, 0, 0},                 // text
-		{0, 0, 1},                 // Tool started: Bash
-		{0, 0, 1},                 // Tool finished: Bash
-		{0, 0, 2},                 // Edit started: Write
-		{0, 0, 2},                 // Edit finished: Write
+		{0, 0, 0},                   // text
+		{0, 0, 1},                   // Tool started: Bash
+		{0, 0, 1},                   // Tool finished: Bash
+		{0, 0, 2},                   // Edit started: Write
+		{0, 0, 2},                   // Edit finished: Write
 		{wantTotalTokens, 0.421, 2}, // usage
 	}
 	if len(events) != len(wantTelemetry) {

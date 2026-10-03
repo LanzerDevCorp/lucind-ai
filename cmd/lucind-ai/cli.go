@@ -22,19 +22,18 @@ import (
 
 	"github.com/LanzerDevCorp/lucind-ai/internal/accept"
 	"github.com/LanzerDevCorp/lucind-ai/internal/dag"
+	"github.com/LanzerDevCorp/lucind-ai/internal/dispatchcheck"
 	"github.com/LanzerDevCorp/lucind-ai/internal/executor"
 	"github.com/LanzerDevCorp/lucind-ai/internal/feature"
 	"github.com/LanzerDevCorp/lucind-ai/internal/integrate"
 	"github.com/LanzerDevCorp/lucind-ai/internal/lane"
 	"github.com/LanzerDevCorp/lucind-ai/internal/ledger"
-	"github.com/LanzerDevCorp/lucind-ai/internal/lucindconfig"
 	"github.com/LanzerDevCorp/lucind-ai/internal/packet"
-	"github.com/LanzerDevCorp/lucind-ai/internal/phasespec"
 	"github.com/LanzerDevCorp/lucind-ai/internal/reconcile"
 	"github.com/LanzerDevCorp/lucind-ai/internal/result"
+	"github.com/LanzerDevCorp/lucind-ai/internal/router"
 	lucindrun "github.com/LanzerDevCorp/lucind-ai/internal/run"
-	"github.com/LanzerDevCorp/lucind-ai/internal/skillroots"
-	"github.com/LanzerDevCorp/lucind-ai/internal/skillset"
+	"github.com/LanzerDevCorp/lucind-ai/internal/usagelog"
 	"github.com/LanzerDevCorp/lucind-ai/internal/worktree"
 )
 
@@ -59,16 +58,14 @@ const attemptOwner = "lucind-ai run"
 // error, so a person driving the binary from a terminal always sees the one
 // invocation that works rather than a stack trace. --packet is repeatable:
 // each occurrence adds one more lane to the batch.
-const usage = "usage: lucind-ai run --packet <path> [--packet <path> ...] [--timeout <duration>] [--legacy-main --expected-parent-sha <sha>] [--min-quota <fraction>]\n       lucind-ai split --dag <path> --out <dir>\n       lucind-ai check [--out <path>]\n       lucind-ai accept --run <run-id> --lane <lane-id>\n       lucind-ai feature create --id <id> --parent <ref> --base-sha <sha> [--expected-parent-sha <sha>]\n       lucind-ai feature status [--id <id>]\n       lucind-ai feature recover --attempt <id>\n       lucind-ai feature renew --id <id> --owner <owner> --fence <fence> [--ttl <duration>]\n       lucind-ai feature lease release --id <id> [--owner <owner>] [--fence <fence>] [--pid <pid>] [--force]\n       lucind-ai feature lease status --id <id>\n       lucind-ai feature disable --id <id>\n       lucind-ai reconcile approve --request <id> --source <feature> --target <feature> [--actor <name>]\n       lucind-ai reconcile decline --request <id> [--actor <name>] [--reason <reason>]\n       lucind-ai reconcile cancel --request <id> [--actor <name>] [--reason <reason>]\n       lucind-ai reconcile renew --request <id> [--base-sha <sha>] [--source-sha <sha>] [--target-sha <sha>] [--wait-stable <duration>]\n       lucind-ai reconcile resolve --candidate <id> --sha <sha> [--actor <name>] [--wait-stable <duration>]\n       lucind-ai defect record --id <id> --feature <id> --signature <sig> [--evidence <ev>] [--disposition <disp>] [--run <run-id>] [--lane <lane-id>]\n       lucind-ai defect list --feature <id>\n       lucind-ai defect resolve --id <id>\n       lucind-ai defect decline --id <id>\n       lucind-ai defect defer --id <id>\n       lucind-ai worktree cleanup --lane <id> [--force]\n       lucind-ai integrate retry --run <run-id> [--lane <id> ...] [--timeout <duration>]\n       lucind-ai phase <name> [--change <name>] [--force]\n       lucind-ai --version"
+const usage = "usage: lucind-ai run --packet <path> [--packet <path> ...] [--timeout <duration>] [--legacy-main --expected-parent-sha <sha>] [--min-quota <fraction>] [--max-parallel <n>]\n       lucind-ai explore --objective <text> [--scope <path> ...] [--id <prefix>] [--timeout <duration>]\n       lucind-ai split --dag <path> --out <dir>\n       lucind-ai check [--out <path>]\n       lucind-ai accept --run <run-id> --lane <lane-id>\n       lucind-ai feature create --id <id> --parent <ref> --base-sha <sha> [--expected-parent-sha <sha>]\n       lucind-ai feature status [--id <id>]\n       lucind-ai feature recover --attempt <id>\n       lucind-ai feature renew --id <id> --owner <owner> --fence <fence> [--ttl <duration>]\n       lucind-ai feature lease release --id <id> [--owner <owner>] [--fence <fence>] [--pid <pid>] [--force]\n       lucind-ai feature lease status --id <id>\n       lucind-ai feature disable --id <id>\n       lucind-ai reconcile approve --request <id> --source <feature> --target <feature> [--actor <name>]\n       lucind-ai reconcile decline --request <id> [--actor <name>] [--reason <reason>]\n       lucind-ai reconcile cancel --request <id> [--actor <name>] [--reason <reason>]\n       lucind-ai reconcile renew --request <id> [--base-sha <sha>] [--source-sha <sha>] [--target-sha <sha>] [--wait-stable <duration>]\n       lucind-ai reconcile resolve --candidate <id> --sha <sha> [--actor <name>] [--wait-stable <duration>]\n       lucind-ai defect record --id <id> --feature <id> --signature <sig> [--evidence <ev>] [--disposition <disp>] [--run <run-id>] [--lane <lane-id>]\n       lucind-ai defect list --feature <id>\n       lucind-ai defect resolve --id <id>\n       lucind-ai defect decline --id <id>\n       lucind-ai defect defer --id <id>\n       lucind-ai worktree cleanup --lane <id> [--force]\n       lucind-ai integrate retry --run <run-id> [--lane <id> ...] [--timeout <duration>]\n       lucind-ai attest run -- <command> [args...]\n       lucind-ai attest verify --command \"<exact command string>\"\n       lucind-ai usage report [--since <duration or YYYY-MM-DD>] [--file <path>] [--json]\n       lucind-ai rules init|generate [--root <dir>] [--check]\n       lucind-ai hook stop --state-dir <dir> --result <path> [--max-continues <n>]\n       lucind-ai --version"
 
 // depsFactory constructs run.Deps for runDispatch. In production it is
 // productionDeps; tests may override it to inject test doubles or observe dependency calls.
 var depsFactory = productionDeps
 
-// defaultStatusQuerier constructs a StatusQuerier for phaseDispatch.
-var defaultStatusQuerier = func(workDir string) phasespec.StatusQuerier {
-	return &phasespec.CLIStatusQuerier{WorkDir: workDir}
-}
+// executeBatch runs the batch of packets through ExecuteBatch. Tests may override it to observe batch arguments.
+var executeBatch = lucindrun.ExecuteBatch
 
 // defaultMinQuota is --min-quota's default: the minimum fraction of the
 // active agy-pool account's remaining 5-hour Gemini quota required before a
@@ -91,9 +88,10 @@ var ensureAgyQuota = executor.AgyQuota{}.Ensure
 // how to dispatch. Unlisted values are a routing error, never a silent
 // fallback to agy — see internal/run's Deps.LookupExecutor field.
 var supportedExecutors = map[string]func() executor.Executor{
-	"agy":          func() executor.Executor { return executor.Agy{} },
+	"agy":          agyExecutor,
 	"claude":       func() executor.Executor { return executor.Claude{} },
 	"cursor-agent": func() executor.Executor { return executor.CursorAgent{} },
+	"herdr-agy":    herdrAgyExecutor,
 	"opencode":     func() executor.Executor { return executor.Opencode{} },
 }
 
@@ -151,6 +149,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	switch args[0] {
 	case "run":
 		return runDispatch(ctx, args[1:], stdout, stderr)
+	case "explore":
+		return exploreDispatch(ctx, args[1:], stdout, stderr)
 	case "split":
 		return runSplit(ctx, args[1:], stdout, stderr)
 	case "check":
@@ -167,8 +167,14 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return worktreeDispatch(ctx, args[1:], stdout, stderr)
 	case "integrate":
 		return integrateDispatch(ctx, args[1:], stdout, stderr)
-	case "phase":
-		return phaseDispatch(ctx, args[1:], stdout, stderr)
+	case "attest":
+		return attestDispatch(ctx, args[1:], stdout, stderr)
+	case "usage":
+		return usageDispatch(ctx, args[1:], stdout, stderr)
+	case "rules":
+		return rulesDispatch(ctx, args[1:], stdout, stderr)
+	case "hook":
+		return hookDispatch(ctx, args[1:], os.Stdin, stdout, stderr)
 	case "--version", "-v":
 		fmt.Fprintf(stdout, "lucind-ai %s (%s, %s/%s)\n", version, runtime.Version(), runtime.GOOS, runtime.GOARCH)
 		return 0
@@ -195,10 +201,16 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 	legacyMain := fs.Bool("legacy-main", false, "declare legacy mode (dispatches against main)")
 	expectedParentSHA := fs.String("expected-parent-sha", "", "expected parent commit SHA for legacy mode")
 	minQuota := fs.Float64("min-quota", defaultMinQuota, "minimum fraction of the active agy-pool account's 5h gemini quota required before dispatching an agy-executed batch; below it, auto-rotates to the pooled account with the most quota (0 disables the check)")
+	maxParallel := fs.Int("max-parallel", lucindrun.DefaultMaxParallelLanes, "maximum number of lanes running concurrently (default 3)")
 
 	if err := fs.Parse(args); err != nil {
 		// flag.ContinueOnError already invoked fs.Usage() on a parse
 		// error; nothing more to print here.
+		return 1
+	}
+
+	if *maxParallel < 1 {
+		fmt.Fprintf(stderr, "lucind-ai: --max-parallel must be at least 1 (got %d)\n", *maxParallel)
 		return 1
 	}
 
@@ -208,31 +220,52 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 		return 1
 	}
 
-	ps := make([]packet.Packet, 0, len(packetFlags))
-	for _, path := range packetFlags {
+	_, exitCode := executePacketBatch(ctx, dispatchBatchConfig{
+		packetPaths:       packetFlags,
+		legacyMain:        *legacyMain,
+		expectedParentSHA: *expectedParentSHA,
+		minQuota:          *minQuota,
+		maxParallel:       *maxParallel,
+		timeout:           *timeout,
+	}, stdout, stderr)
+	return exitCode
+}
+
+type dispatchBatchConfig struct {
+	packetPaths       []string
+	legacyMain        bool
+	expectedParentSHA string
+	minQuota          float64
+	maxParallel       int
+	timeout           time.Duration
+}
+
+func executePacketBatch(ctx context.Context, cfg dispatchBatchConfig, stdout, stderr io.Writer) (lucindrun.BatchReport, int) {
+	ps := make([]packet.Packet, 0, len(cfg.packetPaths))
+	for _, path := range cfg.packetPaths {
 		p, err := loadPacket(path)
 		if err != nil {
 			fmt.Fprintf(stderr, "lucind-ai: %v\n", err)
-			return 1
+			return lucindrun.BatchReport{}, 1
 		}
 		ps = append(ps, p)
 	}
 
-	if *legacyMain && *expectedParentSHA == "" {
+	if cfg.legacyMain && cfg.expectedParentSHA == "" {
 		for i, p := range ps {
 			if p.ExpectedParentSHA == "" {
-				fmt.Fprintf(stderr, "lucind-ai: packet %q in legacy mode requires --expected-parent-sha or frontmatter expected_parent_sha\n", packetFlags[i])
-				return 1
+				fmt.Fprintf(stderr, "lucind-ai: packet %q in legacy mode requires --expected-parent-sha or frontmatter expected_parent_sha\n", cfg.packetPaths[i])
+				return lucindrun.BatchReport{}, 1
 			}
 		}
 	}
 
 	for i := range ps {
-		if *legacyMain {
+		if cfg.legacyMain {
 			ps[i].LegacyMain = true
 		}
-		if *expectedParentSHA != "" && ps[i].ExpectedParentSHA == "" {
-			ps[i].ExpectedParentSHA = *expectedParentSHA
+		if cfg.expectedParentSHA != "" && ps[i].ExpectedParentSHA == "" {
+			ps[i].ExpectedParentSHA = cfg.expectedParentSHA
 		}
 	}
 
@@ -245,8 +278,19 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 				names = append(names, name)
 			}
 			sort.Strings(names)
-			fmt.Fprintf(stderr, "lucind-ai: unsupported executor %q in packet %q (supported: %s)\n", p.Executor, packetFlags[i], strings.Join(names, ", "))
-			return 1
+			fmt.Fprintf(stderr, "lucind-ai: unsupported executor %q in packet %q (supported: %s)\n", p.Executor, cfg.packetPaths[i], strings.Join(names, ", "))
+			return lucindrun.BatchReport{}, 1
+		}
+		for _, rung := range p.Escalation {
+			if _, ok := supportedExecutors[rung.Executor]; !ok {
+				names := make([]string, 0, len(supportedExecutors))
+				for name := range supportedExecutors {
+					names = append(names, name)
+				}
+				sort.Strings(names)
+				fmt.Fprintf(stderr, "lucind-ai: unsupported executor %q in packet %q (supported: %s)\n", rung.Executor, cfg.packetPaths[i], strings.Join(names, ", "))
+				return lucindrun.BatchReport{}, 1
+			}
 		}
 	}
 
@@ -261,8 +305,8 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 			continue
 		}
 		if p.Executor != "opencode" {
-			fmt.Fprintf(stderr, "lucind-ai: packet %q names agent %q, but agent is only meaningful for executor \"opencode\" (got executor %q)\n", packetFlags[i], p.Agent, p.Executor)
-			return 1
+			fmt.Fprintf(stderr, "lucind-ai: packet %q names agent %q, but agent is only meaningful for executor \"opencode\" (got executor %q)\n", cfg.packetPaths[i], p.Agent, p.Executor)
+			return lucindrun.BatchReport{}, 1
 		}
 	}
 
@@ -274,21 +318,37 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 	// billing -- as if it belonged to that executor. An omitted model is
 	// always fine: the executor supplies its own DefaultModel.
 	for i, p := range ps {
-		if p.Model == "" {
-			continue
-		}
-		factory := supportedExecutors[p.Executor] // already validated to exist above
-		known := factory().KnownModels()
-		ok := false
-		for _, m := range known {
-			if m == p.Model {
-				ok = true
-				break
+		if p.Model != "" {
+			factory := supportedExecutors[p.Executor] // already validated to exist above
+			known := factory().KnownModels()
+			ok := false
+			for _, m := range known {
+				if m == p.Model {
+					ok = true
+					break
+				}
+			}
+			if !ok {
+				fmt.Fprintf(stderr, "lucind-ai: packet %q names model %q, not a known model for executor %q (known: %s)\n", cfg.packetPaths[i], p.Model, p.Executor, strings.Join(known, ", "))
+				return lucindrun.BatchReport{}, 1
 			}
 		}
-		if !ok {
-			fmt.Fprintf(stderr, "lucind-ai: packet %q names model %q, not a known model for executor %q (known: %s)\n", packetFlags[i], p.Model, p.Executor, strings.Join(known, ", "))
-			return 1
+		for _, rung := range p.Escalation {
+			if rung.Model != "" {
+				factory := supportedExecutors[rung.Executor]
+				known := factory().KnownModels()
+				ok := false
+				for _, m := range known {
+					if m == rung.Model {
+						ok = true
+						break
+					}
+				}
+				if !ok {
+					fmt.Fprintf(stderr, "lucind-ai: packet %q names model %q, not a known model for executor %q (known: %s)\n", cfg.packetPaths[i], rung.Model, rung.Executor, strings.Join(known, ", "))
+					return lucindrun.BatchReport{}, 1
+				}
+			}
 		}
 	}
 
@@ -296,13 +356,17 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 	// worktree.Create so Create is not the first overlap-failure side effect.
 	if err := packet.DisjointAllowedPaths(ps); err != nil {
 		fmt.Fprintf(stderr, "lucind-ai: %v\n", err)
-		return 1
+		return lucindrun.BatchReport{}, 1
 	}
 
 	primaryRoot, err := resolvePrimaryRoot(ctx)
 	if err != nil {
 		fmt.Fprintf(stderr, "lucind-ai: resolve primary repository root: %v\n", err)
-		return 1
+		return lucindrun.BatchReport{}, 1
+	}
+
+	if err := validateDispatchThresholds(ctx, primaryRoot, ps, stderr); err != nil {
+		return lucindrun.BatchReport{}, 1
 	}
 
 	inputs := make([]dispatchAuthoringInput, len(ps))
@@ -312,7 +376,7 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 	ps, err = admitDispatchBatch(ctx, primaryRoot, inputs)
 	if err != nil {
 		printAdmissionError(stderr, err)
-		return 1
+		return lucindrun.BatchReport{}, 1
 	}
 
 	// One batch produces one combined tree and promotes it once. This target
@@ -321,7 +385,7 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 	attemptTarget, featureTargeted, err := lucindrun.FeatureTarget(ps)
 	if err != nil {
 		fmt.Fprintf(stderr, "lucind-ai: %v\n", err)
-		return 1
+		return lucindrun.BatchReport{}, 1
 	}
 
 	// Wave-level agy quota gate: one runDispatch invocation is one wave (the
@@ -333,7 +397,7 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 	// wave leaves zero side effects. Skipped for a batch with no
 	// agy-executed packet: the pooled account's quota has nothing to do with
 	// another executor's billing.
-	if *minQuota > 0 {
+	if cfg.minQuota > 0 {
 		usesAgy := false
 		for _, p := range ps {
 			if p.Executor == "agy" {
@@ -342,9 +406,9 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 			}
 		}
 		if usesAgy {
-			if err := ensureAgyQuota(ctx, *minQuota); err != nil {
+			if err := ensureAgyQuota(ctx, cfg.minQuota); err != nil {
 				fmt.Fprintf(stderr, "lucind-ai: %v\n", err)
-				return 1
+				return lucindrun.BatchReport{}, 1
 			}
 		}
 	}
@@ -356,12 +420,12 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 	toplevel, err := gitShowToplevel(ctx)
 	if err == nil && worktree.IsLinkedWorktree(toplevel) {
 		fmt.Fprintf(stderr, "lucind-ai: refusing to run from inside a linked worktree (%s); run from the primary repository instead\n", toplevel)
-		return 1
+		return lucindrun.BatchReport{}, 1
 	}
 
 	if err := preflightOrchestratorContract(primaryRoot); err != nil {
 		fmt.Fprintf(stderr, "lucind-ai: %v\n", err)
-		return 1
+		return lucindrun.BatchReport{}, 1
 	}
 
 	runID := uuid.NewString()
@@ -370,11 +434,12 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 	ledg, err := ledger.Open(ctx, primaryRoot)
 	if err != nil {
 		fmt.Fprintf(stderr, "lucind-ai: open ledger: %v\n", err)
-		return 1
+		return lucindrun.BatchReport{}, 1
 	}
 	defer ledg.Close()
 
-	deps := depsFactory(runID, primaryRoot, ledg, *timeout)
+	deps := depsFactory(runID, primaryRoot, ledg, cfg.timeout)
+	deps.MaxParallelLanes = cfg.maxParallel
 
 	// Register this run before anything else touches the ledger: every lane
 	// and event ExecuteBatch is about to write carries this runID, and the
@@ -404,7 +469,7 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 		PID:       os.Getpid(),
 	}); err != nil {
 		fmt.Fprintf(stderr, "lucind-ai: register run: %v\n", err)
-		return 1
+		return lucindrun.BatchReport{}, 1
 	}
 
 	// finalStatus is recorded via the deferred UpdateRunStatus below no
@@ -430,13 +495,13 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 	// ctx itself carries no deadline here: run.ExecuteBatch derives each
 	// lane's own deadline independently from deps.LaneTimeout, so a slow
 	// lane never consumes another lane's clock.
-	batch, err := lucindrun.ExecuteBatch(ctx, deps, ps)
+	batch, err := executeBatch(ctx, deps, ps)
 	if err != nil {
 		// internal/run.ExecuteBatch's own errors already start with
 		// "run: ", so no second "run: " prefix is added here -- otherwise
 		// a user sees a doubled "lucind-ai: run: run: ..." on stderr.
 		fmt.Fprintf(stderr, "lucind-ai: %v\n", err)
-		return 1
+		return batch, 1
 	}
 
 	// A feature-targeted batch promotes by compare-and-swap on its named
@@ -458,7 +523,7 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 	}
 	if err != nil {
 		fmt.Fprintf(stderr, "lucind-ai: %v\n", err)
-		return 1
+		return batch, 1
 	}
 
 	integrated := make(map[string]bool, len(integrateReport.Integrated))
@@ -495,11 +560,11 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 	// deferred UpdateRunStatus above.
 	for _, r := range batch.Lanes {
 		if r.Status != lane.Done || reverted[r.LaneID] {
-			return 1
+			return batch, 1
 		}
 	}
 	finalStatus = string(lane.Done)
-	return 0
+	return batch, 0
 }
 
 // runSplit implements the "split" subcommand: parses an apply-dag.yaml sidecar,
@@ -723,6 +788,9 @@ func renderAcceptanceReceipt(w io.Writer, receipt accept.AcceptanceReceipt) {
 func printReport(w io.Writer, r lucindrun.Report) {
 	fmt.Fprintf(w, "lane:      %s\n", r.LaneID)
 	fmt.Fprintf(w, "status:    %s\n", r.Status)
+	if r.Attempts > 1 {
+		fmt.Fprintf(w, "attempts:  %d\n", r.Attempts)
+	}
 	fmt.Fprintf(w, "worktree:  %s\n", r.Worktree)
 	if r.Envelope != nil {
 		fmt.Fprintf(w, "summary:   %s\n", r.Envelope.Summary)
@@ -828,6 +896,115 @@ func resolvePrimaryRoot(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("git rev-parse --git-common-dir returned a non-absolute path: %q", primaryRoot)
 	}
 	return primaryRoot, nil
+}
+
+// gitPathExists reports whether a repository-relative path exists at base in repoRoot.
+func gitPathExists(ctx context.Context, repoRoot, base, relPath string) (bool, error) {
+	cmd := exec.CommandContext(ctx, "git", "-C", repoRoot, "cat-file", "-e", fmt.Sprintf("%s:%s", base, relPath))
+	// The "does not exist" outcome is recognized from git's message, so pin the locale.
+	cmd.Env = append(os.Environ(), "LC_ALL=C")
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		errStr := stderr.String()
+		if strings.Contains(errStr, "does not exist") || strings.Contains(errStr, "not in ") {
+			return false, nil
+		}
+		return false, fmt.Errorf("git cat-file: %w: %s", err, strings.TrimSpace(errStr))
+	}
+	return true, nil
+}
+
+// validateDispatchThresholds validates declared routes against computable signals
+// for each packet in ps before dispatch.
+func validateDispatchThresholds(ctx context.Context, primaryRoot string, ps []packet.Packet, stderr io.Writer) error {
+	for i := range ps {
+		p := ps[i]
+		base := p.BaseSHA
+		if base == "" {
+			base = "HEAD"
+		}
+		exists := func(relPath string) (bool, error) {
+			return gitPathExists(ctx, primaryRoot, base, relPath)
+		}
+		verdict := dispatchcheck.Check(p, exists)
+		flagPath := p.Path
+		switch verdict.Action {
+		case dispatchcheck.ActionReject:
+			fmt.Fprintf(stderr, "lucind-ai: packet %s rejected by dispatch-threshold validator: %s\n", flagPath, strings.Join(verdict.Reasons, ", "))
+			return errors.New("dispatch-threshold validator rejected packet")
+		case dispatchcheck.ActionUpgrade:
+			ps[i].Route = verdict.Route
+			fmt.Fprintf(stderr, "lucind-ai: packet %s route upgraded inline -> worker: %s\n", flagPath, strings.Join(verdict.Reasons, ", "))
+		case dispatchcheck.ActionAccept:
+			// nothing printed
+		}
+
+		// Opt-in shadow router check: runs only when both env vars are set
+		apiKey := os.Getenv("LUCIND_JEV_API_KEY")
+		if apiKey == "" {
+			apiKey = os.Getenv("JEV_API_KEY")
+		}
+		shadowOn := os.Getenv("LUCIND_JEV_SHADOW") == "on"
+		if apiKey != "" && shadowOn {
+			func() {
+				defer func() {
+					_ = recover()
+				}()
+				baseURL := os.Getenv("LUCIND_JEV_URL")
+				jev, err := router.NewJev(baseURL, apiKey)
+				if err != nil {
+					// The error never contains the API key; tell the user why shadow mode is off.
+					fmt.Fprintf(stderr, "lucind-ai: jev shadow router disabled: %v\n", err)
+					return
+				}
+
+				chkSig := dispatchcheck.ComputeSignals(p, exists)
+				sig := router.Signals{
+					AllowedPathCount: chkSig.AllowedPathCount,
+					NewFile:          chkSig.NewFile,
+					RiskTierLevel:    router.SignalsFromRiskTier(chkSig.Tier),
+					ReadOnly:         p.ReadOnly,
+					OpenDesign:       p.OpenDesign,
+					EstimatedLookups: p.EstimatedLookups,
+				}
+				if p.Understood != nil {
+					sig.UnderstoodDeclared = true
+					sig.Understood = *p.Understood
+				}
+
+				shadow := router.Shadow{
+					Primary:   router.Deterministic{},
+					Candidate: jev,
+					Log: func(ev router.Event) {
+						if os.Getenv("LUCIND_USAGE_LOG") == "off" {
+							return
+						}
+						usagePath, err := usagelog.DefaultPath()
+						if err != nil || usagePath == "" {
+							return
+						}
+						_ = usagelog.AppendRouterEvent(usagePath, usagelog.RouterEvent{
+							TS:             ev.TS,
+							Kind:           ev.Kind,
+							PrimaryRoute:   ev.PrimaryRoute,
+							CandidateRoute: ev.CandidateRoute,
+							Confidence:     ev.Confidence,
+							ErrorKind:      ev.ErrorKind,
+							Signals: &usagelog.RouterSignals{
+								AllowedPathCount: ev.Signals.AllowedPathCount,
+								NewFile:          ev.Signals.NewFile,
+								RiskTierLevel:    ev.Signals.RiskTierLevel,
+								ReadOnly:         ev.Signals.ReadOnly,
+							},
+						})
+					},
+				}
+				_, _ = shadow.Route(ctx, sig)
+			}()
+		}
+	}
+	return nil
 }
 
 // orchestratorSkillTrees returns the canonical Claude skill tree and its
@@ -970,11 +1147,13 @@ func productionDeps(runID, primaryRoot string, ledg *ledger.Ledger, timeout time
 		WorktreeFS:               os.DirFS,
 		Now:                      time.Now,
 		LaneTimeout:              timeout,
+		MaxParallelLanes:         lucindrun.DefaultMaxParallelLanes,
 		ResolveCandidateIdentity: lucindrun.ResolveCandidateIdentityFromGit,
 		HasUniqueLaneCommits: func(ctx context.Context, worktreePath, baseSHA string) (bool, error) {
 			return worktree.HasUniqueCommits(ctx, worktreePath, baseSHA)
 		},
 		PorcelainEmpty: worktree.PorcelainEmpty,
+		PreCommitGate:  judgeGateFromEnv(),
 		CombineTree:    integrate.Combine,
 		RunChecks:      integrate.Check,
 		PromoteTarget:  integrate.Promote,
@@ -2511,211 +2690,4 @@ func runDefectTransition(ctx context.Context, verb string, args []string, stdout
 
 	fmt.Fprintf(stdout, "%s defect %s\n", transition.Confirmation, *id)
 	return 0
-}
-
-// phaseDispatch implements the "phase" subcommand: runs the phase specialist for the named SDD phase.
-func phaseDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) int {
-	if len(args) == 0 {
-		fmt.Fprintln(stderr, "lucind-ai: phase name is required")
-		fmt.Fprintln(stderr, "usage: lucind-ai phase <name> [--change <name>] [--force]")
-		return 1
-	}
-
-	fs := flag.NewFlagSet("phase", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	fs.Usage = func() {
-		fmt.Fprintln(stderr, "usage: lucind-ai phase <name> [--change <name>] [--force] [--packet <path>]")
-		fs.PrintDefaults()
-	}
-	change := fs.String("change", "", "target change name (default: active change from sdd-status)")
-	force := fs.Bool("force", false, "force synthesis even if phase is complete")
-	packetFlag := fs.String("packet", "", "path to synthesis packet (default: generated synthesis packet or .lucind/packets/<phase>-<change>-synthesis.md)")
-
-	var nonFlags []string
-	for i := 0; i < len(args); i++ {
-		if strings.HasPrefix(args[i], "-") {
-			if err := fs.Parse(args[i:]); err != nil {
-				return 1
-			}
-			nonFlags = append(nonFlags, fs.Args()...)
-			break
-		} else {
-			nonFlags = append(nonFlags, args[i])
-		}
-	}
-
-	if len(nonFlags) == 0 {
-		fmt.Fprintln(stderr, "lucind-ai: phase name is required")
-		fs.Usage()
-		return 1
-	}
-	phaseName := nonFlags[0]
-
-	primaryRoot, err := resolvePrimaryRoot(ctx)
-	if err != nil {
-		fmt.Fprintf(stderr, "lucind-ai: resolve primary repository root: %v\n", err)
-		return 1
-	}
-
-	toplevel, err := gitShowToplevel(ctx)
-	if err == nil && worktree.IsLinkedWorktree(toplevel) {
-		fmt.Fprintf(stderr, "lucind-ai: refusing to run from inside a linked worktree (%s); run from the primary repository instead\n", toplevel)
-		return 1
-	}
-
-	querier := defaultStatusQuerier(primaryRoot)
-	adapter := phasespec.NewAdapter(querier, primaryRoot)
-
-	adapter.Dispatcher = func(ctx context.Context, changeName, phase string) error {
-		normPhase := strings.ToLower(strings.TrimSpace(phase))
-		packetPath := strings.TrimSpace(*packetFlag)
-		if packetPath == "" {
-			cand1 := filepath.Join(primaryRoot, ".lucind", "packets", fmt.Sprintf("%s-%s-synthesis.md", normPhase, changeName))
-			cand2 := filepath.Join(primaryRoot, "openspec", "changes", changeName, "packets", fmt.Sprintf("%s-%s-synthesis.md", normPhase, changeName))
-			cand3 := filepath.Join(primaryRoot, "openspec", "changes", changeName, fmt.Sprintf("%s-synthesis.md", normPhase))
-			// Existing synthesis packets already on disk are reused as-is without retroactively gaining ## Required skills (known cosmetic gap on stale local caches; env-var delivery still applies).
-			if _, err := os.Stat(cand1); err == nil {
-				packetPath = cand1
-			} else if _, err := os.Stat(cand2); err == nil {
-				packetPath = cand2
-			} else if _, err := os.Stat(cand3); err == nil {
-				packetPath = cand3
-			} else {
-				headSHA, _ := resolveAdmissionRefSHA(ctx, primaryRoot, "HEAD")
-				canonicalFilename, err := phasespec.CanonicalArtifactFilename(normPhase)
-				if err != nil {
-					return err
-				}
-				skillPaths, err := resolveSynthesisSkillPaths(primaryRoot, normPhase)
-				if err != nil {
-					return fmt.Errorf("resolve synthesis skills: %w", err)
-				}
-				var skillsSection strings.Builder
-				if len(skillPaths) > 0 {
-					skillsSection.WriteString("\n## Required skills\n")
-					for _, sp := range skillPaths {
-						fmt.Fprintf(&skillsSection, "- %s\n", sp)
-					}
-				}
-				packetDir := filepath.Join(primaryRoot, ".lucind", "packets")
-				if err := os.MkdirAll(packetDir, 0755); err != nil {
-					return fmt.Errorf("create packets dir: %w", err)
-				}
-				packetPath = cand1
-				packetContent := fmt.Sprintf(`---
-id: %s-%s-synthesis
-executor: agy
-model: gemini-3.7-flash-high
-routed_by: synthesis
-lane_role: synthesis
-sdd_phase: %s
-legacy_main: true
-expected_parent_sha: %s
-allowed_paths: ["openspec/changes/%s/%s", "openspec/changes/%s/%s-synthesis-notes.md"]
----
-
-# Packet %s-%s-synthesis
-
-## Goal
-Synthesize canonical %s artifact for change %s.
-
-## Preconditions
-- All required lenses are merged.
-
-## Done criteria
-- [ ] Canonical artifact openspec/changes/%s/%s is written and committed.
-
-## Hard stops
-- Required lenses are missing or unmerged.
-%s
-## Return
-Write the result envelope to .lucind/result.json in this worktree.
-Validate it against .lucind/result.schema.json before writing.
-After you commit, report success.
-`, normPhase, changeName, normPhase, headSHA, changeName, canonicalFilename, changeName, normPhase,
-					normPhase, changeName, normPhase, changeName, changeName, canonicalFilename,
-					skillsSection.String())
-				if err := os.WriteFile(packetPath, []byte(packetContent), 0644); err != nil {
-					return fmt.Errorf("write synthesis packet: %w", err)
-				}
-			}
-		}
-
-		code := runDispatch(ctx, []string{"--packet", packetPath}, stdout, stderr)
-		if code != 0 {
-			return fmt.Errorf("dispatch exit code %d", code)
-		}
-		return nil
-	}
-
-	changeName := strings.TrimSpace(*change)
-	if changeName == "" {
-		raw, err := querier.QueryStatus(ctx, "")
-		if err != nil {
-			fmt.Fprintf(stderr, "lucind-ai: query sdd status: %v\n", err)
-			return 1
-		}
-		st, err := phasespec.ParseStatus(raw)
-		if err != nil {
-			fmt.Fprintf(stderr, "lucind-ai: parse sdd status: %v\n", err)
-			return 1
-		}
-		changeName = st.ChangeName
-	}
-
-	res, err := adapter.Synthesize(ctx, phasespec.SynthesizeRequest{
-		ChangeName: changeName,
-		Phase:      phaseName,
-		Force:      *force,
-	})
-	if err != nil {
-		fmt.Fprintf(stderr, "lucind-ai: phase synthesis: %v\n", err)
-		return 1
-	}
-
-	if res.Written {
-		fmt.Fprintf(stdout, "phase %s synthesized: %s\n", res.Phase, res.ArtifactPath)
-	} else if res.Dispatched {
-		fmt.Fprintf(stdout, "phase %s synthesis dispatched: %s\n", res.Phase, res.ArtifactPath)
-	} else {
-		fmt.Fprintf(stdout, "phase %s is already complete: %s\n", res.Phase, res.ArtifactPath)
-	}
-	return 0
-}
-
-func resolveSynthesisSkillPaths(primaryRoot, phase string) ([]string, error) {
-	cfg, err := lucindconfig.Load(primaryRoot)
-	if err != nil {
-		return nil, fmt.Errorf("load repository config: %w", err)
-	}
-
-	budget := skillset.DefaultSkillBudget
-	if cfg.SkillBudget != nil {
-		budget = *cfg.SkillBudget
-	}
-
-	var resolver *skillroots.Resolver
-	rootsCfg, err := skillroots.LoadConfig(filepath.Join(primaryRoot, skillroots.DefaultConfigRelPath))
-	if err != nil {
-		if errors.Is(err, skillroots.ErrMissingConfig) {
-			resolver = skillroots.NewResolver(nil)
-		} else {
-			return nil, fmt.Errorf("load skill roots config: %w", err)
-		}
-	} else {
-		resolver = skillroots.NewResolver(rootsCfg.Roots)
-	}
-
-	stackSkills := cfg.StackSkills("synthesis")
-	derived, err := skillset.Derive(phase, "synthesis", stackSkills, nil)
-	if err != nil {
-		return nil, fmt.Errorf("derive synthesis skills: %w", err)
-	}
-
-	if len(derived) > budget {
-		return nil, fmt.Errorf("lucind-ai: synthesis required skills count %d exceeds budget %d (skills: %s)",
-			len(derived), budget, strings.Join(derived, ", "))
-	}
-
-	return resolver.ResolvePaths(derived)
 }

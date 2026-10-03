@@ -99,6 +99,15 @@ type Finding struct {
 	Affects  string `json:"affects,omitempty"`
 }
 
+// Interaction is structured context for a human or orchestrator when status is
+// "interaction_required".
+type Interaction struct {
+	Question        string   `json:"question"`
+	Reason          string   `json:"reason"`
+	UnblockResponse string   `json:"unblock_response"`
+	Options         []string `json:"options,omitempty"`
+}
+
 // Envelope mirrors result.schema.json.
 type Envelope struct {
 	PacketID        string           `json:"packet_id"`
@@ -114,18 +123,21 @@ type Envelope struct {
 	Findings        []Finding        `json:"findings,omitempty"`
 	SkillsLoaded    []string         `json:"skills_loaded,omitempty"`
 	SessionID       string           `json:"session_id,omitempty"`
+	Interaction     *Interaction     `json:"interaction,omitempty"`
 }
 
 // LaneStatus maps the envelope's status field to the project's lane
-// vocabulary. The schema's status enum (done, blocked, deviated, failed)
-// maps 1:1 onto the four terminal lane.Status values; Read having already
-// validated the envelope against the schema is what makes this mapping
-// total in practice.
+// vocabulary. The schema's status enum (done, blocked, deviated, failed,
+// interaction_required) maps onto the four terminal lane.Status values;
+// interaction_required maps to lane.Blocked because a terminal lane status
+// stays blocked while the structured question travels in the envelope.
+// Read having already validated the envelope against the schema is what makes
+// this mapping total in practice.
 func (e Envelope) LaneStatus() lane.Status {
 	switch e.Status {
 	case "done":
 		return lane.Done
-	case "blocked":
+	case "blocked", "interaction_required":
 		return lane.Blocked
 	case "deviated":
 		return lane.Deviated

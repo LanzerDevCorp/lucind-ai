@@ -432,4 +432,3 @@ func TestWaves_CrossWaveOverlapAllowedWithTransitiveEdge(t *testing.T) {
 		t.Errorf("expected wave 2 to have [C], got: %v", packetIDs(waves[2]))
 	}
 }
-

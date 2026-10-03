@@ -77,13 +77,37 @@ func ExecuteBatch(ctx context.Context, deps Deps, ps []packet.Packet) (BatchRepo
 		return BatchReport{}, fmt.Errorf("run: build batch barrier: %w", err)
 	}
 
+	maxParallel := deps.MaxParallelLanes
+	if maxParallel <= 0 {
+		maxParallel = DefaultMaxParallelLanes
+	}
+	sem := make(chan struct{}, maxParallel)
+
 	reports := make([]Report, len(ps))
 	var wg sync.WaitGroup
 	for i, p := range ps {
 		wg.Add(1)
 		go func(i int, p packet.Packet) {
 			defer wg.Done()
-			reports[i] = runOneLane(ctx, deps, p, b)
+
+			select {
+			case <-ctx.Done():
+				reports[i] = recordLaneFailureReport(ctx, deps, p, b, "", ctx.Err())
+				return
+			default:
+			}
+
+			select {
+			case sem <- struct{}{}:
+				defer func() { <-sem }()
+				if ctx.Err() != nil {
+					reports[i] = recordLaneFailureReport(ctx, deps, p, b, "", ctx.Err())
+					return
+				}
+				reports[i] = runOneLane(ctx, deps, p, b)
+			case <-ctx.Done():
+				reports[i] = recordLaneFailureReport(ctx, deps, p, b, "", ctx.Err())
+			}
 		}(i, p)
 	}
 	wg.Wait()
@@ -127,21 +151,7 @@ func runOneLane(ctx context.Context, deps Deps, p packet.Packet, b *barrier.Barr
 
 	report, err := Execute(laneCtx, deps, p)
 	if err != nil {
-		now := deps.Now()
-		// Best-effort: even if ensureLaneFailed itself cannot write to the
-		// ledger, the lane still must be observed into the barrier as
-		// failed below, or the barrier would wait forever for a lane that
-		// can never report in. The recording error is not returned — that
-		// would fail the batch — but both causes go on Report.Diagnosis,
-		// and Execute's Worktree is kept: printReport prints both, and an
-		// empty vs non-empty `worktree:` line is how a human scanning
-		// stdout tells admission rejection from a directory that exists.
-		recErr := ensureLaneFailed(ctx, deps, p, now, err)
-		diagnosis := err.Error()
-		if recErr != nil {
-			diagnosis = fmt.Sprintf("%s (additionally, failed to record the lane failure in the ledger: %v)", err, recErr)
-		}
-		report = Report{LaneID: p.ID, Status: lane.Failed, Worktree: report.Worktree, Diagnosis: diagnosis}
+		return recordLaneFailureReport(ctx, deps, p, b, report.Worktree, err)
 	}
 
 	// Observe is safe for concurrent use (see barrier.Barrier.Observe) and
@@ -151,6 +161,32 @@ func runOneLane(ctx context.Context, deps Deps, p packet.Packet, b *barrier.Barr
 	// batch's barrier was built from, so ErrUnexpectedLane can never fire.
 	_ = b.Observe(lane.State{LaneID: p.ID, Status: report.Status})
 
+	return report
+}
+
+// recordLaneFailureReport records a lane that failed outside normal Execute
+// completion (such as context cancellation while queued or an infrastructure
+// error returned by Execute), drives ensureLaneFailed, and observes the terminal
+// status into the batch barrier.
+func recordLaneFailureReport(ctx context.Context, deps Deps, p packet.Packet, b *barrier.Barrier, worktree string, cause error) Report {
+	now := deps.Now()
+	// Best-effort: even if ensureLaneFailed itself cannot write to the
+	// ledger, the lane still must be observed into the barrier as
+	// failed below, or the barrier would wait forever for a lane that
+	// can never report in. The recording error is not returned — that
+	// would fail the batch — but both causes go on Report.Diagnosis,
+	// and Execute's Worktree is kept: printReport prints both, and an
+	// empty vs non-empty `worktree:` line is how a human scanning
+	// stdout tells admission rejection from a directory that exists.
+	// The batch ctx may already be cancelled (that is why a queued lane never started),
+	// but the failure must still be durably recorded.
+	recErr := ensureLaneFailed(context.WithoutCancel(ctx), deps, p, now, cause)
+	diagnosis := cause.Error()
+	if recErr != nil {
+		diagnosis = fmt.Sprintf("%s (additionally, failed to record the lane failure in the ledger: %v)", cause, recErr)
+	}
+	report := Report{LaneID: p.ID, Status: lane.Failed, Worktree: worktree, Diagnosis: diagnosis}
+	_ = b.Observe(lane.State{LaneID: p.ID, Status: report.Status})
 	return report
 }
 
@@ -198,6 +234,8 @@ func ensureLaneFailed(ctx context.Context, deps Deps, p packet.Packet, now time.
 		Agent:        p.Agent,
 		SDDPhase:     p.SDDPhase,
 		FanoutGroup:  p.FanoutGroup,
+		LaneRole:     p.LaneRole,
+		ReadOnly:     p.ReadOnly,
 		Feature:      p.Feature,
 		Skill:        p.Skill,
 		PacketPath:   p.Path,

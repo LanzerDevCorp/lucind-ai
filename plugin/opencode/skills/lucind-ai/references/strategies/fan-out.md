@@ -14,7 +14,7 @@ Three `agy` Lanes own disjoint lenses; one `cursor-agent` Lane synthesizes the c
 | specs | Capabilities and requirements | Scenarios and coverage | Live-spec conflicts and migration | capability specs plus notes |
 | tasks | Decomposition and ordering | Partition and dispatch shape | Proof and review burden | `tasks.md` plus notes |
 
-Templates live at `../../assets/<phase>-lens-{a,b,c}-packet-template.md` and `../../assets/<phase>-synthesis-packet-template.md`; specs uses the singular `spec-` basename.
+The per-phase lens and synthesis packet templates were retired with SDD. Author lens and synthesis packets from `../../assets/packet-template.md` with `lane_role: lens` or `lane_role: synthesis`, and see `odd.md` for the current workflow; a lens-based explorer skill replaces these phase tables.
 
 ## Dispatch
 

@@ -33,6 +33,7 @@ import (
 	"github.com/LanzerDevCorp/lucind-ai/internal/packet"
 	"github.com/LanzerDevCorp/lucind-ai/internal/result"
 	"github.com/LanzerDevCorp/lucind-ai/internal/skillset"
+	"github.com/LanzerDevCorp/lucind-ai/internal/usagelog"
 	"github.com/LanzerDevCorp/lucind-ai/internal/worktree"
 )
 
@@ -156,6 +157,9 @@ func formatStreamDetail(stream string) string {
 	return fmt.Sprintf("%s\n%s", tail, marker)
 }
 
+// DefaultMaxParallelLanes is the default limit on concurrently running lanes in ExecuteBatch.
+const DefaultMaxParallelLanes = 3
+
 // Deps is everything Execute needs from the outside world. Every field is
 // injected so the whole flow is testable without git, without a real agent
 // and without the network.
@@ -183,6 +187,10 @@ type Deps struct {
 	// package already relies on and what a plain context.Context without a
 	// deadline continues to mean.
 	LaneTimeout time.Duration
+	// MaxParallelLanes is the maximum number of lanes ExecuteBatch runs concurrently.
+	// Zero means the default (3); a negative value is treated as the default as well;
+	// values above the number of packets are harmless.
+	MaxParallelLanes int
 	// AppendProgressBatch is an optional test seam. Production uses Ledger's
 	// atomic batch append when this is nil.
 	AppendProgressBatch func(context.Context, []ledger.LaneProgress) error
@@ -237,6 +245,13 @@ type Deps struct {
 	// cmd/lucind-ai/cli.go's productionDeps).
 	IsAncestorSHA   func(ctx context.Context, primaryRoot, ancestorSHA, descendantSHA string) (bool, error)
 	FeatureLeaseTTL time.Duration
+	// Dispatcher commit seams
+	RunAttested         func(ctx context.Context, worktreePath, cmd string) (exitCode int, output string, err error)
+	HasValidAttestation func(ctx context.Context, repoRoot, cmd, expectedTreeHash string) (bool, error)
+	PreCommitGate       func(ctx context.Context, worktreePath string, p packet.Packet) (lane.Status, string)
+	GitCommit           func(ctx context.Context, worktreePath, message string) error
+	RecordUsage         func(usagelog.Record)
+
 	// RenewInterval controls how often driveAttemptFromLeased renews the
 	// feature lease while checkFunc (integrate.Check) runs during the
 	// CHECKING phase -- see the lease-renewal loop there. Zero means the
@@ -294,6 +309,8 @@ type Report struct {
 	// reporting its own failures as structured JSON on stdout rather than
 	// stderr (see diagnosisDetail).
 	Diagnosis string
+	// Attempts is the total number of executor runs dispatched for this lane.
+	Attempts int
 }
 
 // Execute runs one packet end to end: create its worktree, register it in
@@ -381,6 +398,8 @@ func Execute(ctx context.Context, deps Deps, p packet.Packet) (Report, error) {
 		Agent:        p.Agent,
 		SDDPhase:     p.SDDPhase,
 		FanoutGroup:  p.FanoutGroup,
+		LaneRole:     p.LaneRole,
+		ReadOnly:     p.ReadOnly,
 		Feature:      p.Feature,
 		Skill:        p.Skill,
 		PacketPath:   p.Path,
@@ -410,99 +429,264 @@ func Execute(ctx context.Context, deps Deps, p packet.Packet) (Report, error) {
 		return report, recordLaneFailure(ctx, deps, p.ID, now, cause)
 	}
 
-	exec, err := deps.LookupExecutor(p.Executor)
-	if err != nil {
-		cause := fmt.Errorf("run: resolve executor %q for lane %q: %w", p.Executor, p.ID, err)
-		return report, recordLaneFailure(ctx, deps, p.ID, now, cause)
-	}
+	plan := buildAttemptPlan(p)
+	isLoop := p.MaxIterations > 1 || len(p.Escalation) > 0
 
-	// packet.Model stays authoritative when named. When the packet omits
-	// it, the already-resolved executor supplies its own default —
-	// packet.Parse never injects one, because Parse's job is to reflect
-	// frontmatter literally, not to inject runtime policy.
-	model := p.Model
-	if model == "" {
-		model = exec.DefaultModel()
-	}
-
-	progress := make(chan executor.ProgressEvent, progressBufferSize)
-	progressDone := make(chan []error, 1)
-	appendProgressBatch := deps.AppendProgressBatch
-	if appendProgressBatch == nil {
-		appendProgressBatch = deps.Ledger.AppendProgressBatch
-	}
-	go func() {
-		progressDone <- writeLaneProgress(context.WithoutCancel(ctx), appendProgressBatch, deps.RunID, p.ID, progress)
-	}()
-
-	outcome, err := exec.Run(ctx, executor.Request{
-		Prompt:         p.Body,
-		WorktreePath:   wt.Path,
-		Model:          model,
-		Agent:          p.Agent,
-		ReadOnlyPaths:  append([]string(nil), p.ReadOnlyPaths...),
-		RequiredSkills: append([]string(nil), p.RequiredSkills...),
-		SchemaPath:     schemaPath,
-		Progress:       progress,
-	})
-	close(progress)
-	progressErrors := <-progressDone
-
-	// persistCtx carries ctx's values onward without its deadline or
-	// cancellation, for every ledger write from here on. A caller-owned
-	// per-lane deadline (see ExecuteBatch's Deps.LaneTimeout) is meant to
-	// bound the dispatch itself -- "a lane killed on its ceiling returns
-	// blocked with the worktree preserved" (see docs/prd.md section 7) --
-	// not the bookkeeping that records that outcome. Using the
-	// already-expired ctx here would make persisting a timed-out lane's
-	// own lane.Blocked status fail with context.DeadlineExceeded, turning
-	// a graceful timeout into a spurious lane.Failed. See
-	// executor.Agy.Run's own doc comment: a dispatch that hit ctx's
-	// deadline returns Outcome{TimedOut: true} with a nil error
-	// precisely so the caller can still finish recording it normally.
 	persistCtx := context.WithoutCancel(ctx)
-	progressDiagnosis := reportProgressErrors(persistCtx, deps, p.ID, now, progressErrors)
+
+	var (
+		attemptsRun       int
+		lastStatus        lane.Status
+		lastEnvelope      *result.Envelope
+		lastReason        string
+		lastOutcome       executor.Outcome
+		lastVRes          verificationResult
+		allProgressErrors []error
+		prevRungIndex     = 0
+	)
+
+	for attemptIdx, attempt := range plan {
+		if attemptIdx > 0 && ctx.Err() != nil {
+			// Keep the audit trail honest: the lane stopped because the context ended,
+			// not because the last verification failure was final.
+			lastReason = fmt.Sprintf("context ended before attempt %d/%d (%v); last failure: %s", attemptIdx+1, len(plan), ctx.Err(), lastReason)
+			lastStatus = lane.Blocked
+			lastVRes = verificationResult{}
+			break
+		}
+
+		exec, err := deps.LookupExecutor(attempt.ExecutorName)
+		if err != nil {
+			cause := fmt.Errorf("run: resolve executor %q for lane %q: %w", attempt.ExecutorName, p.ID, err)
+			report.Attempts = attemptsRun
+			return report, recordLaneFailure(persistCtx, deps, p.ID, now, cause)
+		}
+
+		model := attempt.Model
+		if model == "" {
+			model = exec.DefaultModel()
+		}
+
+		if attemptIdx > 0 {
+			var noteDetail string
+			if attempt.RungIndex != prevRungIndex {
+				noteDetail = fmt.Sprintf("attempt %d/%d rung %d escalated %s/%s after: %s",
+					attemptIdx+1, len(plan), attempt.RungIndex, attempt.ExecutorName, model, lastReason)
+			} else {
+				noteDetail = fmt.Sprintf("attempt %d/%d rung %d %s/%s after: %s",
+					attemptIdx+1, len(plan), attempt.RungIndex, attempt.ExecutorName, model, lastReason)
+			}
+			if err := deps.Ledger.AppendEvent(persistCtx, ledger.Event{
+				RunID:  deps.RunID,
+				LaneID: p.ID,
+				Type:   ledger.EventLaneNote,
+				Detail: noteDetail,
+				At:     deps.Now(),
+			}); err != nil {
+				cause := fmt.Errorf("run: append retry note event for %q: %w", p.ID, err)
+				report.Attempts = attemptsRun
+				return report, recordLaneFailure(persistCtx, deps, p.ID, now, cause)
+			}
+		}
+		prevRungIndex = attempt.RungIndex
+
+		prompt := withRequiredSkills(p.Body, p.RequiredSkills)
+		if attemptIdx > 0 {
+			prompt = formatFeedback(withRequiredSkills(p.Body, p.RequiredSkills), attemptIdx, lastVRes.FailedCommand, lastVRes.ExitCode, lastVRes.Output)
+			// A stale envelope from the previous attempt must never be mistaken for
+			// this attempt's result if the worker writes none.
+			if rmErr := os.Remove(filepath.Join(wt.Path, resultEnvelopePath)); rmErr != nil && !errors.Is(rmErr, fs.ErrNotExist) {
+				cause := fmt.Errorf("run: clear previous result envelope for lane %q before attempt %d: %w", p.ID, attemptIdx+1, rmErr)
+				report.Attempts = attemptsRun
+				return report, recordLaneFailure(persistCtx, deps, p.ID, now, cause)
+			}
+		}
+		// lastVRes describes only the attempt that just ran; clear it so a later
+		// non-verification failure is not reclassified as loop exhaustion.
+		lastVRes = verificationResult{}
+
+		var (
+			maxTokens int64
+			maxCost   float64
+			hasTokens bool
+		)
+		onProgress := func(ev executor.ProgressEvent) {
+			if ev.TotalTokens > 0 {
+				hasTokens = true
+				if ev.TotalTokens > maxTokens {
+					maxTokens = ev.TotalTokens
+				}
+			}
+			if ev.CostUSD > maxCost {
+				maxCost = ev.CostUSD
+			}
+		}
+
+		progress := make(chan executor.ProgressEvent, progressBufferSize)
+		progressDone := make(chan []error, 1)
+		appendProgressBatch := deps.AppendProgressBatch
+		if appendProgressBatch == nil {
+			appendProgressBatch = deps.Ledger.AppendProgressBatch
+		}
+		go func() {
+			progressDone <- writeLaneProgress(context.WithoutCancel(ctx), appendProgressBatch, deps.RunID, p.ID, progress, onProgress)
+		}()
+
+		attemptStart := time.Now()
+		attemptsRun++
+		outcome, err := exec.Run(ctx, executor.Request{
+			Prompt:         prompt,
+			WorktreePath:   wt.Path,
+			Model:          model,
+			Agent:          p.Agent,
+			AllowedPaths:   append([]string(nil), p.AllowedPaths...),
+			ReadOnlyPaths:  append([]string(nil), p.ReadOnlyPaths...),
+			RequiredSkills: append([]string(nil), p.RequiredSkills...),
+			SchemaPath:     schemaPath,
+			Progress:       progress,
+		})
+		close(progress)
+		progressErrors := <-progressDone
+
+		durationMS := time.Since(attemptStart).Milliseconds()
+		if !(err != nil && outcome == (executor.Outcome{})) {
+			uRec := usagelog.Record{
+				TS:         time.Now().UTC(),
+				RunID:      deps.RunID,
+				LaneID:     p.ID,
+				Attempt:    attemptIdx + 1,
+				Executor:   attempt.ExecutorName,
+				Provider:   usagelog.Provider(attempt.ExecutorName),
+				Model:      model,
+				LaneRole:   p.LaneRole,
+				DurationMS: durationMS,
+				ExitCode:   outcome.ExitCode,
+				TimedOut:   outcome.TimedOut,
+				Status:     "",
+			}
+			if u, ok := usagelog.ExtractUsage(outcome.Stdout); ok {
+				uRec.TokensKnown = true
+				uRec.InputTokens = u.InputTokens
+				uRec.OutputTokens = u.OutputTokens
+				uRec.ThinkingTokens = u.ThinkingTokens
+				uRec.CacheReadTokens = u.CacheReadTokens
+				uRec.TotalTokens = u.TotalTokens
+				uRec.CostUSD = u.CostUSD
+			} else if hasTokens {
+				uRec.TokensKnown = true
+				uRec.TotalTokens = maxTokens
+				uRec.CostUSD = maxCost
+			} else {
+				uRec.TokensKnown = false
+			}
+
+			recordUsage := deps.RecordUsage
+			if recordUsage == nil {
+				recordUsage = func(rec usagelog.Record) {
+					if os.Getenv("LUCIND_USAGE_LOG") == "off" || deps.RunID == "" {
+						return
+					}
+					path, dErr := usagelog.DefaultPath()
+					if dErr != nil {
+						fmt.Fprintf(os.Stderr, "lucind-ai: record usage: %v\n", dErr)
+						return
+					}
+					if aErr := usagelog.Append(path, rec); aErr != nil {
+						fmt.Fprintf(os.Stderr, "lucind-ai: record usage: %v\n", aErr)
+					}
+				}
+			}
+			recordUsage(uRec)
+		}
+
+		lastOutcome = outcome
+		allProgressErrors = append(allProgressErrors, progressErrors...)
+
+		if err != nil {
+			cause := fmt.Errorf("run: dispatch lane %q: %w", p.ID, err)
+			report.Attempts = attemptsRun
+			return report, recordLaneFailure(persistCtx, deps, p.ID, now, cause)
+		}
+
+		status, envelope, reason := decideStatus(deps, wt.Path, outcome)
+		lastStatus = status
+		lastEnvelope = envelope
+		lastReason = reason
+
+		if status != lane.Done {
+			break
+		}
+
+		if len(p.AllowedPaths) > 0 {
+			status, reason = enforceAllowedPaths(ctx, deps, wt.Path, wt.BaseSHA, p)
+			if status != lane.Done {
+				lastStatus = status
+				lastReason = reason
+				break
+			}
+		}
+
+		status, reason = enforceRequiredSkills(p, envelope)
+		if status != lane.Done {
+			lastStatus = status
+			lastReason = reason
+			break
+		}
+
+		if isLoop {
+			vRes := dispatcherVerify(ctx, deps, wt.Path, wt.BaseSHA, p)
+			lastVRes = vRes
+			if vRes.Status != lane.Done {
+				lastStatus = vRes.Status
+				lastReason = vRes.Reason
+				if vRes.Retryable && attemptIdx+1 < len(plan) {
+					continue
+				}
+				break
+			}
+			if p.CommitMessage != "" {
+				cStatus, cReason := dispatcherCommitOnly(ctx, deps, wt.Path, p)
+				if cStatus != lane.Done {
+					lastStatus = cStatus
+					lastReason = cReason
+					break
+				}
+			}
+			lastStatus = lane.Done
+			lastReason = ""
+			break
+		} else {
+			if p.CommitMessage != "" {
+				status, reason = dispatcherCommit(ctx, deps, wt.Path, wt.BaseSHA, p)
+				lastStatus = status
+				lastReason = reason
+			}
+			break
+		}
+	}
+
+	if lastStatus == lane.Done {
+		status, reason := enforceCompletionMode(ctx, deps, wt.Path, wt.BaseSHA, p)
+		if status != lane.Done {
+			lastStatus = status
+			lastReason = reason
+		}
+	} else if isLoop && lastVRes.Retryable && attemptsRun == len(plan) {
+		if len(p.Escalation) == 0 {
+			lastStatus = lane.Failed
+			lastReason = fmt.Sprintf("write/test/fix loop exhausted after %d attempts: %s", attemptsRun, lastReason)
+		} else {
+			lastStatus = lane.Blocked
+			lastReason = fmt.Sprintf("escalation ladder exhausted after %d attempts: %s", attemptsRun, lastReason)
+		}
+	}
+
+	progressDiagnosis := reportProgressErrors(persistCtx, deps, p.ID, now, allProgressErrors)
 	report.Diagnosis = progressDiagnosis
 
-	if err != nil {
-		// executor.Executor.Run returns a non-nil error only for the
-		// genuine never-ran case (see executor.Agy.Run's doc comment) --
-		// a real infrastructure failure in our own binary, distinct from
-		// a dispatch that ran and produced a bad outcome. The lane has
-		// already been registered and marked running at this point, so
-		// leaving it there would report a lane as running forever when
-		// nothing is running; recordLaneFailure closes that gap.
-		cause := fmt.Errorf("run: dispatch lane %q: %w", p.ID, err)
-		return report, recordLaneFailure(persistCtx, deps, p.ID, now, cause)
-	}
-
-	status, envelope, reason := decideStatus(deps, wt.Path, outcome)
-
-	// Base-SHA four-way diff union against recorded BaseSHA, never live
-	// primary HEAD (which has TOCTOU race if primary moves) and never
-	// `git diff --name-only HEAD~1` (which does not resolve for zero-commit
-	// lanes and misses earlier commits in multi-commit lanes).
-	if status == lane.Done && len(p.AllowedPaths) > 0 {
-		status, reason = enforceAllowedPaths(ctx, deps, wt.Path, wt.BaseSHA, p)
-	}
-
-	if status == lane.Done {
-		status, reason = enforceRequiredSkills(p, envelope)
-	}
-
-	if status == lane.Done {
-		status, reason = enforceCompletionMode(ctx, deps, wt.Path, wt.BaseSHA, p)
-	}
-
-	// diagnosis is empty exactly when reason is empty (the envelope
-	// decided a terminal status cleanly): reason is decideStatus's own
-	// explanation for a non-zero exit, a timeout, or an unreadable
-	// envelope, and it is worth nothing on its own without the captured
-	// stderr and stdout that a person would otherwise have to open the
-	// ledger's SQLite file to go looking for.
 	var diagnosis string
-	if reason != "" {
-		diagnosis = diagnosisDetail(reason, outcome.Stderr, outcome.Stdout)
+	if lastReason != "" {
+		diagnosis = diagnosisDetail(lastReason, lastOutcome.Stderr, lastOutcome.Stdout)
 		if err := deps.Ledger.AppendEvent(persistCtx, ledger.Event{
 			RunID:  deps.RunID,
 			LaneID: p.ID,
@@ -517,23 +701,20 @@ func Execute(ctx context.Context, deps Deps, p packet.Packet) (Report, error) {
 	diagnosis = joinDiagnostics(diagnosis, progressDiagnosis)
 
 	var terminalErr error
-	if status == lane.Done {
-		terminalErr = setDoneCandidate(persistCtx, deps, p, wt.Path, wt.BaseSHA, envelope, now)
+	if lastStatus == lane.Done {
+		terminalErr = setDoneCandidate(persistCtx, deps, p, wt.Path, wt.BaseSHA, lastEnvelope, now)
 	} else {
-		terminalErr = deps.Ledger.SetStatus(persistCtx, deps.RunID, p.ID, status, now)
+		terminalErr = deps.Ledger.SetStatus(persistCtx, deps.RunID, p.ID, lastStatus, now)
 	}
 	if terminalErr != nil {
 		cause := fmt.Errorf("run: set lane %q terminal status: %w", p.ID, terminalErr)
-		if status == lane.Done {
+		if lastStatus == lane.Done {
 			cause = fmt.Errorf("run: set lane %q terminal status: freeze done candidate: %w", p.ID, terminalErr)
 		}
 		return report, recordLaneFailure(persistCtx, deps, p.ID, now, cause)
 	}
 
-	// A truncated capture is recorded as its own ledger event so the
-	// fact survives the run, not only the one process that printed it.
-	// It is appended under ledger.EventLaneNote as a diagnostic annotation.
-	if outcome.OutputTruncated {
+	if lastOutcome.OutputTruncated {
 		if err := deps.Ledger.AppendEvent(persistCtx, ledger.Event{
 			RunID:  deps.RunID,
 			LaneID: p.ID,
@@ -548,11 +729,12 @@ func Execute(ctx context.Context, deps Deps, p packet.Packet) (Report, error) {
 
 	return Report{
 		LaneID:                  p.ID,
-		Status:                  status,
+		Status:                  lastStatus,
 		Worktree:                wt.Path,
-		Envelope:                envelope,
-		OutputCaptureIncomplete: outcome.OutputTruncated,
+		Envelope:                lastEnvelope,
+		OutputCaptureIncomplete: lastOutcome.OutputTruncated,
 		Diagnosis:               diagnosis,
+		Attempts:                attemptsRun,
 	}, nil
 }
 
@@ -590,6 +772,7 @@ func setDoneCandidate(ctx context.Context, deps Deps, p packet.Packet, worktreeP
 		var contract struct {
 			Version       string                        `json:"version"`
 			Mode          string                        `json:"mode"`
+			CommitMessage string                        `json:"commit_message,omitempty"`
 			WritePaths    []string                      `json:"write_paths"`
 			ReadOnlyPaths []string                      `json:"read_only_paths"`
 			DoneCriteria  []string                      `json:"done_criteria"`
@@ -610,6 +793,8 @@ func setDoneCandidate(ctx context.Context, deps Deps, p packet.Packet, worktreeP
 		commit := "required"
 		if contract.Mode == "read-only" {
 			commit = "forbidden"
+		} else if contract.CommitMessage != "" || p.CommitMessage != "" {
+			commit = "dispatcher"
 		}
 		digest = p.Authoring.Digest
 		encoded, hash, err := ledger.FreezeAuthoringEvidence(ledger.AuthoringEvidence{
@@ -694,6 +879,43 @@ func packetDigest(p packet.Packet, paths []string) string {
 	parts = append(parts, strconv.Itoa(len(adhocSkills)))
 	parts = append(parts, adhocSkills...)
 
+	if p.Route != "" {
+		parts = append(parts, "route:"+p.Route)
+	}
+	if p.RouteEvidence != "" {
+		parts = append(parts, "route_evidence:"+p.RouteEvidence)
+	}
+	if p.NamedSkillsOnly {
+		parts = append(parts, "named_skills_only")
+	}
+	if p.Understood != nil {
+		parts = append(parts, "understood:"+strconv.FormatBool(*p.Understood))
+	}
+	if p.OpenDesign {
+		parts = append(parts, "open_design")
+	}
+	if p.EstimatedLookups > 0 {
+		parts = append(parts, "estimated_lookups:"+strconv.Itoa(p.EstimatedLookups))
+	}
+	if len(p.Verification) > 0 {
+		raw, _ := json.Marshal(p.Verification)
+		parts = append(parts, "verification:"+string(raw))
+	}
+	if len(p.KnownEnvironmentalFailures) > 0 {
+		raw, _ := json.Marshal(p.KnownEnvironmentalFailures)
+		parts = append(parts, "known_env_failures:"+string(raw))
+	}
+	if p.CommitMessage != "" {
+		parts = append(parts, "commit_message:"+p.CommitMessage)
+	}
+	if p.MaxIterations > 1 {
+		parts = append(parts, fmt.Sprintf("max_iterations:%d", p.MaxIterations))
+	}
+	if len(p.Escalation) > 0 {
+		raw, _ := json.Marshal(p.Escalation)
+		parts = append(parts, "escalation:"+string(raw))
+	}
+
 	return versionedHash(parts...)
 }
 
@@ -713,6 +935,7 @@ func writeLaneProgress(
 	appendBatch func(context.Context, []ledger.LaneProgress) error,
 	runID, laneID string,
 	progress <-chan executor.ProgressEvent,
+	onEvent ...func(executor.ProgressEvent),
 ) []error {
 	ticker := time.NewTicker(progressFlushInterval)
 	defer ticker.Stop()
@@ -735,6 +958,9 @@ func writeLaneProgress(
 			if !ok {
 				flush()
 				return writeErrors
+			}
+			for _, fn := range onEvent {
+				fn(event)
 			}
 			batch = append(batch, ledger.LaneProgress{
 				RunID: runID, LaneID: laneID, Message: event.Message, At: event.At,
@@ -842,6 +1068,13 @@ func decideStatus(deps Deps, worktreePath string, outcome executor.Outcome) (lan
 			if hs.Fired {
 				return lane.Blocked, &envelope, "hard stop fired: " + hs.HardStop
 			}
+		}
+		if envelope.Status == "interaction_required" {
+			question := ""
+			if envelope.Interaction != nil {
+				question = envelope.Interaction.Question
+			}
+			return lane.Blocked, &envelope, "interaction required: " + question
 		}
 		return st, &envelope, ""
 	}
@@ -973,4 +1206,21 @@ func writeResultSchema(worktreePath string) (string, error) {
 	}
 
 	return path, nil
+}
+
+// withRequiredSkills makes derived required skills visible to the worker. The environment
+// variable alone is invisible to a headless agent, which then omits skills_loaded and is
+// demoted to deviated. A body that already carries the section (typed packets) is untouched.
+func withRequiredSkills(body string, skills []string) string {
+	if len(skills) == 0 || strings.Contains(body, "## Required skills") {
+		return body
+	}
+	var b strings.Builder
+	b.WriteString(strings.TrimRight(body, "\n"))
+	b.WriteString("\n\n## Required skills\n")
+	for _, s := range skills {
+		fmt.Fprintf(&b, "- %s\n", s)
+	}
+	b.WriteString("\nLoad each skill above before starting work and list each skill's name in `skills_loaded` of the result envelope.\n")
+	return b.String()
 }

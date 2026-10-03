@@ -1,6 +1,6 @@
 # SDD Phase Specialist Authority and Scoped Checks
 
-Status: accepted
+Status: Superseded on 2026-10-03 by the herdr agent factory work (the `phase` command and `internal/phasespec` were removed; accepted packets with `sdd_phase` are still parsed and ignored).
 
 Each SDD phase (explore, propose, design, spec, tasks, apply, verify, archive) gets a phase-scoped **Specialist** — the existing `sdd-*` subagent, reconfigured to drive that phase's fan-out-and-synthesis dispatch through lucind-ai itself rather than doing the phase's work directly. The Specialist owns **Acceptance** of its own phase's Lanes without additional human confirmation (already glossary-legal); it reports only a **Phase Verdict** to its Orchestrator, which decides to accept it or trigger one bounded correction. **Promotion** of the whole Change into its Integration Target stays human-confirmed at the end of the full SDD cycle, unchanged. This supersedes the deterministic, non-agentic `internal/phasespec` "Phase Specialist" shipped in `2026-08-29-skill-provisioning-and-phase-specialist`: that adapter's status/eligibility/dispatch mechanics remain the tool the agentic Specialist calls, but its explicit "non-intercepting," tool-less design is reversed for this role.
 

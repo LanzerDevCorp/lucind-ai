@@ -16,7 +16,7 @@ Use this skill to choose and execute a human-approved Execution Strategy for one
 ## Hard Rules
 
 - Confirm the Mode and Execution Strategy before execution. A later strategy change also requires human confirmation.
-- Keep one Orchestrator authoritative for the Change. Agents own Lanes, not scope, priorities, Dependencies, Acceptance, or Promotion — except that a named `sdd-*` phase-Specialist may independently Accept its own phase's Lanes; Promotion remains forbidden to every Agent, Specialist included.
+- Keep one Orchestrator authoritative for the Change. Agents own Lanes, not scope, priorities, Dependencies, Acceptance, or Promotion (legacy packets with an explicit sdd_phase or named sdd-* phase-Specialist remain accepted); Promotion remains forbidden to every Agent, Specialist included.
 - Run `lucind-ai -v` before dispatch. Run CLI usage from the environment rather than caching command syntax here.
 - Run from the primary repository root. Linked-worktree dispatch is refused. Before allocating a worktree, the binary verifies the Claude Code and OpenCode `plugin/.../skills/lucind-ai/` trees are byte-identical and the embedded result schema matches the on-disk schema; a mismatch or stale schema exits non-zero with no worktree created.
 - Author reusable packet templates without live `feature`, `parent_ref`, `base_sha`, or `expected_parent_sha`. At wave dispatch, write all four fields onto the packet copies passed to `lucind-ai run`. Admission stays fail-closed on unbound or mixed targets.
@@ -39,7 +39,7 @@ Read only the modules whose trigger branch fires. When multiple branches fire, r
 | Small Change completed by its Orchestrator without delegation | `references/strategies/direct.md` |
 | Isolated Mode or feature-targeted dispatch | `references/modes/isolated.md` |
 | Exclusive Mode or runtime `legacy_main` path | `references/modes/exclusive.md` |
-| SDD lifecycle, apply DAG, verify, or archive | `references/strategies/sdd.md` |
+| ODD lifecycle, feature tasks, routes, or verification | `references/strategies/odd.md` |
 | Multi-lens planning or multi-Agent delegation | `references/strategies/fan-out.md` |
 | Dependency, defect, blocker, or issue #4 question | `references/coordination/dependencies-defects.md` |
 | Failed attempt, overlap, reconciliation, lease, retry, or multi-wave recovery | `references/coordination/recovery-reconciliation.md` |

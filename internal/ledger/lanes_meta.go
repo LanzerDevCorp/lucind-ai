@@ -24,6 +24,8 @@ type LaneMetadata struct {
 	Agent        string   `json:"agent"`
 	SDDPhase     string   `json:"sdd_phase"`
 	FanoutGroup  string   `json:"fanout_group"`
+	LaneRole     string   `json:"lane_role,omitempty"`
+	ReadOnly     bool     `json:"read_only,omitempty"`
 	Change       string   `json:"change"`
 	Feature      string   `json:"feature"`
 	Skill        string   `json:"skill"`
@@ -44,6 +46,25 @@ type LaneMetadata struct {
 	ParentRef         string `json:"parent_ref"`
 	BaseSHA           string `json:"base_sha"`
 	ExpectedParentSHA string `json:"expected_parent_sha"`
+}
+
+// RequiresMechanicalChecks reports whether the lane requires mechanical checks
+// (e.g. lucind-checks.sh) to run during accept and attempt verification.
+// It fails closed: checks are required unless the lane is explicitly declared
+// non-writing via ReadOnly == true or a known non-writing LaneRole (mirroring
+// the non-writing roles in internal/skillset: lens, synthesis, verify, archive, human).
+func (m LaneMetadata) RequiresMechanicalChecks() bool {
+	if m.ReadOnly {
+		return false
+	}
+	// Non-writing lane roles mirrored from internal/skillset without importing
+	// to avoid coupling or cyclic dependencies.
+	switch m.LaneRole {
+	case "lens", "synthesis", "verify", "archive", "human":
+		return false
+	default:
+		return true
+	}
 }
 
 // UpdateLaneMetadata updates schema-v6's lane metadata columns and appends a

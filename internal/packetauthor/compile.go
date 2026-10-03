@@ -11,22 +11,34 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/LanzerDevCorp/lucind-ai/internal/packet"
 	"github.com/LanzerDevCorp/lucind-ai/internal/skillset"
 )
 
 type normalizedContract struct {
-	Version        string            `json:"version"`
-	RouteIntent    string            `json:"route_intent"`
-	Mode           Mode              `json:"mode"`
-	LaneRole       string            `json:"lane_role,omitempty"`
-	AdhocSkills    []string          `json:"adhoc_skills,omitempty"`
-	RequiredSkills []string          `json:"required_skills,omitempty"`
-	WritePaths     []string          `json:"write_paths"`
-	ReadOnlyPaths  []string          `json:"read_only_paths"`
-	Goal           string            `json:"goal"`
-	DoneCriteria   []string          `json:"done_criteria"`
-	HardStops      []string          `json:"hard_stops"`
-	Result         ResultObligations `json:"result"`
+	Version                    string                  `json:"version"`
+	RouteIntent                string                  `json:"route_intent"`
+	Mode                       Mode                    `json:"mode"`
+	LaneRole                   string                  `json:"lane_role,omitempty"`
+	AdhocSkills                []string                `json:"adhoc_skills,omitempty"`
+	RequiredSkills             []string                `json:"required_skills,omitempty"`
+	WritePaths                 []string                `json:"write_paths"`
+	ReadOnlyPaths              []string                `json:"read_only_paths"`
+	Goal                       string                  `json:"goal"`
+	DoneCriteria               []string                `json:"done_criteria"`
+	HardStops                  []string                `json:"hard_stops"`
+	Result                     ResultObligations       `json:"result"`
+	Route                      string                  `json:"route,omitempty"`
+	RouteEvidence              string                  `json:"route_evidence,omitempty"`
+	NamedSkillsOnly            bool                    `json:"named_skills_only,omitempty"`
+	Understood                 *bool                   `json:"understood,omitempty"`
+	OpenDesign                 bool                    `json:"open_design,omitempty"`
+	EstimatedLookups           int                     `json:"estimated_lookups,omitempty"`
+	Verification               []string                `json:"verification,omitempty"`
+	KnownEnvironmentalFailures []string                `json:"known_environmental_failures,omitempty"`
+	CommitMessage              string                  `json:"commit_message,omitempty"`
+	MaxIterations              int                     `json:"max_iterations,omitempty"`
+	Escalation                 []packet.EscalationRung `json:"escalation,omitempty"`
 }
 type manifest struct {
 	Version      string      `json:"version"`
@@ -59,6 +71,11 @@ func validateContract(contract Contract) (normalizedContract, Diagnostics) {
 	if strings.TrimSpace(contract.Goal) == "" || hasEmptyOrDuplicate(contract.DoneCriteria) || hasEmptyOrDuplicate(contract.HardStops) {
 		diagnostics = append(diagnostics, diagnostic(10, "contract", CodeContractInvalid, "goal, criteria, and stops must be non-empty and unique"))
 	}
+	switch contract.Route {
+	case "", "inline", "worker", "fanout":
+	default:
+		diagnostics = append(diagnostics, diagnostic(10, "route", CodeContractInvalid, "route must be inline, worker, or fanout"))
+	}
 	if contract.Result.Path != ".lucind/result.json" {
 		diagnostics = append(diagnostics, diagnostic(20, "result.path", CodeResultPathMissing, "result path must be .lucind/result.json"))
 	}
@@ -76,6 +93,37 @@ func validateContract(contract Contract) (normalizedContract, Diagnostics) {
 	}
 	if contract.Mode == ModeReadOnly && len(contract.WritePaths) > 0 {
 		diagnostics = append(diagnostics, diagnostic(50, "mode", CodeModeCommitConflict, "read-only contracts cannot declare write paths"))
+	}
+	if contract.CommitMessage != "" {
+		if err := packet.ValidateCommitMessage(contract.CommitMessage); err != nil {
+			diagnostics = append(diagnostics, diagnostic(10, "commit_message", CodeContractInvalid, "commit_message is invalid"))
+		}
+		if len(contract.Verification) == 0 {
+			diagnostics = append(diagnostics, diagnostic(10, "commit_message", CodeContractInvalid, "commit_message requires verification"))
+		}
+	}
+	if contract.MaxIterations != 0 {
+		if contract.MaxIterations < 1 || contract.MaxIterations > 4 {
+			diagnostics = append(diagnostics, diagnostic(10, "max_iterations", CodeContractInvalid, "max_iterations must be between 1 and 4"))
+		}
+	}
+	if len(contract.Escalation) > 0 {
+		if len(contract.Escalation) > 3 {
+			diagnostics = append(diagnostics, diagnostic(10, "escalation", CodeContractInvalid, "escalation at most 3 rungs"))
+		}
+		for _, rung := range contract.Escalation {
+			if strings.TrimSpace(rung.Executor) == "" {
+				diagnostics = append(diagnostics, diagnostic(10, "escalation", CodeContractInvalid, "escalation rung executor must be non-empty"))
+			}
+		}
+	}
+	if contract.MaxIterations > 1 || len(contract.Escalation) > 0 {
+		if len(contract.Verification) == 0 {
+			diagnostics = append(diagnostics, diagnostic(10, "verification", CodeContractInvalid, "loop and escalation require verification"))
+		}
+		if strings.TrimSpace(contract.CommitMessage) == "" {
+			diagnostics = append(diagnostics, diagnostic(10, "commit_message", CodeContractInvalid, "loop and escalation require commit_message (the dispatcher commits looped work)"))
+		}
 	}
 	claimKeys := make([]string, 0, len(contract.TargetClaims))
 	for key, value := range contract.TargetClaims {
@@ -109,10 +157,28 @@ func validateContract(contract Contract) (normalizedContract, Diagnostics) {
 			}
 		}
 		sort.Strings(requiredSkills)
+	} else if contract.NamedSkillsOnly {
+		if derived, err := skillset.DeriveNamed(nil, contract.AdhocSkills); err == nil && len(derived) > 0 {
+			requiredSkills = derived
+		}
 	} else if contract.LaneRole != "" || contract.RouteIntent != "" || len(contract.AdhocSkills) > 0 {
 		if derived, err := skillset.Derive(contract.RouteIntent, contract.LaneRole, nil, contract.AdhocSkills); err == nil && len(derived) > 0 {
 			requiredSkills = derived
 		}
+	}
+
+	var verification []string
+	if len(contract.Verification) > 0 {
+		verification = append([]string(nil), contract.Verification...)
+	}
+	var knownFailures []string
+	if len(contract.KnownEnvironmentalFailures) > 0 {
+		knownFailures = append([]string(nil), contract.KnownEnvironmentalFailures...)
+	}
+
+	var escalation []packet.EscalationRung
+	if len(contract.Escalation) > 0 {
+		escalation = append([]packet.EscalationRung(nil), contract.Escalation...)
 	}
 
 	return normalizedContract{
@@ -120,6 +186,17 @@ func validateContract(contract Contract) (normalizedContract, Diagnostics) {
 		LaneRole: contract.LaneRole, AdhocSkills: adhocSkills, RequiredSkills: requiredSkills,
 		WritePaths: writePaths, ReadOnlyPaths: readOnlyPaths, Goal: contract.Goal,
 		DoneCriteria: append([]string(nil), contract.DoneCriteria...), HardStops: append([]string(nil), contract.HardStops...), Result: contract.Result,
+		Route:                      contract.Route,
+		RouteEvidence:              contract.RouteEvidence,
+		NamedSkillsOnly:            contract.NamedSkillsOnly,
+		Understood:                 contract.Understood,
+		OpenDesign:                 contract.OpenDesign,
+		EstimatedLookups:           contract.EstimatedLookups,
+		Verification:               verification,
+		KnownEnvironmentalFailures: knownFailures,
+		CommitMessage:              contract.CommitMessage,
+		MaxIterations:              contract.MaxIterations,
+		Escalation:                 escalation,
 	}, diagnostics
 }
 
@@ -232,14 +309,18 @@ func renderBody(contract normalizedContract, skillPaths []string) []byte {
 		for _, sp := range skillPaths {
 			fmt.Fprintf(&out, "- %s\n", sp)
 		}
+		out.WriteString("\nRead each SKILL.md above before starting work and list each skill's directory name in `skills_loaded` of the result envelope.\n")
 	}
-	fmt.Fprintf(&out, "\n## Return\n```lucind-result-contract\nversion: 1\npath: %s\nschema: %s\nmode: %s\ncommit: %s\n```\n", contract.Result.Path, contract.Result.Schema, contract.Mode, commitForMode(contract.Mode))
+	fmt.Fprintf(&out, "\n## Return\n```lucind-result-contract\nversion: 1\npath: %s\nschema: %s\nmode: %s\ncommit: %s\n```\n", contract.Result.Path, contract.Result.Schema, contract.Mode, commitForMode(contract.Mode, contract.CommitMessage))
 	return []byte(out.String())
 }
 
-func commitForMode(mode Mode) string {
+func commitForMode(mode Mode, commitMessage string) string {
 	if mode == ModeReadOnly {
 		return "forbidden"
+	}
+	if commitMessage != "" {
+		return "dispatcher"
 	}
 	return "required"
 }

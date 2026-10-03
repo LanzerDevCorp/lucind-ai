@@ -17,8 +17,8 @@ func TestSchemaV10AddsVersionedAuthoringEvidence(t *testing.T) {
 	if err := l.db.QueryRow(`SELECT MAX(version) FROM schema_migrations`).Scan(&version); err != nil {
 		t.Fatal(err)
 	}
-	if version != 10 {
-		t.Fatalf("schema version = %d, want 10", version)
+	if version != schemaVersion {
+		t.Fatalf("schema version = %d, want %d", version, schemaVersion)
 	}
 	assertTableColumns(t, l.db, "lane_candidates", []string{
 		"run_id", "lane_id", "packet_id", "packet_digest", "primary_root", "worktree_path",
