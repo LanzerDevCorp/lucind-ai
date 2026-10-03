@@ -44,9 +44,11 @@ Note for tomorrow: the T1 worktree `~/git_root/lucind-ai-worktrees/lane-t1-hmac-
 - 2026-10-03 | lanzerdev20@gmail.com | preflight | `list`/`current` read-only; active account lanzerdev20, usage cache 98%; no profile has `antigravity-oauth-token` -> rotation disabled (D-ROT-0)
 - 2026-10-03 04:02 | lanzerdev20@gmail.com | quota | blind reviewer B for T12b (`claude-opus-4-6-thinking`) failed with 429 RESOURCE_EXHAUSTED ("Resets in 3h4m"); `agy --print /usage`: Claude and GPT models 5h = 0% (resets 14:06Z), weekly 48%; Gemini models 5h = 28% (resets 13:55Z), weekly 58%. Rotation is disabled (D-ROT-0), so no account switch. Plan (R4 adapted): keep working with Gemini models, spend Gemini quota only on writers (no pro reviewers), and run the pending review B after 14:06Z.
 
-## Reporte matutino (borrador, se completa al cerrar la sesión)
+## Reporte matutino
 
-Estado al 2026-10-03 05:20 (hora local). Rama `feature/herdr-agent-factory`, nada empujado, RDD apagado, sin `gentle-ai review`.
+Cierre de la sesión sin supervisión, 2026-10-03 (hora local ~07:30). Rama `feature/herdr-agent-factory`; nada empujado, ningún PR, RDD apagado, ningún `gentle-ai review ...`, rotación de cuentas desactivada (D-ROT-0), un solo `agy` a la vez.
+
+### Tareas
 
 | Tarea | Estado | Commits en la rama de feature |
 |---|---|---|
@@ -56,23 +58,54 @@ Estado al 2026-10-03 05:20 (hora local). Rama `feature/herdr-agent-factory`, nad
 | T4 SDD fuera (docs/plantillas, `sdd-*` opt-in) | hecha | 85b4a24 |
 | T5 comando `phase` y `internal/phasespec` fuera | hecha | 10ef695 |
 | T6 skills worker y explorador | hecha | 3fe1e8c |
-| T7 spike herdr/agy | hecha | `docs/herdr-spike-findings.md` (commit b323c2f en historial) |
-| T8 executor `herdr-agy` | hecha | cc6df27, f721ce8 |
-| T9 commit del dispatcher | hecha | 82cae7d, bed8d65 |
+| T7 spike herdr/agy | hecha | `docs/herdr-spike-findings.md` |
+| T8 executor `herdr-agy` | hecha (revisión ciega x2) | cc6df27, f721ce8 |
+| T9 commit del dispatcher | hecha (revisión ciega x2) | 82cae7d, bed8d65 |
 | T10 clasificador de riesgo y plan por tier (sin cursor-agent) | hecha | 5563143 |
 | T11 validador del umbral de despacho | hecha | ebcd33c |
-| T12a tope de paralelismo | hecha | be120f5 |
-| T12b loop write/test/fix + escalera | hecha, revisión B pendiente | ac33b61, f919168 |
-| T12c fan-out de exploradores | pendiente (cuota) | n/a |
-| T13 log de uso y reporte | hecha | 47bd901 |
+| T12a tope de paralelismo (3) | hecha | be120f5 |
+| T12b loop write/test/fix + escalera | hecha (revisión ciega x2) | ac33b61, f919168 |
+| T12c fan-out de exploradores (`lucind-ai explore`) | hecha | 52c9549, 7aa93ac |
+| T13 log de uso y `usage report` | hecha | 47bd901 |
 | T14 Router + Jev en shadow (sin llamadas reales) | hecha | 2cd9e78 |
-| T15 fuente única de reglas | hecha | 218053c |
-| T16-T20 seguimientos descubiertos por las revisiones | creados, sin empezar | n/a |
+| T15 fuente única de reglas (`rules init/generate`) | hecha | 218053c |
+| T16-T20 seguimientos descubiertos por las revisiones y los e2e | creados, sin empezar | n/a |
 
-Verificación: ver la sección final del reporte (se vuelve a correr al cerrar).
-Decisiones que esperan revisión (más riesgosas primero): D3 (checks fail-closed: lanes legacy solo con `sdd_phase` ahora corren checks), D7 (`--no-verify` en el commit del dispatcher), D4 (`sdd-*` opt-in cambia el digest de packets con rol sin fase), D12 (los loops exigen `commit_message`), D15 (Jev: términos de retención sin leer), D10 (tope de 3 lanes por defecto), D1, D5, D6, D8, D9, D11, D13, D14, D16.
+Saltadas o bloqueadas: ninguna. Fuera de alcance esta noche: `cursor-agent` (T18).
+
+### Estado de verificación
+
+- `go build ./...` y `go vet ./...` limpios sobre la rama de feature; `make verify-plugin-content verify-opencode-plugin` pasan (plugin 2.0.20).
+- `go test ./...` pasa. Dos corridas completas finales con `-race`: una limpia y otra con la flake ya conocida de `internal/ledger` (`TestConcurrentProgressAndSetStatus`, SQLITE_BUSY bajo carga, T20). Dos flakes propias de esta noche se corrigieron (leases de `internal/feature`, fake de `pane run` de T8, D2 y D16).
+- Cada tarea se verificó con build, vet, tests y una prueba real de comportamiento en repos temporales; los e2e encontraron bugs que los unit tests no veían (p. ej. `routed_by: explore` derivaba `sdd-explore`, T12c; tests de `cmd` escribiendo en el estado real, T13).
+
+### Decisiones que esperan tu revisión (las más riesgosas primero)
+
+1. D7: el commit del dispatcher usa `--no-verify` (no corre hooks del repo).
+2. D3: los checks mecánicos corren salvo lane read-only o rol no escritor; lanes legacy con solo `sdd_phase` ahora ejecutan checks.
+3. D4: `sdd-*` es opt-in; cambia el digest de packets con rol `apply`/`verify`/`archive` sin `sdd_phase`.
+4. D12: los loops exigen `verification` y `commit_message`.
+5. D17: `Agy.KnownModels()` ampliado a los 5 modelos del diseño (antes `lucind-ai run` solo aceptaba `gemini-3.7-flash-high`).
+6. D15: Jev. Se leyó la documentación pública (solo lectura, sin enviar datos); los términos de retención exactos NO se pudieron leer. El router está apagado por defecto y solo envía 4 números/booleanos; leer el Data Processing Agreement antes de habilitarlo.
+7. D10: `ExecuteBatch` limita a 3 lanes concurrentes por defecto (`--max-parallel`).
+8. D1, D5, D6, D8, D9, D11, D13, D14, D16: ver arriba.
+
 `BLOCKED-DECISION`: ninguna.
-Rotación de cuentas: DESACTIVADA toda la noche (D-ROT-0). Cuota agy: Gemini 5h al 6 % (reinicia 13:55Z) y Claude/GPT al 0 % (14:06Z) a las 12:05Z.
-No verificado: segunda revisión ciega de T12b; los términos de retención de Jev; los dos tests de ledger que fallan bajo carga (T20).
-Siguiente tarea recomendada: segunda revisión de T12b con modelo Claude cuando reinicie la cuota, luego T12c, T17 y T16.
-Worktrees y ramas `lane/*` se conservan en `~/git_root/lucind-ai-worktrees/` (borrar está prohibido sin supervisión); borrarlos es decisión tuya.
+
+### Cuota y rotación
+
+Rotación DESACTIVADA toda la noche (D-ROT-0): ningún perfil guardado tiene `antigravity-oauth-token`. Hubo un 429 (revisor Claude de T12b, ~11:00Z); la ventana de Gemini quedó al 6 % y se esperó al reinicio (13:55Z) con trabajo local mientras tanto; la segunda revisión se hizo tras el reinicio de la cuota Claude/GPT (14:06Z). Al cierre: Gemini 5 h ~90 %, Claude/GPT 5 h ~100 % (semanales 52 % / 48 %).
+
+### No verificado
+
+- Los términos de retención de datos de Jev (D15).
+- Que `lucind-ai explore` y `herdr-agy` funcionen con el `agy` y `herdr` reales: solo se probaron con fakes y un `agy` falso en repos temporales (el `herdr` real sí se usó en el e2e de T8 con un `agy` falso).
+- Dos tests de `internal/ledger` siguen fallando de forma intermitente bajo carga (T20).
+
+### Siguiente tarea recomendada
+
+T17 (accept re-verifica los candidatos con commit del dispatcher), luego T16 (parada dura y limpieza de `herdr-agy`), T19 (señales declaradas del router), T20 (flake del ledger) y T18 (jueces con `cursor-agent`, necesita Cursor). Antes de usar `lucind-ai explore` o `herdr-agy` en serio, una corrida real con `agy` en un repo descartable.
+
+### Lo que dejé en disco
+
+Worktrees `~/git_root/lucind-ai-worktrees/lane-*` y ramas `lane/*` se conservan todos (borrar está prohibido sin supervisión): hay más de 20; los commits ya están integrados en la rama de feature por cherry-pick, así que `git branch --no-merged` los mostrará hasta que decidas borrarlos. Estado de `herdr`: los workspaces temporales de los spikes se cerraron. El binario instalado en `$GOPATH/bin` corresponde a la rama de feature (`lucind-ai -v`).
