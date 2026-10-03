@@ -196,6 +196,9 @@ Route for every task: delegated to agy via herdr (multi-file, deletion-heavy wor
 - D24 (agy, T3): legacy runners (`agy.go`, `herdr.go`, `herdr_interactive.go`, `executor.go`)
   removed; `AgyQuota`, `DefaultModel`, `KnownModels`, `ResolveModel` kept.
 - D25 (agy, T3): pane split direction = right when width >= 2*height, else down; right on error.
+- D26 (process): when every saved agy account is below ~5% of the 5h window, wait for the reset
+  instead of moving heavy work to Claude (keeps the agy-heavy split). 2026-10-03 15:30: all three
+  saved accounts at ~3% remaining; T4 scheduled for ~18:33 local in a fresh agy session.
 
 ## Next step
 
