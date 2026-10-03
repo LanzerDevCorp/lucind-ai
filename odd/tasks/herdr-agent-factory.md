@@ -81,7 +81,12 @@ Each task closes with a work-unit commit and records its commit id and review ti
   - Route: inline by the orchestrator (read-only plus throwaway repos/panes created for the spike; no source writes). Findings: `docs/herdr-spike-findings.md`. Key facts: `worktree open --path` needs `--cwd <repo>`; `worktree remove` kills live panes, refuses dirty trees, leaves the branch; `agent wait` is unreliable for headless runs (use the exit sentinel); stream-json final `result` equals the json output; usage has tokens but no cost; `--sandbox` made the add-dir read-only and did not restrict network or other writes.
   - Commit: `06d1a00` (docs only, directly on the feature branch).
 
-- [ ] **T8. HerdrExecutor.** Implement `executor.Executor` over herdr panes: lucind-ai creates the worktree, herdr opens it, headless CLI runs in the pane with stream-json tee and an exit sentinel. Depends on T7. Route: delegated writer. Est. ~500 lines.
+- [x] **T8. HerdrExecutor.** Implement `executor.Executor` over herdr panes: lucind-ai creates the worktree, herdr opens it, headless CLI runs in the pane with stream-json tee and an exit sentinel. Depends on T7. Route: delegated writer. Est. ~500 lines.
+  - Route: delegated writer (agy `gemini-3.8-flash-high`; trigger: new file + process boundary + plugin doc). Shipped `executor.HerdrAgy` registered as packet executor `herdr-agy` (same agy invocation as `executor.Agy`, run through a generated `run.sh` in a herdr pane; `worktree open --cwd --path`; nonce exit sentinel; `pane wait-output --regex`; C-c on timeout; stream-json progress polling), plugin executors doc rows, plugin bumped to 2.0.17.
+  - Evidence: orchestrator re-ran build, vet, `go test -race` on executor/cmd, full suite, plugin checks; real end-to-end with real `herdr` and a fake `agy` script in a throwaway repo (prompt with quotes, `$()` and backticks arrives byte-identical; exit code 3 propagates; state dir kept on failure, removed on success). Found and fixed by hand: real herdr errors are `{"error":{"code","message"}}` objects (the writer's fake used a string), non-timeout `wait-output` failures were treated as timeouts.
+  - Blind review (`gemini-3.1-pro-high`, `claude-opus-4-6-thinking`, sequential, read-only; worktree unchanged): both found the unparseable `exit.code` => success; one found `cd` failure falling through to run agy in the wrong directory. Both fixed with tests. Accepted risks and deferred items: see D5 and T16.
+  - Commits: lane `dc3b55b`, `9633b37`; integrated as the two latest executor commits ending at `f721ce8`.
+
 - [ ] **T9. Dispatcher commit step.** After green attestation (T1) and judges, the dispatcher makes the Conventional Commit from the packet message. Depends on T1, T8. Route: delegated writer. Est. ~200 lines.
 - [ ] **T10. Risk classifier and judges.** Port a minimal `ClassifyRisk` (path tokens, risk signals, byte-proven passive content; failure is high); map tiers to verification (passive: readback; medium: attestation + 1 judge; high: attestation + 2 blind judges + Claude). Prove `cursor-agent` end to end. Route: delegated writer. Est. ~450 lines.
 - [ ] **T11. Dispatch-threshold validator.** Validate the declared route against computable signals (allowed_paths count, new-file flag, risk tier); upgrade or reject mismatches. Route: delegated writer. Est. ~200 lines.
@@ -89,8 +94,9 @@ Each task closes with a work-unit commit and records its commit id and review ti
 - [ ] **T13. Usage logging and report.** Per-call JSONL (provider, model, tokens, lane) and a report command against the 60/15/25 target. Route: delegated writer. Est. ~250 lines.
 - [ ] **T14. Router interface with Jev in shadow mode.** Router interface; deterministic implementation as baseline and permanent fallback; Jev adapter over plain HTTP (no Go SDK) that logs disagreements to the T13 JSONL and has no authority. Read `docs.typesafe.ai/api.md` and `legal.md` first. Route: delegated writer. Est. ~350 lines.
 - [ ] **T15. Rules source and generated files.** Single rules source generating `CLAUDE.md`, `GEMINI.md`, `AGENTS.md` per workspace; workspace `CLAUDE.md` states that delegation goes through the dispatcher. Route: delegated writer. Est. ~200 lines.
+- [ ] **T16. HerdrAgy lifecycle: hard stop and cleanup.** Found by the T8 blind review: (a) after a timeout the C-c grace period can expire and the pane process keeps running (no hard-kill fallback); (b) state dirs `$XDG_STATE_HOME/lucind-ai/herdr/run-*` are kept on failure and never reaped; (c) `pane wait-output` followed by reading `exit.code` has no cross-check that agy really exited. Add a bounded hard-stop policy (second C-c, then close only the pane/workspace that this executor itself opened, never reused ones) and a reaper for old run dirs with a retention window. Route: delegated writer. Est. ~200 lines. Depends on T8.
 
-Order: T1, T1b, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15.
+Order: T1, T1b, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16.
 
 ## Acceptance criteria
 
@@ -108,6 +114,7 @@ Order: T1, T1b, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15.
 ## Next step
 
 T2 (packet contract fields and `interaction_required`): delegate to agy in a new worktree `lane/t2-packet-fields` from `feature/herdr-agent-factory`. The T1 worktree `lane-t1-hmac-attestation` is kept until the follow-ups are decided; remove it only after confirming nothing unique remains (its commit was cherry-picked, so the SHA differs).
+- 2026-10-03: T8 closed (`f721ce8`). T16 added from the T8 review findings.
 - 2026-10-03: T7 closed (`06d1a00`).
 - 2026-10-03: T6 closed (`3fe1e8c`).
 - 2026-10-03: T5 closed (`10ef695`).

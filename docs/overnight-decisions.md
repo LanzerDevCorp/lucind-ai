@@ -14,6 +14,9 @@ D3 | 2026-10-03 | T3 | legacy lanes carrying only `sdd_phase` (explore/spec/...)
 
 D4 | 2026-10-03 | T4 | "make sdd-* derivation optional": lane roles apply/verify/archive always added sdd-apply/verify/archive | keep as-is / opt-in via explicit sdd_phase / new flag | opt-in via explicit sdd_phase (reuses the existing field, no new API) | consistent with how lens/synthesis already gate sdd-<phase>; ODD packets get no sdd-* skills | revert the three `if sddPhase != ""` guards in internal/skillset/skillset.go; NOTE required_skills (hence packet digest) of role-only apply/verify/archive packets change, so a replay of an old such packet gets a new digest | 85b4a24
 
+D5 | 2026-10-03 | T8 | blind review item: the exit sentinel nonce is readable from run.sh by the agent (it could print a forged sentinel) | delete run.sh before running agy / accept | accepted | agy already runs with --dangerously-skip-permissions and can write any file, so exit code and output are not a security boundary; trust comes from the dispatcher (attestation, allowed_paths diff, judges). A forged sentinel without a matching exit.code fails closed (read error) | n/a | f721ce8
+D6 | 2026-10-03 | T8 | review items: no hard-kill after C-c grace; state dirs of failed runs are never reaped | fix now / new task | new task T16 | closing panes/workspaces needs a policy for reused panes (rule: never close panes you did not create) that deserves its own task | n/a | f721ce8
+
 Note for tomorrow: the T1 worktree `~/git_root/lucind-ai-worktrees/lane-t1-hmac-attestation` and branch `lane/t1-hmac-attestation` are kept (deletion is forbidden overnight).
 
 ## Registro de rotaciones
