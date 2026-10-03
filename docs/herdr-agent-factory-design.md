@@ -1,6 +1,6 @@
 # herdr agent factory: design decisions and handoff
 
-Status (2026-10-03): design agreed with the owner; implementation in progress on `feature/herdr-agent-factory`. T1 (HMAC test attestation) is done and integrated as `880665b`; next is T2. See section 8 for the progress log and section 9 for how to resume.
+Status (2026-10-03, end of the first unattended night): T1-T11, T12a, T12b and T13-T15 are done on `feature/herdr-agent-factory` (see `odd/tasks/herdr-agent-factory.md` for commit ids). Pending: T12c (explorer fan-out), T16-T20 (follow-ups found by the reviews) and the second blind review of T12b. See section 8 for what shipped and what was learned, `docs/overnight-decisions.md` for every decision taken without the owner (D1-D16) and section 9 for how to resume.
 Tracking: `odd/tasks/herdr-agent-factory.md` (tasks T1-T15, authoritative checklist) and its Engram mirror `odd/herdr-agent-factory/tasks` (project `lucind-ai`).
 This document consolidates every decision taken in the design session so implementation can continue in this repository without the original conversation.
 
@@ -191,9 +191,38 @@ Notes for step 6: the worker leaves changes uncommitted by design; the orchestra
 - Writing the task packet with explicit sections (allowed surfaces, design, acceptance criteria, strict TDD, verification, return format) produced a result that needed no corrections; keep that structure for T2 onward.
 - The orchestrator's Claude Code session blocks long foreground `sleep` calls; wait with `herdr pane wait-output` launched as a background command instead.
 
+### Overnight run (T1b to T15): what shipped
+
+| Task | What shipped | Where |
+|---|---|---|
+| T1b | atomic key creation (temp file + `os.Link`), `0444` before rename, `accept` reuses a valid attestation, `RepoID` keyed by the git common dir | `internal/attest`, `internal/accept` |
+| T2 | packet fields `route`, `route_evidence`, `verification`, `known_environmental_failures`, `named_skills_only`; result status `interaction_required` + `interaction` payload | `internal/packet`, `internal/result` |
+| T3 | one fail-closed predicate (`LaneMetadata.RequiresMechanicalChecks`) replaces the SDD gates | `internal/ledger`, `internal/accept`, `internal/run` |
+| T4, T5 | SDD templates and strategy retired, `sdd-*` skills opt-in, `phase` command and `internal/phasespec` removed | plugin trees, `cmd/lucind-ai` |
+| T6 | worker rules in `lucind-apply`, SDD-free explorer lenses in `lucind-fan-out-lens` | `.agents/skills` |
+| T7 | herdr and agy facts | `docs/herdr-spike-findings.md` |
+| T8 | `herdr-agy` executor | `internal/executor/herdr.go` |
+| T9 | dispatcher commit step (`commit_message`, attested verification, `--no-verify`) | `internal/run/commit_step.go` |
+| T10, T11 | risk classifier and tier plan; dispatch-threshold validator wired into `run` | `internal/risk`, `internal/dispatchcheck` |
+| T12a, T12b | lane concurrency cap (3); write/test/fix loop and escalation ladder | `internal/run` |
+| T13 | per-call usage log and `usage report` | `internal/usagelog` |
+| T14 | Router interface, deterministic baseline, Jev shadow adapter (opt-in, numbers and booleans only) | `internal/router` |
+| T15 | one rules source generating `CLAUDE.md`, `GEMINI.md`, `AGENTS.md` | `internal/rules` |
+
+### Learnings from the overnight run
+
+- **Writers deliver, the orchestrator still has to verify.** Every task needed at least one fix after the writer reported "no risks": a test fixture taken from another repository (T9), a silently dropped stale state between loop attempts (T12b), tests writing to the real state directory (T13), a `net` substring that matched ordinary words (T10), a fake with the wrong error shape (T8), redirects that would carry a bearer key (T14). Mutation checks (revert the fix, watch the test fail) caught two tests that did not discriminate.
+- **Blind reviewers pay off on process, key and git code.** Two reviewers from different families converged on the real issues in T1b, T8, T9. The Claude family hit its 5 h quota during T12b: plan reviews against `agy /usage` (free) before launching them.
+- **Quota is the bottleneck, not time.** Gemini 5 h went from 98% to 6% over about nine hours with roughly 25 agy runs. The pro and opus reviewers cost far more than flash writers. Rotation was unavailable (profiles lack `antigravity-oauth-token`).
+- **Run the whole suite with `-race` more than once.** Two timing flakes appeared only under full-suite load (lease TTLs in `internal/feature`, a fake `pane run` bound to a short context) and were fixed; two ledger tests still flake (T20).
+- **Test hygiene.** A new default side effect (usage log) polluted the real state dir until both test packages got a guard. Any new default writer needs the same check (`ls` the real dir before and after a test run).
+- **Doc edits through Python heredocs:** a quoted heredoc keeps `\`` as two characters; use plain backticks.
+
 ### Next
 
-T2 in a new worktree `lane/t2-packet-fields` from `feature/herdr-agent-factory` (same recipe, section 7). The T1 worktree `lane-t1-hmac-attestation` is kept until the follow-ups are decided.
+1. Run the second blind review of T12b (commit range `7f12d0e..9fc2c6d` in lane `lane/t12b-loop-ladder`) with a Claude-family model once the 5 h bucket resets; apply only reproduced findings (D11).
+2. T12c explorer fan-out (`lucind-ai explore`), then T16 (HerdrAgy hard stop and cleanup), T17 (accept re-verifies dispatcher-commit candidates), T18 (judges via `cursor-agent`), T19 (declared fuzzy signals), T20 (ledger flake).
+3. Owner decisions waiting: read Jev's Data Processing Agreement before ever enabling the shadow router (D15); review the riskiest recorded decisions first (D3 fail-closed checks, D7 `--no-verify`, D4 `sdd-*` opt-in changes digests of role-only packets); decide about the lane worktrees and branches kept on disk (deletion is forbidden unattended).
 
 ## 9. Resuming in a new session
 
