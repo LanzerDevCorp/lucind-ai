@@ -29,3 +29,5 @@ Note for tomorrow: the T1 worktree `~/git_root/lucind-ai-worktrees/lane-t1-hmac-
 ## Registro de rotaciones
 
 - 2026-10-03 | lanzerdev20@gmail.com | preflight | `list`/`current` read-only; active account lanzerdev20, usage cache 98%; no profile has `antigravity-oauth-token` -> rotation disabled (D-ROT-0)
+- 2026-10-03 04:02 | lanzerdev20@gmail.com | quota | blind reviewer B for T12b (`claude-opus-4-6-thinking`) failed with 429 RESOURCE_EXHAUSTED ("Resets in 3h4m"); `agy --print /usage`: Claude and GPT models 5h = 0% (resets 14:06Z), weekly 48%; Gemini models 5h = 28% (resets 13:55Z), weekly 58%. Rotation is disabled (D-ROT-0), so no account switch. Plan (R4 adapted): keep working with Gemini models, spend Gemini quota only on writers (no pro reviewers), and run the pending review B after 14:06Z.
+
