@@ -75,11 +75,19 @@ func Derive(sddPhase, laneRole string, stackSkills, adhocSkills []string) ([]str
 			derived = append(derived, "sdd-"+sddPhase)
 		}
 	case "apply":
-		derived = append(derived, "lucind-apply", "sdd-apply")
+		derived = append(derived, "lucind-apply")
+		if sddPhase != "" {
+			derived = append(derived, "sdd-apply")
+		}
 	case "verify":
-		derived = append(derived, "lucind-verify", "sdd-verify")
+		derived = append(derived, "lucind-verify")
+		if sddPhase != "" {
+			derived = append(derived, "sdd-verify")
+		}
 	case "archive":
-		derived = append(derived, "sdd-archive")
+		if sddPhase != "" {
+			derived = append(derived, "sdd-archive")
+		}
 	case "ultrafixer", "human":
 		// No child or phase skill derived.
 	case "":

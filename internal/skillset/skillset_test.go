@@ -88,7 +88,7 @@ func TestDerive(t *testing.T) {
 			laneRole:    "apply",
 			stackSkills: nil,
 			adhocSkills: nil,
-			wantSkills:  []string{"lucind-apply", "lucind-executor", "sdd-apply"},
+			wantSkills:  []string{"lucind-apply", "lucind-executor"},
 		},
 		{
 			name:        "verify lane",
@@ -104,7 +104,7 @@ func TestDerive(t *testing.T) {
 			laneRole:    "verify",
 			stackSkills: nil,
 			adhocSkills: nil,
-			wantSkills:  []string{"lucind-executor", "lucind-verify", "sdd-verify"},
+			wantSkills:  []string{"lucind-executor", "lucind-verify"},
 		},
 		{
 			name:        "archive lane",
@@ -120,7 +120,7 @@ func TestDerive(t *testing.T) {
 			laneRole:    "archive",
 			stackSkills: nil,
 			adhocSkills: nil,
-			wantSkills:  []string{"lucind-executor", "sdd-archive"},
+			wantSkills:  []string{"lucind-executor"},
 		},
 		{
 			name:        "ultrafixer role",
@@ -374,5 +374,16 @@ func TestDeriveNamed(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestDeriveRoleOnlyApplyDerivesLucindApplyAndExecutor(t *testing.T) {
+	got, err := skillset.Derive("", "apply", nil, nil)
+	if err != nil {
+		t.Fatalf("Derive() error = %v", err)
+	}
+	want := []string{"lucind-apply", "lucind-executor"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Derive(\"\", \"apply\", nil, nil) = %v, want %v", got, want)
 	}
 }
