@@ -35,6 +35,8 @@ D15 | 2026-10-03 | T14 | Jev (TypeSafe) API read from the public docs (docs.type
 
 D16 | 2026-10-03 | verification | repeated full `go test ./... -race` runs: (a) `TestHerdrAgyTimeoutSendsCtrlCAndReturnsTimedOut` (mine, T8) was timing-flaky because the fake `pane run` was tied to a 20 ms context: FIXED (the fake no longer uses the caller context; 6 consecutive -race runs green); (b) two internal/ledger concurrency tests hit SQLITE_BUSY once under full-suite load: NOT changed, tracked as T20 | ignore / fix now / track | fixed (a), tracked (b) | (b) is pre-existing, passes in isolation, and the ledger code is untouched by this work | n/a | n/a
 
+D17 | 2026-10-03 | T12c | `executor.Agy.KnownModels()` only allowed `gemini-3.7-flash-high`, so `lucind-ai run` would have rejected every model of the factory design (found while wiring explore; the nightly manual dispatches bypassed `run`) | keep the list and add per-command wrappers / extend the real list | extended `Agy.KnownModels()` to the design set (3.7-flash-high, 3.8-flash-high, 3.8-flash-medium, 3.1-pro-high, claude-opus-4-6-thinking); `herdr-agy` shares it; default model unchanged (3.7-flash-high) | the doc comment says extending the set is a deliberate code change for models verified against the real CLI: all five were used successfully tonight; wrappers would hide the problem and recorded a smaller list | restore the single-model list in internal/executor/agy.go | 52c9549
+
 Note for tomorrow: the T1 worktree `~/git_root/lucind-ai-worktrees/lane-t1-hmac-attestation` and branch `lane/t1-hmac-attestation` are kept (deletion is forbidden overnight).
 
 ## Registro de rotaciones
