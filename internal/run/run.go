@@ -33,6 +33,7 @@ import (
 	"github.com/LanzerDevCorp/lucind-ai/internal/packet"
 	"github.com/LanzerDevCorp/lucind-ai/internal/result"
 	"github.com/LanzerDevCorp/lucind-ai/internal/skillset"
+	"github.com/LanzerDevCorp/lucind-ai/internal/usagelog"
 	"github.com/LanzerDevCorp/lucind-ai/internal/worktree"
 )
 
@@ -249,6 +250,7 @@ type Deps struct {
 	HasValidAttestation func(ctx context.Context, repoRoot, cmd, expectedTreeHash string) (bool, error)
 	PreCommitGate       func(ctx context.Context, worktreePath string, p packet.Packet) (lane.Status, string)
 	GitCommit           func(ctx context.Context, worktreePath, message string) error
+	RecordUsage         func(usagelog.Record)
 
 	// RenewInterval controls how often driveAttemptFromLeased renews the
 	// feature lease while checkFunc (integrate.Check) runs during the
@@ -503,6 +505,23 @@ func Execute(ctx context.Context, deps Deps, p packet.Packet) (Report, error) {
 		// non-verification failure is not reclassified as loop exhaustion.
 		lastVRes = verificationResult{}
 
+		var (
+			maxTokens int64
+			maxCost   float64
+			hasTokens bool
+		)
+		onProgress := func(ev executor.ProgressEvent) {
+			if ev.TotalTokens > 0 {
+				hasTokens = true
+				if ev.TotalTokens > maxTokens {
+					maxTokens = ev.TotalTokens
+				}
+			}
+			if ev.CostUSD > maxCost {
+				maxCost = ev.CostUSD
+			}
+		}
+
 		progress := make(chan executor.ProgressEvent, progressBufferSize)
 		progressDone := make(chan []error, 1)
 		appendProgressBatch := deps.AppendProgressBatch
@@ -510,9 +529,10 @@ func Execute(ctx context.Context, deps Deps, p packet.Packet) (Report, error) {
 			appendProgressBatch = deps.Ledger.AppendProgressBatch
 		}
 		go func() {
-			progressDone <- writeLaneProgress(context.WithoutCancel(ctx), appendProgressBatch, deps.RunID, p.ID, progress)
+			progressDone <- writeLaneProgress(context.WithoutCancel(ctx), appendProgressBatch, deps.RunID, p.ID, progress, onProgress)
 		}()
 
+		attemptStart := time.Now()
 		attemptsRun++
 		outcome, err := exec.Run(ctx, executor.Request{
 			Prompt:         prompt,
@@ -526,6 +546,57 @@ func Execute(ctx context.Context, deps Deps, p packet.Packet) (Report, error) {
 		})
 		close(progress)
 		progressErrors := <-progressDone
+
+		durationMS := time.Since(attemptStart).Milliseconds()
+		if !(err != nil && outcome == (executor.Outcome{})) {
+			uRec := usagelog.Record{
+				TS:         time.Now().UTC(),
+				RunID:      deps.RunID,
+				LaneID:     p.ID,
+				Attempt:    attemptIdx + 1,
+				Executor:   attempt.ExecutorName,
+				Provider:   usagelog.Provider(attempt.ExecutorName),
+				Model:      model,
+				LaneRole:   p.LaneRole,
+				DurationMS: durationMS,
+				ExitCode:   outcome.ExitCode,
+				TimedOut:   outcome.TimedOut,
+				Status:     "",
+			}
+			if u, ok := usagelog.ExtractUsage(outcome.Stdout); ok {
+				uRec.TokensKnown = true
+				uRec.InputTokens = u.InputTokens
+				uRec.OutputTokens = u.OutputTokens
+				uRec.ThinkingTokens = u.ThinkingTokens
+				uRec.CacheReadTokens = u.CacheReadTokens
+				uRec.TotalTokens = u.TotalTokens
+				uRec.CostUSD = u.CostUSD
+			} else if hasTokens {
+				uRec.TokensKnown = true
+				uRec.TotalTokens = maxTokens
+				uRec.CostUSD = maxCost
+			} else {
+				uRec.TokensKnown = false
+			}
+
+			recordUsage := deps.RecordUsage
+			if recordUsage == nil {
+				recordUsage = func(rec usagelog.Record) {
+					if os.Getenv("LUCIND_USAGE_LOG") == "off" || deps.RunID == "" {
+						return
+					}
+					path, dErr := usagelog.DefaultPath()
+					if dErr != nil {
+						fmt.Fprintf(os.Stderr, "lucind-ai: record usage: %v\n", dErr)
+						return
+					}
+					if aErr := usagelog.Append(path, rec); aErr != nil {
+						fmt.Fprintf(os.Stderr, "lucind-ai: record usage: %v\n", aErr)
+					}
+				}
+			}
+			recordUsage(uRec)
+		}
 
 		lastOutcome = outcome
 		allProgressErrors = append(allProgressErrors, progressErrors...)
@@ -854,6 +925,7 @@ func writeLaneProgress(
 	appendBatch func(context.Context, []ledger.LaneProgress) error,
 	runID, laneID string,
 	progress <-chan executor.ProgressEvent,
+	onEvent ...func(executor.ProgressEvent),
 ) []error {
 	ticker := time.NewTicker(progressFlushInterval)
 	defer ticker.Stop()
@@ -876,6 +948,9 @@ func writeLaneProgress(
 			if !ok {
 				flush()
 				return writeErrors
+			}
+			for _, fn := range onEvent {
+				fn(event)
 			}
 			batch = append(batch, ledger.LaneProgress{
 				RunID: runID, LaneID: laneID, Message: event.Message, At: event.At,
