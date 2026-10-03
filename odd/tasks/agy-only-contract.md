@@ -96,7 +96,7 @@ Route for every task: delegated to agy via herdr (multi-file, deletion-heavy wor
   workspace hook writing `env` + stdin to a file. Record result + evidence here. If not
   inherited, document plan B (bind `conversationId` on first `PreInvocation`).
   Acceptance: a yes/no answer with captured evidence. No source changes.
-- [ ] **T1 — Delete non-agy providers.** Remove `cursor-agent`, `opencode`, `claude`
+- [x] **T1 — Delete non-agy providers.** Remove `cursor-agent`, `opencode`, `claude`
   executors, the `Executor` interface (agy/herdr-agy concrete), `internal/judges`,
   `internal/resolve` (callers that need them are deleted in T2 — stub/remove call sites so the
   build stays green), packet `agent` field, `plugin/opencode` + its Makefile targets, related
@@ -139,6 +139,16 @@ Route for every task: delegated to agy via herdr (multi-file, deletion-heavy wor
     `executionNum`, `fullyIdle`, `terminationReason`.
   - `~/.gemini/antigravity-cli/settings.json` `trustedWorkspaces` already contains `$HOME`.
 
+- **T1** (route: delegated to agy pane w1:pT, which delegated to a `worker` subagent).
+  Commits `211d371`, `6bb037f`, `43e772b` (84 files, +357/−9045). agy reported
+  `sh lucind-checks.sh` PASS. Orchestrator re-run: 34 packages ok, 1 failure
+  `internal/run TestCheckingPhaseRenewsLeaseWhileChecksRun` (lease ExpiresAt timing) — passes
+  3/3 in isolation, so load-flaky; the package and leases are deleted in T2. Kept: minimal
+  `Executor` interface (removed in T2); `ScanConflictMarkers`/`EnforceAllowedPaths` moved to
+  `internal/integrate/conflict.go`; `PreCommitGate: nil`. Remaining provider strings: ledger
+  CHECK (T2), usagelog (T2), `scripts/hooks/check-orphaned-processes.sh` (T5 cleanup).
+- New agy session for T2+: pane **w1:pW** (`--dangerously-skip-permissions`, orchestrator role).
+
 ## Decisions log (taken autonomously; for user review)
 
 - D1 (T0): lane identity in hooks = `LUCIND_LANE` env var; no conversationId binding.
@@ -158,4 +168,4 @@ Route for every task: delegated to agy via herdr (multi-file, deletion-heavy wor
 
 ## Next step
 
-T1.
+T2.
