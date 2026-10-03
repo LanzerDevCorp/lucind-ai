@@ -32,6 +32,15 @@ type HerdrAgy struct {
 	// defaults to 10 seconds.
 	Grace time.Duration
 
+	// Interactive runs agy as a visible interactive session (`agy -i`) in the lane pane
+	// instead of a headless `--print` script; see herdr_interactive.go.
+	Interactive bool
+	// HookBinary is the lucind-ai executable the Stop hook invokes. Defaults to os.Executable().
+	HookBinary string
+	// TrustSettingsPath is the Antigravity settings file that records trusted workspaces.
+	// Defaults to ~/.gemini/antigravity-cli/settings.json.
+	TrustSettingsPath string
+
 	// Unexported seams for test isolation
 	cmd          herdrCmd
 	gitCommonDir gitCommonDirFunc
@@ -138,6 +147,9 @@ func parseHerdrError(data []byte, fallbackErr error) error {
 
 // Run execs agy inside a herdr pane in the specified worktree.
 func (h HerdrAgy) Run(ctx context.Context, req Request) (outcome Outcome, err error) {
+	if h.Interactive {
+		return h.runInteractive(ctx, req)
+	}
 	// 1. Resolve state directory outside the worktree
 	stateRoot := os.Getenv("XDG_STATE_HOME")
 	if stateRoot == "" {

@@ -72,6 +72,9 @@ type fakeHerdr struct {
 	waitOutFunc  func(ctx context.Context, pane string, regex string) ([]byte, error)
 	typedCmds    []string
 	sentKeysCall []string
+	onKeys       func(args []string)
+	asyncRun     bool // `pane run` returns immediately, like the real CLI (interactive sessions never exit by themselves)
+	closedWS     []string
 }
 
 func (f *fakeHerdr) cmd(ctx context.Context, args ...string) ([]byte, error) {
@@ -114,6 +117,13 @@ func (f *fakeHerdr) cmd(ctx context.Context, args ...string) ([]byte, error) {
 		if f.fakeAgyDir != "" {
 			cmd.Env = append(os.Environ(), "PATH="+f.fakeAgyDir+":"+os.Getenv("PATH"))
 		}
+		if f.asyncRun {
+			if err := cmd.Start(); err != nil {
+				return nil, err
+			}
+			go func() { _ = cmd.Wait() }()
+			return nil, nil
+		}
 		out, err := cmd.CombinedOutput()
 		return out, err
 	}
@@ -146,6 +156,16 @@ func (f *fakeHerdr) cmd(ctx context.Context, args ...string) ([]byte, error) {
 	if len(args) >= 2 && args[0] == "pane" && args[1] == "send-keys" {
 		f.mu.Lock()
 		f.sentKeysCall = append(f.sentKeysCall, args...)
+		f.mu.Unlock()
+		if f.onKeys != nil {
+			f.onKeys(args)
+		}
+		return nil, nil
+	}
+
+	if len(args) >= 3 && args[0] == "workspace" && args[1] == "close" {
+		f.mu.Lock()
+		f.closedWS = append(f.closedWS, args[2])
 		f.mu.Unlock()
 		return nil, nil
 	}
