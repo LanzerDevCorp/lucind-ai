@@ -62,7 +62,11 @@ Each task closes with a work-unit commit and records its commit id and review ti
   - Evidence: orchestrator re-ran build, vet, full `go test ./...` in the lane and on the feature branch. Behavior change recorded as D3.
   - Commits: lane `d5d07f2`; integrated as `d5d07f2`. No blind review; RDD off.
 
-- [ ] **T4. SDD removal, docs and derivation.** Retire the 21 SDD packet templates and `references/strategies/sdd.md`; make `sdd-*` derivation in `internal/skillset` optional; add `odd.md` strategy. Plugin bump. Route: delegated writer. Est. ~400 lines (mostly deletions).
+- [x] **T4. SDD removal, docs and derivation.** Retire the 21 SDD packet templates and `references/strategies/sdd.md`; make `sdd-*` derivation in `internal/skillset` optional; add `odd.md` strategy. Plugin bump. Route: delegated writer. Est. ~400 lines (mostly deletions).
+  - Route: delegated writer (agy `gemini-3.8-flash-high`; trigger: 50+ files incl. deletions in two plugin copies). Removed 21 SDD packet templates and `strategies/sdd.md` from both copies, added `strategies/odd.md`, router/SKILL.md rows, `skillset.Derive` now adds `sdd-apply|verify|archive` only with an explicit `sdd_phase` (role-only apply now derives `lucind-apply` + `lucind-executor`; decision D4), plugin bumped to 2.0.16.
+  - Evidence: orchestrator re-ran build, vet, full tests, `make verify-plugin-content verify-opencode-plugin`; checked no dangling plugin references (fixed one in `strategies/fan-out.md` by hand, both copies, then re-ran the bump); read back `odd.md` and the SKILL.md diff.
+  - Commits: lane `85b4a24`; integrated as `85b4a24`.
+
 - [ ] **T5. SDD removal, phase command.** Accept-and-ignore `sdd_phase`; remove the `phase` subcommand and `internal/phasespec`. `rg phasespec` before cutting. Route: delegated writer. Est. ~600 lines (deletions).
 - [ ] **T6. Worker and explorer skills.** Port the `gentle-ai-worker` rules into `lucind-apply` (edit surfaces, tool safety, TDD discipline, escalate ambiguity; map states to the envelope); rewrite `lucind-fan-out-lens` as an SDD-free explorer-lens skill with structural/textual/historical lenses. Plugin bump. Route: delegated writer. Est. ~250 lines.
 - [ ] **T7. Spike: herdr and agy facts.** Verify `herdr worktree open --path` on an externally created worktree, `herdr worktree remove` with live panes, `herdr agent wait` completion detection, exit-code sentinel and stream-json capture, and what `agy --sandbox` restricts. Output: findings note only. Route: delegated explorer (read-only plus scratch). No source writes.
@@ -93,6 +97,7 @@ Order: T1, T1b, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15.
 ## Next step
 
 T2 (packet contract fields and `interaction_required`): delegate to agy in a new worktree `lane/t2-packet-fields` from `feature/herdr-agent-factory`. The T1 worktree `lane-t1-hmac-attestation` is kept until the follow-ups are decided; remove it only after confirming nothing unique remains (its commit was cherry-picked, so the SHA differs).
+- 2026-10-03: T4 closed (`85b4a24`).
 - 2026-10-03: T3 closed (`d5d07f2`).
 - 2026-10-03: T2 closed (`73179d2`).
 - 2026-10-03: T1b closed. Slice 1 now = `880665b`, `6b82c49`, `aa8a693`. Engram mirror update pending.

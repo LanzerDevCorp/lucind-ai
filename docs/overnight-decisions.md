@@ -12,6 +12,8 @@ D2 | 2026-10-03 | T1b | one unexplained `FAIL` count (3) from `go test ./...` on
 
 D3 | 2026-10-03 | T3 | legacy lanes carrying only `sdd_phase` (explore/spec/...) and no `lane_role`/`read_only` used to skip mechanical checks; the new predicate runs them | keep skipping on legacy SDD phases / fail closed | fail closed (checks run unless the lane is declared read-only or has a non-writing role) | the mission asks for a fail-closed role/read_only predicate; legacy SDD packets are being retired (T4/T5) | revert `RequiresMechanicalChecks` to the SDDPhase condition in accept.go and attempt.go | d5d07f2
 
+D4 | 2026-10-03 | T4 | "make sdd-* derivation optional": lane roles apply/verify/archive always added sdd-apply/verify/archive | keep as-is / opt-in via explicit sdd_phase / new flag | opt-in via explicit sdd_phase (reuses the existing field, no new API) | consistent with how lens/synthesis already gate sdd-<phase>; ODD packets get no sdd-* skills | revert the three `if sddPhase != ""` guards in internal/skillset/skillset.go; NOTE required_skills (hence packet digest) of role-only apply/verify/archive packets change, so a replay of an old such packet gets a new digest | 85b4a24
+
 Note for tomorrow: the T1 worktree `~/git_root/lucind-ai-worktrees/lane-t1-hmac-attestation` and branch `lane/t1-hmac-attestation` are kept (deletion is forbidden overnight).
 
 ## Registro de rotaciones
