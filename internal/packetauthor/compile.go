@@ -303,6 +303,7 @@ func renderBody(contract normalizedContract, skillPaths []string) []byte {
 		for _, sp := range skillPaths {
 			fmt.Fprintf(&out, "- %s\n", sp)
 		}
+		out.WriteString("\nRead each SKILL.md above before starting work and list each skill's directory name in `skills_loaded` of the result envelope.\n")
 	}
 	fmt.Fprintf(&out, "\n## Return\n```lucind-result-contract\nversion: 1\npath: %s\nschema: %s\nmode: %s\ncommit: %s\n```\n", contract.Result.Path, contract.Result.Schema, contract.Mode, commitForMode(contract.Mode, contract.CommitMessage))
 	return []byte(out.String())

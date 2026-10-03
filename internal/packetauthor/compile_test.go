@@ -124,6 +124,9 @@ func TestCompileDigestExcludesResolvedPaths(t *testing.T) {
 	if !strings.Contains(bodyA, "## Required skills\n- /var/tmp/root-a/lucind-executor/SKILL.md\n- /var/tmp/root-a/lucind-apply/SKILL.md") {
 		t.Errorf("artA.Body missing expected ## Required skills section: %s", bodyA)
 	}
+	if !strings.Contains(bodyA, "Read each SKILL.md above before starting work and list each skill's directory name in `skills_loaded` of the result envelope.") {
+		t.Errorf("artA.Body missing the instruction to load and declare required skills: %s", bodyA)
+	}
 	hardStopsIdx := strings.Index(bodyA, "## Hard stops")
 	reqSkillsIdx := strings.Index(bodyA, "## Required skills")
 	returnIdx := strings.Index(bodyA, "## Return")
