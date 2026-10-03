@@ -42,3 +42,35 @@ Note for tomorrow: the T1 worktree `~/git_root/lucind-ai-worktrees/lane-t1-hmac-
 - 2026-10-03 | lanzerdev20@gmail.com | preflight | `list`/`current` read-only; active account lanzerdev20, usage cache 98%; no profile has `antigravity-oauth-token` -> rotation disabled (D-ROT-0)
 - 2026-10-03 04:02 | lanzerdev20@gmail.com | quota | blind reviewer B for T12b (`claude-opus-4-6-thinking`) failed with 429 RESOURCE_EXHAUSTED ("Resets in 3h4m"); `agy --print /usage`: Claude and GPT models 5h = 0% (resets 14:06Z), weekly 48%; Gemini models 5h = 28% (resets 13:55Z), weekly 58%. Rotation is disabled (D-ROT-0), so no account switch. Plan (R4 adapted): keep working with Gemini models, spend Gemini quota only on writers (no pro reviewers), and run the pending review B after 14:06Z.
 
+## Reporte matutino (borrador, se completa al cerrar la sesión)
+
+Estado al 2026-10-03 05:20 (hora local). Rama `feature/herdr-agent-factory`, nada empujado, RDD apagado, sin `gentle-ai review`.
+
+| Tarea | Estado | Commits en la rama de feature |
+|---|---|---|
+| T1b atestación (clave atómica, 0444, accept la reutiliza, RepoID) | hecha | 6b82c49, aa8a693 |
+| T2 campos del packet + `interaction_required` | hecha | 73179d2 |
+| T3 predicado fail-closed de checks mecánicos | hecha | d5d07f2 |
+| T4 SDD fuera (docs/plantillas, `sdd-*` opt-in) | hecha | 85b4a24 |
+| T5 comando `phase` y `internal/phasespec` fuera | hecha | 10ef695 |
+| T6 skills worker y explorador | hecha | 3fe1e8c |
+| T7 spike herdr/agy | hecha | `docs/herdr-spike-findings.md` (commit b323c2f en historial) |
+| T8 executor `herdr-agy` | hecha | cc6df27, f721ce8 |
+| T9 commit del dispatcher | hecha | 82cae7d, bed8d65 |
+| T10 clasificador de riesgo y plan por tier (sin cursor-agent) | hecha | 5563143 |
+| T11 validador del umbral de despacho | hecha | ebcd33c |
+| T12a tope de paralelismo | hecha | be120f5 |
+| T12b loop write/test/fix + escalera | hecha, revisión B pendiente | ac33b61, f919168 |
+| T12c fan-out de exploradores | pendiente (cuota) | n/a |
+| T13 log de uso y reporte | hecha | 47bd901 |
+| T14 Router + Jev en shadow (sin llamadas reales) | hecha | 2cd9e78 |
+| T15 fuente única de reglas | hecha | 218053c |
+| T16-T20 seguimientos descubiertos por las revisiones | creados, sin empezar | n/a |
+
+Verificación: ver la sección final del reporte (se vuelve a correr al cerrar).
+Decisiones que esperan revisión (más riesgosas primero): D3 (checks fail-closed: lanes legacy solo con `sdd_phase` ahora corren checks), D7 (`--no-verify` en el commit del dispatcher), D4 (`sdd-*` opt-in cambia el digest de packets con rol sin fase), D12 (los loops exigen `commit_message`), D15 (Jev: términos de retención sin leer), D10 (tope de 3 lanes por defecto), D1, D5, D6, D8, D9, D11, D13, D14, D16.
+`BLOCKED-DECISION`: ninguna.
+Rotación de cuentas: DESACTIVADA toda la noche (D-ROT-0). Cuota agy: Gemini 5h al 6 % (reinicia 13:55Z) y Claude/GPT al 0 % (14:06Z) a las 12:05Z.
+No verificado: segunda revisión ciega de T12b; los términos de retención de Jev; los dos tests de ledger que fallan bajo carga (T20).
+Siguiente tarea recomendada: segunda revisión de T12b con modelo Claude cuando reinicie la cuota, luego T12c, T17 y T16.
+Worktrees y ramas `lane/*` se conservan en `~/git_root/lucind-ai-worktrees/` (borrar está prohibido sin supervisión); borrarlos es decisión tuya.
