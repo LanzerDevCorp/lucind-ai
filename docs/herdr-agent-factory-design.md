@@ -237,6 +237,16 @@ Notes for step 6: the worker leaves changes uncommitted by design; the orchestra
 
 Found by real runs and fixed: derived required skills were never shown to the worker; the ledger did not admit `herdr-agy` (migration v11). A repo needs `.lucind/skill-roots.yaml` for lanes to find skills.
 
+### Interactive lanes (herdr-interactive-agents)
+
+Inside herdr (`HERDR_ENV=1`) every `agy` lane, whether the packet says `executor: agy` or `herdr-agy`, runs as a visible interactive `agy -i` session in its own pane, so the owner watches the agent work. Outside herdr, or with `LUCIND_HERDR_VISIBLE=off`, lanes keep the headless `agy --print` process.
+
+- **Trust.** Interactive agy blocks on a trust prompt for every unseen folder (trust is per exact path). lucind-ai adds the lane worktree to `trustedWorkspaces` in `~/.gemini/antigravity-cli/settings.json` (`internal/agytrust`: parse-preserving, atomic, locked, never rewrites JSON it cannot parse) and removes it when the lane ends.
+- **End of work.** The process never exits, so a per-lane `.agents/hooks.json` installs an Antigravity `Stop` hook that runs `lucind-ai hook stop`. On `fullyIdle` it validates the result envelope and writes `done.json`; an invalid or missing envelope makes the hook answer `continue` with the validation error (at most 2 times) so the agent repairs it itself. The executor then ends the session with two C-c; the T16 hard stop still applies.
+- **Rules.** The lane also gets Antigravity rule files in `.agents/rules/` (`lucind-worker.md` and `lucind-lane-scope.md` always on, `lucind-result-envelope.md` on demand with the schema inlined), rendered from `lucind-rules.md`. Hooks and rules are excluded from git and removed after the lane.
+- **Trade-offs.** Interactive runs give no usage JSON (usage is logged with unknown tokens) and no process exit code; the hook and the envelope are the signals. A repo that already tracks `.agents/hooks.json` or `lucind-*.md` rules makes the lane fail instead of overwriting them.
+- **Proof.** Real agy through `lucind-ai run` in a sandbox repo: write lane, dispatcher commit, integration (2026-10-03). The opt-in live test `TestHerdrAgyInteractiveLive` (`LUCIND_HERDR_LIVE=1`) covers trust, hook repair and rules loading.
+
 ## 9. Resuming in a new session
 
 1. Read this document, then `odd/tasks/herdr-agent-factory.md` for the checklist and per-task progress.
