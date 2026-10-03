@@ -360,31 +360,64 @@ func TestVerifierCleanupMarkerMismatchRejectsAndPreservesIsolation(t *testing.T)
 	}
 }
 
-func TestVerifierSkipsChecksForDeclaredNonApplyPhase(t *testing.T) {
-	f := newVerifierFixture(t, validResult("allowed.txt"), "#!/bin/sh\nexit 7\n", map[string]string{"allowed.txt": "candidate\n"}, []string{"allowed.txt"})
-	if err := f.ledger.UpdateLaneMetadata(context.Background(), ledger.LaneMetadata{RunID: "run-1", LaneID: "lane-1", SDDPhase: "propose"}, time.Now().UTC()); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := f.verifier.Verify(context.Background(), AcceptanceRequest{"run-1", "lane-1"}); err != nil {
-		t.Fatalf("Verify() with declared non-apply sdd_phase should skip the failing checks script: %v", err)
-	}
-}
-
-func TestVerifierRunsChecksForApplyEmptyOrMissingSDDPhase(t *testing.T) {
+func TestVerifierSkipsChecksForNonWritingLanes(t *testing.T) {
 	tests := []struct {
 		name     string
-		setPhase bool
-		phase    string
+		metadata ledger.LaneMetadata
 	}{
-		{name: "declared apply", setPhase: true, phase: "apply"},
-		{name: "explicit empty sdd_phase", setPhase: true, phase: ""},
-		{name: "missing lane metadata", setPhase: false},
+		{
+			name:     "lens lane role skips checks",
+			metadata: ledger.LaneMetadata{RunID: "run-1", LaneID: "lane-1", LaneRole: "lens"},
+		},
+		{
+			name:     "read-only true skips checks",
+			metadata: ledger.LaneMetadata{RunID: "run-1", LaneID: "lane-1", LaneRole: "apply", ReadOnly: true},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			f := newVerifierFixture(t, validResult("allowed.txt"), "#!/bin/sh\nexit 7\n", map[string]string{"allowed.txt": "candidate\n"}, []string{"allowed.txt"})
-			if tt.setPhase {
-				if err := f.ledger.UpdateLaneMetadata(context.Background(), ledger.LaneMetadata{RunID: "run-1", LaneID: "lane-1", SDDPhase: tt.phase}, time.Now().UTC()); err != nil {
+			if err := f.ledger.UpdateLaneMetadata(context.Background(), tt.metadata, time.Now().UTC()); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := f.verifier.Verify(context.Background(), AcceptanceRequest{"run-1", "lane-1"}); err != nil {
+				t.Fatalf("Verify() for %s should skip the failing checks script: %v", tt.name, err)
+			}
+		})
+	}
+}
+
+func TestVerifierRunsChecksForWritingOrUnspecifiedLanes(t *testing.T) {
+	tests := []struct {
+		name        string
+		setMetadata bool
+		metadata    ledger.LaneMetadata
+	}{
+		{
+			name:        "declared apply role",
+			setMetadata: true,
+			metadata:    ledger.LaneMetadata{RunID: "run-1", LaneID: "lane-1", LaneRole: "apply"},
+		},
+		{
+			name:        "explicit empty role",
+			setMetadata: true,
+			metadata:    ledger.LaneMetadata{RunID: "run-1", LaneID: "lane-1", LaneRole: ""},
+		},
+		{
+			name:        "missing lane metadata",
+			setMetadata: false,
+		},
+		{
+			name:        "legacy sdd_phase explore without role fails closed and runs checks",
+			setMetadata: true,
+			metadata:    ledger.LaneMetadata{RunID: "run-1", LaneID: "lane-1", SDDPhase: "explore"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := newVerifierFixture(t, validResult("allowed.txt"), "#!/bin/sh\nexit 7\n", map[string]string{"allowed.txt": "candidate\n"}, []string{"allowed.txt"})
+			if tt.setMetadata {
+				if err := f.ledger.UpdateLaneMetadata(context.Background(), tt.metadata, time.Now().UTC()); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -395,13 +428,13 @@ func TestVerifierRunsChecksForApplyEmptyOrMissingSDDPhase(t *testing.T) {
 	}
 }
 
-func TestVerifierNonApplyPhaseStillEnforcesScope(t *testing.T) {
+func TestVerifierNonWritingLaneStillEnforcesScope(t *testing.T) {
 	f := newVerifierFixture(t, validResult("allowed.txt"), "#!/bin/sh\necho checks-ok\n", map[string]string{"allowed.txt": "candidate\n"}, []string{"other.txt"})
-	if err := f.ledger.UpdateLaneMetadata(context.Background(), ledger.LaneMetadata{RunID: "run-1", LaneID: "lane-1", SDDPhase: "propose"}, time.Now().UTC()); err != nil {
+	if err := f.ledger.UpdateLaneMetadata(context.Background(), ledger.LaneMetadata{RunID: "run-1", LaneID: "lane-1", LaneRole: "lens"}, time.Now().UTC()); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := f.verifier.Verify(context.Background(), AcceptanceRequest{"run-1", "lane-1"}); err == nil {
-		t.Fatal("Verify() with a declared non-apply sdd_phase still accepted an out-of-scope change")
+		t.Fatal("Verify() with a non-writing lane role still accepted an out-of-scope change")
 	}
 }
 

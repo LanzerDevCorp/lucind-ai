@@ -1249,45 +1249,66 @@ func TestFixtureRetryReblocksOnTipDrift(t *testing.T) {
 	}
 }
 
-func TestExecuteAttemptSkipsChecksForDeclaredNonApplyLanes(t *testing.T) {
-	spies := &attemptSpies{}
-	deps, l, featSvc := newAttemptTestDeps(t, spies)
-
-	featID := "feat-non-apply-1"
-	if _, err := featSvc.Create(context.Background(), featID, "refs/heads/feature-non-apply", "base-sha-non-apply", "expected-parent-sha-1"); err != nil {
-		t.Fatalf("featSvc.Create() error = %v", err)
-	}
-	if err := l.RegisterLane(context.Background(), ledger.Lane{RunID: deps.RunID, LaneID: "lane-1", PacketID: "lane-1", Executor: "agy", RoutingCondition: "test", Status: lane.Running}); err != nil {
-		t.Fatalf("RegisterLane() error = %v", err)
-	}
-	if err := l.UpdateLaneMetadata(context.Background(), ledger.LaneMetadata{RunID: deps.RunID, LaneID: "lane-1", SDDPhase: "propose"}, time.Now().UTC()); err != nil {
-		t.Fatalf("UpdateLaneMetadata() error = %v", err)
-	}
-
-	req := run.AttemptRequest{
-		ID:                "att-non-apply-1",
-		FeatureID:         featID,
-		ParentRef:         "refs/heads/feature-non-apply",
-		BaseSHA:           "base-sha-non-apply",
-		ExpectedParentSHA: "expected-parent-sha-1",
-		IdempotencyKey:    "key-non-apply-1",
-		Owner:             "owner-non-apply",
-		Branches:          []string{"lucind/lane-1"},
+func TestExecuteAttemptSkipsChecksForNonWritingLanes(t *testing.T) {
+	tests := []struct {
+		slug     string
+		metadata ledger.LaneMetadata
+	}{
+		{
+			slug:     "lens",
+			metadata: ledger.LaneMetadata{LaneRole: "lens"},
+		},
+		{
+			slug:     "read_only",
+			metadata: ledger.LaneMetadata{LaneRole: "apply", ReadOnly: true},
+		},
 	}
 
-	res, err := run.ExecuteAttempt(context.Background(), deps, req)
-	if err != nil {
-		t.Fatalf("ExecuteAttempt() error = %v", err)
-	}
-	if res.Status != run.AttemptStatusPromoted {
-		t.Fatalf("res.Status = %v, want %v", res.Status, run.AttemptStatusPromoted)
-	}
+	for _, tt := range tests {
+		t.Run(tt.slug, func(t *testing.T) {
+			spies := &attemptSpies{}
+			deps, l, featSvc := newAttemptTestDeps(t, spies)
 
-	spies.mu.Lock()
-	checkCalls := len(spies.checkCalls)
-	spies.mu.Unlock()
-	if checkCalls != 0 {
-		t.Fatalf("checkFunc called %d times, want 0 for a declared non-apply combined lane", checkCalls)
+			featID := "feat-non-writing-" + tt.slug
+			if _, err := featSvc.Create(context.Background(), featID, "refs/heads/feature-non-writing-"+tt.slug, "base-sha-non-writing-"+tt.slug, "expected-parent-sha-1"); err != nil {
+				t.Fatalf("featSvc.Create() error = %v", err)
+			}
+			if err := l.RegisterLane(context.Background(), ledger.Lane{RunID: deps.RunID, LaneID: "lane-1", PacketID: "lane-1", Executor: "agy", RoutingCondition: "test", Status: lane.Running}); err != nil {
+				t.Fatalf("RegisterLane() error = %v", err)
+			}
+			meta := tt.metadata
+			meta.RunID = deps.RunID
+			meta.LaneID = "lane-1"
+			if err := l.UpdateLaneMetadata(context.Background(), meta, time.Now().UTC()); err != nil {
+				t.Fatalf("UpdateLaneMetadata() error = %v", err)
+			}
+
+			req := run.AttemptRequest{
+				ID:                "att-non-writing-" + tt.slug,
+				FeatureID:         featID,
+				ParentRef:         "refs/heads/feature-non-writing-" + tt.slug,
+				BaseSHA:           "base-sha-non-writing-" + tt.slug,
+				ExpectedParentSHA: "expected-parent-sha-1",
+				IdempotencyKey:    "key-non-writing-" + tt.slug,
+				Owner:             "owner-non-writing",
+				Branches:          []string{"lucind/lane-1"},
+			}
+
+			res, err := run.ExecuteAttempt(context.Background(), deps, req)
+			if err != nil {
+				t.Fatalf("ExecuteAttempt() error = %v", err)
+			}
+			if res.Status != run.AttemptStatusPromoted {
+				t.Fatalf("res.Status = %v, want %v", res.Status, run.AttemptStatusPromoted)
+			}
+
+			spies.mu.Lock()
+			checkCalls := len(spies.checkCalls)
+			spies.mu.Unlock()
+			if checkCalls != 0 {
+				t.Fatalf("checkFunc called %d times, want 0 for non-writing lane %s", checkCalls, tt.slug)
+			}
+		})
 	}
 }
 
@@ -1296,11 +1317,12 @@ func TestExecuteAttemptRunsChecksForApplyEmptyOrMissingCombinedLane(t *testing.T
 		slug         string
 		registerLane bool
 		setMetadata  bool
-		sddPhase     string
+		metadata     ledger.LaneMetadata
 	}{
-		{slug: "apply", registerLane: true, setMetadata: true, sddPhase: "apply"},
-		{slug: "empty", registerLane: true, setMetadata: true, sddPhase: ""},
+		{slug: "apply", registerLane: true, setMetadata: true, metadata: ledger.LaneMetadata{LaneRole: "apply"}},
+		{slug: "empty", registerLane: true, setMetadata: true, metadata: ledger.LaneMetadata{LaneRole: ""}},
 		{slug: "missing", registerLane: false, setMetadata: false},
+		{slug: "legacy_explore_sdd_phase_fails_closed", registerLane: true, setMetadata: true, metadata: ledger.LaneMetadata{SDDPhase: "explore"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.slug, func(t *testing.T) {
@@ -1316,7 +1338,10 @@ func TestExecuteAttemptRunsChecksForApplyEmptyOrMissingCombinedLane(t *testing.T
 				}
 			}
 			if tt.setMetadata {
-				if err := l.UpdateLaneMetadata(context.Background(), ledger.LaneMetadata{RunID: deps.RunID, LaneID: "lane-1", SDDPhase: tt.sddPhase}, time.Now().UTC()); err != nil {
+				meta := tt.metadata
+				meta.RunID = deps.RunID
+				meta.LaneID = "lane-1"
+				if err := l.UpdateLaneMetadata(context.Background(), meta, time.Now().UTC()); err != nil {
 					t.Fatalf("UpdateLaneMetadata() error = %v", err)
 				}
 			}
@@ -1346,4 +1371,3 @@ func TestExecuteAttemptRunsChecksForApplyEmptyOrMissingCombinedLane(t *testing.T
 		})
 	}
 }
-

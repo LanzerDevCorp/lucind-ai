@@ -374,13 +374,10 @@ func startLeaseRenewal(ctx context.Context, featSvc *feature.Service, att Attemp
 }
 
 // shouldRunAttemptChecks resolves whether this attempt's CHECKING phase must
-// execute checkFunc, from the SDDPhase each combined lane declared at
-// dispatch time (ledger.LaneMetadata.SDDPhase, written via UpdateLaneMetadata
-// in internal/run/run.go). Checks run unless every combined lane is a
-// declared non-apply phase: an "apply" phase, an empty/missing sdd_phase, or
-// metadata that cannot be resolved all fail closed to running checks — a
-// conservative extension of design.md's Decision 2, matching
-// internal/accept's gate.
+// execute checkFunc, from the lane role and read-only declaration of each
+// combined lane (ledger.LaneMetadata.RequiresMechanicalChecks). Checks run
+// unless every combined lane is explicitly non-writing: missing or unresolvable
+// metadata and any lane requiring checks all fail closed to running checks.
 func shouldRunAttemptChecks(ctx context.Context, deps Deps, branches []string) bool {
 	if deps.Ledger == nil || len(branches) == 0 {
 		return true
@@ -388,7 +385,7 @@ func shouldRunAttemptChecks(ctx context.Context, deps Deps, branches []string) b
 	for _, branch := range branches {
 		laneID := strings.TrimPrefix(branch, "lucind/")
 		metadata, err := deps.Ledger.GetLaneMetadata(ctx, deps.RunID, laneID)
-		if err != nil || metadata.SDDPhase == "" || metadata.SDDPhase == "apply" {
+		if err != nil || metadata.RequiresMechanicalChecks() {
 			return true
 		}
 	}
@@ -466,11 +463,11 @@ func driveAttemptFromLeased(ctx context.Context, deps Deps, att Attempt, featSvc
 			renewInterval = time.Second
 		}
 	}
-	runSDDPhaseChecks := shouldRunAttemptChecks(ctx, deps, req.Branches)
+	runChecks := shouldRunAttemptChecks(ctx, deps, req.Branches)
 	stopLeaseRenewal := startLeaseRenewal(ctx, featSvc, att, checkLeaseTTL, renewInterval)
 	var passed bool
 	var output string
-	if runSDDPhaseChecks {
+	if runChecks {
 		passed, output, err = checkFunc(ctx, wtPath)
 	} else {
 		passed, output, err = true, "", nil

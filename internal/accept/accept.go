@@ -132,9 +132,9 @@ func (v *Verifier) Verify(ctx context.Context, req AcceptanceRequest) (Acceptanc
 	if err := createOwnedIsolation(ctx, root, isolation, candidate, marker); err != nil {
 		return AcceptanceReceipt{}, err
 	}
-	runSDDPhaseChecks := metadata.SDDPhase == "" || metadata.SDDPhase == "apply"
+	runChecks := metadata.RequiresMechanicalChecks()
 	var version, output string
-	if runSDDPhaseChecks {
+	if runChecks {
 		var hasAttest bool
 		if v.hasAttestation != nil {
 			var attestErr error

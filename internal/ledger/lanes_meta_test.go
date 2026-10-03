@@ -244,3 +244,133 @@ func decodeLaneMetadataAudit(t *testing.T, detail string) LaneMetadata {
 	}
 	return metadata
 }
+
+func TestLaneMetadataRequiresMechanicalChecks(t *testing.T) {
+	tests := []struct {
+		name     string
+		metadata LaneMetadata
+		want     bool
+	}{
+		{
+			name:     "apply role requires checks",
+			metadata: LaneMetadata{LaneRole: "apply", ReadOnly: false},
+			want:     true,
+		},
+		{
+			name:     "ultrafixer role requires checks",
+			metadata: LaneMetadata{LaneRole: "ultrafixer", ReadOnly: false},
+			want:     true,
+		},
+		{
+			name:     "empty role and not read-only requires checks",
+			metadata: LaneMetadata{LaneRole: "", ReadOnly: false},
+			want:     true,
+		},
+		{
+			name:     "unknown role requires checks (fail closed)",
+			metadata: LaneMetadata{LaneRole: "unknown_custom_role", ReadOnly: false},
+			want:     true,
+		},
+		{
+			name:     "lens role skips checks",
+			metadata: LaneMetadata{LaneRole: "lens", ReadOnly: false},
+			want:     false,
+		},
+		{
+			name:     "synthesis role skips checks",
+			metadata: LaneMetadata{LaneRole: "synthesis", ReadOnly: false},
+			want:     false,
+		},
+		{
+			name:     "verify role skips checks",
+			metadata: LaneMetadata{LaneRole: "verify", ReadOnly: false},
+			want:     false,
+		},
+		{
+			name:     "archive role skips checks",
+			metadata: LaneMetadata{LaneRole: "archive", ReadOnly: false},
+			want:     false,
+		},
+		{
+			name:     "human role skips checks",
+			metadata: LaneMetadata{LaneRole: "human", ReadOnly: false},
+			want:     false,
+		},
+		{
+			name:     "read-only true with apply role skips checks",
+			metadata: LaneMetadata{LaneRole: "apply", ReadOnly: true},
+			want:     false,
+		},
+		{
+			name:     "read-only true with empty role skips checks",
+			metadata: LaneMetadata{LaneRole: "", ReadOnly: true},
+			want:     false,
+		},
+		{
+			name:     "read-only true with unknown role skips checks",
+			metadata: LaneMetadata{LaneRole: "unknown_custom_role", ReadOnly: true},
+			want:     false,
+		},
+		{
+			name:     "legacy explore sdd_phase with empty role runs checks (fail closed)",
+			metadata: LaneMetadata{SDDPhase: "explore", LaneRole: "", ReadOnly: false},
+			want:     true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.metadata.RequiresMechanicalChecks()
+			if got != tt.want {
+				t.Errorf("RequiresMechanicalChecks() = %v, want %v for %+v", got, tt.want, tt.metadata)
+			}
+		})
+	}
+}
+
+func TestLaneMetadataLegacyJSONDecodesZeroValues(t *testing.T) {
+	legacyJSON := `{"run_id":"run-legacy","lane_id":"lane-l","model":"legacy-model","sdd_phase":"propose"}`
+	var meta LaneMetadata
+	if err := json.Unmarshal([]byte(legacyJSON), &meta); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if meta.LaneRole != "" {
+		t.Fatalf("LaneRole = %q, want empty zero-value", meta.LaneRole)
+	}
+	if meta.ReadOnly {
+		t.Fatalf("ReadOnly = %v, want false zero-value", meta.ReadOnly)
+	}
+	if meta.SDDPhase != "propose" {
+		t.Fatalf("SDDPhase = %q, want propose", meta.SDDPhase)
+	}
+}
+
+func TestLaneMetadataNewFieldsRoundTrip(t *testing.T) {
+	l := openTestLedger(t)
+	ctx := context.Background()
+	registerLaneForMetadataTest(t, l, "run-new-fields", "lane-nf")
+
+	want := LaneMetadata{
+		RunID:    "run-new-fields",
+		LaneID:   "lane-nf",
+		Model:    "test-model",
+		Agent:    "test-agent",
+		LaneRole: "lens",
+		ReadOnly: true,
+	}
+	at := time.Date(2026, time.October, 3, 8, 0, 0, 0, time.UTC)
+	if err := l.UpdateLaneMetadata(ctx, want, at); err != nil {
+		t.Fatalf("UpdateLaneMetadata() error = %v", err)
+	}
+
+	got, err := l.GetLaneMetadata(ctx, want.RunID, want.LaneID)
+	if err != nil {
+		t.Fatalf("GetLaneMetadata() error = %v", err)
+	}
+	if got.LaneRole != want.LaneRole {
+		t.Fatalf("got LaneRole = %q, want %q", got.LaneRole, want.LaneRole)
+	}
+	if got.ReadOnly != want.ReadOnly {
+		t.Fatalf("got ReadOnly = %v, want %v", got.ReadOnly, want.ReadOnly)
+	}
+}

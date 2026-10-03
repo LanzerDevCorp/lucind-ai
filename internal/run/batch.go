@@ -198,6 +198,8 @@ func ensureLaneFailed(ctx context.Context, deps Deps, p packet.Packet, now time.
 		Agent:        p.Agent,
 		SDDPhase:     p.SDDPhase,
 		FanoutGroup:  p.FanoutGroup,
+		LaneRole:     p.LaneRole,
+		ReadOnly:     p.ReadOnly,
 		Feature:      p.Feature,
 		Skill:        p.Skill,
 		PacketPath:   p.Path,
