@@ -7,6 +7,7 @@ Load this module only when choosing or diagnosing an executor, model, provider, 
 | Executor | Default model | Allowed models | Notes |
 |---|---|---|---|
 | `agy` | `gemini-3.7-flash-high` | `gemini-3.7-flash-high` | Broad mechanical work; result schema is also passed to the CLI, but the packet must still write the envelope file. |
+| `herdr-agy` | `gemini-3.7-flash-high` | `gemini-3.7-flash-high` | Runs the same agy invocation inside a herdr pane (worktree opened with `--cwd`/`--path`, exit sentinel, state dir under `$XDG_STATE_HOME/lucind-ai/herdr`); requires `HERDR_ENV=1`/a running herdr session and shares agy's models. |
 | `cursor-agent` | `cursor-grok-4.6-high` | `cursor-grok-4.6-high` | Bounded editorial or precision work. Do not copy an external-provider model into this route. |
 | `opencode` | `openai/gpt-5.6-sol` | `openai/gpt-5.6-sol`, `openai/gpt-5.6-luna` | Only route supporting packet `agent`; use a primary agent listed by the installed CLI. |
 | `claude` | `claude-opus-5` | `claude-opus-5` | Uses the full model ID rather than the moving `opus` alias for reproducibility. |

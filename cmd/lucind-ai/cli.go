@@ -85,6 +85,7 @@ var supportedExecutors = map[string]func() executor.Executor{
 	"agy":          func() executor.Executor { return executor.Agy{} },
 	"claude":       func() executor.Executor { return executor.Claude{} },
 	"cursor-agent": func() executor.Executor { return executor.CursorAgent{} },
+	"herdr-agy":    func() executor.Executor { return executor.HerdrAgy{} },
 	"opencode":     func() executor.Executor { return executor.Opencode{} },
 }
 

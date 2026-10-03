@@ -368,20 +368,44 @@ func TestRunAcceptsClaudeExecutor(t *testing.T) {
 	}
 }
 
+// TestRunAcceptsHerdrAgyExecutor proves that a packet specifying
+// "executor: herdr-agy" passes the pre-dispatch unsupported executor check
+// and that its default model equals executor.Agy's.
+func TestRunAcceptsHerdrAgyExecutor(t *testing.T) {
+	factory, ok := supportedExecutors["herdr-agy"]
+	if !ok {
+		t.Fatalf("supportedExecutors[%q] not found, want herdr-agy to be accepted as a supported executor", "herdr-agy")
+	}
+	if factory == nil || factory() == nil {
+		t.Fatalf("supportedExecutors[%q] factory returned nil", "herdr-agy")
+	}
+	if got, want := factory().DefaultModel(), (executor.Agy{}).DefaultModel(); got != want {
+		t.Errorf("DefaultModel() = %q, want %q (same as agy)", got, want)
+	}
+}
+
 // TestEveryExecutorOwnsExactlyOneProviderFamily pins the invariant that made
-// adding a fourth executor safe: each registered executor may run on its own
+// adding an executor safe: each registered executor may run on its own
 // models only, so a model string copied from a sibling packet can never
 // silently dispatch -- and bill -- against a different provider. Adding an
-// executor whose KnownModels overlaps another's would break this.
+// executor whose KnownModels overlaps another provider family would break this.
+// Note: herdr-agy runs the same agy CLI and shares agy's provider family and models.
 func TestEveryExecutorOwnsExactlyOneProviderFamily(t *testing.T) {
+	familyOf := func(execName string) string {
+		if execName == "herdr-agy" {
+			return "agy"
+		}
+		return execName
+	}
 	owner := map[string]string{}
 	for name, factory := range supportedExecutors {
 		for _, model := range factory().KnownModels() {
-			if prior, clash := owner[model]; clash {
-				t.Errorf("model %q is claimed by both %q and %q; every model must belong to exactly one executor", model, prior, name)
+			fam := familyOf(name)
+			if prior, clash := owner[model]; clash && prior != fam {
+				t.Errorf("model %q is claimed by both %q and %q; every model must belong to exactly one provider family", model, prior, fam)
 				continue
 			}
-			owner[model] = name
+			owner[model] = fam
 		}
 	}
 }
