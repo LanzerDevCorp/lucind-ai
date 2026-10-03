@@ -1,6 +1,7 @@
 # herdr-agent-factory
 
 Feature branch: `feature/herdr-agent-factory` (from `dev`). Mirror: Engram topic `odd/herdr-agent-factory/tasks`.
+Design record (all decisions, rationale, open items, resume guide): `docs/herdr-agent-factory-design.md`.
 
 ## Objective
 
