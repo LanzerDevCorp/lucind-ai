@@ -1,6 +1,6 @@
 # herdr agent factory: design decisions and handoff
 
-Status: design agreed with the owner on 2026-10-03; implementation in progress on `feature/herdr-agent-factory`.
+Status (2026-10-03): design agreed with the owner; implementation in progress on `feature/herdr-agent-factory`. T1 (HMAC test attestation) is done and integrated as `880665b`; next is T2. See section 8 for the progress log and section 9 for how to resume.
 Tracking: `odd/tasks/herdr-agent-factory.md` (tasks T1-T15, authoritative checklist) and its Engram mirror `odd/herdr-agent-factory/tasks` (project `lucind-ai`).
 This document consolidates every decision taken in the design session so implementation can continue in this repository without the original conversation.
 
@@ -144,7 +144,7 @@ Claude models used through Cursor consume Cursor quota, not Anthropic's. Avoid t
 |---|---|
 | What `agy --sandbox` restricts | Unknown; spike T7 |
 | `herdr worktree open` on external worktrees; `remove` with live panes | Unknown; spike T7 |
-| Exit code and token capture in a pane | Plan: run the CLI headless with `--output-format stream-json`, tee to a file, write an exit sentinel; `herdr agent wait` / `pane wait-output` to detect the end. Not yet proven end to end in a real executor |
+| Exit code and token capture in a pane | Partly proven by hand on T1: `agy --output-format json` redirected to a file, exit code written to a file, and `herdr pane wait-output --regex 'LUCIND_EXIT=[0-9]+'` detected the end. Token and cost fields in the JSON were not inspected, and `stream-json` was not tried. Not yet implemented in a real executor (T8) |
 | Jev API format and data-retention terms | Not read; read before T14 |
 | Documented lucind-ai rule "no silent provider fallback" | Not found verbatim; the escalation ladder (declared in the packet, executed deterministically) must be reconciled with the written policy (`docs/prd.md:173`, `CONTEXT.md`) |
 | gentle-ai `sync` leaving content outside markers untouched | Reported by an explorer, not verified |
@@ -152,7 +152,7 @@ Claude models used through Cursor consume Cursor quota, not Anthropic's. Avoid t
 
 ## 6. Task order
 
-T1 HMAC attestation -> T2 packet fields and `interaction_required` -> T3 neutralize SDD gates -> T4 SDD removal (docs, derivation) -> T5 SDD removal (phase command) -> T6 worker and explorer skills -> T7 spike -> T8 `HerdrExecutor` -> T9 dispatcher commit step -> T10 risk classifier and judges -> T11 dispatch-threshold validator -> T12 fan-out and loops -> T13 usage logging -> T14 router with Jev in shadow mode -> T15 rules source and generated files.
+T1 HMAC attestation (DONE, `880665b`) -> T2 packet fields and `interaction_required` (next) -> T3 neutralize SDD gates -> T4 SDD removal (docs, derivation) -> T5 SDD removal (phase command) -> T6 worker and explorer skills -> T7 spike -> T8 `HerdrExecutor` -> T9 dispatcher commit step -> T10 risk classifier and judges -> T11 dispatch-threshold validator -> T12 fan-out and loops -> T13 usage logging -> T14 router with Jev in shadow mode -> T15 rules source and generated files.
 Details, estimates, routes and acceptance criteria are in `odd/tasks/herdr-agent-factory.md`.
 
 ## 7. How to dispatch a task manually (until HerdrExecutor exists)
@@ -166,9 +166,36 @@ This is the recipe used for T1. It is the behavior `HerdrExecutor` (T8) must rep
 5. Wait with a regex that cannot match the typed command line: `herdr pane wait-output <pane> --regex 'LUCIND_EXIT=[0-9]+' --timeout <ms>`. A literal `--match LUCIND_EXIT=` would match the command echo immediately.
 6. Review: read the exit code and `out.json`; check `git diff --name-only` stays inside the allowed surfaces; re-run one reported verification command yourself (spot check); then commit on the lane branch and integrate into the feature branch.
 
-Notes for step 6: the worker leaves changes uncommitted by design; the lane branch is merged or cherry-picked into `feature/herdr-agent-factory` after verification; remove the worktree only after confirming no unique commits remain.
+Notes for step 6: the worker leaves changes uncommitted by design; the orchestrator commits on the lane branch and then cherry-picks that commit into `feature/herdr-agent-factory` (this is how T1 was integrated, `87d2676` -> `880665b`). Because a cherry-pick changes the SHA, the lane branch still looks like it has "unique commits"; remove the worktree only after confirming the cherry-pick landed, and then with an explicit decision, not automatically. This recipe was validated on T1.
 
-## 8. Resuming in a new session
+## 8. Progress log
+
+### T1: HMAC test attestation (done)
+
+- **What shipped:** `lucind-ai attest run -- <cmd>` and `lucind-ai attest verify --command "<cmd>"`, in `internal/attest`, `cmd/lucind-ai/attest.go` (registered in `cmd/lucind-ai/cli.go`) and `docs/attestation.md`. The tree hash comes from a temporary git index (`GIT_INDEX_FILE`), so uncommitted and untracked files count and the real index is never modified. `verify` reports one of `no entry`, `tree changed`, `tests failed`, `bad mac`, and compares the MAC with `hmac.Equal`.
+- **Worker:** `agy`, model `gemini-3.8-flash-high`, headless in herdr pane `w1:p3`, `--dangerously-skip-permissions --mode accept-edits`, exit 0 (duration not measured). It reported `status: completed` with RED then GREEN evidence, edited only the allowed surfaces, and closed with a `## Key Learnings` block. Its answer followed the Return contract defined in the replaced `~/.gemini/GEMINI.md`, which suggests the new global file is loaded (not proven by a dedicated test).
+- **Orchestrator verification (do not trust the worker's report alone):** re-ran `go build ./...`, `go vet` and `go test` on the two packages, then an end-to-end run in a throwaway repo with temp `XDG_CONFIG_HOME` and `XDG_STATE_HOME`: `verify` passes after `run`; fails with `tree changed` after an edit or an untracked file; passes again after reverting; a failing command never verifies; `git status` and the cached index stay clean; the log file mode is 0444.
+- **Commits:** lane `87d2676` on `lane/t1-hmac-attestation`, integrated into the feature branch as `880665b`. Feature doc updated in `e356eeb`.
+- **Native review:** `gentle-ai review assess` over the range since `dev` classified the candidate `high` (`process_boundary`: `attest.go` starts processes; 1571 lines because the range also included the two docs commits). The consent envelope was shown to the owner, who chose to skip this candidate; the exact `declined` invocation was run once and validated (`declined_this_candidate`, same target). For later slices pass the last reviewed boundary as `--base-ref`, not `dev`, so the range stays per slice. The lucind-ai tier classifier (T10) is meant to replace this dependency on gentle-ai.
+- **Follow-ups, not blocking:**
+  - Key creation is `os.WriteFile` then `Chmod`, not atomic if two first runs race.
+  - Log entries are renamed into place before `chmod 0444`, leaving a short window with the default mode.
+  - Wire `attest verify` into `lucind-ai accept` and into the dispatcher commit step (T9). Today the attestation exists as a standalone command.
+
+### Process learnings from the first manual dispatch
+
+- A literal `--match LUCIND_EXIT=` would have matched the echoed command line immediately; the `--regex 'LUCIND_EXIT=[0-9]+'` form is required.
+- `herdr pane read` prints plain text, not JSON; do not pipe it to `jq`.
+- `agy` printed `root agent idle; waiting up to 30m0s for 1 background task(s)` on stderr and then exited 0 on its own; it is not an error.
+- `herdr` recognizes `agy` as an agent kind (`herdr agent start --kind agy`), so the interactive mode (Q7 option b) is available for UAT and exploratory work without extra integration.
+- Writing the task packet with explicit sections (allowed surfaces, design, acceptance criteria, strict TDD, verification, return format) produced a result that needed no corrections; keep that structure for T2 onward.
+- The orchestrator's Claude Code session blocks long foreground `sleep` calls; wait with `herdr pane wait-output` launched as a background command instead.
+
+### Next
+
+T2 in a new worktree `lane/t2-packet-fields` from `feature/herdr-agent-factory` (same recipe, section 7). The T1 worktree `lane-t1-hmac-attestation` is kept until the follow-ups are decided.
+
+## 9. Resuming in a new session
 
 1. Read this document, then `odd/tasks/herdr-agent-factory.md` for the checklist and per-task progress.
 2. Engram: `mem_context`, then `mem_search` for `design/agent-factory-herdr-lucind-ai` (the first three design records are stored under project `gentle-ai`; later records and the ODD mirror under project `lucind-ai`) and `odd/herdr-agent-factory/tasks`.
