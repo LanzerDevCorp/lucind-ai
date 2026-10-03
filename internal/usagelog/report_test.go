@@ -331,3 +331,30 @@ func TestBuildReportRouterEvents(t *testing.T) {
 		t.Errorf("expected Text() without router events to not contain 'Router shadow:'; got:\n%s", textNoEvents)
 	}
 }
+
+func TestReportRouterAgreementRate(t *testing.T) {
+	base := time.Date(2026, 10, 3, 12, 0, 0, 0, time.UTC)
+	records := []usagelog.Record{
+		{TS: base, Kind: "router_agreement", PrimaryRoute: "inline", CandidateRoute: "inline", Confidence: 0.99},
+		{TS: base, Kind: "router_agreement", PrimaryRoute: "worker", CandidateRoute: "worker", Confidence: 0.8},
+		{TS: base, Kind: "router_agreement", PrimaryRoute: "inline", CandidateRoute: "inline", Confidence: 0.9},
+		{TS: base, Kind: "router_disagreement", PrimaryRoute: "worker", CandidateRoute: "inline", Confidence: 0.4},
+		{TS: base, Kind: "router_error", ErrorKind: "timeout"},
+	}
+	rep := usagelog.BuildReport(records, time.Time{}, 0)
+	if rep.RouterAgreements != 3 || rep.RouterDisagreements != 1 || rep.RouterErrors != 1 {
+		t.Fatalf("counts = %d/%d/%d", rep.RouterAgreements, rep.RouterDisagreements, rep.RouterErrors)
+	}
+	if rep.RouterAgreementRate != 0.75 {
+		t.Errorf("RouterAgreementRate = %v; want 0.75", rep.RouterAgreementRate)
+	}
+	if rep.RouterDisagreementAvgConfidence != 0.4 {
+		t.Errorf("RouterDisagreementAvgConfidence = %v; want 0.4", rep.RouterDisagreementAvgConfidence)
+	}
+	text := rep.Text()
+	for _, want := range []string{"Router shadow: 1 disagreements, 1 errors", "Router agreement: 75.0% (3 of 4 decisions)", "avg confidence of disagreements 0.40"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("Text() missing %q:\n%s", want, text)
+		}
+	}
+}

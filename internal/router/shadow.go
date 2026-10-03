@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-// Event records a shadow routing disagreement or candidate error.
+// Event records one shadow routing outcome: agreement, disagreement or candidate error.
 type Event struct {
 	Kind           string    `json:"kind"`
 	PrimaryRoute   string    `json:"primary_route,omitempty"`
@@ -67,16 +67,18 @@ func (s Shadow) Route(ctx context.Context, sig Signals) (Decision, error) {
 				return
 			}
 
+			kind := "router_agreement"
 			if candDec.Route != primDec.Route {
-				s.Log(Event{
-					Kind:           "router_disagreement",
-					PrimaryRoute:   primDec.Route,
-					CandidateRoute: candDec.Route,
-					Confidence:     candDec.Confidence,
-					Signals:        sig,
-					TS:             time.Now().UTC(),
-				})
+				kind = "router_disagreement"
 			}
+			s.Log(Event{
+				Kind:           kind,
+				PrimaryRoute:   primDec.Route,
+				CandidateRoute: candDec.Route,
+				Confidence:     candDec.Confidence,
+				Signals:        sig,
+				TS:             time.Now().UTC(),
+			})
 		}()
 	}
 

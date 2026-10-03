@@ -940,6 +940,9 @@ func validateDispatchThresholds(ctx context.Context, primaryRoot string, ps []pa
 
 		// Opt-in shadow router check: runs only when both env vars are set
 		apiKey := os.Getenv("LUCIND_JEV_API_KEY")
+		if apiKey == "" {
+			apiKey = os.Getenv("JEV_API_KEY")
+		}
 		shadowOn := os.Getenv("LUCIND_JEV_SHADOW") == "on"
 		if apiKey != "" && shadowOn {
 			func() {

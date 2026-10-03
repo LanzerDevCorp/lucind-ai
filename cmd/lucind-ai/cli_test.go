@@ -6367,6 +6367,41 @@ func TestValidateDispatchThresholds_JevShadow(t *testing.T) {
 		}
 	})
 
+	t.Run("JEV_API_KEY fallback enables shadow and agreement is logged", func(t *testing.T) {
+		tmpState := t.TempDir()
+		t.Setenv("XDG_STATE_HOME", tmpState)
+		t.Setenv("LUCIND_USAGE_LOG", "")
+
+		var gotAuth string
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			gotAuth = r.Header.Get("Authorization")
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"model":"jev-latest","answers":{"route":{"type":"choice","choice":"inline","confidence":0.9}}}`))
+		}))
+		defer srv.Close()
+
+		t.Setenv("LUCIND_JEV_API_KEY", "")
+		t.Setenv("JEV_API_KEY", "fallback-key")
+		t.Setenv("LUCIND_JEV_SHADOW", "on")
+		t.Setenv("LUCIND_JEV_URL", srv.URL)
+
+		ps := []packet.Packet{{Path: "packet-1.md", Route: "inline", BaseSHA: baseSHA, AllowedPaths: []string{"README.md"}}}
+		var stderr bytes.Buffer
+		if err := validateDispatchThresholds(context.Background(), repo, ps, &stderr); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if gotAuth != "Bearer fallback-key" {
+			t.Errorf("Authorization = %q; want the JEV_API_KEY fallback", gotAuth)
+		}
+		records, _, err := usagelog.ReadAll(filepath.Join(tmpState, "lucind-ai", "usage.jsonl"))
+		if err != nil || len(records) != 1 || records[0].Kind != "router_agreement" {
+			t.Fatalf("records = %+v, err = %v; want one router_agreement", records, err)
+		}
+		if strings.Contains(stderr.String(), "fallback-key") {
+			t.Errorf("stderr leaks the key: %s", stderr.String())
+		}
+	})
+
 	t.Run("only one env var: no request made", func(t *testing.T) {
 		tmpState := t.TempDir()
 		t.Setenv("XDG_STATE_HOME", tmpState)

@@ -73,9 +73,14 @@ type Report struct {
 	GrandTotal          GrandTotals      `json:"grand_total"`
 	SkippedLines        int              `json:"skipped_lines"`
 	TargetComparison    TargetComparison `json:"target_comparison"`
+	RouterAgreements    int              `json:"router_agreements,omitempty"`
 	RouterDisagreements int              `json:"router_disagreements,omitempty"`
-	RouterErrors        int              `json:"router_errors,omitempty"`
-	HasRouterEvents     bool             `json:"has_router_events,omitempty"`
+	// RouterAgreementRate is agreements / (agreements + disagreements); errors are excluded.
+	RouterAgreementRate float64 `json:"router_agreement_rate,omitempty"`
+	// RouterDisagreementAvgConfidence is the mean candidate confidence over disagreements.
+	RouterDisagreementAvgConfidence float64 `json:"router_disagreement_avg_confidence,omitempty"`
+	RouterErrors                    int     `json:"router_errors,omitempty"`
+	HasRouterEvents                 bool    `json:"has_router_events,omitempty"`
 }
 
 // BuildReport aggregates records filtered by since (zero since includes all)
@@ -92,14 +97,21 @@ func BuildReport(records []Record, since time.Time, skipped int) Report {
 	}
 	modelMap := make(map[string]*ModelTotals)
 	roleMap := make(map[string]*LaneRoleTotals)
+	var disagreementConfidence float64
 
 	for _, r := range records {
 		if !since.IsZero() && r.TS.Before(since) {
 			continue
 		}
 
+		if r.Kind == "router_agreement" {
+			rep.RouterAgreements++
+			rep.HasRouterEvents = true
+			continue
+		}
 		if r.Kind == "router_disagreement" {
 			rep.RouterDisagreements++
+			disagreementConfidence += r.Confidence
 			rep.HasRouterEvents = true
 			continue
 		}
@@ -245,6 +257,12 @@ func BuildReport(records []Record, since time.Time, skipped int) Report {
 		rep.LaneRoles = append(rep.LaneRoles, *roleMap[k])
 	}
 
+	if decisions := rep.RouterAgreements + rep.RouterDisagreements; decisions > 0 {
+		rep.RouterAgreementRate = float64(rep.RouterAgreements) / float64(decisions)
+	}
+	if rep.RouterDisagreements > 0 {
+		rep.RouterDisagreementAvgConfidence = disagreementConfidence / float64(rep.RouterDisagreements)
+	}
 	return rep
 }
 
@@ -302,6 +320,13 @@ func (r Report) Text() string {
 
 	if r.HasRouterEvents {
 		sb.WriteString(fmt.Sprintf("Router shadow: %d disagreements, %d errors\n", r.RouterDisagreements, r.RouterErrors))
+		if decisions := r.RouterAgreements + r.RouterDisagreements; decisions > 0 {
+			sb.WriteString(fmt.Sprintf("Router agreement: %.1f%% (%d of %d decisions)", r.RouterAgreementRate*100, r.RouterAgreements, decisions))
+			if r.RouterDisagreements > 0 {
+				sb.WriteString(fmt.Sprintf("; avg confidence of disagreements %.2f", r.RouterDisagreementAvgConfidence))
+			}
+			sb.WriteString("\n")
+		}
 	}
 
 	sb.WriteString(fmt.Sprintf("Skipped lines: %d\n\n", r.SkippedLines))

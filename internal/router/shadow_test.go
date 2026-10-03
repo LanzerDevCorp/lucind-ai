@@ -37,7 +37,7 @@ func TestShadow_Route(t *testing.T) {
 		Reasons:    nil,
 	}
 
-	t.Run("agreement logs nothing", func(t *testing.T) {
+	t.Run("agreement logs a router_agreement event", func(t *testing.T) {
 		var events []router.Event
 		s := router.Shadow{
 			Primary: fakeRouter{dec: primaryDecision},
@@ -58,8 +58,8 @@ func TestShadow_Route(t *testing.T) {
 		if dec.Route != "inline" || dec.Source != "deterministic" {
 			t.Errorf("got decision %+v; want %+v", dec, primaryDecision)
 		}
-		if len(events) != 0 {
-			t.Fatalf("expected 0 events on agreement, got %d: %+v", len(events), events)
+		if len(events) != 1 || events[0].Kind != "router_agreement" || events[0].PrimaryRoute != "inline" || events[0].CandidateRoute != "inline" || events[0].Confidence != 0.9 {
+			t.Fatalf("expected one router_agreement event, got %+v", events)
 		}
 	})
 
