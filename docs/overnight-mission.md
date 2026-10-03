@@ -71,3 +71,9 @@ Orden de dependencias: respetá el del feature doc; si una tarea queda `blocked`
 
 ## Cierre y reporte matutino
 Al terminar (o al quedar bloqueado todo), escribí en `docs/overnight-decisions.md` una sección "Reporte matutino": tabla de tareas (hecha / bloqueada / saltada) con commit ids; estado de `go build ./... && go test ./...` en la rama de feature; decisiones D<n> que esperan revisión (con la más riesgosa primero); `BLOCKED-DECISION` y su motivo; estado de la rotación de cuentas (activa o desactivada y por qué); cosas que no pudiste verificar; y la siguiente tarea recomendada. Dejá el feature doc y su espejo al día y commiteá. No hagas push.
+
+## Estado de ejecución
+
+Misión ejecutada y cerrada el 2026-10-03. Se completó la cola hasta T15 (incluida T12c, la parte de explorador de T12); T16-T20 son seguimientos nuevos que quedaron fuera de esta misión. Los detalles están en `docs/overnight-decisions.md`: tabla de tareas con commits, estado de verificación, decisiones D1-D17, estado de la rotación de cuentas (desactivada, D-ROT-0) y la sección "Reporte matutino". El checklist autoritativo es `odd/tasks/herdr-agent-factory.md`.
+
+Condición de parada de la misión ("parar al terminar T15 o cuando todo lo restante esté bloqueado"): cumplida. No se hizo push, ni PR, ni merge, y RDD siguió apagado.
