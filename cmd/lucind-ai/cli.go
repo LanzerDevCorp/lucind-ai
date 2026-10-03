@@ -56,11 +56,14 @@ const attemptOwner = "lucind-ai run"
 // error, so a person driving the binary from a terminal always sees the one
 // invocation that works rather than a stack trace. --packet is repeatable:
 // each occurrence adds one more lane to the batch.
-const usage = "usage: lucind-ai run --packet <path> [--packet <path> ...] [--timeout <duration>] [--legacy-main --expected-parent-sha <sha>] [--min-quota <fraction>]\n       lucind-ai split --dag <path> --out <dir>\n       lucind-ai check [--out <path>]\n       lucind-ai accept --run <run-id> --lane <lane-id>\n       lucind-ai feature create --id <id> --parent <ref> --base-sha <sha> [--expected-parent-sha <sha>]\n       lucind-ai feature status [--id <id>]\n       lucind-ai feature recover --attempt <id>\n       lucind-ai feature renew --id <id> --owner <owner> --fence <fence> [--ttl <duration>]\n       lucind-ai feature lease release --id <id> [--owner <owner>] [--fence <fence>] [--pid <pid>] [--force]\n       lucind-ai feature lease status --id <id>\n       lucind-ai feature disable --id <id>\n       lucind-ai reconcile approve --request <id> --source <feature> --target <feature> [--actor <name>]\n       lucind-ai reconcile decline --request <id> [--actor <name>] [--reason <reason>]\n       lucind-ai reconcile cancel --request <id> [--actor <name>] [--reason <reason>]\n       lucind-ai reconcile renew --request <id> [--base-sha <sha>] [--source-sha <sha>] [--target-sha <sha>] [--wait-stable <duration>]\n       lucind-ai reconcile resolve --candidate <id> --sha <sha> [--actor <name>] [--wait-stable <duration>]\n       lucind-ai defect record --id <id> --feature <id> --signature <sig> [--evidence <ev>] [--disposition <disp>] [--run <run-id>] [--lane <lane-id>]\n       lucind-ai defect list --feature <id>\n       lucind-ai defect resolve --id <id>\n       lucind-ai defect decline --id <id>\n       lucind-ai defect defer --id <id>\n       lucind-ai worktree cleanup --lane <id> [--force]\n       lucind-ai integrate retry --run <run-id> [--lane <id> ...] [--timeout <duration>]\n       lucind-ai attest run -- <command> [args...]\n       lucind-ai attest verify --command \"<exact command string>\"\n       lucind-ai --version"
+const usage = "usage: lucind-ai run --packet <path> [--packet <path> ...] [--timeout <duration>] [--legacy-main --expected-parent-sha <sha>] [--min-quota <fraction>] [--max-parallel <n>]\n       lucind-ai split --dag <path> --out <dir>\n       lucind-ai check [--out <path>]\n       lucind-ai accept --run <run-id> --lane <lane-id>\n       lucind-ai feature create --id <id> --parent <ref> --base-sha <sha> [--expected-parent-sha <sha>]\n       lucind-ai feature status [--id <id>]\n       lucind-ai feature recover --attempt <id>\n       lucind-ai feature renew --id <id> --owner <owner> --fence <fence> [--ttl <duration>]\n       lucind-ai feature lease release --id <id> [--owner <owner>] [--fence <fence>] [--pid <pid>] [--force]\n       lucind-ai feature lease status --id <id>\n       lucind-ai feature disable --id <id>\n       lucind-ai reconcile approve --request <id> --source <feature> --target <feature> [--actor <name>]\n       lucind-ai reconcile decline --request <id> [--actor <name>] [--reason <reason>]\n       lucind-ai reconcile cancel --request <id> [--actor <name>] [--reason <reason>]\n       lucind-ai reconcile renew --request <id> [--base-sha <sha>] [--source-sha <sha>] [--target-sha <sha>] [--wait-stable <duration>]\n       lucind-ai reconcile resolve --candidate <id> --sha <sha> [--actor <name>] [--wait-stable <duration>]\n       lucind-ai defect record --id <id> --feature <id> --signature <sig> [--evidence <ev>] [--disposition <disp>] [--run <run-id>] [--lane <lane-id>]\n       lucind-ai defect list --feature <id>\n       lucind-ai defect resolve --id <id>\n       lucind-ai defect decline --id <id>\n       lucind-ai defect defer --id <id>\n       lucind-ai worktree cleanup --lane <id> [--force]\n       lucind-ai integrate retry --run <run-id> [--lane <id> ...] [--timeout <duration>]\n       lucind-ai attest run -- <command> [args...]\n       lucind-ai attest verify --command \"<exact command string>\"\n       lucind-ai --version"
 
 // depsFactory constructs run.Deps for runDispatch. In production it is
 // productionDeps; tests may override it to inject test doubles or observe dependency calls.
 var depsFactory = productionDeps
+
+// executeBatch runs the batch of packets through ExecuteBatch. Tests may override it to observe batch arguments.
+var executeBatch = lucindrun.ExecuteBatch
 
 // defaultMinQuota is --min-quota's default: the minimum fraction of the
 // active agy-pool account's remaining 5-hour Gemini quota required before a
@@ -188,10 +191,16 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 	legacyMain := fs.Bool("legacy-main", false, "declare legacy mode (dispatches against main)")
 	expectedParentSHA := fs.String("expected-parent-sha", "", "expected parent commit SHA for legacy mode")
 	minQuota := fs.Float64("min-quota", defaultMinQuota, "minimum fraction of the active agy-pool account's 5h gemini quota required before dispatching an agy-executed batch; below it, auto-rotates to the pooled account with the most quota (0 disables the check)")
+	maxParallel := fs.Int("max-parallel", lucindrun.DefaultMaxParallelLanes, "maximum number of lanes running concurrently (default 3)")
 
 	if err := fs.Parse(args); err != nil {
 		// flag.ContinueOnError already invoked fs.Usage() on a parse
 		// error; nothing more to print here.
+		return 1
+	}
+
+	if *maxParallel < 1 {
+		fmt.Fprintf(stderr, "lucind-ai: --max-parallel must be at least 1 (got %d)\n", *maxParallel)
 		return 1
 	}
 
@@ -372,6 +381,7 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 	defer ledg.Close()
 
 	deps := depsFactory(runID, primaryRoot, ledg, *timeout)
+	deps.MaxParallelLanes = *maxParallel
 
 	// Register this run before anything else touches the ledger: every lane
 	// and event ExecuteBatch is about to write carries this runID, and the
@@ -427,7 +437,7 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 	// ctx itself carries no deadline here: run.ExecuteBatch derives each
 	// lane's own deadline independently from deps.LaneTimeout, so a slow
 	// lane never consumes another lane's clock.
-	batch, err := lucindrun.ExecuteBatch(ctx, deps, ps)
+	batch, err := executeBatch(ctx, deps, ps)
 	if err != nil {
 		// internal/run.ExecuteBatch's own errors already start with
 		// "run: ", so no second "run: " prefix is added here -- otherwise
@@ -1012,6 +1022,7 @@ func productionDeps(runID, primaryRoot string, ledg *ledger.Ledger, timeout time
 		WorktreeFS:               os.DirFS,
 		Now:                      time.Now,
 		LaneTimeout:              timeout,
+		MaxParallelLanes:         lucindrun.DefaultMaxParallelLanes,
 		ResolveCandidateIdentity: lucindrun.ResolveCandidateIdentityFromGit,
 		HasUniqueLaneCommits: func(ctx context.Context, worktreePath, baseSHA string) (bool, error) {
 			return worktree.HasUniqueCommits(ctx, worktreePath, baseSHA)

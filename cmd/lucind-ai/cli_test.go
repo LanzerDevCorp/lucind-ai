@@ -6136,3 +6136,88 @@ func TestValidateDispatchThresholds(t *testing.T) {
 		}
 	})
 }
+
+func TestRunMaxParallelValidation(t *testing.T) {
+	tests := []struct {
+		name string
+		val  string
+	}{
+		{"zero", "0"},
+		{"negative", "-1"},
+		{"negative multi", "-5"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			dir := t.TempDir()
+			p := filepath.Join(dir, "packet.md")
+			content := "---\n" +
+				"id: lane-1\n" +
+				"executor: agy\n" +
+				"routed_by: test\n" +
+				"---\n" +
+				"Do the thing.\n"
+			if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+				t.Fatalf("write packet: %v", err)
+			}
+
+			code := run(context.Background(), []string{"run", "--packet", p, "--max-parallel", tt.val}, &stdout, &stderr)
+			if code != 1 {
+				t.Fatalf("run with --max-parallel %s exit code = %d, want 1", tt.val, code)
+			}
+			if !strings.Contains(stderr.String(), "--max-parallel") {
+				t.Fatalf("stderr = %q, want mention of --max-parallel", stderr.String())
+			}
+			if !strings.Contains(stderr.String(), "at least 1") {
+				t.Fatalf("stderr = %q, want clear message stating --max-parallel must be at least 1", stderr.String())
+			}
+		})
+	}
+}
+
+func TestRunMaxParallelAcceptedAndReachesDeps(t *testing.T) {
+	primaryRoot := initRepo(t)
+	overrideDispatchDeps(t, testDoneExecutor{})
+
+	var capturedDeps lucindrun.Deps
+	origExecuteBatch := executeBatch
+	defer func() { executeBatch = origExecuteBatch }()
+	executeBatch = func(ctx context.Context, deps lucindrun.Deps, ps []packet.Packet) (lucindrun.BatchReport, error) {
+		capturedDeps = deps
+		return origExecuteBatch(ctx, deps, ps)
+	}
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(primaryRoot); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(cwd)
+
+	t.Run("explicit max-parallel 2", func(t *testing.T) {
+		p1 := writeAgyPacket(t, primaryRoot, "lane-1", "agy")
+		var stdout, stderr bytes.Buffer
+		code := run(context.Background(), []string{"run", "--packet", p1, "--max-parallel", "2"}, &stdout, &stderr)
+		if code != 0 {
+			t.Fatalf("run exit code = %d, want 0; stderr = %q", code, stderr.String())
+		}
+		if capturedDeps.MaxParallelLanes != 2 {
+			t.Errorf("Deps.MaxParallelLanes = %d, want 2", capturedDeps.MaxParallelLanes)
+		}
+	})
+
+	t.Run("default max-parallel", func(t *testing.T) {
+		p2 := writeAgyPacket(t, primaryRoot, "lane-2", "agy")
+		var stdout, stderr bytes.Buffer
+		code := run(context.Background(), []string{"run", "--packet", p2}, &stdout, &stderr)
+		if code != 0 {
+			t.Fatalf("run exit code = %d, want 0; stderr = %q", code, stderr.String())
+		}
+		if capturedDeps.MaxParallelLanes != lucindrun.DefaultMaxParallelLanes {
+			t.Errorf("Deps.MaxParallelLanes = %d, want default %d", capturedDeps.MaxParallelLanes, lucindrun.DefaultMaxParallelLanes)
+		}
+	})
+}

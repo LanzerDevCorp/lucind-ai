@@ -1078,3 +1078,332 @@ func TestExecuteBatchOutOfScopeUntrackedFileDeviatedExcludedFromIntegrate(t *tes
 		}
 	}
 }
+
+type watermarkFakeExecutor struct {
+	mu           sync.Mutex
+	active       int32
+	maxWatermark int32
+	sleep        time.Duration
+	release      chan struct{}
+}
+
+func (w *watermarkFakeExecutor) Run(ctx context.Context, _ executor.Request) (executor.Outcome, error) {
+	curr := atomic.AddInt32(&w.active, 1)
+	w.mu.Lock()
+	if curr > w.maxWatermark {
+		w.maxWatermark = curr
+	}
+	rel := w.release
+	w.mu.Unlock()
+
+	if rel != nil {
+		select {
+		case <-rel:
+		case <-ctx.Done():
+		}
+	} else {
+		d := w.sleep
+		if d == 0 {
+			d = 25 * time.Millisecond
+		}
+		select {
+		case <-time.After(d):
+		case <-ctx.Done():
+		}
+	}
+
+	atomic.AddInt32(&w.active, -1)
+	return executor.Outcome{ExitCode: 0}, nil
+}
+
+func (w *watermarkFakeExecutor) DefaultModel() string  { return "stub-default" }
+func (w *watermarkFakeExecutor) KnownModels() []string { return []string{"stub-default"} }
+
+func (w *watermarkFakeExecutor) Watermark() int32 {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.maxWatermark
+}
+
+func TestExecuteBatchConcurrencyCap(t *testing.T) {
+	tests := []struct {
+		name          string
+		maxParallel   int
+		wantMaxCap    int32
+		wantWatermark int32 // if >0, exact match; if 0, check <= wantMaxCap
+	}{
+		{
+			name:        "explicit cap 3",
+			maxParallel: 3,
+			wantMaxCap:  3,
+		},
+		{
+			name:        "default cap 0 means 3",
+			maxParallel: 0,
+			wantMaxCap:  3,
+		},
+		{
+			name:          "cap 1 runs strictly sequentially",
+			maxParallel:   1,
+			wantMaxCap:    1,
+			wantWatermark: 1,
+		},
+		{
+			name:          "cap 100 allows all 7 to overlap",
+			maxParallel:   100,
+			wantMaxCap:    7,
+			wantWatermark: 7,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			const packetCount = 7
+			var ps []packet.Packet
+			for i := 0; i < packetCount; i++ {
+				ps = append(ps, batchPacket(fmt.Sprintf("lane-%d", i)))
+			}
+
+			we := &watermarkFakeExecutor{sleep: 30 * time.Millisecond}
+			if tt.maxParallel == 100 {
+				release := make(chan struct{})
+				we.release = release
+				go func() {
+					for {
+						if atomic.LoadInt32(&we.active) == packetCount {
+							close(release)
+							return
+						}
+						time.Sleep(time.Millisecond)
+					}
+				}()
+			}
+			deps := newBatchTestDeps(t, func(id string) string { return root + "/" + id }, func(id string) []byte {
+				return []byte(laneEnvelopeJSON(id, "done"))
+			}, we, nil)
+			deps.MaxParallelLanes = tt.maxParallel
+
+			report, err := run.ExecuteBatch(context.Background(), deps, ps)
+			if err != nil {
+				t.Fatalf("ExecuteBatch() error = %v, want nil", err)
+			}
+			if len(report.Lanes) != packetCount {
+				t.Fatalf("len(report.Lanes) = %d, want %d", len(report.Lanes), packetCount)
+			}
+			for _, l := range report.Lanes {
+				if l.Status != lane.Done {
+					t.Errorf("lane %s status = %v, want done", l.LaneID, l.Status)
+				}
+			}
+
+			watermark := we.Watermark()
+			if tt.wantWatermark > 0 {
+				if watermark != tt.wantWatermark {
+					t.Errorf("watermark = %d, want exactly %d", watermark, tt.wantWatermark)
+				}
+			} else {
+				if watermark > tt.wantMaxCap {
+					t.Errorf("watermark = %d, want at most %d", watermark, tt.wantMaxCap)
+				}
+			}
+		})
+	}
+}
+
+// TestExecuteBatchQueuedLaneDoesNotBurnTimeout proves that a lane queued behind the cap
+// does not derive its per-lane timeout until it actually acquires a slot and begins running.
+func TestExecuteBatchQueuedLaneDoesNotBurnTimeout(t *testing.T) {
+	root := t.TempDir()
+	fe := newBatchFakeExecutor()
+	slowPath := root + "/lane-slow"
+	queuedPath := root + "/lane-queued"
+	fe.outcomeFor[slowPath] = executor.Outcome{ExitCode: 0}
+	fe.outcomeFor[queuedPath] = executor.Outcome{ExitCode: 0}
+	fe.delayFor[slowPath] = 60 * time.Millisecond
+	fe.delayFor[queuedPath] = 60 * time.Millisecond
+
+	deps := newBatchTestDeps(t, func(id string) string { return root + "/" + id }, func(id string) []byte {
+		return []byte(laneEnvelopeJSON(id, "done"))
+	}, fe, nil)
+	deps.MaxParallelLanes = 1
+	// LaneTimeout is 100ms. If lane-queued burned timeout while queued behind
+	// lane-slow (60ms), it would only have 40ms left when starting, causing it
+	// to time out after 40ms instead of finishing its 60ms execution.
+	deps.LaneTimeout = 100 * time.Millisecond
+
+	ps := []packet.Packet{batchPacket("lane-slow"), batchPacket("lane-queued")}
+
+	report, err := run.ExecuteBatch(context.Background(), deps, ps)
+	if err != nil {
+		t.Fatalf("ExecuteBatch() error = %v, want nil", err)
+	}
+
+	if len(report.Lanes) != 2 {
+		t.Fatalf("len(report.Lanes) = %d, want 2", len(report.Lanes))
+	}
+	for _, l := range report.Lanes {
+		if l.Status != lane.Done {
+			t.Errorf("lane %s status = %v, want done (per-lane timeout must not burn while queued)", l.LaneID, l.Status)
+		}
+	}
+}
+
+type cancelFakeExecutor struct {
+	runningCount    int32
+	twoSlotsHeld    chan struct{}
+	cancelTriggered chan struct{}
+}
+
+func (c *cancelFakeExecutor) Run(ctx context.Context, _ executor.Request) (executor.Outcome, error) {
+	if atomic.AddInt32(&c.runningCount, 1) == 2 {
+		close(c.twoSlotsHeld)
+	}
+	select {
+	case <-c.cancelTriggered:
+	case <-ctx.Done():
+	}
+	return executor.Outcome{ExitCode: 0}, nil
+}
+
+func (c *cancelFakeExecutor) DefaultModel() string  { return "stub-default" }
+func (c *cancelFakeExecutor) KnownModels() []string { return []string{"stub-default"} }
+
+// TestExecuteBatchCancelledContextWhileQueuedReturnsAllLanes proves that cancelling the context
+// while lanes are queued behind the concurrency cap returns without deadlock, and every packet
+// is accounted for in BatchReport.Lanes.
+func TestExecuteBatchCancelledContextWhileQueuedReturnsAllLanes(t *testing.T) {
+	root := t.TempDir()
+	const totalPackets = 5
+	var ps []packet.Packet
+	for i := 0; i < totalPackets; i++ {
+		ps = append(ps, batchPacket(fmt.Sprintf("lane-%d", i)))
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	fe := &cancelFakeExecutor{
+		twoSlotsHeld:    make(chan struct{}),
+		cancelTriggered: make(chan struct{}),
+	}
+
+	deps := newBatchTestDeps(t, func(id string) string { return root + "/" + id }, func(id string) []byte {
+		return []byte(laneEnvelopeJSON(id, "done"))
+	}, fe, nil)
+	deps.MaxParallelLanes = 2
+
+	go func() {
+		// Wait until both slots are occupied by running lanes.
+		<-fe.twoSlotsHeld
+		// Remaining lanes are queued behind the cap. Cancel ctx!
+		cancel()
+		// Release the running lanes to finish.
+		close(fe.cancelTriggered)
+	}()
+
+	done := make(chan struct{})
+	var report run.BatchReport
+	var err error
+	go func() {
+		report, err = run.ExecuteBatch(ctx, deps, ps)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("ExecuteBatch hung after context cancellation while lanes were queued")
+	}
+
+	if err != nil {
+		t.Fatalf("ExecuteBatch() error = %v, want nil", err)
+	}
+
+	if len(report.Lanes) != totalPackets {
+		t.Fatalf("len(report.Lanes) = %d, want %d", len(report.Lanes), totalPackets)
+	}
+
+	var doneCount, failedCount int
+	for i, l := range report.Lanes {
+		wantID := fmt.Sprintf("lane-%d", i)
+		if l.LaneID != wantID {
+			t.Errorf("report.Lanes[%d].LaneID = %q, want %q", i, l.LaneID, wantID)
+		}
+		switch l.Status {
+		case lane.Done:
+			doneCount++
+		case lane.Failed:
+			failedCount++
+		default:
+			t.Errorf("unexpected status %v for lane %s", l.Status, l.LaneID)
+		}
+	}
+
+	if doneCount != 2 {
+		t.Errorf("doneCount = %d, want exactly 2 running lanes to finish done", doneCount)
+	}
+	if failedCount != 3 {
+		t.Errorf("failedCount = %d, want exactly 3 queued lanes to be recorded as failed", failedCount)
+	}
+
+	// The cancelled batch ctx must not stop the failures from being persisted.
+	ledgerLanes, lerr := deps.Ledger.Lanes(context.Background(), deps.RunID)
+	if lerr != nil {
+		t.Fatalf("Ledger.Lanes: %v", lerr)
+	}
+	var ledgerFailed int
+	for _, l := range ledgerLanes {
+		if l.Status == lane.Failed {
+			ledgerFailed++
+		}
+	}
+	if ledgerFailed != 3 {
+		t.Errorf("ledger has %d failed lanes, want 3 queued lanes durably recorded as failed", ledgerFailed)
+	}
+}
+
+// TestExecuteBatchReportOrderUnderCap proves that report order equals input order under the cap
+// even when later lanes complete before earlier ones.
+func TestExecuteBatchReportOrderUnderCap(t *testing.T) {
+	root := t.TempDir()
+	const count = 5
+	var ps []packet.Packet
+	for i := 0; i < count; i++ {
+		ps = append(ps, batchPacket(fmt.Sprintf("lane-%d", i)))
+	}
+
+	fe := newBatchFakeExecutor()
+	// Later lanes finish faster than earlier ones.
+	fe.delayFor[root+"/lane-0"] = 60 * time.Millisecond
+	fe.delayFor[root+"/lane-1"] = 10 * time.Millisecond
+	fe.delayFor[root+"/lane-2"] = 50 * time.Millisecond
+	fe.delayFor[root+"/lane-3"] = 10 * time.Millisecond
+	fe.delayFor[root+"/lane-4"] = 10 * time.Millisecond
+	for _, p := range ps {
+		fe.outcomeFor[root+"/"+p.ID] = executor.Outcome{ExitCode: 0}
+	}
+
+	deps := newBatchTestDeps(t, func(id string) string { return root + "/" + id }, func(id string) []byte {
+		return []byte(laneEnvelopeJSON(id, "done"))
+	}, fe, nil)
+	deps.MaxParallelLanes = 2
+
+	report, err := run.ExecuteBatch(context.Background(), deps, ps)
+	if err != nil {
+		t.Fatalf("ExecuteBatch() error = %v, want nil", err)
+	}
+
+	if len(report.Lanes) != count {
+		t.Fatalf("len(report.Lanes) = %d, want %d", len(report.Lanes), count)
+	}
+	for i, l := range report.Lanes {
+		wantID := fmt.Sprintf("lane-%d", i)
+		if l.LaneID != wantID {
+			t.Errorf("report.Lanes[%d].LaneID = %q, want %q (input order preserved)", i, l.LaneID, wantID)
+		}
+		if l.Status != lane.Done {
+			t.Errorf("lane %s status = %v, want done", l.LaneID, l.Status)
+		}
+	}
+}

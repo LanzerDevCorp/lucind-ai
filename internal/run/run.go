@@ -156,6 +156,9 @@ func formatStreamDetail(stream string) string {
 	return fmt.Sprintf("%s\n%s", tail, marker)
 }
 
+// DefaultMaxParallelLanes is the default limit on concurrently running lanes in ExecuteBatch.
+const DefaultMaxParallelLanes = 3
+
 // Deps is everything Execute needs from the outside world. Every field is
 // injected so the whole flow is testable without git, without a real agent
 // and without the network.
@@ -183,6 +186,10 @@ type Deps struct {
 	// package already relies on and what a plain context.Context without a
 	// deadline continues to mean.
 	LaneTimeout time.Duration
+	// MaxParallelLanes is the maximum number of lanes ExecuteBatch runs concurrently.
+	// Zero means the default (3); a negative value is treated as the default as well;
+	// values above the number of packets are harmless.
+	MaxParallelLanes int
 	// AppendProgressBatch is an optional test seam. Production uses Ledger's
 	// atomic batch append when this is nil.
 	AppendProgressBatch func(context.Context, []ledger.LaneProgress) error
