@@ -91,7 +91,7 @@ ledger + migrations; packets; `rules init|generate`; `plugin/opencode`.
 
 Route for every task: delegated to agy via herdr (multi-file, deletion-heavy work).
 
-- [ ] **T0 — Spike: env inheritance in agy hooks.** Prove whether a command hook spawned by
+- [x] **T0 — Spike: env inheritance in agy hooks.** Prove whether a command hook spawned by
   agy sees an env var set on the agy process (`LUCIND_LANE=spike agy ...`). Throwaway
   workspace hook writing `env` + stdin to a file. Record result + evidence here. If not
   inherited, document plan B (bind `conversationId` on first `PreInvocation`).
@@ -124,6 +124,25 @@ Route for every task: delegated to agy via herdr (multi-file, deletion-heavy wor
 
 (updated per task: commit SHA, checks run and observed result, route, notes)
 
+- **T0** (route: delegated to agy via herdr; no source changes). Result: **YES** — command
+  hooks inherit the agy process env. `LUCIND_LANE=spike agy -p ... --dangerously-skip-permissions
+  --model gemini-3.8-flash-low` in a throwaway workspace; hook script read
+  `os.environ["LUCIND_LANE"]` and logged `"spike"` on all 4 events (PreToolUse + Stop).
+  Orchestrator spot check: hook.py reads env (not hardcoded); 4/4 log entries carry the value.
+  Plan B not needed. Facts for T4:
+  - PreToolUse entries are grouped `{"matcher": "...", "hooks": [...]}`; Stop entries are flat
+    objects in the `Stop` array; top level is a named group (`{"<name>": {...events}}`).
+  - PreToolUse must print `{"decision":"allow"}` to not gate; Stop `{}` ends,
+    `{"decision":"continue","reason":...}` re-enters the loop.
+  - stdin carries `conversationId`, `workspacePaths`, `transcriptPath`, `modelName`,
+    `toolCall{name,args}` (PreToolUse; `run_command` args `CommandLine`, `Cwd`), and Stop has
+    `executionNum`, `fullyIdle`, `terminationReason`.
+  - `~/.gemini/antigravity-cli/settings.json` `trustedWorkspaces` already contains `$HOME`.
+
+## Decisions log (taken autonomously; for user review)
+
+- D1 (T0): lane identity in hooks = `LUCIND_LANE` env var; no conversationId binding.
+
 ## Next step
 
-T0.
+T1.
