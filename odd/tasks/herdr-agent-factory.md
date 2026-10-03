@@ -72,7 +72,11 @@ Each task closes with a work-unit commit and records its commit id and review ti
   - Evidence: orchestrator re-ran build, vet, full tests; `lucind-ai phase propose` now exits non-zero as an unknown command; `rg phasespec cmd internal` empty.
   - Commits: lane `10ef695`; integrated as `10ef695`.
 
-- [ ] **T6. Worker and explorer skills.** Port the `gentle-ai-worker` rules into `lucind-apply` (edit surfaces, tool safety, TDD discipline, escalate ambiguity; map states to the envelope); rewrite `lucind-fan-out-lens` as an SDD-free explorer-lens skill with structural/textual/historical lenses. Plugin bump. Route: delegated writer. Est. ~250 lines.
+- [x] **T6. Worker and explorer skills.** Port the `gentle-ai-worker` rules into `lucind-apply` (edit surfaces, tool safety, TDD discipline, escalate ambiguity; map states to the envelope); rewrite `lucind-fan-out-lens` as an SDD-free explorer-lens skill with structural/textual/historical lenses. Plugin bump. Route: delegated writer. Est. ~250 lines.
+  - Route: delegated writer (agy `gemini-3.8-flash-high`; trigger: skill-document rewrite that needs reading the reference rules). Ported the worker rules into `.agents/skills/lucind-apply/SKILL.md` (edit surfaces, tool safety, TDD lifecycle, verification and known failures, `interaction_required` contract, envelope mapping) and rewrote `.agents/skills/lucind-fan-out-lens/SKILL.md` as an SDD-free read-only explorer with structural/textual/historical lenses and a synthesis protocol.
+  - Evidence: structural readback of both files; `rg -i sdd` on both returns nothing; envelope field names checked against `result.schema.json` with `jq`; build, full tests and `make verify-plugin-content verify-opencode-plugin` green. No plugin bump was needed: `.agents/skills` is outside the hashed plugin tree (the verify target passed unchanged).
+  - Commits: lane `3fe1e8c`; integrated as `3fe1e8c`.
+
 - [ ] **T7. Spike: herdr and agy facts.** Verify `herdr worktree open --path` on an externally created worktree, `herdr worktree remove` with live panes, `herdr agent wait` completion detection, exit-code sentinel and stream-json capture, and what `agy --sandbox` restricts. Output: findings note only. Route: delegated explorer (read-only plus scratch). No source writes.
 - [ ] **T8. HerdrExecutor.** Implement `executor.Executor` over herdr panes: lucind-ai creates the worktree, herdr opens it, headless CLI runs in the pane with stream-json tee and an exit sentinel. Depends on T7. Route: delegated writer. Est. ~500 lines.
 - [ ] **T9. Dispatcher commit step.** After green attestation (T1) and judges, the dispatcher makes the Conventional Commit from the packet message. Depends on T1, T8. Route: delegated writer. Est. ~200 lines.
@@ -101,6 +105,7 @@ Order: T1, T1b, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15.
 ## Next step
 
 T2 (packet contract fields and `interaction_required`): delegate to agy in a new worktree `lane/t2-packet-fields` from `feature/herdr-agent-factory`. The T1 worktree `lane-t1-hmac-attestation` is kept until the follow-ups are decided; remove it only after confirming nothing unique remains (its commit was cherry-picked, so the SHA differs).
+- 2026-10-03: T6 closed (`3fe1e8c`).
 - 2026-10-03: T5 closed (`10ef695`).
 - 2026-10-03: T4 closed (`85b4a24`).
 - 2026-10-03: T3 closed (`d5d07f2`).
