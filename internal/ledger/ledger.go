@@ -50,7 +50,7 @@ var (
 	ErrAlreadyDecided = errors.New("ledger: approval already decided")
 
 	// ErrPragmaNotApplied is returned by Open when a required pragma
-	// (journal_mode=wal or busy_timeout=5000) did not take effect on the
+	// (journal_mode=wal or busy_timeout=30000) did not take effect on the
 	// opened connection. A post-open PRAGMA Exec only reaches one
 	// arbitrary pooled connection, so pragmas are set via the DSN and
 	// then read back to convert a driver-specific DSN-syntax assumption
@@ -128,7 +128,7 @@ func executorAdmitted(name string) bool {
 
 const (
 	wantJournalMode = "wal"
-	wantBusyTimeout = 5000
+	wantBusyTimeout = 30000
 )
 
 // Ledger is a handle to the lane ledger database.
@@ -163,7 +163,7 @@ func openAtPath(ctx context.Context, dbPath string) (*Ledger, error) {
 	}
 
 	dsn := "file:" + dbPath +
-		"?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)"
+		"?_pragma=busy_timeout(30000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)"
 
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
