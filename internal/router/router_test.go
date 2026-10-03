@@ -126,3 +126,24 @@ func TestDeterministic_Route(t *testing.T) {
 		})
 	}
 }
+
+func TestDeterministic_DeclaredFuzzySignals(t *testing.T) {
+	d := router.Deterministic{}
+	for _, tc := range []struct {
+		name string
+		s    router.Signals
+		want string
+	}{
+		{"nothing declared stays inline", router.Signals{AllowedPathCount: 1}, "inline"},
+		{"not understood", router.Signals{AllowedPathCount: 1, UnderstoodDeclared: true, Understood: false}, "worker"},
+		{"understood", router.Signals{AllowedPathCount: 1, UnderstoodDeclared: true, Understood: true}, "inline"},
+		{"open design", router.Signals{AllowedPathCount: 1, OpenDesign: true}, "worker"},
+		{"five lookups", router.Signals{AllowedPathCount: 1, EstimatedLookups: 5}, "inline"},
+		{"six lookups", router.Signals{AllowedPathCount: 1, EstimatedLookups: 6}, "worker"},
+	} {
+		got, err := d.Route(context.Background(), tc.s)
+		if err != nil || got.Route != tc.want {
+			t.Errorf("%s: route=%q err=%v, want %q", tc.name, got.Route, err, tc.want)
+		}
+	}
+}

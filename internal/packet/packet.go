@@ -41,6 +41,9 @@ var (
 	ErrInvalidKnownEnvironmentalFailures = errors.New("packet: frontmatter known_environmental_failures must be a JSON array of strings")
 	ErrInvalidCommitMessage              = errors.New("packet: frontmatter commit_message is invalid")
 	ErrCommitMessageNeedsVerification    = errors.New("packet: frontmatter commit_message requires non-empty verification")
+	ErrInvalidUnderstood                 = errors.New("packet: frontmatter understood must be true or false")
+	ErrInvalidOpenDesign                 = errors.New("packet: frontmatter open_design must be true or false")
+	ErrInvalidEstimatedLookups           = errors.New("packet: frontmatter estimated_lookups must be an integer between 0 and 1000")
 	ErrInvalidMaxIterations              = errors.New("packet: frontmatter max_iterations must be an integer between 1 and 4")
 	ErrInvalidEscalation                 = errors.New("packet: frontmatter escalation is invalid")
 	ErrLoopNeedsVerification             = errors.New("packet: loop and escalation require non-empty verification")
@@ -153,6 +156,13 @@ type Packet struct {
 	// NamedSkillsOnly is the optional strict boolean flag declaring that only explicitly
 	// named skills (stack and ad-hoc) should be loaded, with no lane-role or sdd-* skills.
 	NamedSkillsOnly bool
+	// Understood, OpenDesign and EstimatedLookups are signals declared by the orchestrator that
+	// the dispatcher cannot compute: whether the fix is understood (nil = undeclared), whether
+	// a design question is still open, and how many lookups the work is expected to need
+	// (0 = undeclared).
+	Understood       *bool
+	OpenDesign       bool
+	EstimatedLookups int
 	// Verification is the optional JSON array of exact verification commands to run.
 	Verification []string
 	// KnownEnvironmentalFailures is the optional JSON array of baseline failure names or commands.
@@ -275,6 +285,32 @@ func Parse(r io.Reader) (Packet, error) {
 			default:
 				return Packet{}, ErrInvalidNamedSkillsOnly
 			}
+		case "understood":
+			switch strings.TrimSpace(value) {
+			case "true":
+				v := true
+				p.Understood = &v
+			case "false":
+				v := false
+				p.Understood = &v
+			default:
+				return Packet{}, ErrInvalidUnderstood
+			}
+		case "open_design":
+			switch strings.TrimSpace(value) {
+			case "true":
+				p.OpenDesign = true
+			case "false":
+				p.OpenDesign = false
+			default:
+				return Packet{}, ErrInvalidOpenDesign
+			}
+		case "estimated_lookups":
+			n, err := strconv.Atoi(strings.TrimSpace(value))
+			if err != nil || n < 0 || n > 1000 {
+				return Packet{}, ErrInvalidEstimatedLookups
+			}
+			p.EstimatedLookups = n
 		case "verification":
 			trimmed := strings.TrimSpace(value)
 			var commands []string

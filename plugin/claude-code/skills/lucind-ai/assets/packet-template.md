@@ -46,7 +46,7 @@ Two are mandatory in every packet:
 
 *(Qualitative verification lanes: see `verify-packet-template.md` for the standardized read-only judgment packet template.)*
 
-*(Optional frontmatter keys: `route` [inline|worker|fanout], `route_evidence`, `named_skills_only` [true|false to load only explicitly named stack and ad-hoc skills plus lucind-executor], `verification` [JSON array of exact command strings], `known_environmental_failures` [JSON array of baseline test failure names or commands].)*
+*(Optional frontmatter keys: `route` [inline|worker|fanout], `route_evidence`, `understood`/`open_design` [true|false], `estimated_lookups` [integer], `named_skills_only` [true|false to load only explicitly named stack and ad-hoc skills plus lucind-executor], `verification` [JSON array of exact command strings], `known_environmental_failures` [JSON array of baseline test failure names or commands].)*
 
 
 Then the packet's own:

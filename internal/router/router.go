@@ -14,7 +14,16 @@ type Signals struct {
 	NewFile          bool `json:"new_file"`
 	RiskTierLevel    int  `json:"risk_tier_level"` // 0 passive, 1 medium, 2 high
 	ReadOnly         bool `json:"read_only"`
+	// Signals declared by the orchestrator. UnderstoodDeclared distinguishes "not understood"
+	// from "not declared".
+	UnderstoodDeclared bool `json:"understood_declared"`
+	Understood         bool `json:"understood"`
+	OpenDesign         bool `json:"open_design"`
+	EstimatedLookups   int  `json:"estimated_lookups"`
 }
+
+// maxInlineLookups mirrors the dispatch-threshold evidence budget for inline work.
+const maxInlineLookups = 5
 
 // Decision represents the routing choice produced by a Router.
 type Decision struct {
@@ -61,6 +70,15 @@ func (d Deterministic) Route(ctx context.Context, s Signals) (Decision, error) {
 	}
 	if s.RiskTierLevel >= 2 {
 		reasons = append(reasons, "risk_tier:high")
+	}
+	if s.UnderstoodDeclared && !s.Understood {
+		reasons = append(reasons, "understood:false")
+	}
+	if s.OpenDesign {
+		reasons = append(reasons, "open_design:true")
+	}
+	if s.EstimatedLookups > maxInlineLookups {
+		reasons = append(reasons, fmt.Sprintf("estimated_lookups:%d", s.EstimatedLookups))
 	}
 
 	route := "inline"

@@ -591,3 +591,20 @@ func TestDispatcherCommitSkipsRepositoryHooks(t *testing.T) {
 		t.Fatalf("a commit-msg hook ran and injected a trailer: %q", msg)
 	}
 }
+
+func TestDeclaredRouterSignalsChangePacketDigest(t *testing.T) {
+	base := run.PacketDigest(testPacket(), []string{"internal/run"})
+	no := false
+	mutations := map[string]func(*packet.Packet){
+		"understood":        func(p *packet.Packet) { p.Understood = &no },
+		"open_design":       func(p *packet.Packet) { p.OpenDesign = true },
+		"estimated_lookups": func(p *packet.Packet) { p.EstimatedLookups = 3 },
+	}
+	for name, mutate := range mutations {
+		p := testPacket()
+		mutate(&p)
+		if run.PacketDigest(p, []string{"internal/run"}) == base {
+			t.Errorf("%s did not change the digest", name)
+		}
+	}
+}

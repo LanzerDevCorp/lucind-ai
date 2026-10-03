@@ -887,6 +887,15 @@ func packetDigest(p packet.Packet, paths []string) string {
 	if p.NamedSkillsOnly {
 		parts = append(parts, "named_skills_only")
 	}
+	if p.Understood != nil {
+		parts = append(parts, "understood:"+strconv.FormatBool(*p.Understood))
+	}
+	if p.OpenDesign {
+		parts = append(parts, "open_design")
+	}
+	if p.EstimatedLookups > 0 {
+		parts = append(parts, "estimated_lookups:"+strconv.Itoa(p.EstimatedLookups))
+	}
 	if len(p.Verification) > 0 {
 		raw, _ := json.Marshal(p.Verification)
 		parts = append(parts, "verification:"+string(raw))

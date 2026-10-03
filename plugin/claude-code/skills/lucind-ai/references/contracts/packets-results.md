@@ -20,6 +20,9 @@ Every packet starts with YAML frontmatter and a non-empty prompt body.
 | `legacy_main` | Runtime boolean mapping for Exclusive Mode. Dispatching with `--legacy-main` **requires** an expected parent SHA from one of exactly two sources: the batch-wide `--expected-parent-sha <sha>` flag, or this key in every packet's frontmatter. It is an optimistic-concurrency guard on the parent ref, so the binary will not derive it for you — deriving it from `HEAD` would assert the check against itself. Omitting both is refused in pre-dispatch validation (`cmd/lucind-ai/cli.go:211-214`) before any worktree or quota is consumed; the error names only the first packet, but the flag satisfies the whole batch. |
 | `route` | Optional execution route tier: `inline`, `worker`, or `fanout`. Empty allowed; any other value is a parse error. |
 | `route_evidence` | Optional free-string explanation for the routing decision. |
+| `understood` | Optional `true`/`false`: whether the fix is understood. `false` upgrades an `inline` packet to `worker`. |
+| `open_design` | Optional `true`/`false`: a design question is still open. `true` upgrades an `inline` packet to `worker`. |
+| `estimated_lookups` | Optional integer 0-1000: expected sequential lookups. More than 5 upgrades an `inline` packet to `worker`. |
 | `named_skills_only` | Optional strict boolean; when `true`, derives only explicitly named stack and ad-hoc skills plus `lucind-executor` (no lane-role and no `sdd-*` skills). |
 | `verification` | Optional single-line JSON array of exact foreground verification command strings to execute. |
 | `known_environmental_failures` | Optional single-line JSON array of baseline test failure names or commands that do not block acceptance. |

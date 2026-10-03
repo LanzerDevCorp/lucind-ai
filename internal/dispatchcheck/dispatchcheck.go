@@ -110,11 +110,12 @@ func Check(p packet.Packet, exists PathExists) Verdict {
 
 	switch p.Route {
 	case "inline":
-		if hasHardSignals {
+		declared := declaredReasons(p)
+		if hasHardSignals || len(declared) > 0 {
 			return Verdict{
 				Action:  ActionUpgrade,
 				Route:   "worker",
-				Reasons: signals.Reasons,
+				Reasons: append(append([]string(nil), signals.Reasons...), declared...),
 			}
 		}
 		return Verdict{
@@ -173,4 +174,23 @@ func Check(p packet.Packet, exists PathExists) Verdict {
 			Reasons: []string{fmt.Sprintf("unknown route: %s", p.Route)},
 		}
 	}
+}
+
+// maxInlineLookups is the evidence budget for inline work: more than this many sequential
+// lookups requires a delegated explorer or writer.
+const maxInlineLookups = 5
+
+// declaredReasons lists the orchestrator-declared signals that rule out the inline route.
+func declaredReasons(p packet.Packet) []string {
+	var reasons []string
+	if p.Understood != nil && !*p.Understood {
+		reasons = append(reasons, "understood:false")
+	}
+	if p.OpenDesign {
+		reasons = append(reasons, "open_design:true")
+	}
+	if p.EstimatedLookups > maxInlineLookups {
+		reasons = append(reasons, fmt.Sprintf("estimated_lookups:%d", p.EstimatedLookups))
+	}
+	return reasons
 }

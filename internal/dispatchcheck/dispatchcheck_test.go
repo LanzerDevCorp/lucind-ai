@@ -3,6 +3,7 @@ package dispatchcheck_test
 import (
 	"errors"
 	"reflect"
+	"slices"
 	"testing"
 
 	"github.com/LanzerDevCorp/lucind-ai/internal/dispatchcheck"
@@ -395,6 +396,34 @@ func TestCheck(t *testing.T) {
 			}
 			if !reflect.DeepEqual(got.Reasons, tt.wantReasons) {
 				t.Errorf("Check() Reasons = %#v, want %#v", got.Reasons, tt.wantReasons)
+			}
+		})
+	}
+}
+
+func TestCheckDeclaredFuzzySignalsUpgradeInline(t *testing.T) {
+	no, yes := false, true
+	for _, tc := range []struct {
+		name       string
+		p          packet.Packet
+		wantAction dispatchcheck.Action
+		wantReason string
+	}{
+		{"not understood", packet.Packet{Route: "inline", AllowedPaths: []string{"a.go"}, Understood: &no}, dispatchcheck.ActionUpgrade, "understood:false"},
+		{"open design", packet.Packet{Route: "inline", AllowedPaths: []string{"a.go"}, OpenDesign: true}, dispatchcheck.ActionUpgrade, "open_design:true"},
+		{"many lookups", packet.Packet{Route: "inline", AllowedPaths: []string{"a.go"}, EstimatedLookups: 6}, dispatchcheck.ActionUpgrade, "estimated_lookups:6"},
+		{"understood, closed, few lookups", packet.Packet{Route: "inline", AllowedPaths: []string{"a.go"}, Understood: &yes, EstimatedLookups: 5}, dispatchcheck.ActionAccept, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			v := dispatchcheck.Check(tc.p, func(string) (bool, error) { return true, nil })
+			if v.Action != tc.wantAction {
+				t.Fatalf("Action = %v, want %v (%v)", v.Action, tc.wantAction, v.Reasons)
+			}
+			if tc.wantReason != "" && !slices.Contains(v.Reasons, tc.wantReason) {
+				t.Errorf("Reasons = %v, want to contain %q", v.Reasons, tc.wantReason)
+			}
+			if tc.wantAction == dispatchcheck.ActionUpgrade && v.Route != "worker" {
+				t.Errorf("Route = %q, want worker", v.Route)
 			}
 		})
 	}

@@ -963,6 +963,12 @@ func validateDispatchThresholds(ctx context.Context, primaryRoot string, ps []pa
 					NewFile:          chkSig.NewFile,
 					RiskTierLevel:    router.SignalsFromRiskTier(chkSig.Tier),
 					ReadOnly:         p.ReadOnly,
+					OpenDesign:       p.OpenDesign,
+					EstimatedLookups: p.EstimatedLookups,
+				}
+				if p.Understood != nil {
+					sig.UnderstoodDeclared = true
+					sig.Understood = *p.Understood
 				}
 
 				shadow := router.Shadow{

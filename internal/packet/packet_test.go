@@ -1864,3 +1864,34 @@ func TestParseLoopRequiresCommitMessage(t *testing.T) {
 		t.Fatalf("Parse() with commit_message error = %v", err)
 	}
 }
+
+func TestParseDeclaredRouterSignals(t *testing.T) {
+	parse := func(extra string) (packet.Packet, error) {
+		return packet.Parse(strings.NewReader("---\nid: sig\nexecutor: agy\nrouted_by: test\n" + extra + "---\n\n## Goal\nx\n"))
+	}
+	p, err := parse("understood: false\nopen_design: true\nestimated_lookups: 7\n")
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+	if p.Understood == nil || *p.Understood || !p.OpenDesign || p.EstimatedLookups != 7 {
+		t.Errorf("got understood=%v open_design=%v lookups=%d", p.Understood, p.OpenDesign, p.EstimatedLookups)
+	}
+	p, err = parse("")
+	if err != nil || p.Understood != nil || p.OpenDesign || p.EstimatedLookups != 0 {
+		t.Errorf("defaults wrong: %+v err=%v", p, err)
+	}
+	for _, tc := range []struct {
+		extra string
+		want  error
+	}{
+		{"understood: maybe\n", packet.ErrInvalidUnderstood},
+		{"open_design: 1\n", packet.ErrInvalidOpenDesign},
+		{"estimated_lookups: -1\n", packet.ErrInvalidEstimatedLookups},
+		{"estimated_lookups: lots\n", packet.ErrInvalidEstimatedLookups},
+		{"estimated_lookups: 1001\n", packet.ErrInvalidEstimatedLookups},
+	} {
+		if _, err := parse(tc.extra); !errors.Is(err, tc.want) {
+			t.Errorf("Parse(%q) error = %v, want %v", tc.extra, err, tc.want)
+		}
+	}
+}
