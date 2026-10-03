@@ -159,6 +159,10 @@ Route for every task: delegated to agy via herdr (multi-file, deletion-heavy wor
   executor runners pruned. Orchestrator re-run of `sh lucind-checks.sh`: exit 0, 10/10 packages;
   argv spot check: `pane split ... --env LUCIND_LANE=<id>`, `agent start ... --dangerously-skip-permissions`,
   footer asks for `lucind-ai attest run -- sh lucind-checks.sh`; no pane close/kill calls.
+- **T5 (partial, route: inline by Claude — orchestration criteria is Claude's work)**:
+  commit `c9862a3` replaces `plugin/claude-code/skills/lucind-ai` (packet skill, 20 files) with a
+  single `plugin/claude-code/skills/lucind/SKILL.md`. Remaining for T5: docs rewrite
+  (`docs/product.md`, `ROADMAP.md`, `README.md`), skill install, e2e lane.
 
 ## Decisions log (taken autonomously; for user review)
 
@@ -199,6 +203,8 @@ Route for every task: delegated to agy via herdr (multi-file, deletion-heavy wor
 - D26 (process): when every saved agy account is below ~5% of the 5h window, wait for the reset
   instead of moving heavy work to Claude (keeps the agy-heavy split). 2026-10-03 15:30: all three
   saved accounts at ~3% remaining; T4 scheduled for ~18:33 local in a fresh agy session.
+- D27: `make install` also links `plugin/claude-code/skills/lucind` into `~/.claude/skills/lucind`
+  so Claude always loads the repo version of the skill.
 
 ## Next step
 
