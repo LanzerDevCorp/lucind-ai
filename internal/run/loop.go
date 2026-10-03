@@ -3,9 +3,13 @@ package run
 import (
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/LanzerDevCorp/lucind-ai/internal/packet"
 )
+
+// maxFeedbackOutputBytes bounds the verification output fed back to the worker.
+const maxFeedbackOutputBytes = 8 * 1024
 
 // MaxTotalAttempts caps the total number of executor runs per lane across all rungs.
 const MaxTotalAttempts = 4
@@ -67,12 +71,44 @@ func formatFeedback(body string, prevAttemptNum int, failedCommand string, exitC
 	} else {
 		b.WriteString(fmt.Sprintf("%s, exit code: %d\n\n", failedCommand, exitCode))
 	}
-	b.WriteString("```\n")
+	output = tailBytes(output, maxFeedbackOutputBytes)
+	// The output comes from commands the worker can influence. Fence it with more
+	// backticks than any run inside it so it cannot close the block and inject text.
+	fence := strings.Repeat("`", max(3, longestBacktickRun(output)+1))
+	b.WriteString(fence + "\n")
 	if output != "" {
 		b.WriteString(strings.TrimRight(output, "\n"))
 		b.WriteString("\n")
 	}
-	b.WriteString("```\n\n")
+	b.WriteString(fence + "\n\n")
 	b.WriteString("Fix the failures without weakening or deleting tests, and stay inside the allowed edit surfaces.\n")
 	return b.String()
+}
+
+// longestBacktickRun returns the length of the longest run of consecutive backticks in s.
+func longestBacktickRun(s string) int {
+	longest, current := 0, 0
+	for _, r := range s {
+		if r == '`' {
+			current++
+			if current > longest {
+				longest = current
+			}
+		} else {
+			current = 0
+		}
+	}
+	return longest
+}
+
+// tailBytes returns at most n trailing bytes of s without splitting a UTF-8 sequence.
+func tailBytes(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	cut := len(s) - n
+	for cut < len(s) && !utf8.RuneStart(s[cut]) {
+		cut++
+	}
+	return s[cut:]
 }

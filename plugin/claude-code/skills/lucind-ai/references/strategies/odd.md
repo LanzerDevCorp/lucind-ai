@@ -21,6 +21,9 @@ Load this module when executing under the Organic Driven Development strategy fo
 ## Loop and escalation
 
 When a packet declares `max_iterations` (> 1) or an `escalation` ladder (up to 3 rungs), the dispatcher executes a write/test/fix loop:
+
+- **Requirements**: a looped packet must declare `verification` and a `commit_message`: the loop reuses one worktree across attempts and the dispatcher, not the worker, commits once verification passes.
+- **Between attempts**: the previous result envelope is deleted before the next attempt (a failure to delete it fails the lane), verification output is fed back inside a fence longer than any backtick run it contains and capped at 8 KiB, and if the context ends between attempts the lane ends `blocked` with the last failure in its reason.
 - **Retry condition**: The loop retries only when the worker reported done but dispatcher verification failed (a declared `verification` command exited non-zero or the tree changed during verification). Any other non-done outcome (timeout, envelope blocked/deviated/failed/interaction_required, allowed_paths violation, missing skills, nothing to commit, HEAD moved) stops the loop immediately without retry.
 - **Same worktree**: Worker retries execute in the same worktree without reset so uncommitted changes persist. The subsequent attempt's prompt receives the failed command, exit code, and captured tail output.
 - **Attempt plan and total cap**: Rung 0 (the packet's declared executor/model) and each escalation rung receive `max(1, max_iterations)` attempts, subject to a hard cap of `MaxTotalAttempts = 4` executor runs across the entire lane.

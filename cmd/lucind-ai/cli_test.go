@@ -255,6 +255,7 @@ func TestRunEscalationUnsupportedExecutorRejected(t *testing.T) {
 		"executor: agy\n" +
 		"routed_by: test\n" +
 		"verification: [\"go test ./...\"]\n" +
+		"commit_message: feat: x\n" +
 		"escalation: [{\"executor\":\"bogus-executor\"}]\n" +
 		"---\n" +
 		"Do the thing.\n"
@@ -282,6 +283,7 @@ func TestRunEscalationUnknownModelRejected(t *testing.T) {
 		"executor: agy\n" +
 		"routed_by: test\n" +
 		"verification: [\"go test ./...\"]\n" +
+		"commit_message: feat: x\n" +
 		"escalation: [{\"executor\":\"cursor-agent\",\"model\":\"gemini-3.7-flash-high\"}]\n" +
 		"---\n" +
 		"Do the thing.\n"

@@ -1727,7 +1727,7 @@ func TestParseCommitMessage(t *testing.T) {
 func TestParseMaxIterations(t *testing.T) {
 	for _, n := range []int{1, 2, 3, 4} {
 		t.Run(fmt.Sprintf("valid: %d", n), func(t *testing.T) {
-			src := fmt.Sprintf("---\nid: test-lane\nexecutor: agy\nrouted_by: test\nmax_iterations: %d\nverification: [\"go test ./...\"]\n---\n\n## Goal\nTest\n", n)
+			src := fmt.Sprintf("---\nid: test-lane\nexecutor: agy\nrouted_by: test\nmax_iterations: %d\nverification: [\"go test ./...\"]\ncommit_message: feat: x\n---\n\n## Goal\nTest\n", n)
 			p, err := packet.Parse(strings.NewReader(src))
 			if err != nil {
 				t.Fatalf("Parse() error = %v, want nil", err)
@@ -1752,7 +1752,7 @@ func TestParseMaxIterations(t *testing.T) {
 	invalid := []string{"0", "-1", "5", "abc", "1.5", ""}
 	for _, val := range invalid {
 		t.Run("invalid: "+val, func(t *testing.T) {
-			src := fmt.Sprintf("---\nid: test-lane\nexecutor: agy\nrouted_by: test\nmax_iterations: %s\nverification: [\"go test ./...\"]\n---\n\n## Goal\nTest\n", val)
+			src := fmt.Sprintf("---\nid: test-lane\nexecutor: agy\nrouted_by: test\nmax_iterations: %s\nverification: [\"go test ./...\"]\ncommit_message: feat: x\n---\n\n## Goal\nTest\n", val)
 			_, err := packet.Parse(strings.NewReader(src))
 			if !errors.Is(err, packet.ErrInvalidMaxIterations) {
 				t.Fatalf("Parse() error = %v, want %v", err, packet.ErrInvalidMaxIterations)
@@ -1763,7 +1763,7 @@ func TestParseMaxIterations(t *testing.T) {
 
 func TestParseEscalation(t *testing.T) {
 	t.Run("valid single rung", func(t *testing.T) {
-		src := "---\nid: test-lane\nexecutor: agy\nrouted_by: test\nverification: [\"go test ./...\"]\nescalation: [{\"executor\":\"herdr-agy\",\"model\":\"gemini-3.8-flash-high\"}]\n---\n\n## Goal\nTest\n"
+		src := "---\nid: test-lane\nexecutor: agy\nrouted_by: test\nverification: [\"go test ./...\"]\ncommit_message: feat: x\nescalation: [{\"executor\":\"herdr-agy\",\"model\":\"gemini-3.8-flash-high\"}]\n---\n\n## Goal\nTest\n"
 		p, err := packet.Parse(strings.NewReader(src))
 		if err != nil {
 			t.Fatalf("Parse() error = %v, want nil", err)
@@ -1777,7 +1777,7 @@ func TestParseEscalation(t *testing.T) {
 	})
 
 	t.Run("valid 3 rungs with empty models", func(t *testing.T) {
-		src := "---\nid: test-lane\nexecutor: agy\nrouted_by: test\nverification: [\"go test ./...\"]\nescalation: [{\"executor\":\"herdr-agy\"},{\"executor\":\"cursor-agent\",\"model\":\"claude-3.7-sonnet\"},{\"executor\":\"opencode\"}]\n---\n\n## Goal\nTest\n"
+		src := "---\nid: test-lane\nexecutor: agy\nrouted_by: test\nverification: [\"go test ./...\"]\ncommit_message: feat: x\nescalation: [{\"executor\":\"herdr-agy\"},{\"executor\":\"cursor-agent\",\"model\":\"claude-3.7-sonnet\"},{\"executor\":\"opencode\"}]\n---\n\n## Goal\nTest\n"
 		p, err := packet.Parse(strings.NewReader(src))
 		if err != nil {
 			t.Fatalf("Parse() error = %v, want nil", err)
@@ -1808,7 +1808,7 @@ func TestParseEscalation(t *testing.T) {
 	}
 	for _, tc := range invalid {
 		t.Run("invalid: "+tc.name, func(t *testing.T) {
-			src := fmt.Sprintf("---\nid: test-lane\nexecutor: agy\nrouted_by: test\nverification: [\"go test ./...\"]\nescalation: %s\n---\n\n## Goal\nTest\n", tc.val)
+			src := fmt.Sprintf("---\nid: test-lane\nexecutor: agy\nrouted_by: test\nverification: [\"go test ./...\"]\ncommit_message: feat: x\nescalation: %s\n---\n\n## Goal\nTest\n", tc.val)
 			_, err := packet.Parse(strings.NewReader(src))
 			if !errors.Is(err, packet.ErrInvalidEscalation) {
 				t.Fatalf("Parse() error = %v, want %v", err, packet.ErrInvalidEscalation)
@@ -1852,4 +1852,15 @@ func TestLoopNeedsVerification(t *testing.T) {
 			t.Errorf("MaxIterations = %d, want 1", p.MaxIterations)
 		}
 	})
+}
+
+func TestParseLoopRequiresCommitMessage(t *testing.T) {
+	base := "---\nid: lane-a\nexecutor: agy\nrouted_by: manual\nmax_iterations: 2\nverification: [\"go test ./...\"]\n---\nbody\n"
+	if _, err := packet.Parse(strings.NewReader(base)); !errors.Is(err, packet.ErrLoopNeedsCommitMessage) {
+		t.Fatalf("Parse() error = %v, want %v", err, packet.ErrLoopNeedsCommitMessage)
+	}
+	withCommit := strings.Replace(base, "---\nbody", "commit_message: fix: x\n---\nbody", 1)
+	if _, err := packet.Parse(strings.NewReader(withCommit)); err != nil {
+		t.Fatalf("Parse() with commit_message error = %v", err)
+	}
 }

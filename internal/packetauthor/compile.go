@@ -118,6 +118,9 @@ func validateContract(contract Contract) (normalizedContract, Diagnostics) {
 		if len(contract.Verification) == 0 {
 			diagnostics = append(diagnostics, diagnostic(10, "verification", CodeContractInvalid, "loop and escalation require verification"))
 		}
+		if strings.TrimSpace(contract.CommitMessage) == "" {
+			diagnostics = append(diagnostics, diagnostic(10, "commit_message", CodeContractInvalid, "loop and escalation require commit_message (the dispatcher commits looped work)"))
+		}
 	}
 	claimKeys := make([]string, 0, len(contract.TargetClaims))
 	for key, value := range contract.TargetClaims {

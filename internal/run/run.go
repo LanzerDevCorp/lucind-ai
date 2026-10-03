@@ -433,18 +433,23 @@ func Execute(ctx context.Context, deps Deps, p packet.Packet) (Report, error) {
 	persistCtx := context.WithoutCancel(ctx)
 
 	var (
-		attemptsRun        int
-		lastStatus         lane.Status
-		lastEnvelope       *result.Envelope
-		lastReason         string
-		lastOutcome        executor.Outcome
-		lastVRes           verificationResult
-		lastProgressErrors []error
-		prevRungIndex      = 0
+		attemptsRun       int
+		lastStatus        lane.Status
+		lastEnvelope      *result.Envelope
+		lastReason        string
+		lastOutcome       executor.Outcome
+		lastVRes          verificationResult
+		allProgressErrors []error
+		prevRungIndex     = 0
 	)
 
 	for attemptIdx, attempt := range plan {
 		if attemptIdx > 0 && ctx.Err() != nil {
+			// Keep the audit trail honest: the lane stopped because the context ended,
+			// not because the last verification failure was final.
+			lastReason = fmt.Sprintf("context ended before attempt %d/%d (%v); last failure: %s", attemptIdx+1, len(plan), ctx.Err(), lastReason)
+			lastStatus = lane.Blocked
+			lastVRes = verificationResult{}
 			break
 		}
 
@@ -488,7 +493,11 @@ func Execute(ctx context.Context, deps Deps, p packet.Packet) (Report, error) {
 			prompt = formatFeedback(p.Body, attemptIdx, lastVRes.FailedCommand, lastVRes.ExitCode, lastVRes.Output)
 			// A stale envelope from the previous attempt must never be mistaken for
 			// this attempt's result if the worker writes none.
-			_ = os.Remove(filepath.Join(wt.Path, resultEnvelopePath))
+			if rmErr := os.Remove(filepath.Join(wt.Path, resultEnvelopePath)); rmErr != nil && !errors.Is(rmErr, fs.ErrNotExist) {
+				cause := fmt.Errorf("run: clear previous result envelope for lane %q before attempt %d: %w", p.ID, attemptIdx+1, rmErr)
+				report.Attempts = attemptsRun
+				return report, recordLaneFailure(persistCtx, deps, p.ID, now, cause)
+			}
 		}
 		// lastVRes describes only the attempt that just ran; clear it so a later
 		// non-verification failure is not reclassified as loop exhaustion.
@@ -519,7 +528,7 @@ func Execute(ctx context.Context, deps Deps, p packet.Packet) (Report, error) {
 		progressErrors := <-progressDone
 
 		lastOutcome = outcome
-		lastProgressErrors = progressErrors
+		allProgressErrors = append(allProgressErrors, progressErrors...)
 
 		if err != nil {
 			cause := fmt.Errorf("run: dispatch lane %q: %w", p.ID, err)
@@ -600,7 +609,7 @@ func Execute(ctx context.Context, deps Deps, p packet.Packet) (Report, error) {
 		}
 	}
 
-	progressDiagnosis := reportProgressErrors(persistCtx, deps, p.ID, now, lastProgressErrors)
+	progressDiagnosis := reportProgressErrors(persistCtx, deps, p.ID, now, allProgressErrors)
 	report.Diagnosis = progressDiagnosis
 
 	var diagnosis string

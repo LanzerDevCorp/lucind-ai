@@ -44,6 +44,7 @@ var (
 	ErrInvalidMaxIterations              = errors.New("packet: frontmatter max_iterations must be an integer between 1 and 4")
 	ErrInvalidEscalation                 = errors.New("packet: frontmatter escalation is invalid")
 	ErrLoopNeedsVerification             = errors.New("packet: loop and escalation require non-empty verification")
+	ErrLoopNeedsCommitMessage            = errors.New("packet: loop and escalation require commit_message (the dispatcher commits looped work)")
 )
 
 var commitMessageRegex = regexp.MustCompile(`^(feat|fix|docs|refactor|test|chore|perf|build|ci|style|revert)(\([a-z0-9._/-]+\))?!?: \S.*$`)
@@ -340,6 +341,11 @@ func Parse(r io.Reader) (Packet, error) {
 	if p.MaxIterations > 1 || len(p.Escalation) > 0 {
 		if len(p.Verification) == 0 {
 			return Packet{}, ErrLoopNeedsVerification
+		}
+		// A looped lane is verified by the dispatcher and must be committed by it: the
+		// loop reuses one worktree across attempts, so a worker-made commit would end it.
+		if p.CommitMessage == "" {
+			return Packet{}, ErrLoopNeedsCommitMessage
 		}
 	}
 

@@ -360,6 +360,7 @@ func TestCompileLoopAndEscalation(t *testing.T) {
 	t.Run("max_iterations and escalation propagate and change digest", func(t *testing.T) {
 		baseContract := validContract()
 		baseContract.Verification = []string{"go test ./..."}
+		baseContract.CommitMessage = "feat: x"
 		baseArt, err := packetauthor.Compile(baseContract, validFeatureBinding())
 		if err != nil {
 			t.Fatal(err)

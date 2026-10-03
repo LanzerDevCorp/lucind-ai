@@ -24,8 +24,8 @@ Every packet starts with YAML frontmatter and a non-empty prompt body.
 | `verification` | Optional single-line JSON array of exact foreground verification command strings to execute. |
 | `known_environmental_failures` | Optional single-line JSON array of baseline test failure names or commands that do not block acceptance. |
 | `commit_message` | Optional single-line Conventional Commit message string (<= 100 chars, matching `^(feat|fix|docs|refactor|test|chore|perf|build|ci|style|revert)(\([a-z0-9._/-]+\))?!?: \S.*$`). Requires non-empty `verification`. When declared, the worker does NOT commit; after the worker reports done, the dispatcher executes verification under attestation and commits with this message. Forbidden from containing `co-authored-by` or `generated with`. |
-| `max_iterations` | Optional integer 1..4 (absent means 1). Number of write/test/fix iterations per rung before escalating or stopping. Values > 1 require non-empty `verification`. |
-| `escalation` | Optional single-line JSON array of up to 3 rung objects `[{"executor":"<name>","model":"<model or empty>"}]` without unknown keys. Declares the escalation ladder when verification fails. Requires non-empty `verification`. |
+| `max_iterations` | Optional integer 1..4 (absent means 1). Number of write/test/fix iterations per rung before escalating or stopping. Values > 1 require non-empty `verification` and a `commit_message` (the dispatcher commits looped work). |
+| `escalation` | Optional single-line JSON array of up to 3 rung objects `[{"executor":"<name>","model":"<model or empty>"}]` without unknown keys. Declares the escalation ladder when verification fails. Requires non-empty `verification`. Requires non-empty `verification` and a `commit_message`. |
 
 ## Body structure
 
