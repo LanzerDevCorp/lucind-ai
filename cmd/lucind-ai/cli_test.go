@@ -5974,3 +5974,165 @@ func chdirRepo(t *testing.T, dir string) string {
 	}
 	return cwd
 }
+
+func TestGitPathExists(t *testing.T) {
+	if testing.Short() {
+		t.Skip("shells out to real git")
+	}
+	repo := initRepo(t)
+	baseSHA := currentHead(t, repo)
+
+	// In baseSHA, README.md exists, new_file.txt does not.
+	exists, err := gitPathExists(context.Background(), repo, baseSHA, "README.md")
+	if err != nil {
+		t.Fatalf("gitPathExists(README.md) error = %v", err)
+	}
+	if !exists {
+		t.Errorf("gitPathExists(README.md) = false, want true (existing file => not new)")
+	}
+
+	exists, err = gitPathExists(context.Background(), repo, baseSHA, "new_file.txt")
+	if err != nil {
+		t.Fatalf("gitPathExists(new_file.txt) error = %v", err)
+	}
+	if exists {
+		t.Errorf("gitPathExists(new_file.txt) = true, want false (missing file => new)")
+	}
+
+	// Commit new_file.txt to HEAD
+	if err := os.WriteFile(filepath.Join(repo, "new_file.txt"), []byte("new\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repo, "add", "new_file.txt")
+	runGit(t, repo, "commit", "-m", "add new_file.txt")
+	headSHA := currentHead(t, repo)
+
+	// BaseSHA honored: new_file.txt exists in HEAD, but not in baseSHA
+	exists, err = gitPathExists(context.Background(), repo, headSHA, "new_file.txt")
+	if err != nil || !exists {
+		t.Errorf("gitPathExists(headSHA, new_file.txt) = %t, %v, want true, nil", exists, err)
+	}
+	exists, err = gitPathExists(context.Background(), repo, baseSHA, "new_file.txt")
+	if err != nil || exists {
+		t.Errorf("gitPathExists(baseSHA, new_file.txt) = %t, %v, want false, nil (BaseSHA honored)", exists, err)
+	}
+
+	// Invalid object/SHA returns error
+	_, err = gitPathExists(context.Background(), repo, "deadbeef1234", "README.md")
+	if err == nil {
+		t.Errorf("gitPathExists(invalid SHA) error = nil, want error")
+	}
+}
+
+func TestValidateDispatchThresholds(t *testing.T) {
+	if testing.Short() {
+		t.Skip("shells out to real git")
+	}
+	repo := initRepo(t)
+	baseSHA := currentHead(t, repo)
+
+	t.Run("upgrades inline packet and updates route to worker", func(t *testing.T) {
+		ps := []packet.Packet{
+			{
+				Path:         "packet-upgrade.md",
+				Route:        "inline",
+				BaseSHA:      baseSHA,
+				AllowedPaths: []string{"README.md", "other.txt"},
+			},
+		}
+		var stderr bytes.Buffer
+		err := validateDispatchThresholds(context.Background(), repo, ps, &stderr)
+		if err != nil {
+			t.Fatalf("validateDispatchThresholds error = %v", err)
+		}
+		if ps[0].Route != "worker" {
+			t.Errorf("ps[0].Route = %q, want worker", ps[0].Route)
+		}
+		if !strings.Contains(stderr.String(), "lucind-ai: packet packet-upgrade.md route upgraded inline -> worker:") {
+			t.Errorf("stderr = %q, want upgrade message", stderr.String())
+		}
+	})
+
+	t.Run("accepts inline packet below threshold and prints nothing", func(t *testing.T) {
+		ps := []packet.Packet{
+			{
+				Path:         "packet-accept.md",
+				Route:        "inline",
+				BaseSHA:      baseSHA,
+				AllowedPaths: []string{"README.md"},
+			},
+		}
+		var stderr bytes.Buffer
+		err := validateDispatchThresholds(context.Background(), repo, ps, &stderr)
+		if err != nil {
+			t.Fatalf("validateDispatchThresholds error = %v", err)
+		}
+		if ps[0].Route != "inline" {
+			t.Errorf("ps[0].Route = %q, want inline", ps[0].Route)
+		}
+		if stderr.Len() != 0 {
+			t.Errorf("stderr = %q, want empty", stderr.String())
+		}
+	})
+
+	t.Run("rejects packet missing required route evidence", func(t *testing.T) {
+		ps := []packet.Packet{
+			{
+				Path:          "packet-reject.md",
+				Route:         "worker",
+				RouteEvidence: "",
+				BaseSHA:       baseSHA,
+				AllowedPaths:  []string{"README.md"},
+			},
+		}
+		var stderr bytes.Buffer
+		err := validateDispatchThresholds(context.Background(), repo, ps, &stderr)
+		if err == nil {
+			t.Fatalf("validateDispatchThresholds error = nil, want error")
+		}
+		if !strings.Contains(stderr.String(), "lucind-ai: packet packet-reject.md rejected by dispatch-threshold validator:") {
+			t.Errorf("stderr = %q, want reject message", stderr.String())
+		}
+	})
+
+	t.Run("batch with one rejected packet returns exit 1 before dispatch", func(t *testing.T) {
+		pValid := filepath.Join(repo, "p-valid.md")
+		pValidContent := "---\n" +
+			"id: lane-valid\n" +
+			"executor: agy\n" +
+			"routed_by: test\n" +
+			"route: worker\n" +
+			"route_evidence: necessary worker\n" +
+			"allowed_paths: [\"README.md\"]\n" +
+			"---\n" +
+			"Do valid work.\n"
+		if err := os.WriteFile(pValid, []byte(pValidContent), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		pInvalid := filepath.Join(repo, "p-invalid.md")
+		pInvalidContent := "---\n" +
+			"id: lane-invalid\n" +
+			"executor: agy\n" +
+			"routed_by: test\n" +
+			"route: worker\n" +
+			"allowed_paths: [\"other.txt\"]\n" +
+			"---\n" +
+			"Do invalid work.\n"
+		if err := os.WriteFile(pInvalid, []byte(pInvalidContent), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		cwd := chdirRepo(t, repo)
+		defer os.Chdir(cwd)
+
+		var stdout, stderr bytes.Buffer
+		code := run(context.Background(), []string{"run", "--packet", pValid, "--packet", pInvalid}, &stdout, &stderr)
+		if code != 1 {
+			t.Fatalf("run exit code = %d, want 1", code)
+		}
+		if !strings.Contains(stderr.String(), "rejected by dispatch-threshold validator") {
+			t.Errorf("stderr = %q, want rejection error", stderr.String())
+		}
+	})
+}

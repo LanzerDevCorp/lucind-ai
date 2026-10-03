@@ -3,5 +3,5 @@
 #
 # Regenerate BOTH lines below with `make bump-plugin-version` -- a deliberate,
 # human-run action, never an automatic side effect of a skill-tree content edit.
-version: 2.0.18
-sha256: 10926dc0d95dd6ff322d53a4b3d02e1e57a63b1f96bcd479642139cae4e24fa2
+version: 2.0.19
+sha256: 03d525d8729217c32d5f4d8b393b0cddaf5247696fcb17c011f140ec68747df0

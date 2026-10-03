@@ -22,6 +22,7 @@ import (
 
 	"github.com/LanzerDevCorp/lucind-ai/internal/accept"
 	"github.com/LanzerDevCorp/lucind-ai/internal/dag"
+	"github.com/LanzerDevCorp/lucind-ai/internal/dispatchcheck"
 	"github.com/LanzerDevCorp/lucind-ai/internal/executor"
 	"github.com/LanzerDevCorp/lucind-ai/internal/feature"
 	"github.com/LanzerDevCorp/lucind-ai/internal/integrate"
@@ -294,6 +295,10 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 	primaryRoot, err := resolvePrimaryRoot(ctx)
 	if err != nil {
 		fmt.Fprintf(stderr, "lucind-ai: resolve primary repository root: %v\n", err)
+		return 1
+	}
+
+	if err := validateDispatchThresholds(ctx, primaryRoot, ps, stderr); err != nil {
 		return 1
 	}
 
@@ -820,6 +825,51 @@ func resolvePrimaryRoot(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("git rev-parse --git-common-dir returned a non-absolute path: %q", primaryRoot)
 	}
 	return primaryRoot, nil
+}
+
+// gitPathExists reports whether a repository-relative path exists at base in repoRoot.
+func gitPathExists(ctx context.Context, repoRoot, base, relPath string) (bool, error) {
+	cmd := exec.CommandContext(ctx, "git", "-C", repoRoot, "cat-file", "-e", fmt.Sprintf("%s:%s", base, relPath))
+	// The "does not exist" outcome is recognized from git's message, so pin the locale.
+	cmd.Env = append(os.Environ(), "LC_ALL=C")
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		errStr := stderr.String()
+		if strings.Contains(errStr, "does not exist") || strings.Contains(errStr, "not in ") {
+			return false, nil
+		}
+		return false, fmt.Errorf("git cat-file: %w: %s", err, strings.TrimSpace(errStr))
+	}
+	return true, nil
+}
+
+// validateDispatchThresholds validates declared routes against computable signals
+// for each packet in ps before dispatch.
+func validateDispatchThresholds(ctx context.Context, primaryRoot string, ps []packet.Packet, stderr io.Writer) error {
+	for i := range ps {
+		p := ps[i]
+		base := p.BaseSHA
+		if base == "" {
+			base = "HEAD"
+		}
+		exists := func(relPath string) (bool, error) {
+			return gitPathExists(ctx, primaryRoot, base, relPath)
+		}
+		verdict := dispatchcheck.Check(p, exists)
+		flagPath := p.Path
+		switch verdict.Action {
+		case dispatchcheck.ActionReject:
+			fmt.Fprintf(stderr, "lucind-ai: packet %s rejected by dispatch-threshold validator: %s\n", flagPath, strings.Join(verdict.Reasons, ", "))
+			return errors.New("dispatch-threshold validator rejected packet")
+		case dispatchcheck.ActionUpgrade:
+			ps[i].Route = verdict.Route
+			fmt.Fprintf(stderr, "lucind-ai: packet %s route upgraded inline -> worker: %s\n", flagPath, strings.Join(verdict.Reasons, ", "))
+		case dispatchcheck.ActionAccept:
+			// nothing printed
+		}
+	}
+	return nil
 }
 
 // orchestratorSkillTrees returns the canonical Claude skill tree and its
