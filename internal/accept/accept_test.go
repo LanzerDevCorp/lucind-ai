@@ -595,6 +595,8 @@ func TestVerifierAttestationReuse(t *testing.T) {
 func TestAcceptDispatcherCommitObligation(t *testing.T) {
 	contract := `{"version":"packet-author/v1","mode":"write","commit_message":"feat: add allowed","verification":["sh lucind-checks.sh"],"write_paths":["allowed.txt"],"done_criteria":["implemented"],"hard_stops":["stop"],"result":{"path":".lucind/result.json","schema":".lucind/result.schema.json"}}`
 
+	// attestFn stands in for attest.HasValidAttestation; default: every declared command is attested.
+	attestFn := func(context.Context, string, string, string) (bool, error) { return true, nil }
 	setupCandidate := func(t *testing.T, envelopeCommit string, candidateCommitEqualBase bool, mode string) (*Verifier, AcceptanceRequest) {
 		t.Helper()
 		f := newVerifierFixture(t, "", "", map[string]string{"allowed.txt": "candidate\n"}, []string{"allowed.txt"})
@@ -666,6 +668,7 @@ func TestAcceptDispatcherCommitObligation(t *testing.T) {
 		if err := f.ledger.SetDoneCandidate(context.Background(), row); err != nil {
 			t.Fatal(err)
 		}
+		f.verifier.hasAttestation = attestFn
 		return f.verifier, AcceptanceRequest{"run-1", "lane-disp"}
 	}
 
@@ -698,6 +701,42 @@ func TestAcceptDispatcherCommitObligation(t *testing.T) {
 		_, err := v.Verify(context.Background(), req)
 		if err == nil || !strings.Contains(err.Error(), "write commit mismatch") {
 			t.Fatalf("expected write commit mismatch error, got %v", err)
+		}
+	})
+
+	t.Run("rejected when a declared verification command has no attestation for the candidate tree", func(t *testing.T) {
+		var gotCmd, gotTree string
+		attestFn = func(_ context.Context, _ string, cmd, tree string) (bool, error) {
+			gotCmd, gotTree = cmd, tree
+			return false, nil
+		}
+		defer func() { attestFn = func(context.Context, string, string, string) (bool, error) { return true, nil } }()
+		v, req := setupCandidate(t, "", false, "write")
+		_, err := v.Verify(context.Background(), req)
+		if err == nil || !strings.Contains(err.Error(), "missing attestation") {
+			t.Fatalf("expected missing attestation error, got %v", err)
+		}
+		if gotCmd != "sh lucind-checks.sh" || gotTree == "" {
+			t.Fatalf("attestation looked up with cmd=%q tree=%q", gotCmd, gotTree)
+		}
+	})
+
+	t.Run("rejected when the attestation lookup errors (fail closed)", func(t *testing.T) {
+		attestFn = func(context.Context, string, string, string) (bool, error) { return false, errors.New("boom") }
+		defer func() { attestFn = func(context.Context, string, string, string) (bool, error) { return true, nil } }()
+		v, req := setupCandidate(t, "", false, "write")
+		if _, err := v.Verify(context.Background(), req); err == nil || !strings.Contains(err.Error(), "missing attestation") {
+			t.Fatalf("expected missing attestation error, got %v", err)
+		}
+	})
+
+	t.Run("rejected when the dispatcher contract declares no verification", func(t *testing.T) {
+		saved := contract
+		contract = strings.Replace(contract, `"verification":["sh lucind-checks.sh"],`, "", 1)
+		defer func() { contract = saved }()
+		v, req := setupCandidate(t, "", false, "write")
+		if _, err := v.Verify(context.Background(), req); err == nil || !strings.Contains(err.Error(), "missing attestation") {
+			t.Fatalf("expected missing attestation error, got %v", err)
 		}
 	})
 

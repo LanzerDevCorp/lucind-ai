@@ -112,6 +112,9 @@ func (v *Verifier) Verify(ctx context.Context, req AcceptanceRequest) (Acceptanc
 	if err := validateResultAndScope(ctx, root, candidate); err != nil {
 		return AcceptanceReceipt{}, err
 	}
+	if err := v.requireDispatcherAttestations(ctx, root, candidate); err != nil {
+		return AcceptanceReceipt{}, err
+	}
 	binding, err := v.binding(candidate)
 	if err != nil {
 		return AcceptanceReceipt{}, err
@@ -388,6 +391,36 @@ func validateVersionedEvidence(c ledger.LaneCandidate, envelope result.Envelope,
 	}
 	if outside := candidatechange.OutOfScope(actual, c.AllowedPaths); len(outside) > 0 {
 		return fmt.Errorf("accept: out-of-scope changes %v", outside)
+	}
+	return nil
+}
+
+// requireDispatcherAttestations enforces that, for a dispatcher-commit lane, every declared
+// verification command has a valid attestation bound to the candidate tree. The dispatcher
+// commit step records them; accept re-checks instead of trusting the frozen evidence. Fails
+// closed: no declared command, a lookup error, or a missing attestation all reject.
+func (v *Verifier) requireDispatcherAttestations(ctx context.Context, root string, c ledger.LaneCandidate) error {
+	if c.AuthoringEvidenceVersion != ledger.AuthoringEvidenceVersion {
+		return nil
+	}
+	evidence, err := ledger.DecodeAuthoringEvidence(c.AuthoringEvidenceVersion, c.AuthoringEvidenceJSON, c.AuthoringEvidenceHash)
+	if err != nil {
+		return fmt.Errorf("accept: invalid authoring evidence: %w", err)
+	}
+	if evidence.CommitObligation != "dispatcher" {
+		return nil
+	}
+	var contract struct {
+		Verification []string `json:"verification"`
+	}
+	if json.Unmarshal(evidence.Contract, &contract) != nil || len(contract.Verification) == 0 || v.hasAttestation == nil {
+		return errors.New("accept: missing attestation: dispatcher commit declares no verifiable command")
+	}
+	for _, command := range contract.Verification {
+		ok, err := v.hasAttestation(ctx, root, command, c.CandidateTree)
+		if err != nil || !ok {
+			return fmt.Errorf("accept: missing attestation for %q on tree %s", command, c.CandidateTree)
+		}
 	}
 	return nil
 }
