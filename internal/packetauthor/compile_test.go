@@ -196,3 +196,75 @@ func mutateContract(change func(*packetauthor.Contract)) packetauthor.Contract {
 	change(&c)
 	return c
 }
+
+func TestCompileNamedSkillsOnly(t *testing.T) {
+	c := validContract()
+	c.LaneRole = "apply"
+	c.AdhocSkills = []string{"custom-tool"}
+	c.NamedSkillsOnly = true
+
+	art, err := packetauthor.Compile(c, validFeatureBinding())
+	if err != nil {
+		t.Fatalf("Compile() error = %v", err)
+	}
+
+	// Should derive only lucind-executor and custom-tool, no lucind-apply and no sdd-apply
+	wantReq := []byte(`"required_skills":["custom-tool","lucind-executor"]`)
+	if !bytes.Contains(art.ContractJSON, wantReq) {
+		t.Fatalf("ContractJSON = %s, want required_skills with only custom-tool and lucind-executor", art.ContractJSON)
+	}
+	if bytes.Contains(art.ContractJSON, []byte("lucind-apply")) || bytes.Contains(art.ContractJSON, []byte("sdd-apply")) {
+		t.Fatalf("ContractJSON contains lane-role or sdd skills: %s", art.ContractJSON)
+	}
+}
+
+func TestCompileNewFieldsPropagate(t *testing.T) {
+	base, err := packetauthor.Compile(validContract(), validFeatureBinding())
+	if err != nil {
+		t.Fatalf("Compile(base) error = %v", err)
+	}
+
+	c := validContract()
+	c.Route = "worker"
+	c.RouteEvidence = "touches auth"
+	c.NamedSkillsOnly = true
+	c.Verification = []string{"go test ./..."}
+	c.KnownEnvironmentalFailures = []string{"TestFlaky"}
+
+	art, err := packetauthor.Compile(c, validFeatureBinding())
+	if err != nil {
+		t.Fatalf("Compile() error = %v", err)
+	}
+
+	if art.Digest == base.Digest {
+		t.Errorf("art.Digest = %q, want different from base", art.Digest)
+	}
+	if !bytes.Contains(art.ContractJSON, []byte(`"route":"worker"`)) {
+		t.Errorf("ContractJSON missing route: %s", art.ContractJSON)
+	}
+	if !bytes.Contains(art.ContractJSON, []byte(`"route_evidence":"touches auth"`)) {
+		t.Errorf("ContractJSON missing route_evidence: %s", art.ContractJSON)
+	}
+	if !bytes.Contains(art.ContractJSON, []byte(`"named_skills_only":true`)) {
+		t.Errorf("ContractJSON missing named_skills_only: %s", art.ContractJSON)
+	}
+	if !bytes.Contains(art.ContractJSON, []byte(`"verification":["go test ./..."]`)) {
+		t.Errorf("ContractJSON missing verification: %s", art.ContractJSON)
+	}
+	if !bytes.Contains(art.ContractJSON, []byte(`"known_environmental_failures":["TestFlaky"]`)) {
+		t.Errorf("ContractJSON missing known_environmental_failures: %s", art.ContractJSON)
+	}
+}
+
+func TestCompileRejectsInvalidRoute(t *testing.T) {
+	c := validContract()
+	c.Route = "turbo"
+	_, err := packetauthor.Compile(c, validFeatureBinding())
+	assertDiagnosticCode(t, err, packetauthor.CodeContractInvalid)
+	for _, ok := range []string{"", "inline", "worker", "fanout"} {
+		c.Route = ok
+		if _, err := packetauthor.Compile(c, validFeatureBinding()); err != nil {
+			t.Fatalf("route %q must be accepted: %v", ok, err)
+		}
+	}
+}

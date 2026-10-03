@@ -202,3 +202,75 @@ func TestExecutePassesRequiredSkillsToExecutorRequest(t *testing.T) {
 		})
 	}
 }
+
+func TestLegacyPacketDigestPinned(t *testing.T) {
+	legacyP := testPacket()
+	legacyP.LaneRole = "apply"
+	legacyP.RequiredSkills = []string{"lucind-apply", "lucind-executor"}
+	legacyP.AdhocSkills = []string{"sec-audit"}
+	legacyP.ReadOnlyPaths = []string{"docs/auth.md"}
+	d := run.PacketDigest(legacyP, []string{"internal/run"})
+
+	const want = "sha256:4f84afdbf169af18ccdb0b7dd712116a548e1c281814fd2ffd1e9c7c3f5ffec7"
+	if d != want {
+		t.Fatalf("packetDigest = %q, want literal pin %q", d, want)
+	}
+}
+
+func TestNewFieldsChangePacketDigest(t *testing.T) {
+	base := testPacket()
+	baseDigest := run.PacketDigest(base, []string{"internal/run"})
+
+	// Route
+	pRoute := base
+	pRoute.Route = "worker"
+	if d := run.PacketDigest(pRoute, []string{"internal/run"}); d == baseDigest {
+		t.Errorf("setting Route did not change digest: %q", d)
+	}
+
+	// RouteEvidence
+	pEvidence := base
+	pEvidence.RouteEvidence = "touches auth, 2+ non-trivial files"
+	if d := run.PacketDigest(pEvidence, []string{"internal/run"}); d == baseDigest {
+		t.Errorf("setting RouteEvidence did not change digest: %q", d)
+	}
+
+	// NamedSkillsOnly
+	pNamed := base
+	pNamed.NamedSkillsOnly = true
+	if d := run.PacketDigest(pNamed, []string{"internal/run"}); d == baseDigest {
+		t.Errorf("setting NamedSkillsOnly did not change digest: %q", d)
+	}
+
+	// Verification
+	pVerif := base
+	pVerif.Verification = []string{"go test ./..."}
+	if d := run.PacketDigest(pVerif, []string{"internal/run"}); d == baseDigest {
+		t.Errorf("setting Verification did not change digest: %q", d)
+	}
+
+	// Verification unambiguous list encoding
+	pVerif1 := base
+	pVerif1.Verification = []string{"a", "b"}
+	pVerif2 := base
+	pVerif2.Verification = []string{"ab"}
+	if run.PacketDigest(pVerif1, []string{"internal/run"}) == run.PacketDigest(pVerif2, []string{"internal/run"}) {
+		t.Errorf("Verification list encoding collided for [a, b] and [ab]")
+	}
+
+	// KnownEnvironmentalFailures
+	pKEF := base
+	pKEF.KnownEnvironmentalFailures = []string{"TestFlaky"}
+	if d := run.PacketDigest(pKEF, []string{"internal/run"}); d == baseDigest {
+		t.Errorf("setting KnownEnvironmentalFailures did not change digest: %q", d)
+	}
+
+	// KnownEnvironmentalFailures unambiguous list encoding
+	pKEF1 := base
+	pKEF1.KnownEnvironmentalFailures = []string{"a", "b"}
+	pKEF2 := base
+	pKEF2.KnownEnvironmentalFailures = []string{"ab"}
+	if run.PacketDigest(pKEF1, []string{"internal/run"}) == run.PacketDigest(pKEF2, []string{"internal/run"}) {
+		t.Errorf("KnownEnvironmentalFailures list encoding collided for [a, b] and [ab]")
+	}
+}

@@ -119,6 +119,32 @@ func Derive(sddPhase, laneRole string, stackSkills, adhocSkills []string) ([]str
 	return result, nil
 }
 
+// DeriveNamed deterministically derives required skills for lanes with named_skills_only set.
+// It returns lucind-executor plus the explicitly named stack and ad-hoc skills,
+// de-duplicated and sorted lexicographically, with no lane-role skill and no sdd-* skill.
+func DeriveNamed(stackSkills, adhocSkills []string) ([]string, error) {
+	seen := make(map[string]bool)
+	var result []string
+
+	add := func(skills []string) {
+		for _, s := range skills {
+			s = strings.TrimSpace(s)
+			if s == "" || seen[s] {
+				continue
+			}
+			seen[s] = true
+			result = append(result, s)
+		}
+	}
+
+	add([]string{"lucind-executor"})
+	add(stackSkills)
+	add(adhocSkills)
+
+	sort.Strings(result)
+	return result, nil
+}
+
 // DigestBody elides the ## Required skills section — the heading line through
 // the line before the next ## heading or EOF — leaving the rest byte-identical.
 // A body without that heading returns unchanged.

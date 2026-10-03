@@ -18,6 +18,11 @@ Every packet starts with YAML frontmatter and a non-empty prompt body.
 | `read_only_paths` | Apply-DAG JSON array owned by transitive dependencies and forbidden for this node to write. It must not overlap the node's `allowed_paths`. |
 | `feature`, `parent_ref`, `base_sha`, `expected_parent_sha` | Omit from reusable templates (no live target SHAs or feature names). At wave dispatch the orchestrator writes all four onto the packet copies it passes to `lucind-ai run`. Required together on a dispatched feature-targeted batch; admission stays fail-closed on unbound or mixed targets. |
 | `legacy_main` | Runtime boolean mapping for Exclusive Mode. Dispatching with `--legacy-main` **requires** an expected parent SHA from one of exactly two sources: the batch-wide `--expected-parent-sha <sha>` flag, or this key in every packet's frontmatter. It is an optimistic-concurrency guard on the parent ref, so the binary will not derive it for you — deriving it from `HEAD` would assert the check against itself. Omitting both is refused in pre-dispatch validation (`cmd/lucind-ai/cli.go:211-214`) before any worktree or quota is consumed; the error names only the first packet, but the flag satisfies the whole batch. |
+| `route` | Optional execution route tier: `inline`, `worker`, or `fanout`. Empty allowed; any other value is a parse error. |
+| `route_evidence` | Optional free-string explanation for the routing decision. |
+| `named_skills_only` | Optional strict boolean; when `true`, derives only explicitly named stack and ad-hoc skills plus `lucind-executor` (no lane-role and no `sdd-*` skills). |
+| `verification` | Optional single-line JSON array of exact foreground verification command strings to execute. |
+| `known_environmental_failures` | Optional single-line JSON array of baseline test failure names or commands that do not block acceptance. |
 
 ## Body structure
 
@@ -33,7 +38,9 @@ Every hard stop must be evaluated in the result whether or not it fired. A fired
 
 The packet body must explicitly tell the Agent to write `.lucind/result.json` and validate it against `.lucind/result.schema.json`. The binary never synthesizes this file from executor stdout. A correct commit without the file cannot complete the Lane.
 
-The envelope carries status, summary, done-criterion evidence, hard-stop evaluations, changed paths, commits, and blocker details. Treat it as the Agent's structured claim, not independent proof. Verify cited `file:line`, changed paths, git status, commit, checks, and terminal consumers before Acceptance.
+The envelope carries status, summary, done-criterion evidence, hard-stop evaluations, changed paths, commits, blocker details, and optional interaction requirements. Treat it as the Agent's structured claim, not independent proof. Verify cited `file:line`, changed paths, git status, commit, checks, and terminal consumers before Acceptance.
+
+Valid statuses: `done`, `blocked`, `deviated`, `failed`, and `interaction_required`. When the worker needs a human or orchestrator answer to proceed and has stopped, it reports `status: "interaction_required"` and includes the mandatory top-level `interaction` payload (`question`, `reason`, `unblock_response`, and optional `options`). The `interaction` object is required when status is `interaction_required` and forbidden for all other statuses. In the binary's terminal lane status vocabulary, `interaction_required` maps to `lane.Blocked` with the question captured in the failure reason.
 
 Read-only packets may inspect paths outside their worktree only when those paths are explicitly granted. Ignored packets from the primary checkout are not automatically visible in Lane worktrees.
 

@@ -21,18 +21,22 @@ const delimiter = "---"
 // is an instruction the binary would have to invent, which is exactly what
 // dispatch must never do.
 var (
-	ErrNoFrontmatter        = errors.New("packet: document has no closed --- frontmatter block")
-	ErrMissingID            = errors.New("packet: frontmatter is missing a non-empty id")
-	ErrMissingExecutor      = errors.New("packet: frontmatter is missing a non-empty executor")
-	ErrMissingRoutedBy      = errors.New("packet: frontmatter is missing a non-empty routed_by")
-	ErrEmptyBody            = errors.New("packet: body is empty, there is no prompt to dispatch")
-	ErrInvalidReadOnly      = errors.New("packet: frontmatter read_only must be a boolean (true or false)")
-	ErrInvalidLegacyMain    = errors.New("packet: frontmatter legacy_main must be a boolean (true or false)")
-	ErrInvalidAllowedPaths  = errors.New("packet: frontmatter allowed_paths must be a JSON array of strings")
-	ErrInvalidReadOnlyPaths = errors.New("packet: frontmatter read_only_paths must be a JSON array of strings")
-	ErrInvalidLaneRole      = errors.New("packet: frontmatter lane_role is invalid")
-	ErrInvalidSDDPhase      = errors.New("packet: frontmatter sdd_phase is invalid")
-	ErrInvalidAdhocSkills   = errors.New("packet: frontmatter adhoc_skills must be a JSON array of strings")
+	ErrNoFrontmatter                     = errors.New("packet: document has no closed --- frontmatter block")
+	ErrMissingID                         = errors.New("packet: frontmatter is missing a non-empty id")
+	ErrMissingExecutor                   = errors.New("packet: frontmatter is missing a non-empty executor")
+	ErrMissingRoutedBy                   = errors.New("packet: frontmatter is missing a non-empty routed_by")
+	ErrEmptyBody                         = errors.New("packet: body is empty, there is no prompt to dispatch")
+	ErrInvalidReadOnly                   = errors.New("packet: frontmatter read_only must be a boolean (true or false)")
+	ErrInvalidLegacyMain                 = errors.New("packet: frontmatter legacy_main must be a boolean (true or false)")
+	ErrInvalidAllowedPaths               = errors.New("packet: frontmatter allowed_paths must be a JSON array of strings")
+	ErrInvalidReadOnlyPaths              = errors.New("packet: frontmatter read_only_paths must be a JSON array of strings")
+	ErrInvalidLaneRole                   = errors.New("packet: frontmatter lane_role is invalid")
+	ErrInvalidSDDPhase                   = errors.New("packet: frontmatter sdd_phase is invalid")
+	ErrInvalidAdhocSkills                = errors.New("packet: frontmatter adhoc_skills must be a JSON array of strings")
+	ErrInvalidRoute                      = errors.New("packet: frontmatter route must be inline, worker, or fanout")
+	ErrInvalidNamedSkillsOnly            = errors.New("packet: frontmatter named_skills_only must be a boolean (true or false)")
+	ErrInvalidVerification               = errors.New("packet: frontmatter verification must be a JSON array of strings")
+	ErrInvalidKnownEnvironmentalFailures = errors.New("packet: frontmatter known_environmental_failures must be a JSON array of strings")
 )
 
 // Authoring is immutable typed input retained for candidate evidence. It is
@@ -105,6 +109,18 @@ type Packet struct {
 	Skill string
 	// AdhocSkills is the optional list of ad-hoc skills declared in frontmatter (adhoc_skills).
 	AdhocSkills []string
+	// Route is the optional execution routing tier declared in frontmatter (route).
+	// Closed set: {"", "inline", "worker", "fanout"}.
+	Route string
+	// RouteEvidence is the optional free-string explanation for Route (route_evidence).
+	RouteEvidence string
+	// NamedSkillsOnly is the optional strict boolean flag declaring that only explicitly
+	// named skills (stack and ad-hoc) should be loaded, with no lane-role or sdd-* skills.
+	NamedSkillsOnly bool
+	// Verification is the optional JSON array of exact verification commands to run.
+	Verification []string
+	// KnownEnvironmentalFailures is the optional JSON array of baseline failure names or commands.
+	KnownEnvironmentalFailures []string
 	// RequiredSkills is the derived list of required skills. Populated by admission
 	// or compilation, never parsed directly from frontmatter.
 	RequiredSkills []string
@@ -198,6 +214,39 @@ func Parse(r io.Reader) (Packet, error) {
 				return Packet{}, ErrInvalidReadOnlyPaths
 			}
 			p.ReadOnlyPaths = paths
+		case "route":
+			val := strings.TrimSpace(value)
+			switch val {
+			case "", "inline", "worker", "fanout":
+				p.Route = val
+			default:
+				return Packet{}, ErrInvalidRoute
+			}
+		case "route_evidence":
+			p.RouteEvidence = strings.TrimSpace(value)
+		case "named_skills_only":
+			switch strings.TrimSpace(value) {
+			case "true":
+				p.NamedSkillsOnly = true
+			case "false":
+				p.NamedSkillsOnly = false
+			default:
+				return Packet{}, ErrInvalidNamedSkillsOnly
+			}
+		case "verification":
+			trimmed := strings.TrimSpace(value)
+			var commands []string
+			if len(trimmed) == 0 || trimmed[0] != '[' || json.Unmarshal([]byte(trimmed), &commands) != nil {
+				return Packet{}, ErrInvalidVerification
+			}
+			p.Verification = commands
+		case "known_environmental_failures":
+			trimmed := strings.TrimSpace(value)
+			var failures []string
+			if len(trimmed) == 0 || trimmed[0] != '[' || json.Unmarshal([]byte(trimmed), &failures) != nil {
+				return Packet{}, ErrInvalidKnownEnvironmentalFailures
+			}
+			p.KnownEnvironmentalFailures = failures
 		}
 	}
 

@@ -2331,3 +2331,173 @@ func TestUltrafixerPacketTemplateContract(t *testing.T) {
 		t.Errorf("template missing declined disposition instruction")
 	}
 }
+
+func TestParseNewFrontmatterFields(t *testing.T) {
+	src := "---\n" +
+		"id: test-new-fields\n" +
+		"executor: agy\n" +
+		"routed_by: test route\n" +
+		"route: worker\n" +
+		"route_evidence: touches auth, 2+ non-trivial files\n" +
+		"named_skills_only: true\n" +
+		"verification: [\"go build ./...\", \"go test ./...\"]\n" +
+		"known_environmental_failures: [\"TestFlakyNetwork\"]\n" +
+		"---\n\n## Goal\nTest\n"
+
+	p, err := packet.Parse(strings.NewReader(src))
+	if err != nil {
+		t.Fatalf("Parse() error = %v, want nil", err)
+	}
+
+	if p.Route != "worker" {
+		t.Errorf("Route = %q, want %q", p.Route, "worker")
+	}
+	if p.RouteEvidence != "touches auth, 2+ non-trivial files" {
+		t.Errorf("RouteEvidence = %q, want %q", p.RouteEvidence, "touches auth, 2+ non-trivial files")
+	}
+	if !p.NamedSkillsOnly {
+		t.Errorf("NamedSkillsOnly = %v, want true", p.NamedSkillsOnly)
+	}
+	wantVerification := []string{"go build ./...", "go test ./..."}
+	if !slices.Equal(p.Verification, wantVerification) {
+		t.Errorf("Verification = %v, want %v", p.Verification, wantVerification)
+	}
+	wantKnownFailures := []string{"TestFlakyNetwork"}
+	if !slices.Equal(p.KnownEnvironmentalFailures, wantKnownFailures) {
+		t.Errorf("KnownEnvironmentalFailures = %v, want %v", p.KnownEnvironmentalFailures, wantKnownFailures)
+	}
+}
+
+func TestParseNewFrontmatterValidation(t *testing.T) {
+	validRoutes := []string{"", "inline", "worker", "fanout"}
+	for _, r := range validRoutes {
+		t.Run("valid route "+r, func(t *testing.T) {
+			src := "---\n" +
+				"id: test-route\n" +
+				"executor: agy\n" +
+				"routed_by: test\n" +
+				"route: " + r + "\n" +
+				"---\n\n## Goal\nTest\n"
+			p, err := packet.Parse(strings.NewReader(src))
+			if err != nil {
+				t.Fatalf("Parse() error = %v, want nil", err)
+			}
+			if p.Route != r {
+				t.Errorf("Route = %q, want %q", p.Route, r)
+			}
+		})
+	}
+
+	t.Run("invalid route rejected", func(t *testing.T) {
+		src := "---\n" +
+			"id: test-route\n" +
+			"executor: agy\n" +
+			"routed_by: test\n" +
+			"route: invalid_route\n" +
+			"---\n\n## Goal\nTest\n"
+		_, err := packet.Parse(strings.NewReader(src))
+		if !errors.Is(err, packet.ErrInvalidRoute) {
+			t.Fatalf("Parse() error = %v, want %v", err, packet.ErrInvalidRoute)
+		}
+	})
+
+	t.Run("invalid named_skills_only non-boolean rejected", func(t *testing.T) {
+		src := "---\n" +
+			"id: test-named\n" +
+			"executor: agy\n" +
+			"routed_by: test\n" +
+			"named_skills_only: yes\n" +
+			"---\n\n## Goal\nTest\n"
+		_, err := packet.Parse(strings.NewReader(src))
+		if !errors.Is(err, packet.ErrInvalidNamedSkillsOnly) {
+			t.Fatalf("Parse() error = %v, want %v", err, packet.ErrInvalidNamedSkillsOnly)
+		}
+	})
+
+	t.Run("valid named_skills_only false", func(t *testing.T) {
+		src := "---\n" +
+			"id: test-named\n" +
+			"executor: agy\n" +
+			"routed_by: test\n" +
+			"named_skills_only: false\n" +
+			"---\n\n## Goal\nTest\n"
+		p, err := packet.Parse(strings.NewReader(src))
+		if err != nil {
+			t.Fatalf("Parse() error = %v, want nil", err)
+		}
+		if p.NamedSkillsOnly {
+			t.Errorf("NamedSkillsOnly = true, want false")
+		}
+	})
+
+	t.Run("invalid verification non-array rejected", func(t *testing.T) {
+		src := "---\n" +
+			"id: test-verif\n" +
+			"executor: agy\n" +
+			"routed_by: test\n" +
+			"verification: bare-string\n" +
+			"---\n\n## Goal\nTest\n"
+		_, err := packet.Parse(strings.NewReader(src))
+		if !errors.Is(err, packet.ErrInvalidVerification) {
+			t.Fatalf("Parse() error = %v, want %v", err, packet.ErrInvalidVerification)
+		}
+	})
+
+	t.Run("invalid verification non-string array rejected", func(t *testing.T) {
+		src := "---\n" +
+			"id: test-verif\n" +
+			"executor: agy\n" +
+			"routed_by: test\n" +
+			"verification: [123]\n" +
+			"---\n\n## Goal\nTest\n"
+		_, err := packet.Parse(strings.NewReader(src))
+		if !errors.Is(err, packet.ErrInvalidVerification) {
+			t.Fatalf("Parse() error = %v, want %v", err, packet.ErrInvalidVerification)
+		}
+	})
+
+	t.Run("invalid known_environmental_failures non-array rejected", func(t *testing.T) {
+		src := "---\n" +
+			"id: test-kef\n" +
+			"executor: agy\n" +
+			"routed_by: test\n" +
+			"known_environmental_failures: bare-string\n" +
+			"---\n\n## Goal\nTest\n"
+		_, err := packet.Parse(strings.NewReader(src))
+		if !errors.Is(err, packet.ErrInvalidKnownEnvironmentalFailures) {
+			t.Fatalf("Parse() error = %v, want %v", err, packet.ErrInvalidKnownEnvironmentalFailures)
+		}
+	})
+
+	t.Run("invalid known_environmental_failures non-string array rejected", func(t *testing.T) {
+		src := "---\n" +
+			"id: test-kef\n" +
+			"executor: agy\n" +
+			"routed_by: test\n" +
+			"known_environmental_failures: [123]\n" +
+			"---\n\n## Goal\nTest\n"
+		_, err := packet.Parse(strings.NewReader(src))
+		if !errors.Is(err, packet.ErrInvalidKnownEnvironmentalFailures) {
+			t.Fatalf("Parse() error = %v, want %v", err, packet.ErrInvalidKnownEnvironmentalFailures)
+		}
+	})
+
+	t.Run("legacy packet with sdd_phase parses cleanly", func(t *testing.T) {
+		src := "---\n" +
+			"id: test-legacy\n" +
+			"executor: agy\n" +
+			"routed_by: test\n" +
+			"sdd_phase: apply\n" +
+			"---\n\n## Goal\nTest\n"
+		p, err := packet.Parse(strings.NewReader(src))
+		if err != nil {
+			t.Fatalf("Parse() error = %v, want nil", err)
+		}
+		if p.SDDPhase != "apply" {
+			t.Errorf("SDDPhase = %q, want apply", p.SDDPhase)
+		}
+		if p.Route != "" || p.RouteEvidence != "" || p.NamedSkillsOnly != false || len(p.Verification) != 0 || len(p.KnownEnvironmentalFailures) != 0 {
+			t.Errorf("unexpected non-zero fields in legacy packet: %+v", p)
+		}
+	})
+}

@@ -3,6 +3,8 @@ package skillset_test
 import (
 	"errors"
 	"reflect"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/LanzerDevCorp/lucind-ai/internal/skillset"
@@ -316,6 +318,60 @@ func TestDigestBodyElidesRequiredSkills(t *testing.T) {
 			got := skillset.DigestBody(tt.body)
 			if got != tt.want {
 				t.Errorf("DigestBody()\ngot:\n%q\nwant:\n%q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDeriveNamed(t *testing.T) {
+	tests := []struct {
+		name        string
+		stackSkills []string
+		adhocSkills []string
+		want        []string
+	}{
+		{
+			name:        "only mandatory lucind-executor when stack and adhoc are empty",
+			stackSkills: nil,
+			adhocSkills: nil,
+			want:        []string{"lucind-executor"},
+		},
+		{
+			name:        "combines stack and adhoc skills with lucind-executor",
+			stackSkills: []string{"go-testing", "git-workflow"},
+			adhocSkills: []string{"custom-debug"},
+			want:        []string{"custom-debug", "git-workflow", "go-testing", "lucind-executor"},
+		},
+		{
+			name:        "deduplicates and trims whitespace",
+			stackSkills: []string{"go-testing", " git-workflow "},
+			adhocSkills: []string{"go-testing", "lucind-executor"},
+			want:        []string{"git-workflow", "go-testing", "lucind-executor"},
+		},
+		{
+			name:        "has NO lane-role and NO sdd-* skills",
+			stackSkills: []string{"custom-stack"},
+			adhocSkills: []string{"custom-adhoc"},
+			want:        []string{"custom-adhoc", "custom-stack", "lucind-executor"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := skillset.DeriveNamed(tt.stackSkills, tt.adhocSkills)
+			if err != nil {
+				t.Fatalf("DeriveNamed() error = %v, want nil", err)
+			}
+			if !slices.Equal(got, tt.want) {
+				t.Errorf("DeriveNamed() = %v, want %v", got, tt.want)
+			}
+			for _, s := range got {
+				if strings.HasPrefix(s, "sdd-") {
+					t.Errorf("DeriveNamed() included sdd-* skill %q", s)
+				}
+				if s == "lucind-apply" || s == "lucind-verify" || s == "lucind-fan-out-lens" {
+					t.Errorf("DeriveNamed() included lane-role skill %q", s)
+				}
 			}
 		})
 	}

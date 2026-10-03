@@ -15,18 +15,23 @@ import (
 )
 
 type normalizedContract struct {
-	Version        string            `json:"version"`
-	RouteIntent    string            `json:"route_intent"`
-	Mode           Mode              `json:"mode"`
-	LaneRole       string            `json:"lane_role,omitempty"`
-	AdhocSkills    []string          `json:"adhoc_skills,omitempty"`
-	RequiredSkills []string          `json:"required_skills,omitempty"`
-	WritePaths     []string          `json:"write_paths"`
-	ReadOnlyPaths  []string          `json:"read_only_paths"`
-	Goal           string            `json:"goal"`
-	DoneCriteria   []string          `json:"done_criteria"`
-	HardStops      []string          `json:"hard_stops"`
-	Result         ResultObligations `json:"result"`
+	Version                    string            `json:"version"`
+	RouteIntent                string            `json:"route_intent"`
+	Mode                       Mode              `json:"mode"`
+	LaneRole                   string            `json:"lane_role,omitempty"`
+	AdhocSkills                []string          `json:"adhoc_skills,omitempty"`
+	RequiredSkills             []string          `json:"required_skills,omitempty"`
+	WritePaths                 []string          `json:"write_paths"`
+	ReadOnlyPaths              []string          `json:"read_only_paths"`
+	Goal                       string            `json:"goal"`
+	DoneCriteria               []string          `json:"done_criteria"`
+	HardStops                  []string          `json:"hard_stops"`
+	Result                     ResultObligations `json:"result"`
+	Route                      string            `json:"route,omitempty"`
+	RouteEvidence              string            `json:"route_evidence,omitempty"`
+	NamedSkillsOnly            bool              `json:"named_skills_only,omitempty"`
+	Verification               []string          `json:"verification,omitempty"`
+	KnownEnvironmentalFailures []string          `json:"known_environmental_failures,omitempty"`
 }
 type manifest struct {
 	Version      string      `json:"version"`
@@ -58,6 +63,11 @@ func validateContract(contract Contract) (normalizedContract, Diagnostics) {
 	}
 	if strings.TrimSpace(contract.Goal) == "" || hasEmptyOrDuplicate(contract.DoneCriteria) || hasEmptyOrDuplicate(contract.HardStops) {
 		diagnostics = append(diagnostics, diagnostic(10, "contract", CodeContractInvalid, "goal, criteria, and stops must be non-empty and unique"))
+	}
+	switch contract.Route {
+	case "", "inline", "worker", "fanout":
+	default:
+		diagnostics = append(diagnostics, diagnostic(10, "route", CodeContractInvalid, "route must be inline, worker, or fanout"))
 	}
 	if contract.Result.Path != ".lucind/result.json" {
 		diagnostics = append(diagnostics, diagnostic(20, "result.path", CodeResultPathMissing, "result path must be .lucind/result.json"))
@@ -109,10 +119,23 @@ func validateContract(contract Contract) (normalizedContract, Diagnostics) {
 			}
 		}
 		sort.Strings(requiredSkills)
+	} else if contract.NamedSkillsOnly {
+		if derived, err := skillset.DeriveNamed(nil, contract.AdhocSkills); err == nil && len(derived) > 0 {
+			requiredSkills = derived
+		}
 	} else if contract.LaneRole != "" || contract.RouteIntent != "" || len(contract.AdhocSkills) > 0 {
 		if derived, err := skillset.Derive(contract.RouteIntent, contract.LaneRole, nil, contract.AdhocSkills); err == nil && len(derived) > 0 {
 			requiredSkills = derived
 		}
+	}
+
+	var verification []string
+	if len(contract.Verification) > 0 {
+		verification = append([]string(nil), contract.Verification...)
+	}
+	var knownFailures []string
+	if len(contract.KnownEnvironmentalFailures) > 0 {
+		knownFailures = append([]string(nil), contract.KnownEnvironmentalFailures...)
 	}
 
 	return normalizedContract{
@@ -120,6 +143,11 @@ func validateContract(contract Contract) (normalizedContract, Diagnostics) {
 		LaneRole: contract.LaneRole, AdhocSkills: adhocSkills, RequiredSkills: requiredSkills,
 		WritePaths: writePaths, ReadOnlyPaths: readOnlyPaths, Goal: contract.Goal,
 		DoneCriteria: append([]string(nil), contract.DoneCriteria...), HardStops: append([]string(nil), contract.HardStops...), Result: contract.Result,
+		Route:                      contract.Route,
+		RouteEvidence:              contract.RouteEvidence,
+		NamedSkillsOnly:            contract.NamedSkillsOnly,
+		Verification:               verification,
+		KnownEnvironmentalFailures: knownFailures,
 	}, diagnostics
 }
 

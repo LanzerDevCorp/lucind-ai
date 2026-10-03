@@ -694,6 +694,24 @@ func packetDigest(p packet.Packet, paths []string) string {
 	parts = append(parts, strconv.Itoa(len(adhocSkills)))
 	parts = append(parts, adhocSkills...)
 
+	if p.Route != "" {
+		parts = append(parts, "route:"+p.Route)
+	}
+	if p.RouteEvidence != "" {
+		parts = append(parts, "route_evidence:"+p.RouteEvidence)
+	}
+	if p.NamedSkillsOnly {
+		parts = append(parts, "named_skills_only")
+	}
+	if len(p.Verification) > 0 {
+		raw, _ := json.Marshal(p.Verification)
+		parts = append(parts, "verification:"+string(raw))
+	}
+	if len(p.KnownEnvironmentalFailures) > 0 {
+		raw, _ := json.Marshal(p.KnownEnvironmentalFailures)
+		parts = append(parts, "known_env_failures:"+string(raw))
+	}
+
 	return versionedHash(parts...)
 }
 
@@ -842,6 +860,13 @@ func decideStatus(deps Deps, worktreePath string, outcome executor.Outcome) (lan
 			if hs.Fired {
 				return lane.Blocked, &envelope, "hard stop fired: " + hs.HardStop
 			}
+		}
+		if envelope.Status == "interaction_required" {
+			question := ""
+			if envelope.Interaction != nil {
+				question = envelope.Interaction.Question
+			}
+			return lane.Blocked, &envelope, "interaction required: " + question
 		}
 		return st, &envelope, ""
 	}
