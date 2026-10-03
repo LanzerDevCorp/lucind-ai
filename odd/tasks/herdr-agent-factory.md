@@ -188,3 +188,9 @@ T2 (packet contract fields and `interaction_required`): delegate to agy in a new
 - 2026-10-03: T3 closed (`d5d07f2`).
 - 2026-10-03: T2 closed (`73179d2`).
 - 2026-10-03: T1b closed. Slice 1 now = `880665b`, `6b82c49`, `aa8a693`. Engram mirror update pending.
+
+## Real-agy end-to-end evidence (2026-10-03, sandbox repo `~/git_root/lucind-sandbox`)
+
+- `lucind-ai explore` with real agy: 3 lenses + synthesis all `done` after two fixes found by the run itself: derived required skills were never shown to the worker (`fix(run)`, `fix(packetauthor)`), and a repo needs `.lucind/skill-roots.yaml`.
+- `herdr-agy` write lane with dispatcher commit (`verification: go test ./...`, `commit_message: feat: add sub function`): worker did not commit, dispatcher verified under attestation and committed `feat: add sub function` (no attribution), integration merged it, `go test` passes. It first failed because the ledger did not admit `herdr-agy`; fixed by migration v11 (`fix(ledger)`).
+- Manual packet shape gotchas (documented here, not bugs): `commit_message` has no quotes; the body needs `## Done criteria`, `## Return`, the schema sentence and a `lucind-result-contract` fence with `commit: required`; the body must not contain commit instructions when `commit_message` is set.
