@@ -29,6 +29,8 @@ D12 | 2026-10-03 | T12b | loop semantics: loops require commit_message (dispatch
 
 D13 | 2026-10-03 | queue order | Gemini 5h quota at 28% (resets 13:55Z) with T12c, T13, T14, T15 left; Claude/GPT bucket at 0% (resets 14:06Z) | follow the mission order T12c,T13,T14,T15 / do the required list first | T13, T15, T14 first, T12c (explorer fan-out, the most optional slice) last | if quota runs out the items that complete the owner's list are already done; every task keeps its own dependencies (T12c depends on T12a and T6, both done) | none (order only) | n/a
 
+D14 | 2026-10-03 | T15 | which sections go to which generated file; what to do with hand-written files | AGENTS.md = everything / worker+all; overwrite hand-written with --force / never | CLAUDE.md = orchestrator+all, GEMINI.md and AGENTS.md = worker+all; hand-written or symlinked files are never overwritten (no --force); this repo keeps its hand-written CLAUDE.md and no lucind-rules.md was added to it | AGENTS.md is read by implementer agents (opencode, cursor-agent lanes); overwriting a user's file is not reversible | change the audience mapping in internal/rules Render | 218053c
+
 Note for tomorrow: the T1 worktree `~/git_root/lucind-ai-worktrees/lane-t1-hmac-attestation` and branch `lane/t1-hmac-attestation` are kept (deletion is forbidden overnight).
 
 ## Registro de rotaciones
