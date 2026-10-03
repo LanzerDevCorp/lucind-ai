@@ -33,6 +33,8 @@ D14 | 2026-10-03 | T15 | which sections go to which generated file; what to do w
 
 D15 | 2026-10-03 | T14 | Jev (TypeSafe) API read from the public docs (docs.typesafe.ai/api.md and legal.md, read-only fetch, no data sent): POST https://api.typesafe.ai/v1/systemone, Bearer key, body {state, model:"jev-latest", questions:{key:{type: noul|choice|score, instructions, criteria}}}, response {model, answers, usage}, errors 401/422/429/529. legal.md is only an index (Data Processing Agreement, Privacy Policy, Master Customer Agreement); it states a commitment not to train on user data and offers zero data retention for enterprise customers, but the exact retention periods were NOT readable | send richer context / only numbers and booleans | only numbers and booleans, opt-in via two env vars, shadow mode, no real API call tonight | retention terms unverified (open item for the owner: read the Data Processing Agreement before enabling) | remove the shadow wiring in cmd/lucind-ai/cli.go | n/a
 
+D16 | 2026-10-03 | verification | repeated full \`go test ./... -race\` runs: (a) \`TestHerdrAgyTimeoutSendsCtrlCAndReturnsTimedOut\` (mine, T8) was timing-flaky because the fake \`pane run\` was tied to a 20 ms context: FIXED (the fake no longer uses the caller context; 6 consecutive -race runs green); (b) two internal/ledger concurrency tests hit SQLITE_BUSY once under full-suite load: NOT changed, tracked as T20 | ignore / fix now / track | fixed (a), tracked (b) | (b) is pre-existing, passes in isolation, and the ledger code is untouched by this work | n/a | n/a
+
 Note for tomorrow: the T1 worktree `~/git_root/lucind-ai-worktrees/lane-t1-hmac-attestation` and branch `lane/t1-hmac-attestation` are kept (deletion is forbidden overnight).
 
 ## Registro de rotaciones

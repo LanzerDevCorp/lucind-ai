@@ -108,7 +108,9 @@ func (f *fakeHerdr) cmd(ctx context.Context, args ...string) ([]byte, error) {
 		f.mu.Unlock()
 
 		// Execute cmdStr using sh -c in a subprocess with PATH pointing to fakeAgyDir first.
-		cmd := exec.CommandContext(ctx, "sh", "-c", cmdStr)
+		// Real `herdr pane run` only types the command into the pane and returns, so the
+		// script must not be tied to the (possibly already expiring) caller context.
+		cmd := exec.Command("sh", "-c", cmdStr)
 		if f.fakeAgyDir != "" {
 			cmd.Env = append(os.Environ(), "PATH="+f.fakeAgyDir+":"+os.Getenv("PATH"))
 		}
