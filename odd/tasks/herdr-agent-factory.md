@@ -104,7 +104,11 @@ Each task closes with a work-unit commit and records its commit id and review ti
   - Commits: lane `ebcd33c`; integrated as `ebcd33c`. Decision D9.
 
 - [ ] **T12. Fan-out and loops.** Parallel independent tasks (cap 3 workers), explorer fan-out with 3 lenses plus an agy synthesizer (about 2k-token handoff), write/test/fix loop (cap 4 iterations), escalation ladder declared in the packet and executed deterministically. Delivered in three slices, each its own work unit:
-  - [ ] **T12a. Parallel lane cap.** \`ExecuteBatch\` currently starts every lane at once with no limit; add \`Deps.MaxParallelLanes\` (default 3) and a \`--max-parallel\` flag. Est. ~120 lines.
+  - [x] **T12a. Parallel lane cap.** \`ExecuteBatch\` currently starts every lane at once with no limit; add \`Deps.MaxParallelLanes\` (default 3) and a \`--max-parallel\` flag. Est. ~120 lines.
+    - Route: delegated writer (agy `gemini-3.8-flash-high`; trigger: concurrency change in `run` + CLI). `Deps.MaxParallelLanes` (default `DefaultMaxParallelLanes = 3`) with a counting semaphore in `ExecuteBatch`, `--max-parallel <n>` (n >= 1). Queued lanes do not burn their own timeout, report order is preserved, cancelled queued lanes are recorded as failed.
+    - Evidence: orchestrator re-ran build, vet, full suite and `go test -race` on run/cmd; real binary rejects `--max-parallel 0` and `-3`; fixed by hand: queued-lane failure persistence used the cancelled ctx (now `context.WithoutCancel`), with a ledger assertion proven by mutation (fails without the fix).
+    - Commit: lane `be120f5`; integrated as `be120f5`. Decision D10.
+
   - [ ] **T12b. Write/test/fix loop and escalation ladder.** Packet fields \`max_iterations\` (default 1 = today's behavior, cap 4) and \`escalation\` (ordered executor/model rungs); the dispatcher re-dispatches the worker with the failing verification output, then climbs the ladder deterministically; exhaustion ends blocked. Depends on T9. Est. ~350 lines.
   - [ ] **T12c. Explorer fan-out.** \`lucind-ai explore\`: 3 read-only lens lanes (structural, textual, historical) in parallel, then one synthesis lane fed with the bounded lens outputs; prints the handoff. Depends on T12a, T6. Est. ~350 lines.
 - [ ] **T13. Usage logging and report.** Per-call JSONL (provider, model, tokens, lane) and a report command against the 60/15/25 target. Route: delegated writer. Est. ~250 lines.
@@ -132,6 +136,7 @@ Order: T1, T1b, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T1
 ## Next step
 
 T2 (packet contract fields and `interaction_required`): delegate to agy in a new worktree `lane/t2-packet-fields` from `feature/herdr-agent-factory`. The T1 worktree `lane-t1-hmac-attestation` is kept until the follow-ups are decided; remove it only after confirming nothing unique remains (its commit was cherry-picked, so the SHA differs).
+- 2026-10-03: T12a closed (`be120f5`).
 - 2026-10-03: T11 closed (`ebcd33c`).
 - 2026-10-03: T10 closed (`5563143`); T18 carved out.
 - 2026-10-03: T9 closed (`bed8d65`). T17 added from the T9 review findings.

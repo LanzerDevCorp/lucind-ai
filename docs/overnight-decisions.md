@@ -22,6 +22,8 @@ D8 | 2026-10-03 | T9 | packet field design: commit_message requires verification
 
 D9 | 2026-10-03 | T11 | what to do when a declared route contradicts computed signals | reject all mismatches / upgrade inline to worker / warn only | upgrade inline->worker (printed), reject only missing evidence or a malformed fanout; over-delegation (worker below threshold) accepted | a packet that reaches the dispatcher is delegated anyway, so upgrading is consistent and never unsafe; rejection is reserved for missing/incoherent declarations | remove validateDispatchThresholds from runDispatch in cmd/lucind-ai/cli.go | ebcd33c
 
+D10 | 2026-10-03 | T12a | default lane concurrency: before this change ExecuteBatch started every lane at once | keep unlimited by default / default 3 / default 1 | default 3 with --max-parallel | the mission asks for a cap of 3 workers; behavior change for batches of more than 3 lanes (they now queue) | pass --max-parallel with a large value, or set DefaultMaxParallelLanes | be120f5
+
 Note for tomorrow: the T1 worktree `~/git_root/lucind-ai-worktrees/lane-t1-hmac-attestation` and branch `lane/t1-hmac-attestation` are kept (deletion is forbidden overnight).
 
 ## Registro de rotaciones
