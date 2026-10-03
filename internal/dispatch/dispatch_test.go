@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -57,10 +58,17 @@ func setupFakeRunnerForNewLane(t *testing.T, newPaneID string) *fakeHerdrRunner 
 	runner.handlers["agent start"] = func(args []string) ([]byte, error) {
 		return []byte(`{"result": {"started": true}}`), nil
 	}
+	runner.handlers["agent wait"] = func(args []string) ([]byte, error) {
+		return []byte(`{"result": {"status": "idle"}}`), nil
+	}
 	runner.handlers["agent prompt"] = func(args []string) ([]byte, error) {
 		return []byte(`{"result": {"submitted": true}}`), nil
 	}
 	return runner
+}
+
+func wantPromptTail() []string {
+	return []string{"--wait", "--until", "working", "--until", "blocked", "--timeout", "30000"}
 }
 
 func TestDispatch_HerdrEnvMissing(t *testing.T) {
@@ -169,10 +177,10 @@ func TestDispatch_NewLane_HappyPath(t *testing.T) {
 	}
 
 	// 3. Verify herdr runner command sequence:
-	// layout -> split -> agent start -> agent prompt
+	// layout -> split -> agent start -> agent wait (idle) -> agent prompt
 	calls := runner.Calls()
-	if len(calls) != 4 {
-		t.Fatalf("expected 4 herdr calls, got %d: %v", len(calls), calls)
+	if len(calls) != 5 {
+		t.Fatalf("expected 5 herdr calls, got %d: %v", len(calls), calls)
 	}
 
 	// layout
@@ -205,20 +213,128 @@ func TestDispatch_NewLane_HappyPath(t *testing.T) {
 		t.Errorf("call 2 missing agent options: %v", startArgs)
 	}
 
-	// agent prompt <pane_id> "Read and follow <abs brief.md>" (without --wait)
-	promptArgs := calls[3]
+	// agent wait <pane_id> --until idle --timeout 60000
+	if !reflect.DeepEqual(calls[3], []string{"agent", "wait", "w1:pLane1", "--until", "idle", "--timeout", "60000"}) {
+		t.Errorf("call 3 = %v, want agent wait until idle", calls[3])
+	}
+
+	// agent prompt <pane_id> "Read and follow <abs brief.md>" --wait --until working --until blocked
+	promptArgs := calls[4]
 	if promptArgs[0] != "agent" || promptArgs[1] != "prompt" || promptArgs[2] != "w1:pLane1" {
-		t.Errorf("call 3 = %v, want agent prompt w1:pLane1", promptArgs)
+		t.Errorf("call 4 = %v, want agent prompt w1:pLane1", promptArgs)
 	}
 	absBriefPath, _ := filepath.Abs(briefPath)
 	wantPrompt := fmt.Sprintf("Read and follow %s", absBriefPath)
 	if promptArgs[3] != wantPrompt {
-		t.Errorf("call 3 prompt text = %q, want %q", promptArgs[3], wantPrompt)
+		t.Errorf("call 4 prompt text = %q, want %q", promptArgs[3], wantPrompt)
 	}
-	for _, arg := range promptArgs {
-		if arg == "--wait" {
-			t.Errorf("agent prompt must NOT include --wait: %v", promptArgs)
+	if !reflect.DeepEqual(promptArgs[4:], wantPromptTail()) {
+		t.Errorf("prompt flags = %v, want %v", promptArgs[4:], wantPromptTail())
+	}
+}
+
+func newLaneRunnerWithPrompt(t *testing.T, prompt func(args []string) ([]byte, error), pane string) *fakeHerdrRunner {
+	t.Helper()
+	runner := setupFakeRunnerForNewLane(t, "w1:pLane1")
+	runner.handlers["agent prompt"] = prompt
+	runner.handlers["pane read"] = func(args []string) ([]byte, error) {
+		return []byte(pane), nil
+	}
+	return runner
+}
+
+func countCalls(calls [][]string, a, b string) int {
+	n := 0
+	for _, c := range calls {
+		if len(c) >= 2 && c[0] == a && c[1] == b {
+			n++
 		}
+	}
+	return n
+}
+
+func dispatchNew(t *testing.T, runner *fakeHerdrRunner) error {
+	t.Helper()
+	t.Setenv("HERDR_ENV", "1")
+	repoDir := t.TempDir()
+	initGitRepo(t, repoDir)
+	_, _, err := dispatch.Dispatch(context.Background(), dispatch.Options{
+		Cwd: repoDir, Allow: []string{"x/**"}, Model: "gemini-3.7-flash-high", Brief: "b", Detach: true,
+	}, runner)
+	return err
+}
+
+func TestDispatch_NewLane_PromptStall_PromptAbsent_ResendsOnce(t *testing.T) {
+	n := 0
+	runner := newLaneRunnerWithPrompt(t, func(args []string) ([]byte, error) {
+		n++
+		if n == 1 {
+			return []byte(`agent_prompt_stalled`), errors.New("exit 1")
+		}
+		return []byte(`{"result": {"submitted": true}}`), nil
+	}, "idle agy screen without the brief")
+	if err := dispatchNew(t, runner); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	calls := runner.Calls()
+	if got := countCalls(calls, "agent", "prompt"); got != 2 {
+		t.Errorf("prompt calls = %d, want 2", got)
+	}
+	var read []string
+	for _, c := range calls {
+		if len(c) >= 2 && c[0] == "pane" && c[1] == "read" {
+			read = c
+		}
+	}
+	want := []string{"pane", "read", "w1:pLane1", "--source", "recent-unwrapped", "--lines", "40"}
+	if !reflect.DeepEqual(read, want) {
+		t.Errorf("pane read = %v, want %v", read, want)
+	}
+}
+
+func TestDispatch_NewLane_PromptStall_PromptPresent_NoResend(t *testing.T) {
+	runner := newLaneRunnerWithPrompt(t, func(args []string) ([]byte, error) {
+		return []byte(`agent_prompt_stalled`), errors.New("exit 1")
+	}, "> Read and follow /x/.lucind/lanes/L/brief.md\nworking")
+	// the pane must contain the brief path as dispatched; compute via the fake
+	runner.handlers["pane read"] = func(args []string) ([]byte, error) {
+		for _, c := range runner.Calls() {
+			if len(c) >= 4 && c[0] == "agent" && c[1] == "prompt" {
+				return []byte("> " + c[3] + "\nworking"), nil
+			}
+		}
+		return nil, nil
+	}
+	if err := dispatchNew(t, runner); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := countCalls(runner.Calls(), "agent", "prompt"); got != 1 {
+		t.Errorf("prompt calls = %d, want 1 (no resend)", got)
+	}
+}
+
+func TestDispatch_NewLane_ResendFails_ReturnsError(t *testing.T) {
+	runner := newLaneRunnerWithPrompt(t, func(args []string) ([]byte, error) {
+		return []byte(`agent_prompt_stalled`), errors.New("exit 1")
+	}, "nothing here")
+	if err := dispatchNew(t, runner); err == nil {
+		t.Fatal("expected error when the resend also fails")
+	}
+	if got := countCalls(runner.Calls(), "agent", "prompt"); got != 2 {
+		t.Errorf("prompt calls = %d, want 2", got)
+	}
+}
+
+func TestDispatch_NewLane_ReadinessWaitFails(t *testing.T) {
+	runner := setupFakeRunnerForNewLane(t, "w1:pLane1")
+	runner.handlers["agent wait"] = func(args []string) ([]byte, error) {
+		return []byte("timeout"), errors.New("exit 1")
+	}
+	if err := dispatchNew(t, runner); err == nil || !strings.Contains(err.Error(), "agent wait") {
+		t.Fatalf("expected agent wait error, got %v", err)
+	}
+	if got := countCalls(runner.Calls(), "agent", "prompt"); got != 0 {
+		t.Errorf("prompt must not be sent when agy never became ready")
 	}
 }
 
@@ -270,10 +386,8 @@ func TestDispatch_Continuation(t *testing.T) {
 	if calls[0][0] != "agent" || calls[0][1] != "prompt" || calls[0][2] != "w1:pExisting" {
 		t.Errorf("continuation call = %v, want agent prompt w1:pExisting", calls[0])
 	}
-	for _, arg := range calls[0] {
-		if arg == "--wait" {
-			t.Errorf("agent prompt must NOT include --wait: %v", calls[0])
-		}
+	if !reflect.DeepEqual(calls[0][4:], wantPromptTail()) {
+		t.Errorf("continuation prompt flags = %v, want %v", calls[0][4:], wantPromptTail())
 	}
 
 	// A continuation re-arms the lane: running again with a fresh retry budget.
