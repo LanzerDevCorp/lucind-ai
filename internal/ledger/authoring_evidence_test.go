@@ -60,7 +60,7 @@ func TestSchemaV10AddsAuthoringEvidenceAndPreservesLegacyReads(t *testing.T) {
 		t.Fatalf("legacy evidence = %+v", legacy)
 	}
 	var version int
-	if err := l.db.QueryRow(`SELECT MAX(version) FROM schema_migrations`).Scan(&version); err != nil || version != 10 {
+	if err := l.db.QueryRow(`SELECT MAX(version) FROM schema_migrations`).Scan(&version); err != nil || version != schemaVersion {
 		t.Fatalf("schema version = %d, %v", version, err)
 	}
 }

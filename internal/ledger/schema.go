@@ -7,7 +7,7 @@ import (
 )
 
 // schemaVersion is the migration version this schema represents.
-const schemaVersion = 10
+const schemaVersion = 11
 
 const schemaMigrationsDDL = `
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -444,6 +444,43 @@ CREATE TABLE packet_author_shadow_reviews (
 ) STRICT;
 `
 
+// migrateV10ToV11DDL admits "herdr-agy" in the lanes.executor CHECK by rebuilding the lanes
+// table verbatim with the wider constraint (nothing references lanes by foreign key). The
+// Go admission gate parses this DDL, so the constraint and the gate share one source.
+const migrateV10ToV11DDL = `
+CREATE TABLE lanes_new (
+  run_id             TEXT    NOT NULL,
+  lane_id            TEXT    NOT NULL,
+  packet_id          TEXT    NOT NULL,
+  executor           TEXT    NOT NULL CHECK (executor IN ('agy','cursor-agent','herdr-agy','human','opencode')),
+  routing_condition  TEXT    NOT NULL CHECK (length(trim(routing_condition)) > 0),
+  status             TEXT    NOT NULL CHECK (status IN
+                       ('pending','running','done','blocked','deviated','failed')),
+  worktree_path      TEXT    NOT NULL DEFAULT '',
+  worktree_preserved INTEGER NOT NULL DEFAULT 0 CHECK (worktree_preserved IN (0,1)),
+  attempt            INTEGER NOT NULL DEFAULT 1 CHECK (attempt >= 1),
+  started_at         TEXT,
+  ended_at           TEXT,
+  model              TEXT,
+  agent              TEXT,
+  feature            TEXT,
+  PRIMARY KEY (run_id, lane_id)
+) STRICT;
+
+INSERT INTO lanes_new (
+  run_id, lane_id, packet_id, executor, routing_condition, status,
+  worktree_path, worktree_preserved, attempt, started_at, ended_at, model, agent, feature
+)
+SELECT
+  run_id, lane_id, packet_id, executor, routing_condition, status,
+  worktree_path, worktree_preserved, attempt, started_at, ended_at, model, agent, feature
+FROM lanes ORDER BY run_id, lane_id;
+
+DROP TABLE lanes;
+
+ALTER TABLE lanes_new RENAME TO lanes;
+`
+
 // migrate applies the schema inside one transaction and records the
 // migration version. It is idempotent: re-running it against an already
 // migrated database (e.g. a second Open on the same file) is a safe no-op.
@@ -589,6 +626,16 @@ func migrate(ctx context.Context, db *sql.DB) error {
 			return err
 		}
 		currentVersion = 10
+	}
+
+	if currentVersion < 11 {
+		if _, err := tx.ExecContext(ctx, migrateV10ToV11DDL); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)`, 11, time.Now().UTC().Format(time.RFC3339)); err != nil {
+			return err
+		}
+		currentVersion = 11
 	}
 
 	return tx.Commit()

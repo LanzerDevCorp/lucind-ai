@@ -198,7 +198,7 @@ func TestRegisterLaneRejectsUnadmittedExecutor(t *testing.T) {
 	l := openTestLedger(t)
 	ctx := context.Background()
 	const badExecutor = "not-an-executor"
-	wantAdmitted := []string{"agy", "cursor-agent", "human", "opencode"}
+	wantAdmitted := []string{"agy", "cursor-agent", "herdr-agy", "human", "opencode"}
 
 	in := Lane{
 		RunID:            "run-1",
@@ -2166,5 +2166,65 @@ func TestConcurrentOpenOnFreshDatabase(t *testing.T) {
 		for err := range errs {
 			t.Fatalf("iteration %d: concurrent Open failed: %v", iter, err)
 		}
+	}
+}
+
+func TestRegisterLaneAdmitsHerdrAgy(t *testing.T) {
+	l := openTestLedger(t)
+	err := l.RegisterLane(context.Background(), Lane{
+		RunID: "run-1", LaneID: "lane-h", PacketID: "p", Executor: "herdr-agy",
+		RoutingCondition: "runs agy inside a herdr pane", Status: lane.Pending,
+	})
+	if err != nil {
+		t.Fatalf("RegisterLane(herdr-agy) = %v, want nil", err)
+	}
+}
+
+// TestMigrateV10DatabaseAdmitsHerdrAgyAndPreservesRows downgrades a fresh ledger to the v10
+// shape (old executor CHECK, no v11 row), then reopens it and expects the migration to widen
+// the CHECK without losing lanes.
+func TestMigrateV10DatabaseAdmitsHerdrAgyAndPreservesRows(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	l, err := Open(ctx, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := l.RegisterLane(ctx, Lane{RunID: "run-1", LaneID: "lane-a", PacketID: "p", Executor: "agy", RoutingCondition: "keep me", Status: lane.Pending}); err != nil {
+		t.Fatal(err)
+	}
+	for _, stmt := range []string{
+		`CREATE TABLE lanes_old (
+  run_id TEXT NOT NULL, lane_id TEXT NOT NULL, packet_id TEXT NOT NULL,
+  executor TEXT NOT NULL CHECK (executor IN ('agy','cursor-agent','human','opencode')),
+  routing_condition TEXT NOT NULL CHECK (length(trim(routing_condition)) > 0),
+  status TEXT NOT NULL CHECK (status IN ('pending','running','done','blocked','deviated','failed')),
+  worktree_path TEXT NOT NULL DEFAULT '', worktree_preserved INTEGER NOT NULL DEFAULT 0 CHECK (worktree_preserved IN (0,1)),
+  attempt INTEGER NOT NULL DEFAULT 1 CHECK (attempt >= 1), started_at TEXT, ended_at TEXT,
+  model TEXT, agent TEXT, feature TEXT, PRIMARY KEY (run_id, lane_id)) STRICT`,
+		`INSERT INTO lanes_old SELECT * FROM lanes`,
+		`DROP TABLE lanes`,
+		`ALTER TABLE lanes_old RENAME TO lanes`,
+		`DELETE FROM schema_migrations WHERE version = 11`,
+	} {
+		if _, err := l.db.ExecContext(ctx, stmt); err != nil {
+			t.Fatalf("downgrade %q: %v", stmt, err)
+		}
+	}
+	if err := l.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	l2, err := Open(ctx, root)
+	if err != nil {
+		t.Fatalf("reopen (migrate v10 -> v11): %v", err)
+	}
+	defer l2.Close()
+	if err := l2.RegisterLane(ctx, Lane{RunID: "run-1", LaneID: "lane-h", PacketID: "p", Executor: "herdr-agy", RoutingCondition: "new executor", Status: lane.Pending}); err != nil {
+		t.Fatalf("RegisterLane(herdr-agy) after migration = %v", err)
+	}
+	var cond string
+	if err := l2.db.QueryRowContext(ctx, `SELECT routing_condition FROM lanes WHERE run_id='run-1' AND lane_id='lane-a'`).Scan(&cond); err != nil || cond != "keep me" {
+		t.Fatalf("pre-existing lane lost: cond=%q err=%v", cond, err)
 	}
 }

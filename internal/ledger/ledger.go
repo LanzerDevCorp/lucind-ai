@@ -84,13 +84,13 @@ func (e *ExecutorNotAdmittedError) Error() string {
 	return fmt.Sprintf("ledger: executor %q is not admitted (admitted: %s)", e.Executor, strings.Join(e.Admitted, ", "))
 }
 
-// admittedExecutors is derived from schemaDDL's lanes.executor CHECK, not
+// admittedExecutors is derived from the latest lanes.executor CHECK (migrateV10ToV11DDL), not
 // duplicated beside it. A second literal in Go is the class of defect this
 // package already paid for: the executor package admitted "opencode" while
 // the CHECK did not, and every rejected insert was mapped to a missing
 // routing condition. Parsing the DDL keeps the Go gate and the constraint
 // on the same source of truth; schema.go itself stays untouched.
-var admittedExecutors = parseAdmittedExecutors(schemaDDL)
+var admittedExecutors = parseAdmittedExecutors(migrateV10ToV11DDL)
 
 func parseAdmittedExecutors(ddl string) []string {
 	const marker = "CHECK (executor IN ("
