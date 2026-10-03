@@ -170,6 +170,19 @@ Route for every task: delegated to agy via herdr (multi-file, deletion-heavy wor
   exit 0. Installed plugin at `~/.gemini/antigravity-cli/plugins/lucind/` with absolute binary path
   in hooks.json; `agy plugin validate`: skills 1, hooks 1. Real tool names observed:
   `write_to_file`/`replace_file_content` with `args.TargetFile`; `run_command` (`CommandLine`, `Cwd`).
+- **T5 docs** (route: Claude Sonnet writer). Commits `c449d7e`, `48ab8c9`, `1b3058e`: product,
+  roadmap (`docs/ROADMAP.md`), README rewritten; `make install` links the Claude skill.
+- **E2E attempt 1** (sandbox `~/tmp-lucind-e2e`, lane `20261003-230135-4d1c`, model
+  gemini-3.8-flash-medium). Observed:
+  - `--model gemini-3.8-flash-low` rejected: `KnownModels` is stale vs. agy's real model list.
+  - New lane: agy started but the first prompt was dropped → `timeout` after 15m, exit 4, pane left
+    alive (timeout semantics verified).
+  - `dispatch --lane` continuation re-prompted the same pane; agy created `hello.txt` and wrote a
+    valid `result.json`, but the lane never left `running`: the Stop hook never fired.
+  - Root cause (probe plugin): agy does not load plugins merely copied into
+    `~/.gemini/antigravity-cli/plugins/`; `agy plugin install <dir>` registers them (copied to
+    `~/.gemini/config/plugins/<name>/`) and then hooks fire. `lucind-roles` re-registered that way.
+  - Fixes delegated (D32, D33); E2E to be re-run.
 
 ## Decisions log (taken autonomously; for user review)
 
@@ -218,6 +231,23 @@ Route for every task: delegated to agy via herdr (multi-file, deletion-heavy wor
 - D30 (T4): PreToolUse denies writes with no recognisable path, protects all `.lucind/**` except the
   lane's `result.json`, and resolves symlinks before glob matching.
 - D31 (T4): `dispatch --lane` continuation resets the Stop retry budget to 0.
+- D32 (supersedes D5): `lucind-ai plugin install` stages the rendered plugin and registers it with
+  `agy plugin install <staging>` (uninstalling a previous `lucind` import first); the plugin lives
+  at `~/.gemini/config/plugins/lucind/`.
+- D33: `dispatch` waits for agy to be idle after `agent start`, prompts with herdr's `--wait
+  --until working|blocked`, and re-sends once only if the prompt text is absent from the pane.
+
+## Leftovers (follow-ups, not blocking)
+
+- `KnownModels` drifts from agy's real models (e.g. `gemini-3.8-flash-low`); consider reading
+  `agy models` instead of a static list.
+- Orphan `agy` processes from deleted live tests (`TestHerdrAgyInteractive*` worktrees under /tmp)
+  are still running; safe to kill once the user confirms.
+- Stale docs outside the T5 surface: `docs/agent-rules.md`, `explore.md`, `router.md`,
+  `usage-log.md`, `feature-parent-integration.md`, `estado-real.html`, `CONTEXT.md`; stale files
+  `lucind-lane-check.sh`, `lucind.db.backup`, `templates/`.
+- Result schema still says "packet result envelope" and requires `packet_id` (agy sets it to the
+  lane id); renaming is a breaking schema change left for later.
 
 ## Next step
 
