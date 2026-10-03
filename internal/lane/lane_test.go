@@ -554,19 +554,19 @@ func TestGlobMatching(t *testing.T) {
 
 func TestMarkStopped(t *testing.T) {
 	validDoneJSON := `{
-		"packet_id": "test-pkt",
+		"lane_id": "test-pkt",
 		"status": "done",
 		"summary": "Completed successfully",
 		"hard_stops": []
 	}`
 	validFailedJSON := `{
-		"packet_id": "test-pkt",
+		"lane_id": "test-pkt",
 		"status": "failed",
 		"summary": "Execution failed",
 		"hard_stops": []
 	}`
 	schemaInvalidJSON := `{
-		"packet_id": "test-pkt",
+		"lane_id": "test-pkt",
 		"status": "done"
 	}` // missing required hard_stops
 

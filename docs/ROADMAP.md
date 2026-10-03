@@ -4,7 +4,7 @@ What exists is in [`product.md`](product.md).
 
 ## Done
 
-- **agy-only contract** (`feature/agy-only-contract`): single provider, packetless `dispatch`/`wait`,
+- **agy-only contract** (`feature/agy-only-contract`): single provider, `dispatch`/`wait`,
   per-lane JSON state, embedded agy plugin (PreToolUse/Stop hooks), `accept` with allowed-path and
   attestation checks, Claude skill `lucind`. Orchestration, ledger and other providers removed.
 

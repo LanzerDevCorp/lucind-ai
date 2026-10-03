@@ -13,7 +13,7 @@ Inside a lane (`LUCIND_LANE=<id>`) you finish by writing
 
 ```json
 {
-  "packet_id": "<lane id>",
+  "lane_id": "<lane id>",
   "status": "done",
   "summary": "Two or three sentences on what was actually done.",
   "hard_stops": [],
@@ -30,7 +30,7 @@ Inside a lane (`LUCIND_LANE=<id>`) you finish by writing
 }
 ```
 
-Required: `packet_id`, `status`, `summary`, `hard_stops` (one `{hard_stop, fired, note}` entry
+Required: `lane_id`, `status`, `summary`, `hard_stops` (one `{hard_stop, fired, note}` entry
 per hard stop in the brief; `[]` when the brief lists none).
 
 `status` is one of:

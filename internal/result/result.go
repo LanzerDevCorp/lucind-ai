@@ -21,8 +21,8 @@ import (
 // error carries the validator's detail.
 var ErrSchemaInvalid = errors.New("result: envelope violates the schema")
 
-// HardStop is one packet-declared hard stop and whether it fired. The
-// schema requires one entry per hard stop the packet listed, whether or
+// HardStop is one lane-declared hard stop and whether it fired. The
+// schema requires one entry per hard stop the lane listed, whether or
 // not it fired — this is the field that has twice caught a violated hard
 // stop that green done-criteria alone would have hidden.
 type HardStop struct {
@@ -63,7 +63,7 @@ type ExternalChange struct {
 	Revert string `json:"revert"`
 }
 
-// DoneCriterion is one done-criterion from the packet, with evidence that
+// DoneCriterion is one done-criterion from the lane, with evidence that
 // it was met.
 type DoneCriterion struct {
 	Criterion string `json:"criterion"`
@@ -71,7 +71,7 @@ type DoneCriterion struct {
 	Evidence  string `json:"evidence,omitempty"`
 }
 
-// Question is one question that blocks the packet, required when Status is
+// Question is one question that blocks the lane, required when Status is
 // "blocked".
 type Question struct {
 	Question       string   `json:"question"`
@@ -80,7 +80,7 @@ type Question struct {
 	Recommendation string   `json:"recommendation,omitempty"`
 }
 
-// Deviation is one departure from the packet's stated approach, required
+// Deviation is one departure from the lane's stated approach, required
 // when Status is "deviated".
 type Deviation struct {
 	Expected   string `json:"expected"`
@@ -89,7 +89,7 @@ type Deviation struct {
 	Reversible bool   `json:"reversible,omitempty"`
 }
 
-// Finding is something discovered that the packet did not ask about but
+// Finding is something discovered that the lane did not ask about but
 // that changes other work.
 type Finding struct {
 	Finding  string `json:"finding"`
@@ -108,7 +108,7 @@ type Interaction struct {
 
 // Envelope mirrors result.schema.json.
 type Envelope struct {
-	PacketID        string           `json:"packet_id"`
+	LaneID          string           `json:"lane_id"`
 	Status          string           `json:"status"`
 	Summary         string           `json:"summary"`
 	HardStops       []HardStop       `json:"hard_stops"`
@@ -123,7 +123,6 @@ type Envelope struct {
 	SessionID       string           `json:"session_id,omitempty"`
 	Interaction     *Interaction     `json:"interaction,omitempty"`
 }
-
 
 // Read reads the result envelope at path in fsys, validates it against the
 // embedded schema, and unmarshals it into an Envelope. fsys is an fs.FS

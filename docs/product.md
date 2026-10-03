@@ -86,7 +86,7 @@ This feature deleted judgment from the binary; Claude does it better and cheaper
 | `integrate`/`run` (merge, bisect, revert, CAS promote), `resolve`, `judges` | Merging and review are Claude's. Plain git. |
 | `explore`, `split`/`dag` | Read-only work needs no contract. |
 | `feature`, leases, `reconcile`, `defect`, SQLite ledger | Replaced by per-lane JSON files. |
-| Packets, `rules init\|generate` | The brief is free Markdown; the plugin carries the rules. |
+| Packet files, `rules init\|generate` | The brief is free Markdown; the plugin carries the rules. |
 | Per-lane worktrees, `worktree cleanup` | Worktrees only for parallel writers, created by Claude. |
 | `usage` log, `plugin/opencode` | No consumer. |
 

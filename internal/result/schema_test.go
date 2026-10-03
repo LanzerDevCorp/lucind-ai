@@ -117,7 +117,7 @@ func TestEnvelopeAndSchemaReflectionPin(t *testing.T) {
 
 func TestReadEnvelopeWithSkillsLoaded(t *testing.T) {
 	src := `{
-		"packet_id": "test-skills",
+		"lane_id": "test-skills",
 		"status": "done",
 		"summary": "Loaded skills verified.",
 		"hard_stops": [],
@@ -147,7 +147,7 @@ func TestReadEnvelopeWithInvalidSkillsLoadedFailsValidation(t *testing.T) {
 		{
 			name: "skills_loaded as string instead of array",
 			json: `{
-				"packet_id": "test-skills",
+				"lane_id": "test-skills",
 				"status": "done",
 				"summary": "Invalid skills loaded.",
 				"hard_stops": [],
@@ -157,7 +157,7 @@ func TestReadEnvelopeWithInvalidSkillsLoadedFailsValidation(t *testing.T) {
 		{
 			name: "skills_loaded with non-string items",
 			json: `{
-				"packet_id": "test-skills",
+				"lane_id": "test-skills",
 				"status": "done",
 				"summary": "Invalid skills loaded items.",
 				"hard_stops": [],
