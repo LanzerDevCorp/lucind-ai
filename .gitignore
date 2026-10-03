@@ -16,3 +16,6 @@ Thumbs.db
 # SQLite sidecars: transient, recreated on open, never part of a .backup snapshot
 *.db-shm
 *.db-wal
+
+# secrets
+.env

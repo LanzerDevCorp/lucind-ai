@@ -109,3 +109,13 @@ T17 (accept re-verifica los candidatos con commit del dispatcher), luego T16 (pa
 ### Lo que dejé en disco
 
 Worktrees `~/git_root/lucind-ai-worktrees/lane-*` y ramas `lane/*` se conservan todos (borrar está prohibido sin supervisión): hay 17 ramas `lane/*` con su worktree; los commits ya están integrados en la rama de feature por cherry-pick, así que `git branch --no-merged` los mostrará hasta que decidas borrarlos. Estado de `herdr`: los workspaces temporales de los spikes se cerraron. El binario instalado en `$GOPATH/bin` corresponde a la rama de feature (`lucind-ai -v`).
+
+## Seguimiento posterior (2026-10-03)
+
+El dueño aprobó todas las decisiones D1-D17 y revisó los términos de retención de Jev (D15). Después se cerraron T16-T23 y se probaron `explore`, `herdr-agy` y `cursor-agent` con agentes reales. Decisiones nuevas de esa sesión:
+
+- D18: los jueces ciegos son opt-in (`LUCIND_JUDGES=on`) porque gastan cuota de Cursor; el plan sigue `risk.PlanFor` sobre la clasificación por rutas, que no puede probar contenido pasivo y por eso empieza en medio (un juez); rutas de riesgo alto usan dos.
+- D19: el modelo de Cursor para jueces es independiente de `CursorAgent.KnownModels` (que sigue limitado a grok para lanes); los jueces usan por defecto `claude-sonnet-5-thinking-high` y `gpt-5.6-sol-high`.
+- D20: `busy_timeout` del ledger sube a 30 s (cubre carga alta; las escrituras bloqueadas fallaban con `database is locked`).
+- D21: la migración v11 del ledger admite `herdr-agy` reconstruyendo `lanes` sin perder filas.
+- D22: las lanes de solo lectura siguen pasando por la integración como no-op (Decisión de diseño 3); T22 se cerró sin código.

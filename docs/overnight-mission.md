@@ -77,3 +77,7 @@ Al terminar (o al quedar bloqueado todo), escribí en `docs/overnight-decisions.
 Misión ejecutada y cerrada el 2026-10-03. Se completó la cola hasta T15 (incluida T12c, la parte de explorador de T12); T16-T20 son seguimientos nuevos que quedaron fuera de esta misión. Los detalles están en `docs/overnight-decisions.md`: tabla de tareas con commits, estado de verificación, decisiones D1-D17, estado de la rotación de cuentas (desactivada, D-ROT-0) y la sección "Reporte matutino". El checklist autoritativo es `odd/tasks/herdr-agent-factory.md`.
 
 Condición de parada de la misión ("parar al terminar T15 o cuando todo lo restante esté bloqueado"): cumplida. No se hizo push, ni PR, ni merge, y RDD siguió apagado.
+
+### Seguimiento (2026-10-03, sesión posterior)
+
+Con las decisiones D1-D17 y los términos de retención de Jev aprobados por el dueño, se cerraron T16-T23 (T22 sin código, ver Decisión 3). Se probaron `lucind-ai explore`, `herdr-agy` y `cursor-agent` con agentes reales en un repo descartable, y se borraron las 17 ramas y worktrees `lane/*`. Detalle por tarea en `odd/tasks/herdr-agent-factory.md`, sección "Real-agy end-to-end evidence".

@@ -1,6 +1,6 @@
 # herdr agent factory: design decisions and handoff
 
-Status (2026-10-03, end of the first unattended night): T1-T11, T12a, T12b and T13-T15 are done on `feature/herdr-agent-factory` (see `odd/tasks/herdr-agent-factory.md` for commit ids). Pending: T12c (explorer fan-out), T16-T20 (follow-ups found by the reviews) and the second blind review of T12b. See section 8 for what shipped and what was learned, `docs/overnight-decisions.md` for every decision taken without the owner (D1-D16) and section 9 for how to resume.
+Status (2026-10-03, after the follow-up session): every task T1-T23 is done on `feature/herdr-agent-factory` (see `odd/tasks/herdr-agent-factory.md` for commit ids). `lucind-ai explore`, `herdr-agy` (write lane with dispatcher commit) and `cursor-agent` (read-only lane and blind judges) were proven end to end with real agents in a sandbox repo. Blind judges are opt-in (`LUCIND_JUDGES=on`) and Jev runs in shadow mode only when `LUCIND_JEV_SHADOW=on`. See section 8 for what shipped, `docs/overnight-decisions.md` for the decisions (D1-D17, approved by the owner) and section 9 for how to resume.
 Tracking: `odd/tasks/herdr-agent-factory.md` (tasks T1-T15, authoritative checklist) and its Engram mirror `odd/herdr-agent-factory/tasks` (project `lucind-ai`).
 This document consolidates every decision taken in the design session so implementation can continue in this repository without the original conversation.
 
@@ -142,13 +142,13 @@ Claude models used through Cursor consume Cursor quota, not Anthropic's. Avoid t
 
 | Item | Status |
 |---|---|
-| What `agy --sandbox` restricts | Unknown; spike T7 |
-| `herdr worktree open` on external worktrees; `remove` with live panes | Unknown; spike T7 |
+| What `agy --sandbox` restricts | Answered by spike T7 (`docs/herdr-spike-findings.md`): not a usable guard |
+| `herdr worktree open` on external worktrees; `remove` with live panes | Answered by spike T7 (`docs/herdr-spike-findings.md`) |
 | Exit code and token capture in a pane | Partly proven by hand on T1: `agy --output-format json` redirected to a file, exit code written to a file, and `herdr pane wait-output --regex 'LUCIND_EXIT=[0-9]+'` detected the end. Token and cost fields in the JSON were not inspected, and `stream-json` was not tried. Not yet implemented in a real executor (T8) |
-| Jev API format and data-retention terms | Not read; read before T14 |
+| Jev API format and data-retention terms | API format verified live (2026-10-03, `internal/router/jev_live_test.go`); retention terms reviewed and approved by the owner |
 | Documented lucind-ai rule "no silent provider fallback" | Not found verbatim; the escalation ladder (declared in the packet, executed deterministically) must be reconciled with the written policy (`docs/prd.md:173`, `CONTEXT.md`) |
 | gentle-ai `sync` leaving content outside markers untouched | Reported by an explorer, not verified |
-| `cursor-agent` end to end | Never run in lucind-ai |
+| `cursor-agent` end to end | Proven 2026-10-03: read-only lane through `lucind-ai run`, and blind judge (`TestGateLiveCursor`) |
 
 ## 6. Task order
 
@@ -223,6 +223,19 @@ Notes for step 6: the worker leaves changes uncommitted by design; the orchestra
 1. Run the second blind review of T12b (commit range `7f12d0e..9fc2c6d` in lane `lane/t12b-loop-ladder`) with a Claude-family model once the 5 h bucket resets; apply only reproduced findings (D11).
 2. T12c explorer fan-out (`lucind-ai explore`), then T16 (HerdrAgy hard stop and cleanup), T17 (accept re-verifies dispatcher-commit candidates), T18 (judges via `cursor-agent`), T19 (declared fuzzy signals), T20 (ledger flake).
 3. Owner decisions waiting: read Jev's Data Processing Agreement before ever enabling the shadow router (D15); review the riskiest recorded decisions first (D3 fail-closed checks, D7 `--no-verify`, D4 `sdd-*` opt-in changes digests of role-only packets); decide about the lane worktrees and branches kept on disk (deletion is forbidden unattended).
+
+### Follow-up session (T16-T23)
+
+| Task | What shipped |
+|---|---|
+| T17 | `accept` re-checks the attestation of every declared `verification` command against the candidate tree (fail closed) |
+| T20 | ledger `busy_timeout` 5 s to 30 s after reproducing `database is locked` under load |
+| T21 | Jev shadow logs agreements too; `usage report` shows agreement rate; `JEV_API_KEY` accepted from the environment |
+| T19, T23 | `understood`, `open_design`, `estimated_lookups` in manual and typed packets; they upgrade `inline` to `worker` and feed the router |
+| T16 | `herdr-agy` second C-c, then closes only a workspace it opened; reaps `run-*` state dirs older than 7 days |
+| T18 | `internal/judges`: blind judges over `cursor-agent`, consensus, read-only check, opt-in via `LUCIND_JUDGES=on` |
+
+Found by real runs and fixed: derived required skills were never shown to the worker; the ledger did not admit `herdr-agy` (migration v11). A repo needs `.lucind/skill-roots.yaml` for lanes to find skills.
 
 ## 9. Resuming in a new session
 
