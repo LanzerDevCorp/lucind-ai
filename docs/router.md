@@ -163,7 +163,7 @@ Router shadow: 5 disagreements, 1 errors
 
 ## Open Policy Item: Data Retention Terms
 
-As documented in Decision D15 (`docs/overnight-decisions.md`):
+Decision D15 (overnight run, 2026-10-03):
 - The TypeSafe Jev public documentation outlines API endpoints and models, and states a commitment not to train on customer data.
 - However, the specific legal Data Processing Agreement (DPA) and data-retention schedules for the TypeSafe API have not yet been formally reviewed and confirmed.
 - Therefore, **enabling `LUCIND_JEV_SHADOW=on` remains an explicit decision for the repository owner**. Until the DPA is reviewed, shadow mode remains opt-in and off by default.

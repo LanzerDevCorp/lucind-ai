@@ -112,7 +112,7 @@ func (a Agy) KnownModels() []string {
 // permissions on both the blocking JSON path and the optional stream-json
 // progress path. This is not a stylistic choice: it is the non-interactive invocation documented in
 // plugin/claude-code/skills/lucind-ai/references/runtime.md (see also
-// docs/prd.md section 6, step 4), which is this project's authoritative
+// docs/product.md), which is this project's authoritative
 // source for which flags a headless agy dispatch requires and why.
 // --dangerously-skip-permissions in particular is load-bearing: without it
 // a headless run stalls on an interactive permission prompt and the lane

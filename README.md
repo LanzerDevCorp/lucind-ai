@@ -7,7 +7,7 @@ parallel, and refuses to believe what comes back until it satisfies a schema.
 It owns parallel execution and the integrity of what returns. Review, delivery and lifecycle belong
 to [`gentle-ai`](https://github.com/Gentleman-Programming/gentle-ai).
 
-**[`docs/prd.md`](docs/prd.md) is the source of truth.** This file is the short version.
+**[`docs/product.md`](docs/product.md) is the source of truth.** This file is the short version.
 
 ## Why it exists
 
@@ -93,7 +93,6 @@ candidate out of the ledger and issues a mechanical receipt, and Promotion stays
 | `defect` | `record · list · resolve · decline · defer` — durable defect records, written by the ultrafixer protocol. |
 | `worktree` | `cleanup --lane <id> [--force]`. Removes the worktree; the `lucind/<id>` branch is a separate manual delete. |
 | `integrate` | `retry --run <run-id>` — rebuilds a reverted batch from the ledger and preserved worktrees, with no AI dispatch. |
-| `phase` | The SDD synthesis gate against `gentle-ai sdd-status`; generates the synthesis packet when none exists. |
 
 Run `lucind-ai` with no arguments for the live flag syntax rather than trusting this table.
 
@@ -103,8 +102,8 @@ Honest, because a plan that claims to be finished is the same failure this proje
 
 | Piece | State |
 |---|---|
-| Requirements | see `docs/prd.md` |
-| The `lucind-ai` binary | written — ten subcommands; see the table above |
+| Requirements | see `docs/product.md` |
+| The `lucind-ai` binary | written — see the table above for the subcommands; see the table above |
 | SQLite ledger | written (schema v10) — runs, lanes, events, progress, candidates, receipts, features, leases, attempts, overlap, reconciliation, defects |
 | Barrier / parallel dispatch | written — joins N lanes concurrently under one barrier |
 | Envelope schema + runtime enforcement ladder | written — embedded and enforced on every dispatch (`internal/result/`, `internal/run`) |
@@ -132,7 +131,7 @@ distinction between what exists and what does not.
 ## What is in here
 
 ```
-docs/prd.md                            the source of truth
+docs/product.md                          the source of truth
 docs/estado-real.html                  the design, drawn, with an honesty legend
 docs/research/meta-harness-landscape.md  what already exists in the field
 
