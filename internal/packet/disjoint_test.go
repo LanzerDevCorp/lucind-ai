@@ -94,9 +94,9 @@ func TestPathInScope(t *testing.T) {
 
 func TestDisjointAllowedPaths(t *testing.T) {
 	tests := []struct {
-		name        string
-		packets     []packet.Packet
-		wantErr     bool
+		name         string
+		packets      []packet.Packet
+		wantErr      bool
 		wantIDsInErr []string
 	}{
 		{
