@@ -49,7 +49,7 @@ The attestation mechanism's threat model is **accidental, not adversarial**:
 - **Key location**: `$XDG_CONFIG_HOME/lucind-ai/attest.key` (fallback: `~/.config/lucind-ai/attest.key`).
   - 32 cryptographically secure random bytes generated on first use.
   - File permissions are restricted to `0600`.
-  - **Atomic key creation**: Key files are created atomically using `os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)`. If creation fails with `EEXIST` (`os.ErrExist`), concurrent first-use processes perform bounded retries to read the key written by the winning process. Two or more processes racing on first use always converge on the identical key bytes.
+  - **Atomic key creation**: The key is written in full (mode `0600`) to a private temp file in the key directory and published with `os.Link`, which fails with `EEXIST` if another process won the race; the loser then reads the winner's complete key. Readers never see a partial key under the final name, even if the creator dies mid-write, and processes racing on first use converge on identical key bytes. A key file that is not exactly 32 bytes is rejected.
   - Keys are never written inside any repository or printed to logs/terminals.
 - **Log location**: `$XDG_STATE_HOME/lucind-ai/attestations/<repo_id>/` (fallback: `~/.local/state/lucind-ai/attestations/<repo_id>/`).
   - `<repo_id>` is the SHA-256 hex string of the absolute repository git common directory path (`git rev-parse --git-common-dir`, made absolute and cleaned relative to the directory it was run in). This ensures all linked git worktrees and the primary repository root share the same attestation namespace, while different repositories remain isolated.

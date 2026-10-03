@@ -662,3 +662,88 @@ func TestHasValidAttestation(t *testing.T) {
 		t.Fatalf("expected valid=false for failing entry")
 	}
 }
+
+func TestLoadOrCreateKey_PartialKeyNeverPublished(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cfg", "attest.key")
+	key, err := attest.LoadOrCreateKey(path)
+	if err != nil {
+		t.Fatalf("LoadOrCreateKey error: %v", err)
+	}
+	entries, err := os.ReadDir(filepath.Dir(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Name() != "attest.key" {
+		t.Fatalf("expected only the final key file, got %v", entries)
+	}
+	again, err := attest.LoadOrCreateKey(path)
+	if err != nil || !bytes.Equal(key, again) {
+		t.Fatalf("second load must return the same key, err=%v", err)
+	}
+}
+
+func TestLoadOrCreateKey_RejectsShortKeyFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "attest.key")
+	if err := os.WriteFile(path, []byte("short"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := attest.LoadOrCreateKey(path); err == nil {
+		t.Fatal("expected an error for a key file that is not 32 bytes")
+	}
+}
+
+func TestRepoCommonDir_ResolvesSymlinkedDir(t *testing.T) {
+	ctx := context.Background()
+	real := t.TempDir()
+	initGitRepo(t, real)
+	link := filepath.Join(t.TempDir(), "alias")
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatal(err)
+	}
+	viaReal, err := attest.RepoCommonDir(ctx, real)
+	if err != nil {
+		t.Fatal(err)
+	}
+	viaLink, err := attest.RepoCommonDir(ctx, link)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if viaReal != viaLink {
+		t.Fatalf("symlinked dir must resolve to the same common dir: %q vs %q", viaReal, viaLink)
+	}
+}
+
+func TestHasValidAttestation_RejectsForeignRepoID(t *testing.T) {
+	ctx := context.Background()
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	repo := t.TempDir()
+	initGitRepo(t, repo)
+	commonDir, err := attest.RepoCommonDir(ctx, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	logDir, err := attest.ResolveStateDir(attest.RepoID(commonDir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	key, err := attest.LoadOrCreateKey("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := attest.Entry{
+		Version: 1, RepoID: "someone-elses-repo", Command: "sh lucind-checks.sh", ExitCode: 0,
+		TreeHash: "abc", StartedAt: time.Now().UTC().Format(time.RFC3339Nano), FinishedAt: time.Now().UTC().Format(time.RFC3339Nano),
+	}
+	e.MAC = attest.ComputeMAC(e, key)
+	if _, err := attest.WriteEntry(logDir, e); err != nil {
+		t.Fatal(err)
+	}
+	ok, err := attest.HasValidAttestation(ctx, repo, "sh lucind-checks.sh", "abc", key, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok {
+		t.Fatal("an entry carrying another repository's RepoID must not count as an attestation")
+	}
+}

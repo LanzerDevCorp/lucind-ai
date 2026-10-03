@@ -33,6 +33,10 @@ import (
 
 const ownerMarkerName = ".lucind-accept-owner.json"
 
+// attestedCheckCommand is the exact command string `lucind-ai attest run` must have recorded for
+// accept to reuse the attestation; it mirrors how integrate.Check executes lucind-checks.sh.
+const attestedCheckCommand = "sh lucind-checks.sh"
+
 // AcceptanceRequest deliberately contains no refs or caller-supplied identity.
 type AcceptanceRequest struct {
 	RunID, LaneID string
@@ -134,7 +138,7 @@ func (v *Verifier) Verify(ctx context.Context, req AcceptanceRequest) (Acceptanc
 		var hasAttest bool
 		if v.hasAttestation != nil {
 			var attestErr error
-			hasAttest, attestErr = v.hasAttestation(ctx, root, "sh lucind-checks.sh", candidate.CandidateTree)
+			hasAttest, attestErr = v.hasAttestation(ctx, root, attestedCheckCommand, candidate.CandidateTree)
 			if attestErr != nil {
 				hasAttest = false
 			}

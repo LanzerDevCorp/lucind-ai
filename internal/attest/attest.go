@@ -103,9 +103,10 @@ func ResolveKeyPath() (string, error) {
 
 // LoadOrCreateKey loads a 32-byte secret key from path, generating and storing
 // 32 random bytes with mode 0600 on first use if it does not exist.
-// Key creation is atomic using O_CREATE|O_EXCL. If racing processes attempt first
-// use concurrently, the winner creates the key and any racing processes retry
-// until the key is completely written.
+// The key is written in full to a private temp file and published with os.Link,
+// which fails with EEXIST if another process won the race. Readers therefore only
+// ever observe a complete 32-byte key, and a creator that dies mid-write leaves
+// no partial key under the final name.
 func LoadOrCreateKey(path string) ([]byte, error) {
 	if path == "" {
 		var err error
@@ -117,13 +118,8 @@ func LoadOrCreateKey(path string) ([]byte, error) {
 
 	data, err := os.ReadFile(path)
 	if err == nil {
-		if len(data) == 32 {
-			return data, nil
-		}
-		// Mid-write by another process on first use: bounded retry.
-		return readKeyWithRetry(path)
+		return checkKeyLength(data)
 	}
-
 	if !errors.Is(err, os.ErrNotExist) {
 		return nil, fmt.Errorf("read key file: %w", err)
 	}
@@ -132,48 +128,47 @@ func LoadOrCreateKey(path string) ([]byte, error) {
 	if _, err := rand.Read(key); err != nil {
 		return nil, fmt.Errorf("generate random key: %w", err)
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0700); err != nil {
 		return nil, fmt.Errorf("create key directory: %w", err)
 	}
 
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
-	if err == nil {
-		_, writeErr := f.Write(key)
-		closeErr := f.Close()
-		if writeErr != nil || closeErr != nil {
-			_ = os.Remove(path)
-			if writeErr != nil {
-				return nil, fmt.Errorf("write key file: %w", writeErr)
-			}
-			return nil, fmt.Errorf("close key file: %w", closeErr)
+	tmp, err := os.CreateTemp(dir, ".attest.key.tmp-*")
+	if err != nil {
+		return nil, fmt.Errorf("create temp key file: %w", err)
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName)
+	if err := tmp.Chmod(0600); err != nil {
+		_ = tmp.Close()
+		return nil, fmt.Errorf("chmod temp key file: %w", err)
+	}
+	if _, err := tmp.Write(key); err != nil {
+		_ = tmp.Close()
+		return nil, fmt.Errorf("write temp key file: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return nil, fmt.Errorf("close temp key file: %w", err)
+	}
+
+	if err := os.Link(tmpName, path); err != nil {
+		if !errors.Is(err, os.ErrExist) {
+			return nil, fmt.Errorf("publish key file: %w", err)
 		}
-		return key, nil
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("read key file: %w", err)
+		}
+		return checkKeyLength(data)
 	}
-
-	if errors.Is(err, os.ErrExist) {
-		return readKeyWithRetry(path)
-	}
-
-	return nil, fmt.Errorf("create key file: %w", err)
+	return key, nil
 }
 
-func readKeyWithRetry(path string) ([]byte, error) {
-	const maxAttempts = 30
-	const interval = 5 * time.Millisecond
-	var lastErr error
-	for i := 0; i < maxAttempts; i++ {
-		time.Sleep(interval)
-		data, err := os.ReadFile(path)
-		if err == nil {
-			if len(data) == 32 {
-				return data, nil
-			}
-			lastErr = fmt.Errorf("invalid key file length: expected 32 bytes, got %d", len(data))
-		} else {
-			lastErr = err
-		}
+func checkKeyLength(data []byte) ([]byte, error) {
+	if len(data) != 32 {
+		return nil, fmt.Errorf("invalid key file length: expected 32 bytes, got %d", len(data))
 	}
-	return nil, fmt.Errorf("read key file after bounded retry: %w", lastErr)
+	return data, nil
 }
 
 // RepoToplevel returns the absolute git repository top-level directory for dir.
@@ -209,7 +204,12 @@ func RepoCommonDir(ctx context.Context, dir string) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("resolve dir path %q: %w", dir, err)
 		}
-		commonDir = filepath.Join(absDir, commonDir)
+		// git resolves the relative path against the real directory, not a symlinked alias.
+		realDir, err := filepath.EvalSymlinks(absDir)
+		if err != nil {
+			return "", fmt.Errorf("resolve symlinks for %q: %w", absDir, err)
+		}
+		commonDir = filepath.Join(realDir, commonDir)
 	}
 	return filepath.Clean(commonDir), nil
 }
@@ -234,13 +234,14 @@ func HasValidAttestation(ctx context.Context, repoRoot, command, expectedTreeHas
 			return false, fmt.Errorf("load attestation key: %w", err)
 		}
 	}
+	var wantRepoID string
 	if logDir == "" {
 		commonDir, err := RepoCommonDir(ctx, repoRoot)
 		if err != nil {
 			return false, fmt.Errorf("resolve repo common dir: %w", err)
 		}
-		repoID := RepoID(commonDir)
-		logDir, err = ResolveStateDir(repoID)
+		wantRepoID = RepoID(commonDir)
+		logDir, err = ResolveStateDir(wantRepoID)
 		if err != nil {
 			return false, fmt.Errorf("resolve log dir: %w", err)
 		}
@@ -252,6 +253,9 @@ func HasValidAttestation(ctx context.Context, repoRoot, command, expectedTreeHas
 	}
 
 	for _, e := range entries {
+		if wantRepoID != "" && e.RepoID != wantRepoID {
+			continue
+		}
 		if e.Command == command && e.TreeHash == expectedTreeHash && e.ExitCode == 0 {
 			if VerifyMAC(e, key) {
 				return true, nil
