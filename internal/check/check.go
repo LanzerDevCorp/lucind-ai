@@ -50,6 +50,8 @@ var (
 // Check runs the project verification suite by executing lucind-checks.sh
 // at the root of repoRoot with a scrubbed environment and bounded execution time.
 //
+// Deprecated: lane checks are now configured per lane with dispatch --check.
+//
 // If lucind-checks.sh does not exist, Check returns passed = false, an explanatory
 // message, and err = nil.
 // If the script exits 0, Check returns passed = true, combined output, and err = nil.

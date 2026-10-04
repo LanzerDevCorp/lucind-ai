@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/LanzerDevCorp/lucind-ai/internal/attest"
-	"github.com/LanzerDevCorp/lucind-ai/internal/check"
 	"github.com/LanzerDevCorp/lucind-ai/internal/lane"
 	"github.com/LanzerDevCorp/lucind-ai/internal/result"
 )
@@ -84,41 +83,44 @@ func Accept(ctx context.Context, repoRoot, laneID string) (string, lane.Receipt,
 		}
 	}
 
-	// 5. Attestation check or fallback checks
-	var evidence lane.Evidence
-	_, attestPath, found, err := attest.FindValidAttestation(ctx, repoRoot, "sh lucind-checks.sh", finalTree, nil, "")
-	if err == nil && found {
-		evidence = lane.Evidence{
-			Attestation: &attestPath,
-			CheckLog:    nil,
-		}
-	} else {
-		// Run check.Check(ctx, repoRoot)
-		passed, out, checkErr := check.Check(ctx, repoRoot)
-		if checkErr != nil && out == "" {
-			out = checkErr.Error()
+	// 5. Attestation check or run lane checks
+	evidence := []lane.CheckEvidence{}
+	for i, c := range l.Checks {
+		attestCmd := lane.CheckCommand(c)
+		_, attestPath, found, err := attest.FindValidAttestation(ctx, repoRoot, attestCmd, finalTree, nil, "")
+		if err == nil && found {
+			evidence = append(evidence, lane.CheckEvidence{
+				Check:       c,
+				Attestation: &attestPath,
+			})
+			continue
 		}
 
 		laneDir := lane.LaneDir(repoRoot, laneID)
 		if err := os.MkdirAll(laneDir, 0755); err != nil {
 			return "", lane.Receipt{}, nil, fmt.Errorf("create lane dir %s: %w", laneDir, err)
 		}
-		checkLogPath := filepath.Join(laneDir, "check.log")
-		if err := os.WriteFile(checkLogPath, []byte(out), 0644); err != nil {
+		checkLogPath := filepath.Join(laneDir, fmt.Sprintf("check-%d.log", i))
+
+		cmd := exec.CommandContext(ctx, "sh", "-c", c)
+		cmd.Dir = repoRoot
+		out, cmdErr := cmd.CombinedOutput()
+		if err := os.WriteFile(checkLogPath, out, 0644); err != nil {
 			return "", lane.Receipt{}, nil, fmt.Errorf("write check log %s: %w", checkLogPath, err)
 		}
 
-		evidence = lane.Evidence{
-			Attestation: nil,
-			CheckLog:    &checkLogPath,
-		}
+		evidence = append(evidence, lane.CheckEvidence{
+			Check:    c,
+			CheckLog: &checkLogPath,
+		})
 
-		if !passed {
-			trimmedOut := strings.TrimSpace(out)
+		if cmdErr != nil {
+			trimmedOut := strings.TrimSpace(string(out))
 			if trimmedOut == "" {
-				trimmedOut = "verification checks failed"
+				reasons = append(reasons, fmt.Sprintf("check %q failed", c))
+			} else {
+				reasons = append(reasons, fmt.Sprintf("check %q failed: %s", c, trimmedOut))
 			}
-			reasons = append(reasons, fmt.Sprintf("check failed: %s", trimmedOut))
 		}
 	}
 

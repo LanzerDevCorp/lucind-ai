@@ -32,8 +32,8 @@ Load the `herdr` skill too; this skill assumes its pane/agent commands.
 ### Lane (code changes)
 
 ```bash
-lucind-ai dispatch --cwd <dir> --allow '<glob>' [--allow ...] --brief <file|-> \
-  [--model M] [--timeout 60m] [--detach] [--min-quota 0.1]
+lucind-ai dispatch --cwd "$PWD" --allow '<glob>' [--allow ...] --brief <file|-> \
+  [--check '<cmd>']... [--model M] [--timeout 60m] [--detach] [--min-quota 0.1]
 lucind-ai wait <lane>            # only after --detach
 lucind-ai accept --lane <id>     # run from the lane's repo
 ```
@@ -47,15 +47,29 @@ lucind-ai accept --lane <id>     # run from the lane's repo
   For a formal follow-up turn with wait + validation: `dispatch --lane <id> --brief ...`.
 - On `timeout`: inspect the pane, nudge, or close it yourself. lucind-ai does nothing more.
 - `accept` writes `receipt.json` and accepts only when: the result envelope is valid; every file
-  changed since the base tree matches an `--allow` glob; and an attestation of
-  `sh lucind-checks.sh` matches the final tree (otherwise it runs the checks itself).
+  changed since the base tree matches an `--allow` glob; and each check is verified.
+  `--check '<cmd>'` is optional and repeatable: the orchestrator picks the checks that fit the
+  change (a lint, one test type, e2e, or the whole suite); with none, `accept` requires no
+  attestation. `accept` reuses a valid attestation per check on the final tree and runs only
+  the missing ones.
   **Never re-run tests yourself after an accepted receipt** — the attestation is the proof.
+- **Review before `accept`.** `status: done` only means agy wrote a valid envelope, not that the
+  brief was fully delivered. Compare `git status` and `git diff --stat` and the envelope's
+  `done_criteria` with the brief's scope items; if something is missing, send a follow-up turn to
+  the same lane (`dispatch --lane <id> --brief ...`, including the full original brief) instead of
+  accepting. Mind that a continuation can be marked `done` early by the stale previous
+  `result.json`: wait until `result.json` is newer than `brief.md` and agy is idle.
+- **After `accept`, decide what to do with the pane** (lucind-ai never closes it). Default: close
+  it with `herdr pane close <pane_id>`. If reviewing the diff left a doubt about the
+  implementation, leave it open and ask agy with `herdr agent prompt <pane_id> "..."`, reusing the
+  implementer's fresh context; close it once the question is settled.
 
 ## Writing a brief
 
 Free Markdown, not validated by lucind-ai. Include: goal, scope, acceptance criteria, constraints
-(TDD, style), and what to report in the result envelope. The footer added by `dispatch` already
-covers lane id, allowed globs, result path and the final `lucind-ai attest run -- sh lucind-checks.sh`.
+(TDD, style), and what to report in the result envelope. The contract footer added by `dispatch` already
+covers lane id, allowed globs, result path, and the final verification commands (each
+`lucind-ai attest run -- sh -c '<check>'`, or noting none when zero checks).
 Keep `--allow` as narrow as the task: it is enforced by agy's PreToolUse hook and again by `accept`.
 
 ### Brief sections
@@ -74,8 +88,9 @@ what is described here (no explanatory prose), so put prose under a following he
 - `## Hard stops`: one line per condition that must stop agy. The envelope requires one
   `hard_stops` entry per hard stop in the brief (`[]` when none), so list them here.
 - `## Verification`: the exact commands agy must run, each reported as
-  `<command>: <observed result>` in `done_criteria[].evidence`. The final
-  `lucind-ai attest run -- sh lucind-checks.sh` from the footer still applies.
+  `<command>: <observed result>` in `done_criteria[].evidence`. The final verification
+  command(s) from the contract footer (`lucind-ai attest run -- sh -c '<check>'`, if any)
+  still apply.
 - `## Known environmental failures` (optional): exact test names or command lines already
   failing on the base. Any other failing required command means the lane is not `done`.
 - `## Test-first policy`: when a relevant runnable deterministic test and a clear expected outcome
@@ -134,6 +149,4 @@ fresh agy session; an open session does not pick up new credentials reliably.
 
 ## Setup
 
-`make install` installs the binary and the embedded agy plugin
-(`lucind-ai plugin install`, which registers it via `agy plugin install` into `~/.gemini/config/plugins/lucind/`). Check the build with
-`lucind-ai -v` before dispatching.
+`lucind-ai install` installs the Claude skill into `~/.claude/skills/lucind`, the `lucind` agy plugin, and the `lucind-roles` agy plugin. `make install` builds the binary and runs `lucind-ai install`. Check the build with `lucind-ai -v` before dispatching.

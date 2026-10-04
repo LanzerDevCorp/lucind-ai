@@ -285,3 +285,70 @@ func TestStop(t *testing.T) {
 		}
 	})
 }
+
+func TestStop_RetryLogging(t *testing.T) {
+	t.Run("missing result writes retry log with reason", func(t *testing.T) {
+		root := newLaneRepo(t)
+		got := stop(t, laneID, root)
+		if got["decision"] != "continue" {
+			t.Fatalf("got %v, want continue", got)
+		}
+		logBytes, err := os.ReadFile(filepath.Join(lane.LaneDir(root, laneID), "hook.log"))
+		if err != nil {
+			t.Fatalf("reading hook.log: %v", err)
+		}
+		logContent := string(logBytes)
+		wantLog1 := "stop: retry 1/2: the file does not exist"
+		if !strings.Contains(logContent, wantLog1) {
+			t.Fatalf("hook.log does not contain %q; got:\n%s", wantLog1, logContent)
+		}
+
+		// Second retry
+		got = stop(t, laneID, root)
+		if got["decision"] != "continue" {
+			t.Fatalf("got %v, want continue", got)
+		}
+		logBytes, err = os.ReadFile(filepath.Join(lane.LaneDir(root, laneID), "hook.log"))
+		if err != nil {
+			t.Fatalf("reading hook.log: %v", err)
+		}
+		logContent = string(logBytes)
+		wantLog2 := "stop: retry 2/2: the file does not exist"
+		if !strings.Contains(logContent, wantLog2) {
+			t.Fatalf("hook.log does not contain %q; got:\n%s", wantLog2, logContent)
+		}
+	})
+
+	t.Run("invalid result writes retry log with error message", func(t *testing.T) {
+		root := newLaneRepo(t)
+		writeResult(t, root, `{"status":"done"}`)
+		got := stop(t, laneID, root)
+		if got["decision"] != "continue" {
+			t.Fatalf("got %v, want continue", got)
+		}
+		logBytes, err := os.ReadFile(filepath.Join(lane.LaneDir(root, laneID), "hook.log"))
+		if err != nil {
+			t.Fatalf("reading hook.log: %v", err)
+		}
+		logContent := string(logBytes)
+		if !strings.Contains(logContent, "stop: retry 1/2:") || !strings.Contains(logContent, "schema") {
+			t.Fatalf("hook.log missing retry line with schema error; got:\n%s", logContent)
+		}
+	})
+
+	t.Run("valid result writes no retry log lines", func(t *testing.T) {
+		root := newLaneRepo(t)
+		writeResult(t, root, validResult)
+		if got := stop(t, laneID, root); len(got) != 0 {
+			t.Fatalf("got %v, want {}", got)
+		}
+		logBytes, err := os.ReadFile(filepath.Join(lane.LaneDir(root, laneID), "hook.log"))
+		if err != nil {
+			t.Fatalf("reading hook.log: %v", err)
+		}
+		logContent := string(logBytes)
+		if strings.Contains(logContent, "stop: retry") {
+			t.Fatalf("hook.log should not contain any retry lines for valid result; got:\n%s", logContent)
+		}
+	})
+}

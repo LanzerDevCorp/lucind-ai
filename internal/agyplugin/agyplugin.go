@@ -22,10 +22,16 @@ import (
 // Name is the plugin directory and manifest name.
 const Name = "lucind"
 
+// RolesName is the roles plugin directory and manifest name.
+const RolesName = "lucind-roles"
+
 const binPlaceholder = "__LUCIND_BIN__"
 
 //go:embed assets
 var assets embed.FS
+
+//go:embed roles
+var roles embed.FS
 
 // StagingRoot returns the directory the plugin is rendered into before
 // being registered with `agy plugin install`.
@@ -111,9 +117,40 @@ func Install(root, bin string) (string, error) {
 	return dir, nil
 }
 
+// InstallRoles renders the roles plugin into <root>/lucind-roles, replacing
+// any previous install. It returns the plugin directory.
+func InstallRoles(root string) (string, error) {
+	dir := filepath.Join(root, RolesName)
+	if err := os.RemoveAll(dir); err != nil {
+		return "", fmt.Errorf("remove previous roles plugin: %w", err)
+	}
+	err := fs.WalkDir(roles, "roles", func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel := strings.TrimPrefix(strings.TrimPrefix(p, "roles"), "/")
+		if rel == "" {
+			return os.MkdirAll(dir, 0o755)
+		}
+		if d.IsDir() {
+			return os.MkdirAll(filepath.Join(dir, filepath.FromSlash(rel)), 0o755)
+		}
+		data, err := roles.ReadFile(p)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(filepath.Join(dir, filepath.FromSlash(rel)), data, 0o644)
+	})
+	if err != nil {
+		return "", fmt.Errorf("write roles plugin: %w", err)
+	}
+	return dir, nil
+}
+
 var (
-	ansi       = regexp.MustCompile(`\x1b\[[0-9;]*m`)
-	hooksCount = regexp.MustCompile(`hooks\s*:\s*(\d+) processed`)
+	ansi        = regexp.MustCompile(`\x1b\[[0-9;]*m`)
+	hooksCount  = regexp.MustCompile(`hooks\s*:\s*(\d+) processed`)
+	agentsCount = regexp.MustCompile(`agents\s*:\s*(\d+) processed`)
 )
 
 // ErrAgyNotFound is returned by an Agy runner when agy is not on PATH.
@@ -138,21 +175,31 @@ func (ExecAgy) Run(ctx context.Context, args ...string) ([]byte, error) {
 	return exec.CommandContext(ctx, agy, args...).CombinedOutput()
 }
 
-// checkInstallOutput accepts `agy plugin install` output only when it
-// reports at least one processed hook and no error line.
-func checkInstallOutput(out string) error {
+func checkProcessedOutput(out, kind string, re *regexp.Regexp) error {
 	out = ansi.ReplaceAllString(out, "")
 	if strings.Contains(out, "[error]") || strings.Contains(out, "[fail") {
 		return fmt.Errorf("agy plugin install reported errors:\n%s", out)
 	}
-	m := hooksCount.FindStringSubmatch(out)
+	m := re.FindStringSubmatch(out)
 	if m == nil {
-		return fmt.Errorf("agy plugin install did not report hooks:\n%s", out)
+		return fmt.Errorf("agy plugin install did not report %s:\n%s", kind, out)
 	}
 	if n, _ := strconv.Atoi(m[1]); n < 1 {
-		return fmt.Errorf("agy plugin install processed no hooks:\n%s", out)
+		return fmt.Errorf("agy plugin install processed no %s:\n%s", kind, out)
 	}
 	return nil
+}
+
+// checkInstallOutput accepts `agy plugin install` output only when it
+// reports at least one processed hook and no error line.
+func checkInstallOutput(out string) error {
+	return checkProcessedOutput(out, "hooks", hooksCount)
+}
+
+// checkRolesInstallOutput accepts `agy plugin install` output only when it
+// reports at least one processed agent and no error line.
+func checkRolesInstallOutput(out string) error {
+	return checkProcessedOutput(out, "agents", agentsCount)
 }
 
 // Options configures Setup.
@@ -170,6 +217,34 @@ func agyErr(op string, out []byte, err error) error {
 	return fmt.Errorf("agy %s: %w\n%s", op, err, out)
 }
 
+func setupPlugin(ctx context.Context, agy Agy, name, dir string, checkOutput func(string) error) error {
+	out, err := agy.Run(ctx, "plugin", "list")
+	if err != nil {
+		return agyErr("plugin list", out, err)
+	}
+	var listed struct {
+		Imports []struct {
+			Name string `json:"name"`
+		} `json:"imports"`
+	}
+	if err := json.Unmarshal([]byte(ansi.ReplaceAllString(string(out), "")), &listed); err != nil {
+		return fmt.Errorf("parse agy plugin list output: %w\n%s", err, out)
+	}
+	for _, imp := range listed.Imports {
+		if imp.Name == name {
+			if out, err := agy.Run(ctx, "plugin", "uninstall", name); err != nil {
+				return agyErr("plugin uninstall", out, err)
+			}
+			break
+		}
+	}
+	out, err = agy.Run(ctx, "plugin", "install", dir)
+	if err != nil {
+		return agyErr("plugin install", out, err)
+	}
+	return checkOutput(string(out))
+}
+
 // Setup renders the plugin into the staging root and registers it with
 // `agy plugin install`, replacing any previous registration. It returns the
 // staging plugin directory.
@@ -178,37 +253,27 @@ func Setup(ctx context.Context, o Options) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	out, err := o.Agy.Run(ctx, "plugin", "list")
-	if err != nil {
-		return "", agyErr("plugin list", out, err)
-	}
-	var listed struct {
-		Imports []struct {
-			Name string `json:"name"`
-		} `json:"imports"`
-	}
-	if err := json.Unmarshal([]byte(ansi.ReplaceAllString(string(out), "")), &listed); err != nil {
-		return "", fmt.Errorf("parse agy plugin list output: %w\n%s", err, out)
-	}
-	for _, imp := range listed.Imports {
-		if imp.Name == Name {
-			if out, err := o.Agy.Run(ctx, "plugin", "uninstall", Name); err != nil {
-				return "", agyErr("plugin uninstall", out, err)
-			}
-			break
-		}
-	}
-	out, err = o.Agy.Run(ctx, "plugin", "install", dir)
-	if err != nil {
-		return "", agyErr("plugin install", out, err)
-	}
-	if err := checkInstallOutput(string(out)); err != nil {
+	if err := setupPlugin(ctx, o.Agy, Name, dir, checkInstallOutput); err != nil {
 		return "", err
 	}
 	if o.ObsoleteDir != "" {
 		if err := os.RemoveAll(o.ObsoleteDir); err != nil {
 			return "", fmt.Errorf("remove obsolete plugin copy: %w", err)
 		}
+	}
+	return dir, nil
+}
+
+// SetupRoles renders the roles plugin into the staging root and registers it
+// with `agy plugin install`, replacing any previous registration. It returns
+// the staging roles plugin directory.
+func SetupRoles(ctx context.Context, o Options) (string, error) {
+	dir, err := InstallRoles(o.StagingRoot)
+	if err != nil {
+		return "", err
+	}
+	if err := setupPlugin(ctx, o.Agy, RolesName, dir, checkRolesInstallOutput); err != nil {
+		return "", err
 	}
 	return dir, nil
 }

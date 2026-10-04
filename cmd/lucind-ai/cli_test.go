@@ -73,14 +73,15 @@ func writeChecksScript(t *testing.T, repoDir string, exitCode int, output string
 func TestUsageAndHelp(t *testing.T) {
 	ctx := context.Background()
 
-	wantUsage := `usage: lucind-ai dispatch --cwd <dir> --allow <glob>... --brief <file|-> [--model M] [--timeout D] [--detach] [--lane <id>] [--min-quota F]
+	wantUsage := `usage: lucind-ai dispatch --cwd <dir> --allow <glob>... --brief <file|-> [--check <cmd>]... [--model M] [--timeout D] [--detach] [--lane <id>] [--min-quota F]
        lucind-ai wait <lane> [--cwd <dir>] [--timeout D]
-       lucind-ai check [--out <path>]
+       lucind-ai check [--out <path>]   (deprecated)
        lucind-ai accept --lane <id>
        lucind-ai attest run -- <command> [args...]
        lucind-ai attest verify --command "<exact command string>"
        lucind-ai hook pre-tool-use|stop   (agy plugin handlers; stdin JSON)
        lucind-ai plugin install [--dir <staging root>]   (registers via agy plugin install)
+       lucind-ai install
        lucind-ai --version`
 
 	// 1. Missing args prints usage to stderr and exits 1
@@ -294,7 +295,7 @@ func TestCheckUnexpectedArgs(t *testing.T) {
 	if code != 1 {
 		t.Fatalf("run(check extra-arg) exit code = %d, want 1", code)
 	}
-	if !strings.Contains(stderr.String(), "usage: lucind-ai check [--out <path>]") {
+	if !strings.Contains(stderr.String(), "usage: lucind-ai check [--out <path>] (deprecated)") {
 		t.Errorf("stderr = %q, want check usage", stderr.String())
 	}
 }
@@ -333,7 +334,7 @@ func TestAcceptSubcommand(t *testing.T) {
 	{
 		repoDir := initRepo(t)
 		writeChecksScript(t, repoDir, 0, "PASS: all checks passed")
-		l, err := lane.Create(ctx, repoDir, []string{"src/**"}, "test-model")
+		l, err := lane.Create(ctx, repoDir, []string{"src/**"}, "test-model", "sh lucind-checks.sh")
 		if err != nil {
 			t.Fatalf("create lane: %v", err)
 		}
@@ -388,11 +389,40 @@ func TestAcceptSubcommand(t *testing.T) {
 			t.Errorf("stderr = %q, want 'lane %s rejected'", stderr.String(), l.ID)
 		}
 	}
+
+	// 5. Rejection flow: lane with failing check -> exit 1
+	{
+		repoDir := initRepo(t)
+		l, err := lane.Create(ctx, repoDir, []string{"src/**"}, "test-model", "exit 1")
+		if err != nil {
+			t.Fatalf("create lane: %v", err)
+		}
+		writeResultJSON(t, repoDir, l.ID, "done")
+
+		cwd, err := os.Getwd()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chdir(repoDir); err != nil {
+			t.Fatal(err)
+		}
+
+		var stdout, stderr bytes.Buffer
+		code := run(ctx, []string{"accept", "--lane", l.ID}, &stdout, &stderr)
+		_ = os.Chdir(cwd)
+
+		if code != 1 {
+			t.Fatalf("run(accept --lane %s) exit code = %d, want 1; stderr = %q, stdout = %q", l.ID, code, stderr.String(), stdout.String())
+		}
+		if !strings.Contains(stderr.String(), fmt.Sprintf("lane %s rejected", l.ID)) {
+			t.Errorf("stderr = %q, want 'lane %s rejected'", stderr.String(), l.ID)
+		}
+	}
 }
 
 func TestDispatchHelp(t *testing.T) {
 	ctx := context.Background()
-	wantUsageLine := "usage: lucind-ai dispatch --cwd <dir> --allow <glob>... --brief <file|-> [--model M] [--timeout D] [--detach] [--lane <id>] [--min-quota F]"
+	wantUsageLine := "usage: lucind-ai dispatch --cwd <dir> --allow <glob>... --brief <file|-> [--check <cmd>]... [--model M] [--timeout D] [--detach] [--lane <id>] [--min-quota F]"
 	for _, flag := range []string{"--help", "-help", "-h", "help"} {
 		t.Run("flag_"+flag, func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
@@ -404,7 +434,7 @@ func TestDispatchHelp(t *testing.T) {
 			if !strings.Contains(out, wantUsageLine) {
 				t.Errorf("stdout missing usage line; got %q", out)
 			}
-			for _, expectedFlag := range []string{"-cwd", "-allow", "-brief", "-model", "-timeout", "-detach", "-lane", "-min-quota"} {
+			for _, expectedFlag := range []string{"-cwd", "-allow", "-check", "-brief", "-model", "-timeout", "-detach", "-lane", "-min-quota"} {
 				if !strings.Contains(out, expectedFlag) {
 					t.Errorf("stdout missing flag %q; got %q", expectedFlag, out)
 				}
@@ -438,7 +468,7 @@ func TestWaitHelp(t *testing.T) {
 
 func TestDispatchMissingRequiredFlags(t *testing.T) {
 	ctx := context.Background()
-	wantUsageLine := "usage: lucind-ai dispatch --cwd <dir> --allow <glob>... --brief <file|-> [--model M] [--timeout D] [--detach] [--lane <id>] [--min-quota F]"
+	wantUsageLine := "usage: lucind-ai dispatch --cwd <dir> --allow <glob>... --brief <file|-> [--check <cmd>]... [--model M] [--timeout D] [--detach] [--lane <id>] [--min-quota F]"
 
 	tests := []struct {
 		name    string
@@ -469,6 +499,16 @@ func TestDispatchMissingRequiredFlags(t *testing.T) {
 			name:    "invalid timeout",
 			args:    []string{"dispatch", "--cwd", "/tmp", "--allow", "src/**", "--brief", "b.md", "--timeout", "xyz"},
 			wantErr: "invalid --timeout",
+		},
+		{
+			name:    "empty check flag",
+			args:    []string{"dispatch", "--cwd", "/tmp", "--allow", "src/**", "--brief", "b.md", "--check", ""},
+			wantErr: "check command cannot be empty",
+		},
+		{
+			name:    "whitespace check flag",
+			args:    []string{"dispatch", "--cwd", "/tmp", "--allow", "src/**", "--brief", "b.md", "--check", "   "},
+			wantErr: "check command cannot be empty",
 		},
 	}
 
@@ -572,6 +612,8 @@ func TestDispatchExecution(t *testing.T) {
 		"--cwd", repoDir,
 		"--allow", "src/**,pkg/**",
 		"--allow", "cmd/**",
+		"--check", "go test ./...",
+		"--check", "echo 'a,b'",
 		"--brief", briefFile,
 		"--model", "gemini-3.8-flash-high",
 		"--timeout", "30m",
@@ -590,6 +632,16 @@ func TestDispatchExecution(t *testing.T) {
 	wantAllow := []string{"src/**", "pkg/**", "cmd/**"}
 	if len(capturedOpts.Allow) != len(wantAllow) {
 		t.Errorf("captured Allow = %v, want %v", capturedOpts.Allow, wantAllow)
+	}
+	wantChecks := []string{"go test ./...", "echo 'a,b'"}
+	if len(capturedOpts.Checks) != len(wantChecks) {
+		t.Errorf("captured Checks = %v, want %v", capturedOpts.Checks, wantChecks)
+	} else {
+		for i, c := range wantChecks {
+			if capturedOpts.Checks[i] != c {
+				t.Errorf("captured Checks[%d] = %q, want %q", i, capturedOpts.Checks[i], c)
+			}
+		}
 	}
 	if capturedOpts.Brief != "Implement feature X" {
 		t.Errorf("captured Brief = %q, want 'Implement feature X'", capturedOpts.Brief)
@@ -784,4 +836,3 @@ func TestWaitExecution(t *testing.T) {
 		t.Fatalf("exit code = %d, want 4", code)
 	}
 }
-

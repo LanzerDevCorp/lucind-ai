@@ -1,0 +1,4 @@
+{
+  "name": "lucind-roles",
+  "description": "Subagent roles for agy when it orchestrates tasks delegated by Claude: a scoped implementation worker."
+}

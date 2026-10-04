@@ -19,6 +19,7 @@ type Options struct {
 	Cwd      string
 	LaneID   string
 	Allow    []string
+	Checks   []string
 	Model    string
 	Brief    string
 	MinQuota float64
@@ -53,7 +54,7 @@ func ResetEnsureAgyQuotaForTesting() {
 	ensureAgyQuota = defaultQuotaEnsurer
 }
 
-func constructBrief(userBrief, laneID string, allow []string, absResultPath string) string {
+func constructBrief(userBrief, laneID string, allow []string, absResultPath string, checks []string) string {
 	var sb strings.Builder
 	sb.WriteString(strings.TrimRight(userBrief, "\n"))
 	sb.WriteString("\n\n---\n## Lane Contract\n")
@@ -63,9 +64,22 @@ func constructBrief(userBrief, laneID string, allow []string, absResultPath stri
 		sb.WriteString(fmt.Sprintf("  - %s\n", g))
 	}
 	sb.WriteString(fmt.Sprintf("- Write your result envelope to `%s` following the result schema.\n", absResultPath))
-	sb.WriteString("- As the final verification run exactly `lucind-ai attest run -- sh lucind-checks.sh` (accept only reuses an attestation of that exact command; otherwise it re-runs the checks).\n")
+	if len(checks) == 0 {
+		sb.WriteString("- This lane requires no verification command.\n")
+	} else {
+		sb.WriteString("- As the final verification, after your last edit, run these commands exactly as listed and do not edit files afterwards:\n")
+		for _, c := range checks {
+			quoted := "'" + strings.ReplaceAll(c, "'", `'\''`) + "'"
+			sb.WriteString(fmt.Sprintf("  - `lucind-ai attest run -- sh -c %s`\n", quoted))
+		}
+	}
 	sb.WriteString("- Do not edit outside the allowed globs.\n")
 	return sb.String()
+}
+
+// ConstructBrief formats the lane contract brief markdown.
+func ConstructBrief(userBrief, laneID string, allow []string, absResultPath string, checks []string) string {
+	return constructBrief(userBrief, laneID, allow, absResultPath, checks)
 }
 
 // Dispatch executes the agy lane dispatch workflow in a herdr pane.
@@ -73,6 +87,22 @@ func Dispatch(ctx context.Context, opts Options, runner HerdrRunner) (Output, in
 	// 1. HERDR_ENV=1 check
 	if os.Getenv("HERDR_ENV") != "1" {
 		return Output{}, 1, errors.New("herdr is the only supported runtime: HERDR_ENV must be set to 1")
+	}
+
+	cwd := opts.Cwd
+	if cwd == "" {
+		cwd = "."
+	}
+	absCwd, err := filepath.Abs(cwd)
+	if err != nil {
+		return Output{}, 1, fmt.Errorf("resolve abs cwd: %w", err)
+	}
+	cwd = absCwd
+
+	for _, c := range opts.Checks {
+		if strings.TrimSpace(c) == "" {
+			return Output{}, 1, fmt.Errorf("check command cannot be empty")
+		}
 	}
 
 	// 2. Quota gate
@@ -86,10 +116,6 @@ func Dispatch(ctx context.Context, opts Options, runner HerdrRunner) (Output, in
 		runner = DefaultHerdrRunner{}
 	}
 
-	cwd := opts.Cwd
-	if cwd == "" {
-		cwd = "."
-	}
 	repoRoot, err := attest.RepoToplevel(ctx, cwd)
 	if err != nil {
 		return Output{}, 1, fmt.Errorf("resolve repo root: %w", err)
@@ -114,12 +140,21 @@ func Dispatch(ctx context.Context, opts Options, runner HerdrRunner) (Output, in
 		}
 		loadedLane.Status = lane.StatusRunning
 		loadedLane.Retries = 0
+		if len(opts.Checks) > 0 {
+			loadedLane.Checks = opts.Checks
+		}
 		if err := loadedLane.Save(repoRoot); err != nil {
 			return Output{}, 1, fmt.Errorf("save lane %s: %w", opts.LaneID, err)
 		}
+		laneDir := lane.LaneDir(repoRoot, opts.LaneID)
+		resultFile := filepath.Join(laneDir, "result.json")
+		prevFile := filepath.Join(laneDir, "result.prev.json")
+		if err := os.Rename(resultFile, prevFile); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return Output{}, 1, fmt.Errorf("rename previous result: %w", err)
+		}
 		l = loadedLane
 	} else {
-		createdLane, err := lane.Create(ctx, cwd, opts.Allow, model)
+		createdLane, err := lane.Create(ctx, cwd, opts.Allow, model, opts.Checks...)
 		if err != nil {
 			return Output{}, 1, fmt.Errorf("create lane: %w", err)
 		}
@@ -137,7 +172,7 @@ func Dispatch(ctx context.Context, opts Options, runner HerdrRunner) (Output, in
 	if isContinuation && len(opts.Allow) > 0 {
 		allow = opts.Allow
 	}
-	briefText := constructBrief(opts.Brief, l.ID, allow, absResultPath)
+	briefText := constructBrief(opts.Brief, l.ID, allow, absResultPath, l.Checks)
 	briefPath := filepath.Join(lane.LaneDir(repoRoot, l.ID), "brief.md")
 	if err := os.WriteFile(briefPath, []byte(briefText), 0644); err != nil {
 		return Output{}, 1, fmt.Errorf("write brief.md: %w", err)
@@ -154,6 +189,17 @@ func Dispatch(ctx context.Context, opts Options, runner HerdrRunner) (Output, in
 		if err != nil {
 			return Output{}, 1, fmt.Errorf("split pane: %w", err)
 		}
+
+		paneCwd, err := GetPaneCwd(ctx, runner, paneID)
+		if err != nil {
+			_ = ClosePane(ctx, runner, paneID)
+			return Output{}, 1, fmt.Errorf("verify pane cwd: %w", err)
+		}
+		if resolveSymlinks(cwd) != resolveSymlinks(paneCwd) {
+			_ = ClosePane(ctx, runner, paneID)
+			return Output{}, 1, fmt.Errorf("pane cwd mismatch: expected %s, got %s", cwd, paneCwd)
+		}
+
 		l.PaneID = paneID
 		if err := l.Save(repoRoot); err != nil {
 			return Output{}, 1, fmt.Errorf("save lane with pane id: %w", err)
@@ -234,4 +280,12 @@ func sendPrompt(ctx context.Context, runner HerdrRunner, paneID, text, marker st
 		return fmt.Errorf("herdr agent prompt (resend): %w (output: %s)", err, string(out))
 	}
 	return nil
+}
+
+func resolveSymlinks(path string) string {
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return filepath.Clean(path)
+	}
+	return filepath.Clean(resolved)
 }

@@ -368,9 +368,12 @@ func TestReceiptWriting(t *testing.T) {
 		ChangedFiles: []string{"cmd/lucind-ai/main.go"},
 		Verdict:      lane.VerdictAccepted,
 		Reasons:      []string{"all checks passed"},
-		Evidence: lane.Evidence{
-			Attestation: &attestationPath,
-			CheckLog:    nil,
+		Evidence: []lane.CheckEvidence{
+			{
+				Check:       "go test ./...",
+				Attestation: &attestationPath,
+				CheckLog:    nil,
+			},
 		},
 		CreatedAt: time.Now().UTC(),
 	}
@@ -379,25 +382,28 @@ func TestReceiptWriting(t *testing.T) {
 		t.Fatalf("WriteReceipt failed: %v", err)
 	}
 
-	// Verify raw JSON serialization of null vs string pointers
+	// Verify raw JSON serialization: attestation present, check_log omitted due to omitempty
 	data, err := os.ReadFile(lane.ReceiptPath(tempDir, laneID))
 	if err != nil {
 		t.Fatalf("ReadFile receipt failed: %v", err)
 	}
 	var raw struct {
-		Evidence struct {
-			Attestation *string `json:"attestation"`
-			CheckLog    *string `json:"check_log"`
-		} `json:"evidence"`
+		Evidence []map[string]any `json:"evidence"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
 		t.Fatalf("Unmarshal receipt failed: %v", err)
 	}
-	if raw.Evidence.Attestation == nil || *raw.Evidence.Attestation != attestationPath {
-		t.Errorf("raw attestation = %v, want %q", raw.Evidence.Attestation, attestationPath)
+	if len(raw.Evidence) != 1 {
+		t.Fatalf("raw evidence len = %d, want 1", len(raw.Evidence))
 	}
-	if raw.Evidence.CheckLog != nil {
-		t.Errorf("raw check_log = %v, want null (nil)", raw.Evidence.CheckLog)
+	if raw.Evidence[0]["check"] != "go test ./..." {
+		t.Errorf("raw check = %v, want %q", raw.Evidence[0]["check"], "go test ./...")
+	}
+	if raw.Evidence[0]["attestation"] != attestationPath {
+		t.Errorf("raw attestation = %v, want %q", raw.Evidence[0]["attestation"], attestationPath)
+	}
+	if _, exists := raw.Evidence[0]["check_log"]; exists {
+		t.Errorf("raw check_log should be omitted when nil, but exists: %v", raw.Evidence[0]["check_log"])
 	}
 
 	// Load back using LoadReceipt
@@ -411,15 +417,63 @@ func TestReceiptWriting(t *testing.T) {
 	if loaded.FinalTree != receipt.FinalTree {
 		t.Errorf("loaded.FinalTree = %q, want %q", loaded.FinalTree, receipt.FinalTree)
 	}
-	if loaded.Evidence.Attestation == nil || *loaded.Evidence.Attestation != attestationPath {
-		t.Errorf("loaded.Evidence.Attestation = %v, want %q", loaded.Evidence.Attestation, attestationPath)
+	if len(loaded.Evidence) != 1 {
+		t.Fatalf("loaded.Evidence len = %d, want 1", len(loaded.Evidence))
 	}
-	if loaded.Evidence.CheckLog != nil {
-		t.Errorf("loaded.Evidence.CheckLog = %v, want nil", loaded.Evidence.CheckLog)
+	if loaded.Evidence[0].Check != "go test ./..." {
+		t.Errorf("loaded.Evidence[0].Check = %q, want %q", loaded.Evidence[0].Check, "go test ./...")
+	}
+	if loaded.Evidence[0].Attestation == nil || *loaded.Evidence[0].Attestation != attestationPath {
+		t.Errorf("loaded.Evidence[0].Attestation = %v, want %q", loaded.Evidence[0].Attestation, attestationPath)
+	}
+	if loaded.Evidence[0].CheckLog != nil {
+		t.Errorf("loaded.Evidence[0].CheckLog = %v, want nil", loaded.Evidence[0].CheckLog)
 	}
 
-	// Test rejected receipt with both pointers nil
-	rejectReceipt := lane.Receipt{
+	// Test check_log without attestation serializes with check_log and omits attestation
+	checkLogPath := "/path/to/check.log"
+	logReceipt := lane.Receipt{
+		Version:      1,
+		Lane:         laneID,
+		FinalTree:    "finaltree789",
+		BaseTree:     "basetree123",
+		ChangedFiles: []string{"main.go"},
+		Verdict:      lane.VerdictAccepted,
+		Reasons:      []string{},
+		Evidence: []lane.CheckEvidence{
+			{
+				Check:       "sh lucind-checks.sh",
+				Attestation: nil,
+				CheckLog:    &checkLogPath,
+			},
+		},
+		CreatedAt: time.Now().UTC(),
+	}
+	if err := lane.WriteReceipt(tempDir, laneID, logReceipt); err != nil {
+		t.Fatalf("WriteReceipt logReceipt failed: %v", err)
+	}
+	logData, err := os.ReadFile(lane.ReceiptPath(tempDir, laneID))
+	if err != nil {
+		t.Fatalf("ReadFile log receipt failed: %v", err)
+	}
+	var logRaw struct {
+		Evidence []map[string]any `json:"evidence"`
+	}
+	if err := json.Unmarshal(logData, &logRaw); err != nil {
+		t.Fatalf("Unmarshal log receipt failed: %v", err)
+	}
+	if len(logRaw.Evidence) != 1 {
+		t.Fatalf("log raw evidence len = %d, want 1", len(logRaw.Evidence))
+	}
+	if logRaw.Evidence[0]["check_log"] != checkLogPath {
+		t.Errorf("raw check_log = %v, want %q", logRaw.Evidence[0]["check_log"], checkLogPath)
+	}
+	if _, exists := logRaw.Evidence[0]["attestation"]; exists {
+		t.Errorf("raw attestation should be omitted when nil, but exists: %v", logRaw.Evidence[0]["attestation"])
+	}
+
+	// Test nil Evidence serializes as empty slice [] in JSON
+	nilEvidenceReceipt := lane.Receipt{
 		Version:      1,
 		Lane:         laneID,
 		FinalTree:    "finaltree456",
@@ -427,13 +481,10 @@ func TestReceiptWriting(t *testing.T) {
 		ChangedFiles: []string{"forbidden/file.go"},
 		Verdict:      lane.VerdictRejected,
 		Reasons:      []string{"changed file not in allowlist"},
-		Evidence: lane.Evidence{
-			Attestation: nil,
-			CheckLog:    nil,
-		},
-		CreatedAt: time.Now().UTC(),
+		Evidence:     nil,
+		CreatedAt:    time.Now().UTC(),
 	}
-	if err := lane.WriteReceipt(tempDir, laneID, rejectReceipt); err != nil {
+	if err := lane.WriteReceipt(tempDir, laneID, nilEvidenceReceipt); err != nil {
 		t.Fatalf("WriteReceipt rejected failed: %v", err)
 	}
 
@@ -445,15 +496,77 @@ func TestReceiptWriting(t *testing.T) {
 	if err := json.Unmarshal(rejectData, &rejectRaw); err != nil {
 		t.Fatalf("Unmarshal reject failed: %v", err)
 	}
-	evidenceRaw, ok := rejectRaw["evidence"].(map[string]any)
+	evidenceSlice, ok := rejectRaw["evidence"].([]any)
 	if !ok {
-		t.Fatalf("evidence is not an object: %v", rejectRaw["evidence"])
+		t.Fatalf("evidence is not an array: %T (%v)", rejectRaw["evidence"], rejectRaw["evidence"])
 	}
-	if evidenceRaw["attestation"] != nil {
-		t.Errorf("expected attestation to be null in JSON, got %v", evidenceRaw["attestation"])
+	if len(evidenceSlice) != 0 {
+		t.Errorf("expected empty array [] for evidence in JSON, got len %d", len(evidenceSlice))
 	}
-	if evidenceRaw["check_log"] != nil {
-		t.Errorf("expected check_log to be null in JSON, got %v", evidenceRaw["check_log"])
+
+	loadedReject, err := lane.LoadReceipt(tempDir, laneID)
+	if err != nil {
+		t.Fatalf("LoadReceipt rejected failed: %v", err)
+	}
+	if len(loadedReject.Evidence) != 0 {
+		t.Errorf("loadedReject.Evidence len = %d, want 0", len(loadedReject.Evidence))
+	}
+}
+
+func TestWriteReceipt_RoundTrip(t *testing.T) {
+	tempDir := t.TempDir()
+	laneID := "20261003-215144-rtrip"
+
+	attestationPath := "/path/to/attest.json"
+	checkLogPath := "/path/to/check.log"
+
+	receipt := lane.Receipt{
+		Version:      1,
+		Lane:         laneID,
+		FinalTree:    "tree-final",
+		BaseTree:     "tree-base",
+		ChangedFiles: []string{"foo.go", "bar.go"},
+		Verdict:      lane.VerdictAccepted,
+		Reasons:      []string{"reason 1"},
+		Evidence: []lane.CheckEvidence{
+			{
+				Check:       "check 1",
+				Attestation: &attestationPath,
+			},
+			{
+				Check:    "check 2",
+				CheckLog: &checkLogPath,
+			},
+		},
+		CreatedAt: time.Now().UTC().Truncate(time.Millisecond),
+	}
+
+	if err := lane.WriteReceipt(tempDir, laneID, receipt); err != nil {
+		t.Fatalf("WriteReceipt failed: %v", err)
+	}
+
+	loaded, err := lane.LoadReceipt(tempDir, laneID)
+	if err != nil {
+		t.Fatalf("LoadReceipt failed: %v", err)
+	}
+
+	if loaded.Lane != receipt.Lane {
+		t.Errorf("Lane = %q, want %q", loaded.Lane, receipt.Lane)
+	}
+	if loaded.FinalTree != receipt.FinalTree {
+		t.Errorf("FinalTree = %q, want %q", loaded.FinalTree, receipt.FinalTree)
+	}
+	if loaded.Verdict != receipt.Verdict {
+		t.Errorf("Verdict = %q, want %q", loaded.Verdict, receipt.Verdict)
+	}
+	if len(loaded.Evidence) != 2 {
+		t.Fatalf("len(Evidence) = %d, want 2", len(loaded.Evidence))
+	}
+	if loaded.Evidence[0].Check != "check 1" || *loaded.Evidence[0].Attestation != attestationPath || loaded.Evidence[0].CheckLog != nil {
+		t.Errorf("Evidence[0] mismatch: %+v", loaded.Evidence[0])
+	}
+	if loaded.Evidence[1].Check != "check 2" || *loaded.Evidence[1].CheckLog != checkLogPath || loaded.Evidence[1].Attestation != nil {
+		t.Errorf("Evidence[1] mismatch: %+v", loaded.Evidence[1])
 	}
 }
 
@@ -694,3 +807,153 @@ func TestMarkStopped(t *testing.T) {
 	})
 }
 
+func TestCheckCommand(t *testing.T) {
+	cmd := "go test ./..."
+	want := "sh -c go test ./..."
+	got := lane.CheckCommand(cmd)
+	if got != want {
+		t.Errorf("CheckCommand(%q) = %q, want %q", cmd, got, want)
+	}
+}
+
+func TestLaneChecksJSONSerialization(t *testing.T) {
+	t.Run("with checks", func(t *testing.T) {
+		ln := lane.Lane{
+			Version: 1,
+			ID:      "20261003-215144-chk1",
+			Checks:  []string{"go test ./...", "go vet ./..."},
+		}
+		data, err := json.Marshal(ln)
+		if err != nil {
+			t.Fatalf("Marshal failed: %v", err)
+		}
+		var raw map[string]any
+		if err := json.Unmarshal(data, &raw); err != nil {
+			t.Fatalf("Unmarshal raw failed: %v", err)
+		}
+		rawChecks, ok := raw["checks"].([]any)
+		if !ok {
+			t.Fatalf("expected raw checks to be []any, got %T: %v", raw["checks"], raw["checks"])
+		}
+		if len(rawChecks) != 2 || rawChecks[0] != "go test ./..." || rawChecks[1] != "go vet ./..." {
+			t.Errorf("unexpected checks array in json: %v", rawChecks)
+		}
+
+		var deserialized lane.Lane
+		if err := json.Unmarshal(data, &deserialized); err != nil {
+			t.Fatalf("Unmarshal into Lane failed: %v", err)
+		}
+		if len(deserialized.Checks) != 2 || deserialized.Checks[0] != "go test ./..." || deserialized.Checks[1] != "go vet ./..." {
+			t.Errorf("deserialized.Checks = %v, want %v", deserialized.Checks, ln.Checks)
+		}
+	})
+
+	t.Run("without checks", func(t *testing.T) {
+		ln := lane.Lane{
+			Version: 1,
+			ID:      "20261003-215144-chk0",
+		}
+		data, err := json.Marshal(ln)
+		if err != nil {
+			t.Fatalf("Marshal failed: %v", err)
+		}
+		var raw map[string]any
+		if err := json.Unmarshal(data, &raw); err != nil {
+			t.Fatalf("Unmarshal raw failed: %v", err)
+		}
+		if _, exists := raw["checks"]; exists {
+			t.Errorf("expected 'checks' field to be omitted from JSON when empty/nil, but found: %v", raw["checks"])
+		}
+
+		var deserialized lane.Lane
+		if err := json.Unmarshal(data, &deserialized); err != nil {
+			t.Fatalf("Unmarshal into Lane failed: %v", err)
+		}
+		if len(deserialized.Checks) != 0 {
+			t.Errorf("deserialized.Checks = %v, want empty", deserialized.Checks)
+		}
+	})
+}
+
+func TestLaneCreateWithChecks(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("with checks", func(t *testing.T) {
+		repoDir := t.TempDir()
+		initGitRepo(t, repoDir)
+
+		checks := []string{"go test ./...", "go vet ./..."}
+		ln, err := lane.Create(ctx, repoDir, []string{"*"}, "test-model", checks...)
+		if err != nil {
+			t.Fatalf("Create failed: %v", err)
+		}
+		if len(ln.Checks) != len(checks) {
+			t.Fatalf("ln.Checks len = %d, want %d", len(ln.Checks), len(checks))
+		}
+		for i, c := range checks {
+			if ln.Checks[i] != c {
+				t.Errorf("ln.Checks[%d] = %q, want %q", i, ln.Checks[i], c)
+			}
+		}
+
+		// Verify persisted lane.json
+		loaded, err := lane.Load(repoDir, ln.ID)
+		if err != nil {
+			t.Fatalf("Load failed: %v", err)
+		}
+		if len(loaded.Checks) != len(checks) {
+			t.Fatalf("loaded.Checks len = %d, want %d", len(loaded.Checks), len(checks))
+		}
+		for i, c := range checks {
+			if loaded.Checks[i] != c {
+				t.Errorf("loaded.Checks[%d] = %q, want %q", i, loaded.Checks[i], c)
+			}
+		}
+
+		// Verify JSON file contains checks
+		data, err := os.ReadFile(lane.LanePath(repoDir, ln.ID))
+		if err != nil {
+			t.Fatalf("ReadFile failed: %v", err)
+		}
+		var raw map[string]any
+		if err := json.Unmarshal(data, &raw); err != nil {
+			t.Fatalf("Unmarshal raw failed: %v", err)
+		}
+		if _, exists := raw["checks"]; !exists {
+			t.Errorf("expected 'checks' key in lane.json when checks provided")
+		}
+	})
+
+	t.Run("without checks", func(t *testing.T) {
+		repoDir := t.TempDir()
+		initGitRepo(t, repoDir)
+
+		ln, err := lane.Create(ctx, repoDir, []string{"*"}, "test-model")
+		if err != nil {
+			t.Fatalf("Create failed: %v", err)
+		}
+		if len(ln.Checks) != 0 {
+			t.Errorf("ln.Checks = %v, want empty/nil", ln.Checks)
+		}
+
+		loaded, err := lane.Load(repoDir, ln.ID)
+		if err != nil {
+			t.Fatalf("Load failed: %v", err)
+		}
+		if len(loaded.Checks) != 0 {
+			t.Errorf("loaded.Checks = %v, want empty/nil", loaded.Checks)
+		}
+
+		data, err := os.ReadFile(lane.LanePath(repoDir, ln.ID))
+		if err != nil {
+			t.Fatalf("ReadFile failed: %v", err)
+		}
+		var raw map[string]any
+		if err := json.Unmarshal(data, &raw); err != nil {
+			t.Fatalf("Unmarshal raw failed: %v", err)
+		}
+		if _, exists := raw["checks"]; exists {
+			t.Errorf("expected 'checks' key omitted in lane.json when no checks provided, got: %v", raw["checks"])
+		}
+	})
+}

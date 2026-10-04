@@ -22,18 +22,19 @@ import (
 	"github.com/LanzerDevCorp/lucind-ai/internal/dispatch"
 )
 
-const usage = "usage: lucind-ai dispatch --cwd <dir> --allow <glob>... --brief <file|-> [--model M] [--timeout D] [--detach] [--lane <id>] [--min-quota F]\n" +
+const usage = "usage: lucind-ai dispatch --cwd <dir> --allow <glob>... --brief <file|-> [--check <cmd>]... [--model M] [--timeout D] [--detach] [--lane <id>] [--min-quota F]\n" +
 	"       lucind-ai wait <lane> [--cwd <dir>] [--timeout D]\n" +
-	"       lucind-ai check [--out <path>]\n" +
+	"       lucind-ai check [--out <path>]   (deprecated)\n" +
 	"       lucind-ai accept --lane <id>\n" +
 	"       lucind-ai attest run -- <command> [args...]\n" +
 	"       lucind-ai attest verify --command \"<exact command string>\"\n" +
 	"       lucind-ai hook pre-tool-use|stop   (agy plugin handlers; stdin JSON)\n" +
 	"       lucind-ai plugin install [--dir <staging root>]   (registers via agy plugin install)\n" +
+	"       lucind-ai install\n" +
 	"       lucind-ai --version"
 
 const (
-	dispatchUsage = "usage: lucind-ai dispatch --cwd <dir> --allow <glob>... --brief <file|-> [--model M] [--timeout D] [--detach] [--lane <id>] [--min-quota F]"
+	dispatchUsage = "usage: lucind-ai dispatch --cwd <dir> --allow <glob>... --brief <file|-> [--check <cmd>]... [--model M] [--timeout D] [--detach] [--lane <id>] [--min-quota F]"
 	waitUsage     = "usage: lucind-ai wait <lane> [--cwd <dir>] [--timeout D]"
 )
 
@@ -70,6 +71,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return hookDispatch(ctx, args[1:], os.Stdin, stdout, stderr)
 	case "plugin":
 		return pluginDispatch(ctx, args[1:], stdout, stderr)
+	case "install":
+		return runInstall(ctx, args[1:], stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "lucind-ai: unknown subcommand %q\n%s\n", args[0], usage)
 		return 1
@@ -80,7 +83,7 @@ func runCheck(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 	fs := flag.NewFlagSet("check", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
-		fmt.Fprintln(stderr, "usage: lucind-ai check [--out <path>]")
+		fmt.Fprintln(stderr, "usage: lucind-ai check [--out <path>] (deprecated)")
 		fs.PrintDefaults()
 	}
 
@@ -243,6 +246,23 @@ func (s *stringSliceFlag) Set(val string) error {
 	return nil
 }
 
+type checkSliceFlag []string
+
+func (s *checkSliceFlag) String() string {
+	if s == nil || len(*s) == 0 {
+		return ""
+	}
+	return strings.Join(*s, ", ")
+}
+
+func (s *checkSliceFlag) Set(val string) error {
+	if strings.TrimSpace(val) == "" {
+		return errors.New("check command cannot be empty")
+	}
+	*s = append(*s, val)
+	return nil
+}
+
 func parseDuration(s string) (time.Duration, error) {
 	s = strings.TrimSpace(s)
 	if s == "" {
@@ -269,6 +289,8 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 	cwd := fs.String("cwd", "", "working directory (required)")
 	var allow stringSliceFlag
 	fs.Var(&allow, "allow", "allowed glob pattern (repeatable or comma-separated, required)")
+	var checks checkSliceFlag
+	fs.Var(&checks, "check", "verification command to run and attest (repeatable)")
 	briefPath := fs.String("brief", "", "path to brief file or '-' for stdin (required)")
 	model := fs.String("model", "", "model override")
 	timeoutStr := fs.String("timeout", "60m", "timeout duration")
@@ -353,6 +375,7 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 		Cwd:      *cwd,
 		LaneID:   *laneID,
 		Allow:    allow,
+		Checks:   checks,
 		Model:    *model,
 		Brief:    briefContent,
 		MinQuota: *minQuota,
@@ -487,4 +510,3 @@ func runWait(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fmt.Fprintln(stdout, string(data))
 	return exitCode
 }
-

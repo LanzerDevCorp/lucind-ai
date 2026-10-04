@@ -1,0 +1,200 @@
+# lane-checks-and-install
+
+Branch: `feature/lane-checks-and-install` (from `dev`). Delivery strategy: `ask-on-risk`.
+
+## Objective
+
+1. Let the orchestrator choose, per lane, which verification commands must be attested (zero or N),
+   and deprecate the hardcoded `sh lucind-checks.sh`.
+2. Add one fixed, flagless `lucind-ai install` that installs everything lucind needs (agy plugin
+   and the Claude skill) so the binary is portable to any machine.
+
+## Problem and why
+
+- `accept` only trusts an attestation of the exact command `sh lucind-checks.sh`
+  (`internal/accept/accept.go:89`), so a project with several test types and e2e cannot scope
+  verification to the change.
+- Only the agy side is installed by the CLI; the Claude skill is a Makefile symlink
+  (`Makefile:10-14`) and does not travel with the binary.
+
+## Decisions (user-confirmed)
+
+- `--check '<cmd>'` on `dispatch` is repeatable and optional. Zero checks means `accept` requires
+  no attestation and validates only the result envelope and allowed globs.
+- `lucind-checks.sh` is deprecated: no default, no fallback runner in the lane flow.
+  Running the whole suite is the orchestrator's call, passed as a `--check`.
+- `lane.json` `checks` is the single source of truth for the lane's checks. Today the orchestrator
+  fills it with flags; a future Jev-driven selector only has to write that field. `attest` and
+  `accept` read it and nothing else. No selector interface now.
+- `lucind-ai install` takes no configuration flags (one internal flag for tests is allowed). It
+  always installs the same assets. The Claude skill is embedded with `go:embed` and copied, not
+  symlinked.
+
+## Scope
+
+In: `internal/lane`, `internal/dispatch`, `internal/accept`, `internal/check` (deprecate),
+`cmd/lucind-ai` (dispatch flag, install command, help), agy plugin assets, Claude skill, docs,
+Makefile.
+Out: `internal/attest` internals (matches by exact command string already), result schema,
+Jev integration itself.
+
+## Constraints
+
+- Test-first: Go tests exist, so observe RED, then GREEN, then refactor. `go test ./...` is the runner.
+- Artifacts in English. About 400 authored changed lines per task is a planning heuristic only.
+- `attest` records `strings.Join(argv, " ")`, so the command string given to `--check` must be the
+  exact string agy runs; the footer must print it verbatim.
+- After any change touching the binary: `make install` (project CLAUDE.md).
+
+## Tasks
+
+Route per task is recorded when started (inline or delegated, with trigger evidence).
+
+- [x] T1 `lane.json` `checks` field and `dispatch --check` (repeatable, optional); footer lists
+      `lucind-ai attest run -- <cmd>` per check and omits the attest step when there are none.
+      Route: delegated to agy via lucind lane `20261004-053033-5b71` (writes 6 non-trivial files,
+      mapped by an explorer first). Accepted; `lane.CheckCommand` is the shared helper for T2.
+- [x] T2 (commit `d6ad882`, lane `20261004-055320-1006`, agy) `accept`: require a valid attestation per lane check on the final tree, run only the
+      missing ones, accept with none; receipt evidence records per-check attestation or log.
+      Stop using `check.Check` and the hardcoded string.
+- [x] T3 (lane `20261004-060931-1de1`, agy, `retries: 0`) Deprecate `lucind-checks.sh`: update agy rule and `lucind-result` skill, Claude skill,
+      docs (`docs/attestation.md`, `docs/product.md`, `README.md`, `CONTEXT.md`), `cli.go:153`
+      log label; mark the `check` subcommand deprecated in help.
+- [x] T4 (commit `113ae0d`, lane `20261004-063252-cfc0`, agy + a follow-up turn) `lucind-ai install`: embed the Claude skill, copy it to `~/.claude/skills/lucind`, then
+      run the existing agy plugin setup; Makefile `install` calls it. Also embed and install the
+      `lucind-roles` agy plugin (`plugin.json`, `agents/worker.md` with the `tools` frontmatter
+      from T8), so a fresh machine gets a working worker role; its source is not in the repo today.
+
+- [x] T5 Bug: `dispatch` passes a relative `--cwd` (for example `.`) unresolved to
+      `herdr pane split --cwd`, so the pane opens in the herdr server's home and the agy
+      PreToolUse hook denies every tool call (`git rev-parse --show-toplevel` fails, lane hangs).
+      Fix 1: resolve `--cwd` to an absolute path at the start of `Dispatch` and report it in the
+      output JSON. Fix 2: after creating the pane, compare its real cwd (`herdr pane get`) with the
+      expected one; on mismatch close the pane and fail with both paths. Found when lane
+      `20261004-052728-9ea1` died this way. Idea parked, not in scope: pass the repo root to the
+      hook in an env var (`LUCIND_REPO`) so it stops depending on the pane cwd.
+
+      Route: delegated to agy via lane `20261004-054348-0962`. Accepted, commit `09aab78`.
+- [x] T6 (commit `c9f3aba`, inline) Pane lifecycle guidance in `plugin/claude-code/skills/lucind/SKILL.md` (skill only, no
+      Go): after `accept`, the orchestrator decides per lane. Default: close the pane with
+      `herdr pane close <pane_id>`. Alternative: leave it open to ask the implementer follow-up
+      questions about the diff with its fresh context (`herdr agent prompt <pane_id> ...`), then
+      close it. Also use `--cwd "$PWD"` in the dispatch example. No `accept --close-pane` flag
+      for now (it would change the lucind-ai contract). Found when pane `w1:p13` stayed open.
+
+- [x] T7 (commit `d35c7a6`, lane `20261004-064637-d5cb`) Polish the dispatch footer: it repeats "As the final verification run exactly..." once
+      per check; print one intro line and a list of commands.
+- [x] T8 Fix the `worker` role in the `lucind-roles` agy plugin. Root cause (per
+      `docs/provider-docs/gemini/subagents.md`): custom agent frontmatter `tools` defaults to `[]`,
+      and `worker.md` declared none, so the role had no tools. Fix: declared `tools`
+      (`view_file`, `write_to_file`, `replace_file_content`, `multi_replace_file_content`,
+      `list_dir`, `find_by_name`, `grep_search`, `run_command`), plus `subagent: true` and
+      `mainAgent: false`, in the installed copy
+      `~/.gemini/config/plugins/lucind-roles/agents/worker.md` (outside this repo, so done inline,
+      not as a lane; backup kept in the session scratchpad). Probe with a free agy: the worker
+      created a file with `write_to_file` and ran `go test ./internal/lane/...` and `go version`
+      with `run_command`, all succeeded. The docs warn that a misspelled tool name can hang the
+      subagent, so names were copied from the documented list. `commandExecutionPolicy` left at
+      its default (`sandbox`); its semantics are undocumented and the probe did not need a change.
+      Remaining: the role source is not in this repo, so a re-registration could overwrite the
+      fix; T4 must ship `lucind-roles` as an embedded asset and install it.
+- [x] T9 Find out why lane `20261004-054348-0962` (T5) needed `retries: 2` on the result envelope.
+      Finding: agy's orchestrator goes idle while its worker subagent is still running, so the
+      Stop hook sees no valid `result.json` and spends a retry (`internal/agyhook/agyhook.go:226`,
+      `MaxRetries = 2`). Observed retries across lanes: 2, 1, 2, 1, 0, 2. A third early stop would
+      mark the lane failed while agy is still working, so it is a real fragility, and the hook logs
+      nothing about each retry (only the final `lane marked done (retries=N)`). Follow-ups T13/T14.
+- [x] T12 (commit `2f99eb5`, inline, `gofmt -l .` now empty) Format with `gofmt`: lanes left unformatted files (`gofmt -l` lists several; `status.go`
+      was already unformatted on `dev`). One `style:` commit, then use `test -z "$(gofmt -l ...)"`
+      as a `--check` in later lanes.
+- [x] T13 (commit `d35c7a6`) Bug: on a continuation (`dispatch --lane <id>`) the previous `result.json` stays on disk,
+      so the Stop hook accepts the stale envelope and marks the lane `done` while agy is still
+      working (seen in T4's follow-up turn). Move the old file aside (for example
+      `result.prev.json`) when continuing so a fresh envelope is required.
+- [x] T14 (commit `d35c7a6`; logging only) Make the Stop hook log every retry with its reason in
+      `hook.log`; decide separately whether stops while a subagent is still running should consume
+      retries (see T15).
+- [ ] T15 Decide and fix retry exhaustion. Lane `20261004-064637-d5cb` ended with `lane.json`
+      status `failed` (`retries: 2`) although agy kept working and later wrote a valid `done`
+      envelope; `accept` only reads the envelope, so it was accepted, but `wait` and `dispatch`
+      reported failure. Same root cause as T9. Wait for data first: the binary built from
+      `d35c7a6` is the first whose Stop hook logs each retry reason in `hook.log`, so read those
+      logs from the next lanes before choosing between (a) not spending retries while a subagent
+      is running, (b) a higher `MaxRetries`, (c) letting `wait` re-read `result.json` before
+      reporting `failed`.
+- [ ] T10 Rewrite the global `~/.claude/CLAUDE.md` orchestration rules so code-changing work is
+      dispatched through lucind-ai, and native Claude subagents become the exception (user request).
+- [x] T11 Verified: agy does persist Key Learnings. Engram holds observations that the orchestrator
+      did not write and that match the lanes (for example "Herdr pane cwd fail-fast validation",
+      "Embedding asset trees across Go packages with go:embed", "Declarative lane checks
+      verification"). Caveat: they can encode mistakes (one note about symlink handling was vague
+      around the overreach fixed in T4), so they are not reviewed truth.
+      Original task: Verify in a real lane that agy actually persists Key Learnings with Engram `mem_save`
+      (no hook captures them; only the instruction in the agy plugin asks for it).
+
+## Follow-up details
+
+- Dispatch footer repeats "As the final verification run exactly..." once per check; works but is
+  redundant. Minor polish.
+- Reported by the agy worker: the `worker` role in the `lucind-roles` agy plugin is registered with
+  `enable_write_tools: false`, which blocks implementer subagents from editing files or running
+  commands; agy defined `impl-worker` dynamically with `enable_write_tools: true`. Update the
+  `worker` registration (or document `impl-worker`). The plugin lives outside this repo and its
+  on-disk location was not verified. Engram: `odd/lane-checks-and-install/pending-lucind-roles-worker`.
+- Lane `20261004-054348-0962` (T5) needed `retries: 2` on the result envelope; worth finding why.
+
+## Acceptance criteria
+
+- `dispatch` with no `--check` produces a lane that `accept` can accept without any attestation.
+- `dispatch` with two `--check` values: `accept` rejects when either lacks a valid attestation for
+  the final tree and runs only the missing one(s).
+- No non-test code path references `lucind-checks.sh` as a default.
+- `lucind-ai install` on a clean HOME produces the Claude skill copy and the registered agy plugin.
+- `go test ./...` passes; `lucind-ai -v` reflects the installed commit after `make install`.
+
+## Progress
+
+- Explorer map done (attest/accept/lane/install); findings folded into the tasks above.
+- T1 done and accepted. T5 found while dispatching T1 (relative `--cwd`); queued after T1 because
+  both edit `internal/dispatch/dispatch.go` (one writer per tree).
+
+## Verification evidence
+
+- T1: agy reported RED then GREEN per criterion; parent spot check
+  `go test ./internal/lane/... ./internal/dispatch/... ./cmd/lucind-ai/...`: 162 passed;
+  `lucind-ai accept` accepted lane `20261004-053033-5b71`.
+
+## Commits
+
+- T1: `8c3b84d` feat(dispatch). Review assessment: risk medium (`executable_change`), 643 lines,
+  `review_due: true` (`slice_budget_reached`), but native review preflight returned
+  `stop: rdd_disabled`, so the tier outcome is unmanaged (RDD is off for this clone; not enabled
+  on the user's behalf).
+
+- T2: first real use of `dispatch --check` (two checks). Footer rendered correctly. Accepted with
+  the old binary, then re-accepted with the new one (`d6ad882`): both receipt evidence entries
+  used the agy attestation (`attestation` set, no `check_log`), so nothing was re-run.
+
+- T3: commit `af2d2e7`. Parent spot check `go test ./...` 328 passed, `go vet ./...` clean; receipt
+  evidence used both agy attestations. `rg lucind-checks README.md docs plugin internal/agyplugin`
+  leaves only the deprecated `check` subcommand mentions. Agy also removed stale
+  `Verifier.Verify`/`integrate.Check`/`ChecksHash` text from `docs/attestation.md`; verified those
+  symbols no longer exist in the Go code.
+
+- T4: first turn reported `done` with only the `lucind-roles` part; the orchestrator rejected it
+  as incomplete and sent a follow-up turn to the same lane. Review also found agy's
+  `claudeplugin` removed every symlink component from `$HOME` down to the skill directory (it
+  would delete a dotfiles-managed `~/.claude`) and had a test requiring it; fixed inline with RED
+  then GREEN (only the destination symlink is replaced; parents are written through). Parent
+  checks: `go test ./...` 357 passed, `go vet ./...` clean; stale attestations made `accept` run
+  both checks itself. First real `make install`: all three components installed, skill copy equals
+  the repo source, installed `worker` equals the embedded one.
+
+- T7/T13/T14: first lane with three checks including `gofmt`; all three attestations reused by
+  `accept` (no re-run). Parent spot check: `go test ./...` clean, `go vet ./...` clean,
+  `gofmt -l .` empty. `lane.json` showed `failed` with `retries: 2` before accept (see T15).
+
+## Next step
+
+T10 (global CLAUDE.md rewrite) is excluded by the user's goal and stays pending. T15 waits for
+retry data from `hook.log` in upcoming lanes.

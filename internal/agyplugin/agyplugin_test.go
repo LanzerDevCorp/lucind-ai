@@ -218,3 +218,116 @@ func TestStagingRoot_HonorsXDGDataHome(t *testing.T) {
 		t.Errorf("fallback StagingRoot = %q", got)
 	}
 }
+
+func TestInstallRoles_WritesPluginTree(t *testing.T) {
+	root := t.TempDir()
+	dir, err := InstallRoles(root)
+	if err != nil {
+		t.Fatalf("InstallRoles: %v", err)
+	}
+	if want := filepath.Join(root, RolesName); dir != want {
+		t.Fatalf("dir = %s, want %s", dir, want)
+	}
+	for _, rel := range []string{"plugin.json", "agents/worker.md"} {
+		if _, err := os.Stat(filepath.Join(dir, rel)); err != nil {
+			t.Errorf("missing %s: %v", rel, err)
+		}
+	}
+	var manifest struct{ Name string }
+	data, _ := os.ReadFile(filepath.Join(dir, "plugin.json"))
+	if err := json.Unmarshal(data, &manifest); err != nil || manifest.Name != RolesName {
+		t.Fatalf("plugin.json name = %q, err %v", manifest.Name, err)
+	}
+	worker, _ := os.ReadFile(filepath.Join(dir, "agents/worker.md"))
+	if len(worker) == 0 {
+		t.Errorf("agents/worker.md is empty")
+	}
+}
+
+func TestInstallRoles_OverwritesAndRemovesStaleFiles(t *testing.T) {
+	root := t.TempDir()
+	dir, err := InstallRoles(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale := filepath.Join(dir, "agents", "old.md")
+	if err := os.WriteFile(stale, []byte("stale"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := InstallRoles(root); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Errorf("stale file survived reinstall: %v", err)
+	}
+}
+
+func TestCheckRolesInstallOutput(t *testing.T) {
+	good := "\x1b[32m[ok]\x1b[0m lucind-roles\n  \u2714 agents      : 1 processed\n"
+	if err := checkRolesInstallOutput(good); err != nil {
+		t.Errorf("good output rejected: %v", err)
+	}
+	for name, out := range map[string]string{
+		"no agents":   "[ok]    lucind-roles\n  - agents      : skipped (not found)\n",
+		"zero agents": "  \u2714 agents      : 0 processed\n",
+		"error shown": "[error] lucind-roles\n  \u2714 agents      : 1 processed\n",
+		"fail shown":  "[fail]  lucind-roles\n  \u2714 agents      : 1 processed\n",
+	} {
+		if err := checkRolesInstallOutput(out); err == nil {
+			t.Errorf("%s: expected rejection", name)
+		}
+	}
+}
+
+func TestSetupRoles_RegistersViaAgyPluginInstall(t *testing.T) {
+	staging := t.TempDir()
+	goodRolesInstall := "\x1b[32m[ok]\x1b[0m lucind-roles\n  \u2714 agents      : 1 processed\n"
+	agy := &fakeAgy{list: `{"imports":[{"name":"lucind"}]}`, install: goodRolesInstall}
+	dir, err := SetupRoles(context.Background(), Options{StagingRoot: staging, Agy: agy})
+	if err != nil {
+		t.Fatalf("SetupRoles: %v", err)
+	}
+	if want := filepath.Join(staging, RolesName); dir != want {
+		t.Fatalf("dir = %s, want %s", dir, want)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "agents", "worker.md")); err != nil {
+		t.Errorf("staging not rendered: %v", err)
+	}
+	want := [][]string{{"plugin", "list"}, {"plugin", "install", dir}}
+	if !reflect.DeepEqual(agy.calls, want) {
+		t.Errorf("agy calls = %v, want %v", agy.calls, want)
+	}
+}
+
+func TestSetupRoles_UninstallsExistingImportFirst(t *testing.T) {
+	staging := t.TempDir()
+	goodRolesInstall := "\x1b[32m[ok]\x1b[0m lucind-roles\n  \u2714 agents      : 1 processed\n"
+	agy := &fakeAgy{list: `{"imports":[{"name":"lucind-roles"},{"name":"other"}]}`, install: goodRolesInstall}
+	dir, err := SetupRoles(context.Background(), Options{StagingRoot: staging, Agy: agy})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := [][]string{{"plugin", "list"}, {"plugin", "uninstall", RolesName}, {"plugin", "install", dir}}
+	if !reflect.DeepEqual(agy.calls, want) {
+		t.Errorf("agy calls = %v, want %v", agy.calls, want)
+	}
+}
+
+func TestSetupRoles_FailsWhenAgyMissing(t *testing.T) {
+	agy := &fakeAgy{err: map[string]error{"plugin list": ErrAgyNotFound}}
+	_, err := SetupRoles(context.Background(), Options{StagingRoot: t.TempDir(), Agy: agy})
+	if err == nil || !strings.Contains(err.Error(), "agy") {
+		t.Fatalf("expected clear agy error, got %v", err)
+	}
+}
+
+func TestSetupRoles_FailsWhenInstallReportsError(t *testing.T) {
+	agy := &fakeAgy{list: `{}`, install: "[error] lucind-roles\n", err: nil}
+	if _, err := SetupRoles(context.Background(), Options{StagingRoot: t.TempDir(), Agy: agy}); err == nil {
+		t.Fatal("expected failure on [error] output")
+	}
+	agy = &fakeAgy{list: `{}`, err: map[string]error{"plugin install": errors.New("exit 1")}}
+	if _, err := SetupRoles(context.Background(), Options{StagingRoot: t.TempDir(), Agy: agy}); err == nil {
+		t.Fatal("expected failure on agy exit error")
+	}
+}
