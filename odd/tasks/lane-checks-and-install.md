@@ -114,7 +114,17 @@ Route per task is recorded when started (inline or delegated, with trigger evide
 - [x] T14 (commit `d35c7a6`; logging only) Make the Stop hook log every retry with its reason in
       `hook.log`; decide separately whether stops while a subagent is still running should consume
       retries (see T15).
-- [ ] T15 Decide and fix retry exhaustion. Lane `20261004-064637-d5cb` ended with `lane.json`
+- [ ] T15 (plan, branch `feature/lane-stop-retries`; user chose to do (a) and (c)) Three steps:
+      T15a lane: `wait` revalidates `result.json` before reporting `failed` (option c, grace
+      period after retry exhaustion) and the Stop hook logs the full payload of every Stop
+      (`executionNum`, `terminationReason`, `fullyIdle`, retry counter), all with unit tests that
+      simulate Stop payloads. T15b: two real probe lanes to observe agy's real payloads (forced
+      early stop without `result.json`; orchestrator ends its turn while a subagent runs
+      `sleep 90`). T15c: option (a), do not spend retries while a subagent is running, using
+      the signal the probes show. Note: the hook already skips retries when `fullyIdle` is false,
+      yet retries were spent, so either agy reports `fullyIdle: true` during subagent work or
+      those stops were legitimate; the payload logging decides it.
+      Original description: Decide and fix retry exhaustion. Lane `20261004-064637-d5cb` ended with `lane.json`
       status `failed` (`retries: 2`) although agy kept working and later wrote a valid `done`
       envelope; `accept` only reads the envelope, so it was accepted, but `wait` and `dispatch`
       reported failure. Same root cause as T9. Wait for data first: the binary built from
