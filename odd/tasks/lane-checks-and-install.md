@@ -54,7 +54,7 @@ Route per task is recorded when started (inline or delegated, with trigger evide
       `lucind-ai attest run -- <cmd>` per check and omits the attest step when there are none.
       Route: delegated to agy via lucind lane `20261004-053033-5b71` (writes 6 non-trivial files,
       mapped by an explorer first). Accepted; `lane.CheckCommand` is the shared helper for T2.
-- [ ] T2 `accept`: require a valid attestation per lane check on the final tree, run only the
+- [x] T2 (commit `d6ad882`, lane `20261004-055320-1006`, agy) `accept`: require a valid attestation per lane check on the final tree, run only the
       missing ones, accept with none; receipt evidence records per-check attestation or log.
       Stop using `check.Check` and the hardcoded string.
 - [ ] T3 Deprecate `lucind-checks.sh`: update agy rule and `lucind-result` skill, Claude skill,
@@ -79,6 +79,17 @@ Route per task is recorded when started (inline or delegated, with trigger evide
       questions about the diff with its fresh context (`herdr agent prompt <pane_id> ...`), then
       close it. Also use `--cwd "$PWD"` in the dispatch example. No `accept --close-pane` flag
       for now (it would change the lucind-ai contract). Found when pane `w1:p13` stayed open.
+
+## Follow-ups (not in scope of T1-T6)
+
+- Dispatch footer repeats "As the final verification run exactly..." once per check; works but is
+  redundant. Minor polish.
+- Reported by the agy worker: the `worker` role in the `lucind-roles` agy plugin is registered with
+  `enable_write_tools: false`, which blocks implementer subagents from editing files or running
+  commands; agy defined `impl-worker` dynamically with `enable_write_tools: true`. Update the
+  `worker` registration (or document `impl-worker`). The plugin lives outside this repo and its
+  on-disk location was not verified. Engram: `odd/lane-checks-and-install/pending-lucind-roles-worker`.
+- Lane `20261004-054348-0962` (T5) needed `retries: 2` on the result envelope; worth finding why.
 
 ## Acceptance criteria
 
@@ -108,6 +119,10 @@ Route per task is recorded when started (inline or delegated, with trigger evide
   `stop: rdd_disabled`, so the tier outcome is unmanaged (RDD is off for this clone; not enabled
   on the user's behalf).
 
+- T2: first real use of `dispatch --check` (two checks). Footer rendered correctly. Accepted with
+  the old binary, then re-accepted with the new one (`d6ad882`): both receipt evidence entries
+  used the agy attestation (`attestation` set, no `check_log`), so nothing was re-run.
+
 ## Next step
 
-Start T1 with one delegated writer.
+T3 (deprecate `lucind-checks.sh`), then T4 (`lucind-ai install`) and T6 (skill guidance).
