@@ -57,7 +57,7 @@ Route per task is recorded when started (inline or delegated, with trigger evide
 - [x] T2 (commit `d6ad882`, lane `20261004-055320-1006`, agy) `accept`: require a valid attestation per lane check on the final tree, run only the
       missing ones, accept with none; receipt evidence records per-check attestation or log.
       Stop using `check.Check` and the hardcoded string.
-- [ ] T3 Deprecate `lucind-checks.sh`: update agy rule and `lucind-result` skill, Claude skill,
+- [x] T3 (lane `20261004-060931-1de1`, agy, `retries: 0`) Deprecate `lucind-checks.sh`: update agy rule and `lucind-result` skill, Claude skill,
       docs (`docs/attestation.md`, `docs/product.md`, `README.md`, `CONTEXT.md`), `cli.go:153`
       log label; mark the `check` subcommand deprecated in help.
 - [ ] T4 `lucind-ai install`: embed the Claude skill, copy it to `~/.claude/skills/lucind`, then
@@ -80,7 +80,18 @@ Route per task is recorded when started (inline or delegated, with trigger evide
       close it. Also use `--cwd "$PWD"` in the dispatch example. No `accept --close-pane` flag
       for now (it would change the lucind-ai contract). Found when pane `w1:p13` stayed open.
 
-## Follow-ups (not in scope of T1-T6)
+- [ ] T7 Polish the dispatch footer: it repeats "As the final verification run exactly..." once
+      per check; print one intro line and a list of commands.
+- [ ] T8 Update the `worker` role in the `lucind-roles` agy plugin (registered with
+      `enable_write_tools: false`, which blocks implementer subagents) or document `impl-worker`.
+      See "Follow-up details".
+- [ ] T9 Find out why lane `20261004-054348-0962` (T5) needed `retries: 2` on the result envelope.
+- [ ] T10 Rewrite the global `~/.claude/CLAUDE.md` orchestration rules so code-changing work is
+      dispatched through lucind-ai, and native Claude subagents become the exception (user request).
+- [ ] T11 Verify in a real lane that agy actually persists Key Learnings with Engram `mem_save`
+      (no hook captures them; only the instruction in the agy plugin asks for it).
+
+## Follow-up details
 
 - Dispatch footer repeats "As the final verification run exactly..." once per check; works but is
   redundant. Minor polish.
@@ -123,6 +134,12 @@ Route per task is recorded when started (inline or delegated, with trigger evide
   the old binary, then re-accepted with the new one (`d6ad882`): both receipt evidence entries
   used the agy attestation (`attestation` set, no `check_log`), so nothing was re-run.
 
+- T3: commit `af2d2e7`. Parent spot check `go test ./...` 328 passed, `go vet ./...` clean; receipt
+  evidence used both agy attestations. `rg lucind-checks README.md docs plugin internal/agyplugin`
+  leaves only the deprecated `check` subcommand mentions. Agy also removed stale
+  `Verifier.Verify`/`integrate.Check`/`ChecksHash` text from `docs/attestation.md`; verified those
+  symbols no longer exist in the Go code.
+
 ## Next step
 
-T3 (deprecate `lucind-checks.sh`), then T4 (`lucind-ai install`) and T6 (skill guidance).
+T4 (`lucind-ai install`) and T6 (skill pane lifecycle, inline), then the follow-up tasks T7-T11.
