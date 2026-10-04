@@ -30,6 +30,7 @@ const usage = "usage: lucind-ai dispatch --cwd <dir> --allow <glob>... --brief <
 	"       lucind-ai attest verify --command \"<exact command string>\"\n" +
 	"       lucind-ai hook pre-tool-use|stop   (agy plugin handlers; stdin JSON)\n" +
 	"       lucind-ai plugin install [--dir <staging root>]   (registers via agy plugin install)\n" +
+	"       lucind-ai install\n" +
 	"       lucind-ai --version"
 
 const (
@@ -70,6 +71,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return hookDispatch(ctx, args[1:], os.Stdin, stdout, stderr)
 	case "plugin":
 		return pluginDispatch(ctx, args[1:], stdout, stderr)
+	case "install":
+		return runInstall(ctx, args[1:], stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "lucind-ai: unknown subcommand %q\n%s\n", args[0], usage)
 		return 1

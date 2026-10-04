@@ -139,6 +139,4 @@ fresh agy session; an open session does not pick up new credentials reliably.
 
 ## Setup
 
-`make install` installs the binary and the embedded agy plugin
-(`lucind-ai plugin install`, which registers it via `agy plugin install` into `~/.gemini/config/plugins/lucind/`). Check the build with
-`lucind-ai -v` before dispatching.
+`lucind-ai install` installs the Claude skill into `~/.claude/skills/lucind`, the `lucind` agy plugin, and the `lucind-roles` agy plugin. `make install` builds the binary and runs `lucind-ai install`. Check the build with `lucind-ai -v` before dispatching.

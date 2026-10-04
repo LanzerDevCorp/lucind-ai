@@ -23,6 +23,7 @@ dispatch (lane + agy pane) -> agy edits within --allow -> attest run -> result.j
 | `check` | Run `lucind-checks.sh` (deprecated). |
 | `hook pre-tool-use\|stop` | agy plugin handlers. |
 | `plugin install` | Install the embedded agy plugin. |
+| `install` | Install the Claude skill, the `lucind` agy plugin, and the `lucind-roles` agy plugin. |
 | `--version` | Exact build. |
 
 Lane state is plain JSON in `.lucind/lanes/<id>/`. Requires `HERDR_ENV=1` and `agy`.
@@ -33,8 +34,7 @@ Lane state is plain JSON in `.lucind/lanes/<id>/`. Requires `HERDR_ENV=1` and `a
 make install
 ```
 
-Installs the binary, the agy plugin (registered via `agy plugin install` into `~/.gemini/config/plugins/lucind/`) and links the
-Claude skill into `~/.claude/skills/lucind`. Verify with `lucind-ai -v`.
+Installs the binary and runs `lucind-ai install`, which installs the Claude skill into `~/.claude/skills/lucind`, the `lucind` agy plugin, and the `lucind-roles` agy plugin. Verify with `lucind-ai -v`.
 
 ## Docs
 

@@ -38,6 +38,7 @@ Claude --accept--> receipt.json (accepted | rejected)
 | `check [--out <path>]` | Run `lucind-checks.sh` (deprecated; scrubbed env, timeout, process-group kill). |
 | `hook pre-tool-use\|stop` | Handlers called by the agy plugin. Pass-through without `LUCIND_LANE`. |
 | `plugin install [--dir <staging root>]` | Render the embedded agy plugin into a staging dir (`$XDG_DATA_HOME/lucind-ai/agy-plugin/lucind`) and register it with `agy plugin install` (lands in `~/.gemini/config/plugins/lucind/`; requires `agy` on PATH). A plugin merely dropped into `~/.gemini/antigravity-cli/plugins/` validates but is never loaded, so the obsolete copy there is removed. |
+| `install` | Flagless installer for Claude skill, `lucind` agy plugin, and `lucind-roles` agy plugin. |
 | `--version` | Exact build (`git describe`). |
 
 `dispatch`/`wait` print one JSON object. Exit codes: 0 done, 1 error, 3 failed, 4 timeout.
@@ -73,8 +74,8 @@ Without `LUCIND_LANE` every hook is a no-op, so free/manual agy sessions are una
 
 ## Setup
 
-`make install` installs the binary, runs `lucind-ai plugin install`, and links the Claude skill into
-`~/.claude/skills/lucind`, so the three never drift. Check the build with `lucind-ai -v`.
+`make install` builds the binary and runs `lucind-ai install`, which installs the Claude skill, the
+`lucind` agy plugin, and the `lucind-roles` agy plugin. Check the build with `lucind-ai -v`.
 
 ## Removed on purpose
 
