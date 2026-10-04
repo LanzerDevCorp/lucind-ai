@@ -64,6 +64,38 @@ lucind-ai accept --lane <id>     # run from the lane's repo
   implementation, leave it open and ask agy with `herdr agent prompt <pane_id> "..."`, reusing the
   implementer's fresh context; close it once the question is settled.
 
+## Pane layout (preferred)
+
+Keep your own pane big on the left and put every agy pane in one column on the right, stacked.
+This is the user's preferred layout; use it for lanes, probes and read-only agy panes alike.
+
+```
+┌──────────────────────────┬────────────┐
+│                          │  lane 1    │
+│   You (orchestrator)     ├────────────┤
+│   about 70% of the width │  lane 2    │
+│                          ├────────────┤
+│                          │  lane 3    │
+└──────────────────────────┴────────────┘
+```
+
+How to get it:
+
+1. **First lane:** run `lucind-ai dispatch ...` from your pane as usual. It splits the calling pane
+   and goes **right** when the pane is at least twice as wide as it is tall (a full-width pane is).
+2. **Every further lane:** run the dispatch with `HERDR_PANE_ID` set to the **previous lane's pane**,
+   for example `HERDR_PANE_ID=w1:p1E lucind-ai dispatch ... --detach`. herdr resolves `--current`
+   from that variable, so the new pane is split from the lane column. A narrow pane (width under
+   twice its height) splits **down**, which stacks the lanes. Without this, dispatch would split
+   your own pane downward and shrink it.
+3. **Make yours bigger:** once the panes exist, run
+   `herdr pane resize --direction right --amount 0.2 --pane "$HERDR_PANE_ID"` (on a 120-column area
+   the split goes from 60/60 to 84/36). Check it with `herdr pane layout --pane "$HERDR_PANE_ID"`.
+4. **Clean up:** close each lane pane after its `accept` (see above); the column reflows by itself.
+
+Parallel lanes need `--detach`, and parallel writers still need one worktree each. With three or
+more stacked panes the heights get small; prefer fewer parallel lanes.
+
 ## Writing a brief
 
 Free Markdown, not validated by lucind-ai. Include: goal, scope, acceptance criteria, constraints
