@@ -114,7 +114,35 @@ Route per task is recorded when started (inline or delegated, with trigger evide
 - [x] T14 (commit `d35c7a6`; logging only) Make the Stop hook log every retry with its reason in
       `hook.log`; decide separately whether stops while a subagent is still running should consume
       retries (see T15).
-- [ ] T15 Decide and fix retry exhaustion. Lane `20261004-064637-d5cb` ended with `lane.json`
+- [x] T15 DONE (branch `feature/lane-stop-retries`; T15c commit `03900dc`, lane
+      `20261004-075930-8771`; follow-up fix: a continuation also resets `continues` and
+      `last_stop_at`, so the total cap of 10 means re-entries within one turn). T15a done (commit `7ff6a75`, lane
+      `20261004-074526-c8f9`; `wait` revalidates `result.json` with a 10 min grace, hook logs every
+      Stop payload). T15b done with two probe lanes (not accepted, panes closed). Data:
+      probe 1, agy told to stop without writing: 3 Stops, all `fullyIdle=true`, `executionNum`
+      0,1,2, gaps of 3 s and 7 s, lane `failed` after the 2 retries. Probe 2, orchestrator ends
+      its turn while the worker runs `sleep 90`: Stops during the 90 s had `fullyIdle=false` and
+      spent no retry (so the existing `fullyIdle` check already covers a running subagent); the
+      first Stop after the worker finished had `fullyIdle=true` with no `result.json` yet (race:
+      the orchestrator had not processed the worker's report) and spent 1 retry, then agy wrote
+      the envelope and the lane ended `done (retries=1)`. Lane `c8f9` earlier burned its retries
+      in 1m48s and 3 s. Conclusion: `fullyIdle=false` is reliable; the real problem is
+      `fullyIdle=true` stops without a result between agent actions. T15c design (progress-aware
+      budget): the retry budget resets when at least `RetryQuietWindow` (60 s) passed since the
+      last counted retry, so only consecutive quick stops exhaust it (probe 1 still fails in
+      seconds), plus a hard cap on total continues per lane (10) so a stuck agent cannot loop
+      forever. `lane.json` gets `last_stop_at` and `continues`.
+      Original plan (kept for reference), three steps:
+      T15a lane: `wait` revalidates `result.json` before reporting `failed` (option c, grace
+      period after retry exhaustion) and the Stop hook logs the full payload of every Stop
+      (`executionNum`, `terminationReason`, `fullyIdle`, retry counter), all with unit tests that
+      simulate Stop payloads. T15b: two real probe lanes to observe agy's real payloads (forced
+      early stop without `result.json`; orchestrator ends its turn while a subagent runs
+      `sleep 90`). T15c: option (a), do not spend retries while a subagent is running, using
+      the signal the probes show. Note: the hook already skips retries when `fullyIdle` is false,
+      yet retries were spent, so either agy reports `fullyIdle: true` during subagent work or
+      those stops were legitimate; the payload logging decides it.
+      Original description: Decide and fix retry exhaustion. Lane `20261004-064637-d5cb` ended with `lane.json`
       status `failed` (`retries: 2`) although agy kept working and later wrote a valid `done`
       envelope; `accept` only reads the envelope, so it was accepted, but `wait` and `dispatch`
       reported failure. Same root cause as T9. Wait for data first: the binary built from
@@ -193,6 +221,14 @@ Route per task is recorded when started (inline or delegated, with trigger evide
 - T7/T13/T14: first lane with three checks including `gofmt`; all three attestations reused by
   `accept` (no re-run). Parent spot check: `go test ./...` clean, `go vet ./...` clean,
   `gofmt -l .` empty. `lane.json` showed `failed` with `retries: 2` before accept (see T15).
+
+- T15 verification with the installed binary `ba8e0e1` (two real probe lanes, not accepted):
+  stuck agent (replies OK and stops, gaps of 5 s and 3 s) still fails fast: 3 Stops, retries 1/2
+  and 2/2, then `lane marked failed (retries, retries=2)`. Slow agent (three turns, each with
+  `sleep 70`, Stops 1m21s and 1m23s apart) survives: `retry budget reset after 1m21s` and
+  `after 1m23s`, each Stop spent retry 1/2, and the lane ended `done (retries=1)` with
+  `continues: 3`. With the previous hook the third Stop would have failed the lane. Panes were
+  laid out per the new skill section (Claude left, lanes stacked right, resized to 84/36).
 
 ## Next step
 

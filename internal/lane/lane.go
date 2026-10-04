@@ -17,18 +17,20 @@ import (
 
 // Lane represents a managed execution lane.
 type Lane struct {
-	Version   int       `json:"version"`
-	ID        string    `json:"id"`
-	Cwd       string    `json:"cwd"`
-	BaseTree  string    `json:"base_tree"`
-	Allow     []string  `json:"allow"`
-	Checks    []string  `json:"checks,omitempty"`
-	Model     string    `json:"model"`
-	PaneID    string    `json:"pane_id"`
-	Status    Status    `json:"status"`
-	Retries   int       `json:"retries"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	Version    int        `json:"version"`
+	ID         string     `json:"id"`
+	Cwd        string     `json:"cwd"`
+	BaseTree   string     `json:"base_tree"`
+	Allow      []string   `json:"allow"`
+	Checks     []string   `json:"checks,omitempty"`
+	Model      string     `json:"model"`
+	PaneID     string     `json:"pane_id"`
+	Status     Status     `json:"status"`
+	Retries    int        `json:"retries"`
+	LastStopAt *time.Time `json:"last_stop_at,omitempty"`
+	Continues  int        `json:"continues,omitempty"`
+	CreatedAt  time.Time  `json:"created_at"`
+	UpdatedAt  time.Time  `json:"updated_at"`
 }
 
 // CheckEvidence holds an attestation or check log for a single check in a completed lane receipt.

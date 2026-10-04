@@ -26,7 +26,13 @@ import (
 
 // MaxRetries is how many times Stop re-enters the agent loop for a missing
 // or schema-invalid result.json before the lane is marked failed.
-const MaxRetries = 2
+const (
+	MaxRetries        = 2
+	RetryQuietWindow  = 60 * time.Second
+	MaxTotalContinues = 10
+)
+
+var now = time.Now
 
 type toolCall struct {
 	Name string         `json:"name"`
@@ -34,9 +40,12 @@ type toolCall struct {
 }
 
 type payload struct {
-	WorkspacePaths []string  `json:"workspacePaths"`
-	ToolCall       *toolCall `json:"toolCall"`
-	FullyIdle      *bool     `json:"fullyIdle"`
+	WorkspacePaths    []string  `json:"workspacePaths"`
+	ToolCall          *toolCall `json:"toolCall"`
+	ExecutionNum      int       `json:"executionNum"`
+	TerminationReason string    `json:"terminationReason"`
+	FullyIdle         *bool     `json:"fullyIdle"`
+	Error             string    `json:"error"`
 }
 
 // fileWriteTool matches agy tools that modify a file. Observed names:
@@ -207,6 +216,15 @@ func Stop(ctx context.Context, laneID string, stdin []byte) []byte {
 	if err != nil {
 		return end()
 	}
+	idle := "unset"
+	if p.FullyIdle != nil {
+		if *p.FullyIdle {
+			idle = "true"
+		} else {
+			idle = "false"
+		}
+	}
+	logf(root, laneID, "stop: payload executionNum=%d terminationReason=%s fullyIdle=%s error=%q", p.ExecutionNum, p.TerminationReason, idle, p.Error)
 	if p.FullyIdle != nil && !*p.FullyIdle {
 		return end()
 	}
@@ -223,25 +241,48 @@ func Stop(ctx context.Context, laneID string, stdin []byte) []byte {
 	_, readErr := result.Read(os.DirFS(lane.LaneDir(root, laneID)), "result.json")
 	invalid := readErr != nil
 
-	if invalid && l.Retries < MaxRetries {
-		l.Retries++
-		l.UpdatedAt = time.Now().UTC()
-		if err := l.Save(root); err != nil {
-			logf(root, laneID, "stop: save retries: %v", err)
+	if invalid {
+		if l.LastStopAt != nil && now().Sub(*l.LastStopAt) >= RetryQuietWindow {
+			dur := now().Sub(*l.LastStopAt)
+			l.Retries = 0
+			logf(root, laneID, "stop: retry budget reset after %v without a counted stop", dur)
+		}
+
+		if l.Retries < MaxRetries && l.Continues < MaxTotalContinues {
+			l.Retries++
+			l.Continues++
+			stopTime := now().UTC()
+			l.LastStopAt = &stopTime
+			l.UpdatedAt = now().UTC()
+			if err := l.Save(root); err != nil {
+				logf(root, laneID, "stop: save retries: %v", err)
+				return end()
+			}
+			msg := readErr.Error()
+			if len(msg) > 1024 {
+				msg = strings.ToValidUTF8(msg[:1024], "")
+			}
+			if errors.Is(readErr, fs.ErrNotExist) {
+				msg = "the file does not exist"
+			}
+			logf(root, laneID, "stop: retry %d/%d: %s", l.Retries, MaxRetries, msg)
+			return cont(fmt.Sprintf("The result envelope at %s is missing or invalid: %s. Write a valid envelope that satisfies the result schema (see the lucind-result skill) to that exact path before stopping.", resultPath, msg))
+		}
+
+		status, err := lane.MarkStopped(root, laneID)
+		if err != nil {
+			logf(root, laneID, "stop: mark stopped: %v", err)
 			return end()
 		}
-		msg := readErr.Error()
-		if len(msg) > 1024 {
-			msg = strings.ToValidUTF8(msg[:1024], "")
+		limit := "retries"
+		if l.Continues >= MaxTotalContinues {
+			limit = "total continues"
 		}
-		if errors.Is(readErr, fs.ErrNotExist) {
-			msg = "the file does not exist"
-		}
-		logf(root, laneID, "stop: retry %d/%d: %s", l.Retries, MaxRetries, msg)
-		return cont(fmt.Sprintf("The result envelope at %s is missing or invalid: %s. Write a valid envelope that satisfies the result schema (see the lucind-result skill) to that exact path before stopping.", resultPath, msg))
+		logf(root, laneID, "stop: lane marked %s (%s, retries=%d)", status, limit, l.Retries)
+		return end()
 	}
 
-	// Valid result (done => done, anything else => failed) or retries exhausted.
+	// Valid result (!invalid)
 	status, err := lane.MarkStopped(root, laneID)
 	if err != nil {
 		logf(root, laneID, "stop: mark stopped: %v", err)

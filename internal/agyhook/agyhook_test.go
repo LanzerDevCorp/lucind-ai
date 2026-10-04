@@ -3,11 +3,14 @@ package agyhook
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/LanzerDevCorp/lucind-ai/internal/lane"
 )
@@ -349,6 +352,431 @@ func TestStop_RetryLogging(t *testing.T) {
 		logContent := string(logBytes)
 		if strings.Contains(logContent, "stop: retry") {
 			t.Fatalf("hook.log should not contain any retry lines for valid result; got:\n%s", logContent)
+		}
+	})
+}
+
+func TestStop_PayloadLogging(t *testing.T) {
+	t.Run("payload logged with all fields and fullyIdle true", func(t *testing.T) {
+		root := newLaneRepo(t)
+		payload := []byte(`{
+			"workspacePaths": ["` + root + `"],
+			"executionNum": 3,
+			"terminationReason": "goal_achieved",
+			"fullyIdle": true,
+			"error": ""
+		}`)
+		got := decode(t, Stop(context.Background(), laneID, payload))
+		if got["decision"] != "continue" {
+			t.Fatalf("got %v, want continue", got)
+		}
+		logBytes, err := os.ReadFile(filepath.Join(lane.LaneDir(root, laneID), "hook.log"))
+		if err != nil {
+			t.Fatalf("reading hook.log: %v", err)
+		}
+		want := `stop: payload executionNum=3 terminationReason=goal_achieved fullyIdle=true error=""`
+		if !strings.Contains(string(logBytes), want) {
+			t.Fatalf("hook.log does not contain %q; got:\n%s", want, string(logBytes))
+		}
+	})
+
+	t.Run("payload logged with fullyIdle false before early return", func(t *testing.T) {
+		root := newLaneRepo(t)
+		payload := []byte(`{
+			"workspacePaths": ["` + root + `"],
+			"executionNum": 1,
+			"terminationReason": "interrupted",
+			"fullyIdle": false,
+			"error": "user aborted"
+		}`)
+		got := decode(t, Stop(context.Background(), laneID, payload))
+		if len(got) != 0 {
+			t.Fatalf("got %v, want {}", got)
+		}
+		logBytes, err := os.ReadFile(filepath.Join(lane.LaneDir(root, laneID), "hook.log"))
+		if err != nil {
+			t.Fatalf("reading hook.log: %v", err)
+		}
+		want := `stop: payload executionNum=1 terminationReason=interrupted fullyIdle=false error="user aborted"`
+		if !strings.Contains(string(logBytes), want) {
+			t.Fatalf("hook.log does not contain %q; got:\n%s", want, string(logBytes))
+		}
+	})
+
+	t.Run("payload logged with fullyIdle absent/unset", func(t *testing.T) {
+		root := newLaneRepo(t)
+		payload := []byte(`{
+			"workspacePaths": ["` + root + `"],
+			"executionNum": 42,
+			"terminationReason": "max_turns",
+			"error": "something went wrong"
+		}`)
+		got := decode(t, Stop(context.Background(), laneID, payload))
+		if got["decision"] != "continue" {
+			t.Fatalf("got %v, want continue", got)
+		}
+		logBytes, err := os.ReadFile(filepath.Join(lane.LaneDir(root, laneID), "hook.log"))
+		if err != nil {
+			t.Fatalf("reading hook.log: %v", err)
+		}
+		want := `stop: payload executionNum=42 terminationReason=max_turns fullyIdle=unset error="something went wrong"`
+		if !strings.Contains(string(logBytes), want) {
+			t.Fatalf("hook.log does not contain %q; got:\n%s", want, string(logBytes))
+		}
+	})
+
+	t.Run("invalid json writes nothing to hook.log", func(t *testing.T) {
+		root := newLaneRepo(t)
+		got := decode(t, Stop(context.Background(), laneID, []byte("not valid json")))
+		if len(got) != 0 {
+			t.Fatalf("got %v, want {}", got)
+		}
+		logPath := filepath.Join(lane.LaneDir(root, laneID), "hook.log")
+		if _, err := os.Stat(logPath); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("hook.log should not exist, got err: %v", err)
+		}
+	})
+
+	t.Run("invalid lane id writes nothing to hook.log", func(t *testing.T) {
+		root := newLaneRepo(t)
+		payload := []byte(`{
+			"workspacePaths": ["` + root + `"],
+			"executionNum": 1,
+			"terminationReason": "goal_achieved",
+			"fullyIdle": true,
+			"error": ""
+		}`)
+		got := decode(t, Stop(context.Background(), "../../invalid", payload))
+		if len(got) != 0 {
+			t.Fatalf("got %v, want {}", got)
+		}
+		logPath := filepath.Join(lane.LaneDir(root, laneID), "hook.log")
+		if _, err := os.Stat(logPath); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("hook.log should not exist, got err: %v", err)
+		}
+	})
+}
+
+func TestStop_ProgressAwareRetryBudget(t *testing.T) {
+	t.Run("two quick stops exhaust budget on third", func(t *testing.T) {
+		t.Cleanup(func() { now = time.Now })
+		fakeTime := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+		now = func() time.Time { return fakeTime }
+
+		root := newLaneRepo(t)
+
+		// First stop at fakeTime
+		got := stop(t, laneID, root)
+		if got["decision"] != "continue" {
+			t.Fatalf("stop 1: got %v, want continue", got)
+		}
+		l := loadLane(t, root)
+		if l.Retries != 1 || l.Continues != 1 {
+			t.Fatalf("stop 1: retries=%d continues=%d, want 1/1", l.Retries, l.Continues)
+		}
+		if l.LastStopAt == nil || !l.LastStopAt.Equal(fakeTime) {
+			t.Fatalf("stop 1: last_stop_at=%v, want %v", l.LastStopAt, fakeTime)
+		}
+
+		// Second stop at fakeTime + 5s (quick)
+		fakeTime = fakeTime.Add(5 * time.Second)
+		got = stop(t, laneID, root)
+		if got["decision"] != "continue" {
+			t.Fatalf("stop 2: got %v, want continue", got)
+		}
+		l = loadLane(t, root)
+		if l.Retries != 2 || l.Continues != 2 {
+			t.Fatalf("stop 2: retries=%d continues=%d, want 2/2", l.Retries, l.Continues)
+		}
+
+		// Third stop at fakeTime + 10s (quick)
+		fakeTime = fakeTime.Add(5 * time.Second)
+		got = stop(t, laneID, root)
+		if len(got) != 0 {
+			t.Fatalf("stop 3: got %v, want {}", got)
+		}
+		l = loadLane(t, root)
+		if l.Status != lane.StatusFailed {
+			t.Fatalf("stop 3: status=%s, want failed", l.Status)
+		}
+
+		logBytes, err := os.ReadFile(filepath.Join(lane.LaneDir(root, laneID), "hook.log"))
+		if err != nil {
+			t.Fatalf("reading hook.log: %v", err)
+		}
+		wantLog := "stop: lane marked failed (retries, retries=2)"
+		if !strings.Contains(string(logBytes), wantLog) {
+			t.Fatalf("hook.log missing %q; got:\n%s", wantLog, string(logBytes))
+		}
+	})
+
+	t.Run("two stops separated by RetryQuietWindow reset budget", func(t *testing.T) {
+		t.Cleanup(func() { now = time.Now })
+		fakeTime := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+		now = func() time.Time { return fakeTime }
+
+		root := newLaneRepo(t)
+
+		// First stop at fakeTime
+		got := stop(t, laneID, root)
+		if got["decision"] != "continue" {
+			t.Fatalf("stop 1: got %v, want continue", got)
+		}
+		l := loadLane(t, root)
+		if l.Retries != 1 || l.Continues != 1 {
+			t.Fatalf("stop 1: retries=%d continues=%d, want 1/1", l.Retries, l.Continues)
+		}
+
+		// Advance past RetryQuietWindow (65s)
+		gap := RetryQuietWindow + 5*time.Second
+		fakeTime = fakeTime.Add(gap)
+		got = stop(t, laneID, root)
+		if got["decision"] != "continue" {
+			t.Fatalf("stop 2: got %v, want continue", got)
+		}
+		l = loadLane(t, root)
+		// Reset to 0 then incremented to 1
+		if l.Retries != 1 || l.Continues != 2 {
+			t.Fatalf("stop 2: retries=%d continues=%d, want 1/2", l.Retries, l.Continues)
+		}
+		if l.Status != lane.StatusRunning {
+			t.Fatalf("stop 2: status=%s, want running", l.Status)
+		}
+
+		logBytes, err := os.ReadFile(filepath.Join(lane.LaneDir(root, laneID), "hook.log"))
+		if err != nil {
+			t.Fatalf("reading hook.log: %v", err)
+		}
+		logContent := string(logBytes)
+		wantReset := fmt.Sprintf("stop: retry budget reset after %v without a counted stop", gap)
+		if !strings.Contains(logContent, wantReset) {
+			t.Fatalf("hook.log missing reset log %q; got:\n%s", wantReset, logContent)
+		}
+	})
+
+	t.Run("quick-slow-quick sequence keeps lane running", func(t *testing.T) {
+		t.Cleanup(func() { now = time.Now })
+		fakeTime := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+		now = func() time.Time { return fakeTime }
+
+		root := newLaneRepo(t)
+
+		// Stop 1 at t0
+		got := stop(t, laneID, root)
+		if got["decision"] != "continue" {
+			t.Fatalf("stop 1: got %v, want continue", got)
+		}
+		l := loadLane(t, root)
+		if l.Retries != 1 || l.Continues != 1 {
+			t.Fatalf("stop 1: retries=%d continues=%d, want 1/1", l.Retries, l.Continues)
+		}
+
+		// Quick stop at t0 + 5s (Retries becomes 2)
+		fakeTime = fakeTime.Add(5 * time.Second)
+		got = stop(t, laneID, root)
+		if got["decision"] != "continue" {
+			t.Fatalf("stop 2: got %v, want continue", got)
+		}
+		l = loadLane(t, root)
+		if l.Retries != 2 || l.Continues != 2 {
+			t.Fatalf("stop 2: retries=%d continues=%d, want 2/2", l.Retries, l.Continues)
+		}
+
+		// Slow stop: gap of 1m48s (108s > 60s RetryQuietWindow)
+		fakeTime = fakeTime.Add(108 * time.Second)
+		got = stop(t, laneID, root)
+		if got["decision"] != "continue" {
+			t.Fatalf("stop 3: got %v, want continue", got)
+		}
+		l = loadLane(t, root)
+		// Reset to 0, then incremented to 1
+		if l.Retries != 1 || l.Continues != 3 {
+			t.Fatalf("stop 3: retries=%d continues=%d, want 1/3", l.Retries, l.Continues)
+		}
+
+		// Quick stop: gap of 3s
+		fakeTime = fakeTime.Add(3 * time.Second)
+		got = stop(t, laneID, root)
+		if got["decision"] != "continue" {
+			t.Fatalf("stop 4: got %v, want continue", got)
+		}
+		l = loadLane(t, root)
+		// Incremented to 2
+		if l.Retries != 2 || l.Continues != 4 {
+			t.Fatalf("stop 4: retries=%d continues=%d, want 2/4", l.Retries, l.Continues)
+		}
+		if l.Status != lane.StatusRunning {
+			t.Fatalf("status=%s, want running", l.Status)
+		}
+	})
+
+	t.Run("total cap MaxTotalContinues fails lane even with long gaps", func(t *testing.T) {
+		t.Cleanup(func() { now = time.Now })
+		fakeTime := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+		now = func() time.Time { return fakeTime }
+
+		root := newLaneRepo(t)
+
+		// Perform MaxTotalContinues (10) stops, each with gap > RetryQuietWindow
+		for i := 1; i <= MaxTotalContinues; i++ {
+			fakeTime = fakeTime.Add(RetryQuietWindow + 10*time.Second)
+			got := stop(t, laneID, root)
+			if got["decision"] != "continue" {
+				t.Fatalf("stop %d: got %v, want continue", i, got)
+			}
+			l := loadLane(t, root)
+			if l.Continues != i {
+				t.Fatalf("stop %d: continues=%d, want %d", i, l.Continues, i)
+			}
+		}
+
+		// Stop 11: total cap exhausted
+		fakeTime = fakeTime.Add(RetryQuietWindow + 10*time.Second)
+		got := stop(t, laneID, root)
+		if len(got) != 0 {
+			t.Fatalf("stop 11: got %v, want {}", got)
+		}
+		l := loadLane(t, root)
+		if l.Status != lane.StatusFailed {
+			t.Fatalf("stop 11: status=%s, want failed", l.Status)
+		}
+
+		logBytes, err := os.ReadFile(filepath.Join(lane.LaneDir(root, laneID), "hook.log"))
+		if err != nil {
+			t.Fatalf("reading hook.log: %v", err)
+		}
+		wantLog := "stop: lane marked failed (total continues, retries=0)"
+		if !strings.Contains(string(logBytes), wantLog) {
+			t.Fatalf("hook.log missing %q; got:\n%s", wantLog, string(logBytes))
+		}
+	})
+
+	t.Run("fullyIdle=false stops never change Retries Continues or LastStopAt", func(t *testing.T) {
+		t.Cleanup(func() { now = time.Now })
+		fakeTime := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+		now = func() time.Time { return fakeTime }
+
+		root := newLaneRepo(t)
+		stopTime := fakeTime.Add(-10 * time.Minute)
+		l := loadLane(t, root)
+		l.Retries = 1
+		l.Continues = 3
+		l.LastStopAt = &stopTime
+		if err := l.Save(root); err != nil {
+			t.Fatal(err)
+		}
+
+		payload, _ := json.Marshal(map[string]any{
+			"workspacePaths": []string{root},
+			"fullyIdle":      false,
+			"executionNum":   2,
+		})
+		got := decode(t, Stop(context.Background(), laneID, payload))
+		if len(got) != 0 {
+			t.Fatalf("got %v, want {}", got)
+		}
+
+		l = loadLane(t, root)
+		if l.Retries != 1 {
+			t.Fatalf("retries changed: got %d, want 1", l.Retries)
+		}
+		if l.Continues != 3 {
+			t.Fatalf("continues changed: got %d, want 3", l.Continues)
+		}
+		if l.LastStopAt == nil || !l.LastStopAt.Equal(stopTime) {
+			t.Fatalf("lastStopAt changed: got %v, want %v", l.LastStopAt, stopTime)
+		}
+		if l.Status != lane.StatusRunning {
+			t.Fatalf("status changed: got %s, want running", l.Status)
+		}
+	})
+
+	t.Run("valid result is marked done without touching counters", func(t *testing.T) {
+		t.Cleanup(func() { now = time.Now })
+		fakeTime := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+		now = func() time.Time { return fakeTime }
+
+		root := newLaneRepo(t)
+		stopTime := fakeTime.Add(-5 * time.Minute)
+		l := loadLane(t, root)
+		l.Retries = 1
+		l.Continues = 2
+		l.LastStopAt = &stopTime
+		if err := l.Save(root); err != nil {
+			t.Fatal(err)
+		}
+
+		writeResult(t, root, validResult)
+		got := stop(t, laneID, root)
+		if len(got) != 0 {
+			t.Fatalf("got %v, want {}", got)
+		}
+
+		l = loadLane(t, root)
+		if l.Status != lane.StatusDone {
+			t.Fatalf("status=%s, want done", l.Status)
+		}
+		if l.Retries != 1 {
+			t.Fatalf("retries changed: got %d, want 1", l.Retries)
+		}
+		if l.Continues != 2 {
+			t.Fatalf("continues changed: got %d, want 2", l.Continues)
+		}
+		if l.LastStopAt == nil || !l.LastStopAt.Equal(stopTime) {
+			t.Fatalf("lastStopAt changed: got %v, want %v", l.LastStopAt, stopTime)
+		}
+
+		logBytes, err := os.ReadFile(filepath.Join(lane.LaneDir(root, laneID), "hook.log"))
+		if err != nil {
+			t.Fatalf("reading hook.log: %v", err)
+		}
+		wantLog := "stop: lane marked done (retries=1)"
+		if !strings.Contains(string(logBytes), wantLog) {
+			t.Fatalf("hook.log missing %q; got:\n%s", wantLog, string(logBytes))
+		}
+	})
+
+	t.Run("lane.json without new fields loads and behaves like Retries=0", func(t *testing.T) {
+		t.Cleanup(func() { now = time.Now })
+		fakeTime := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+		now = func() time.Time { return fakeTime }
+
+		root := t.TempDir()
+		if real, err := filepath.EvalSymlinks(root); err == nil {
+			root = real
+		}
+		t.Setenv("XDG_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+		t.Setenv("XDG_STATE_HOME", filepath.Join(t.TempDir(), "state"))
+		if out, err := exec.Command("git", "-C", root, "init", "-q").CombinedOutput(); err != nil {
+			t.Fatalf("git init: %v: %s", err, out)
+		}
+		dir := lane.LaneDir(root, laneID)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		// Write lane.json with only legacy fields (no retries, no last_stop_at, no continues)
+		legacyJSON := `{"id":"` + laneID + `","cwd":"` + root + `","status":"running","created_at":"2026-01-01T12:00:00Z","updated_at":"2026-01-01T12:00:00Z"}`
+		if err := os.WriteFile(filepath.Join(dir, "lane.json"), []byte(legacyJSON), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		got := stop(t, laneID, root)
+		if got["decision"] != "continue" {
+			t.Fatalf("got %v, want continue", got)
+		}
+
+		l := loadLane(t, root)
+		if l.Retries != 1 {
+			t.Fatalf("retries=%d, want 1", l.Retries)
+		}
+		if l.Continues != 1 {
+			t.Fatalf("continues=%d, want 1", l.Continues)
+		}
+		if l.LastStopAt == nil || !l.LastStopAt.Equal(fakeTime) {
+			t.Fatalf("lastStopAt=%v, want %v", l.LastStopAt, fakeTime)
+		}
+		if l.Status != lane.StatusRunning {
+			t.Fatalf("status=%s, want running", l.Status)
 		}
 	})
 }
