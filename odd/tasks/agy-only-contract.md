@@ -111,7 +111,7 @@ Route for every task: delegated to agy via herdr (multi-file, deletion-heavy wor
 - [x] **T3 — Packetless `dispatch` / `wait`.** Start from `feature/herdr-direct-dispatch`
   ideas. Base tree hash, `LUCIND_LANE`, blocking/detach, `--lane` continuation, timeout
   semantics, pane never closed. Acceptance: unit tests with a fake herdr; checks green.
-- [ ] **T4 — agy plugin + `plugin install`.** Embedded plugin (plugin.json, hooks.json,
+- [x] **T4 — agy plugin + `plugin install`.** Embedded plugin (plugin.json, hooks.json,
   rules, skills); PreToolUse allowed-path + key/attestation denial; Stop validation with
   bounded `continue`; pass-through without `LUCIND_LANE`; `make install` chains install;
   `accept` allowed-path diff vs base tree. Acceptance: hook handler tests on recorded stdin
@@ -159,6 +159,17 @@ Route for every task: delegated to agy via herdr (multi-file, deletion-heavy wor
   executor runners pruned. Orchestrator re-run of `sh lucind-checks.sh`: exit 0, 10/10 packages;
   argv spot check: `pane split ... --env LUCIND_LANE=<id>`, `agent start ... --dangerously-skip-permissions`,
   footer asks for `lucind-ai attest run -- sh lucind-checks.sh`; no pane close/kill calls.
+- **T5 (partial, route: inline by Claude — orchestration criteria is Claude's work)**:
+  commit `c9862a3` replaces `plugin/claude-code/skills/lucind-ai` (packet skill, 20 files) with a
+  single `plugin/claude-code/skills/lucind/SKILL.md`. Remaining for T5: docs rewrite
+  (`docs/product.md`, `ROADMAP.md`, `README.md`), skill install, e2e lane.
+- **T4** (route: delegated to a Claude Sonnet writer subagent — agy quota exhausted, user said
+  "dale tu"). Commits `3f5e036`, `e18a87d`, `559b86e`, `c5b4f2b`. New `internal/agyhook`
+  (PreToolUse/Stop handlers) and `internal/agyplugin` (embedded plugin + installer);
+  `internal/agyhooks`, `internal/agytrust` deleted. Orchestrator re-run of `sh lucind-checks.sh`:
+  exit 0. Installed plugin at `~/.gemini/antigravity-cli/plugins/lucind/` with absolute binary path
+  in hooks.json; `agy plugin validate`: skills 1, hooks 1. Real tool names observed:
+  `write_to_file`/`replace_file_content` with `args.TargetFile`; `run_command` (`CommandLine`, `Cwd`).
 
 ## Decisions log (taken autonomously; for user review)
 
@@ -199,7 +210,15 @@ Route for every task: delegated to agy via herdr (multi-file, deletion-heavy wor
 - D26 (process): when every saved agy account is below ~5% of the 5h window, wait for the reset
   instead of moving heavy work to Claude (keeps the agy-heavy split). 2026-10-03 15:30: all three
   saved accounts at ~3% remaining; T4 scheduled for ~18:33 local in a fresh agy session.
+- D27: `make install` also links `plugin/claude-code/skills/lucind` into `~/.claude/skills/lucind`
+  so Claude always loads the repo version of the skill.
+- D28 (process, user): when agy is out of quota, Claude subagents take over the task ("dale tu").
+- D29 (T4): Stop with `fullyIdle:false` is a no-op (subagents still running); a Stop on a lane that
+  is no longer `running` is ignored (never overwrites timeout/accepted).
+- D30 (T4): PreToolUse denies writes with no recognisable path, protects all `.lucind/**` except the
+  lane's `result.json`, and resolves symlinks before glob matching.
+- D31 (T4): `dispatch --lane` continuation resets the Stop retry budget to 0.
 
 ## Next step
 
-T4.
+T5 (docs + skill install), then the end-to-end lane.

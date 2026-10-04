@@ -113,6 +113,7 @@ func Dispatch(ctx context.Context, opts Options, runner HerdrRunner) (Output, in
 			return Output{}, 1, fmt.Errorf("cannot continue lane %s with status %s", opts.LaneID, loadedLane.Status)
 		}
 		loadedLane.Status = lane.StatusRunning
+		loadedLane.Retries = 0
 		if err := loadedLane.Save(repoRoot); err != nil {
 			return Output{}, 1, fmt.Errorf("save lane %s: %w", opts.LaneID, err)
 		}
