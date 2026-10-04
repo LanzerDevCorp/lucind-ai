@@ -175,14 +175,16 @@ Route per task is recorded when started (inline or delegated, with trigger evide
 
 ## Follow-up details
 
-- Dispatch footer repeats "As the final verification run exactly..." once per check; works but is
-  redundant. Minor polish.
-- Reported by the agy worker: the `worker` role in the `lucind-roles` agy plugin is registered with
-  `enable_write_tools: false`, which blocks implementer subagents from editing files or running
-  commands; agy defined `impl-worker` dynamically with `enable_write_tools: true`. Update the
-  `worker` registration (or document `impl-worker`). The plugin lives outside this repo and its
-  on-disk location was not verified. Engram: `odd/lane-checks-and-install/pending-lucind-roles-worker`.
-- Lane `20261004-054348-0962` (T5) needed `retries: 2` on the result envelope; worth finding why.
+- RESOLVED by T7 (`d35c7a6`): the dispatch footer used to repeat "As the final verification run
+  exactly..." once per check. It now prints one intro line followed by one list item per check.
+  Verified in the `brief.md` of a real lane with three checks.
+- RESOLVED by T8 and T4: agy reported that the `worker` role of the `lucind-roles` plugin had no
+  write or command tools. Root cause was the missing frontmatter `tools`; fixed, and the plugin
+  source is now vendored in `internal/agyplugin/roles/` and installed by `lucind-ai install`.
+  Engram: `odd/lane-checks-and-install/pending-lucind-roles-worker`.
+- RESOLVED by T9, T14 and T15: lane `20261004-054348-0962` (T5) needed `retries: 2`. Cause: the
+  Stop hook spent retries on `fullyIdle=true` stops without a result while agy kept working. Fixed
+  with a retry budget that resets after a quiet window plus a total cap, and `wait` revalidation.
 
 ## Acceptance criteria
 
