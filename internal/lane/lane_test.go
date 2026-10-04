@@ -694,3 +694,155 @@ func TestMarkStopped(t *testing.T) {
 	})
 }
 
+func TestCheckCommand(t *testing.T) {
+	cmd := "go test ./..."
+	want := "sh -c go test ./..."
+	got := lane.CheckCommand(cmd)
+	if got != want {
+		t.Errorf("CheckCommand(%q) = %q, want %q", cmd, got, want)
+	}
+}
+
+func TestLaneChecksJSONSerialization(t *testing.T) {
+	t.Run("with checks", func(t *testing.T) {
+		ln := lane.Lane{
+			Version: 1,
+			ID:      "20261003-215144-chk1",
+			Checks:  []string{"go test ./...", "go vet ./..."},
+		}
+		data, err := json.Marshal(ln)
+		if err != nil {
+			t.Fatalf("Marshal failed: %v", err)
+		}
+		var raw map[string]any
+		if err := json.Unmarshal(data, &raw); err != nil {
+			t.Fatalf("Unmarshal raw failed: %v", err)
+		}
+		rawChecks, ok := raw["checks"].([]any)
+		if !ok {
+			t.Fatalf("expected raw checks to be []any, got %T: %v", raw["checks"], raw["checks"])
+		}
+		if len(rawChecks) != 2 || rawChecks[0] != "go test ./..." || rawChecks[1] != "go vet ./..." {
+			t.Errorf("unexpected checks array in json: %v", rawChecks)
+		}
+
+		var deserialized lane.Lane
+		if err := json.Unmarshal(data, &deserialized); err != nil {
+			t.Fatalf("Unmarshal into Lane failed: %v", err)
+		}
+		if len(deserialized.Checks) != 2 || deserialized.Checks[0] != "go test ./..." || deserialized.Checks[1] != "go vet ./..." {
+			t.Errorf("deserialized.Checks = %v, want %v", deserialized.Checks, ln.Checks)
+		}
+	})
+
+	t.Run("without checks", func(t *testing.T) {
+		ln := lane.Lane{
+			Version: 1,
+			ID:      "20261003-215144-chk0",
+		}
+		data, err := json.Marshal(ln)
+		if err != nil {
+			t.Fatalf("Marshal failed: %v", err)
+		}
+		var raw map[string]any
+		if err := json.Unmarshal(data, &raw); err != nil {
+			t.Fatalf("Unmarshal raw failed: %v", err)
+		}
+		if _, exists := raw["checks"]; exists {
+			t.Errorf("expected 'checks' field to be omitted from JSON when empty/nil, but found: %v", raw["checks"])
+		}
+
+		var deserialized lane.Lane
+		if err := json.Unmarshal(data, &deserialized); err != nil {
+			t.Fatalf("Unmarshal into Lane failed: %v", err)
+		}
+		if len(deserialized.Checks) != 0 {
+			t.Errorf("deserialized.Checks = %v, want empty", deserialized.Checks)
+		}
+	})
+}
+
+func TestLaneCreateWithChecks(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("with checks", func(t *testing.T) {
+		repoDir := t.TempDir()
+		initGitRepo(t, repoDir)
+
+		checks := []string{"go test ./...", "go vet ./..."}
+		ln, err := lane.Create(ctx, repoDir, []string{"*"}, "test-model", checks...)
+		if err != nil {
+			t.Fatalf("Create failed: %v", err)
+		}
+		if len(ln.Checks) != len(checks) {
+			t.Fatalf("ln.Checks len = %d, want %d", len(ln.Checks), len(checks))
+		}
+		for i, c := range checks {
+			if ln.Checks[i] != c {
+				t.Errorf("ln.Checks[%d] = %q, want %q", i, ln.Checks[i], c)
+			}
+		}
+
+		// Verify persisted lane.json
+		loaded, err := lane.Load(repoDir, ln.ID)
+		if err != nil {
+			t.Fatalf("Load failed: %v", err)
+		}
+		if len(loaded.Checks) != len(checks) {
+			t.Fatalf("loaded.Checks len = %d, want %d", len(loaded.Checks), len(checks))
+		}
+		for i, c := range checks {
+			if loaded.Checks[i] != c {
+				t.Errorf("loaded.Checks[%d] = %q, want %q", i, loaded.Checks[i], c)
+			}
+		}
+
+		// Verify JSON file contains checks
+		data, err := os.ReadFile(lane.LanePath(repoDir, ln.ID))
+		if err != nil {
+			t.Fatalf("ReadFile failed: %v", err)
+		}
+		var raw map[string]any
+		if err := json.Unmarshal(data, &raw); err != nil {
+			t.Fatalf("Unmarshal raw failed: %v", err)
+		}
+		if _, exists := raw["checks"]; !exists {
+			t.Errorf("expected 'checks' key in lane.json when checks provided")
+		}
+	})
+
+	t.Run("without checks", func(t *testing.T) {
+		repoDir := t.TempDir()
+		initGitRepo(t, repoDir)
+
+		ln, err := lane.Create(ctx, repoDir, []string{"*"}, "test-model")
+		if err != nil {
+			t.Fatalf("Create failed: %v", err)
+		}
+		if len(ln.Checks) != 0 {
+			t.Errorf("ln.Checks = %v, want empty/nil", ln.Checks)
+		}
+
+		loaded, err := lane.Load(repoDir, ln.ID)
+		if err != nil {
+			t.Fatalf("Load failed: %v", err)
+		}
+		if len(loaded.Checks) != 0 {
+			t.Errorf("loaded.Checks = %v, want empty/nil", loaded.Checks)
+		}
+
+		data, err := os.ReadFile(lane.LanePath(repoDir, ln.ID))
+		if err != nil {
+			t.Fatalf("ReadFile failed: %v", err)
+		}
+		var raw map[string]any
+		if err := json.Unmarshal(data, &raw); err != nil {
+			t.Fatalf("Unmarshal raw failed: %v", err)
+		}
+		if _, exists := raw["checks"]; exists {
+			t.Errorf("expected 'checks' key omitted in lane.json when no checks provided, got: %v", raw["checks"])
+		}
+	})
+}
+
+

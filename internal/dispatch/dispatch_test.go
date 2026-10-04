@@ -169,8 +169,11 @@ func TestDispatch_NewLane_HappyPath(t *testing.T) {
 	if !strings.Contains(briefContent, fmt.Sprintf("Write your result envelope to `%s` following the result schema.", absResultPath)) {
 		t.Errorf("brief.md missing result path: %s", briefContent)
 	}
-	if !strings.Contains(briefContent, "As the final verification run exactly `lucind-ai attest run -- sh lucind-checks.sh`") {
-		t.Errorf("brief.md missing verification instruction: %s", briefContent)
+	if !strings.Contains(briefContent, "- This lane requires no verification command.") {
+		t.Errorf("brief.md missing no verification command line: %s", briefContent)
+	}
+	if strings.Contains(briefContent, "attest run") {
+		t.Errorf("brief.md should not contain attest run: %s", briefContent)
 	}
 	if !strings.Contains(briefContent, "Do not edit outside the allowed globs.") {
 		t.Errorf("brief.md missing edit constraint: %s", briefContent)
@@ -456,3 +459,287 @@ func containsSlice(haystack []string, needle []string) bool {
 	}
 	return false
 }
+
+func TestConstructBrief(t *testing.T) {
+	laneID := "20261004-120000-abcd"
+	allow := []string{"internal/**", "cmd/**"}
+	absResultPath := "/workspace/.lucind/lanes/20261004-120000-abcd/result.json"
+
+	t.Run("zero checks", func(t *testing.T) {
+		brief := dispatch.ConstructBrief("Brief description", laneID, allow, absResultPath, nil)
+		if !strings.Contains(brief, "Brief description") {
+			t.Errorf("expected brief to contain user description, got: %s", brief)
+		}
+		if !strings.Contains(brief, fmt.Sprintf("- Lane ID: %s", laneID)) {
+			t.Errorf("expected brief to contain lane ID, got: %s", brief)
+		}
+		if !strings.Contains(brief, "- Allowed globs:\n  - internal/**\n  - cmd/**") {
+			t.Errorf("expected brief to contain allowed globs, got: %s", brief)
+		}
+		if !strings.Contains(brief, fmt.Sprintf("- Write your result envelope to `%s` following the result schema.", absResultPath)) {
+			t.Errorf("expected brief to contain result envelope path, got: %s", brief)
+		}
+		if !strings.Contains(brief, "- This lane requires no verification command.") {
+			t.Errorf("expected brief to indicate no verification command, got: %s", brief)
+		}
+		if strings.Contains(brief, "attest run") {
+			t.Errorf("brief should not contain attest run, got: %s", brief)
+		}
+		if !strings.HasSuffix(strings.TrimSpace(brief), "- Do not edit outside the allowed globs.") {
+			t.Errorf("brief should end with edit constraint bullet, got: %s", brief)
+		}
+	})
+
+	t.Run("one check", func(t *testing.T) {
+		checks := []string{"go test ./..."}
+		brief := dispatch.ConstructBrief("Brief description", laneID, allow, absResultPath, checks)
+		wantAttest := "- As the final verification run exactly `lucind-ai attest run -- sh -c 'go test ./...'` and do not edit files afterwards."
+		if !strings.Contains(brief, wantAttest) {
+			t.Errorf("brief missing expected attest line: %q in: %s", wantAttest, brief)
+		}
+		if strings.Contains(brief, "- This lane requires no verification command.") {
+			t.Errorf("brief should not contain no verification command note: %s", brief)
+		}
+		if !strings.HasSuffix(strings.TrimSpace(brief), "- Do not edit outside the allowed globs.") {
+			t.Errorf("brief should end with edit constraint bullet, got: %s", brief)
+		}
+	})
+
+	t.Run("multiple checks", func(t *testing.T) {
+		checks := []string{"go test ./...", "golangci-lint run"}
+		brief := dispatch.ConstructBrief("Brief description", laneID, allow, absResultPath, checks)
+		wantAttest1 := "- As the final verification run exactly `lucind-ai attest run -- sh -c 'go test ./...'` and do not edit files afterwards."
+		wantAttest2 := "- As the final verification run exactly `lucind-ai attest run -- sh -c 'golangci-lint run'` and do not edit files afterwards."
+		if !strings.Contains(brief, wantAttest1) {
+			t.Errorf("brief missing expected attest line 1: %q in: %s", wantAttest1, brief)
+		}
+		if !strings.Contains(brief, wantAttest2) {
+			t.Errorf("brief missing expected attest line 2: %q in: %s", wantAttest2, brief)
+		}
+		idx1 := strings.Index(brief, wantAttest1)
+		idx2 := strings.Index(brief, wantAttest2)
+		if idx1 >= idx2 {
+			t.Errorf("expected attest lines in order, got idx1=%d idx2=%d", idx1, idx2)
+		}
+		if strings.Contains(brief, "- This lane requires no verification command.") {
+			t.Errorf("brief should not contain no verification command note: %s", brief)
+		}
+		if !strings.HasSuffix(strings.TrimSpace(brief), "- Do not edit outside the allowed globs.") {
+			t.Errorf("brief should end with edit constraint bullet, got: %s", brief)
+		}
+	})
+
+	t.Run("quoting with single quotes and and-operator", func(t *testing.T) {
+		check := `echo 'hello' && test`
+		brief := dispatch.ConstructBrief("Brief description", laneID, allow, absResultPath, []string{check})
+		wantAttest := `- As the final verification run exactly ` + "`" + `lucind-ai attest run -- sh -c 'echo '\''hello'\'' && test'` + "`" + ` and do not edit files afterwards.`
+		if !strings.Contains(brief, wantAttest) {
+			t.Errorf("brief missing properly quoted attest line: %q in: %s", wantAttest, brief)
+		}
+	})
+}
+
+func TestDispatchChecks(t *testing.T) {
+	t.Run("NewLaneWithChecks", func(t *testing.T) {
+		t.Setenv("HERDR_ENV", "1")
+		repoDir := t.TempDir()
+		initGitRepo(t, repoDir)
+
+		runner := setupFakeRunnerForNewLane(t, "w1:pLaneChecks")
+
+		opts := dispatch.Options{
+			Cwd:    repoDir,
+			Allow:  []string{"internal/**"},
+			Model:  "gemini-3.8-flash-high",
+			Brief:  "New lane with checks",
+			Checks: []string{"go test ./...", "golangci-lint run"},
+			Detach: true,
+		}
+
+		out, exitCode, err := dispatch.Dispatch(context.Background(), opts, runner)
+		if err != nil {
+			t.Fatalf("unexpected dispatch error: %v", err)
+		}
+		if exitCode != 0 {
+			t.Fatalf("exitCode = %d, want 0", exitCode)
+		}
+
+		savedLane, err := lane.Load(repoDir, out.Lane)
+		if err != nil {
+			t.Fatalf("lane.Load failed: %v", err)
+		}
+		if !reflect.DeepEqual(savedLane.Checks, opts.Checks) {
+			t.Errorf("savedLane.Checks = %v, want %v", savedLane.Checks, opts.Checks)
+		}
+
+		briefPath := filepath.Join(lane.LaneDir(repoDir, out.Lane), "brief.md")
+		briefBytes, err := os.ReadFile(briefPath)
+		if err != nil {
+			t.Fatalf("read brief.md failed: %v", err)
+		}
+		briefContent := string(briefBytes)
+		wantAttest1 := "- As the final verification run exactly `lucind-ai attest run -- sh -c 'go test ./...'` and do not edit files afterwards."
+		wantAttest2 := "- As the final verification run exactly `lucind-ai attest run -- sh -c 'golangci-lint run'` and do not edit files afterwards."
+		if !strings.Contains(briefContent, wantAttest1) {
+			t.Errorf("brief.md missing attest line 1: %s", briefContent)
+		}
+		if !strings.Contains(briefContent, wantAttest2) {
+			t.Errorf("brief.md missing attest line 2: %s", briefContent)
+		}
+		if strings.Contains(briefContent, "- This lane requires no verification command.") {
+			t.Errorf("brief.md should not contain no verification command note: %s", briefContent)
+		}
+	})
+
+	t.Run("ContinuationWithoutChecks", func(t *testing.T) {
+		t.Setenv("HERDR_ENV", "1")
+		repoDir := t.TempDir()
+		initGitRepo(t, repoDir)
+
+		originalChecks := []string{"go test ./..."}
+		createdLane, err := lane.Create(context.Background(), repoDir, []string{"pkg/**"}, "gemini-3.8-flash-high", originalChecks...)
+		if err != nil {
+			t.Fatalf("lane.Create failed: %v", err)
+		}
+		createdLane.PaneID = "w1:pCont1"
+		createdLane.Status = lane.StatusFailed
+		if err := createdLane.Save(repoDir); err != nil {
+			t.Fatalf("lane.Save failed: %v", err)
+		}
+
+		runner := newFakeHerdrRunner()
+		runner.handlers["agent prompt"] = func(args []string) ([]byte, error) {
+			return []byte(`{"result": {"submitted": true}}`), nil
+		}
+
+		opts := dispatch.Options{
+			Cwd:    repoDir,
+			LaneID: createdLane.ID,
+			Brief:  "Resume without overriding checks",
+			Checks: nil,
+			Detach: true,
+		}
+
+		out, exitCode, err := dispatch.Dispatch(context.Background(), opts, runner)
+		if err != nil {
+			t.Fatalf("unexpected dispatch error: %v", err)
+		}
+		if exitCode != 0 {
+			t.Fatalf("exitCode = %d, want 0", exitCode)
+		}
+
+		reloaded, err := lane.Load(repoDir, out.Lane)
+		if err != nil {
+			t.Fatalf("lane.Load failed: %v", err)
+		}
+		if !reflect.DeepEqual(reloaded.Checks, originalChecks) {
+			t.Errorf("reloaded.Checks = %v, want original %v", reloaded.Checks, originalChecks)
+		}
+
+		briefPath := filepath.Join(lane.LaneDir(repoDir, out.Lane), "brief.md")
+		briefBytes, err := os.ReadFile(briefPath)
+		if err != nil {
+			t.Fatalf("read brief.md failed: %v", err)
+		}
+		wantAttest := "- As the final verification run exactly `lucind-ai attest run -- sh -c 'go test ./...'` and do not edit files afterwards."
+		if !strings.Contains(string(briefBytes), wantAttest) {
+			t.Errorf("brief.md did not contain preserved check: %s", string(briefBytes))
+		}
+	})
+
+	t.Run("ContinuationWithReplacementChecks", func(t *testing.T) {
+		t.Setenv("HERDR_ENV", "1")
+		repoDir := t.TempDir()
+		initGitRepo(t, repoDir)
+
+		originalChecks := []string{"go test ./..."}
+		createdLane, err := lane.Create(context.Background(), repoDir, []string{"pkg/**"}, "gemini-3.8-flash-high", originalChecks...)
+		if err != nil {
+			t.Fatalf("lane.Create failed: %v", err)
+		}
+		createdLane.PaneID = "w1:pCont2"
+		createdLane.Status = lane.StatusFailed
+		if err := createdLane.Save(repoDir); err != nil {
+			t.Fatalf("lane.Save failed: %v", err)
+		}
+
+		runner := newFakeHerdrRunner()
+		runner.handlers["agent prompt"] = func(args []string) ([]byte, error) {
+			return []byte(`{"result": {"submitted": true}}`), nil
+		}
+
+		replacementChecks := []string{"golangci-lint run", "go test -race ./..."}
+		opts := dispatch.Options{
+			Cwd:    repoDir,
+			LaneID: createdLane.ID,
+			Brief:  "Resume with replacement checks",
+			Checks: replacementChecks,
+			Detach: true,
+		}
+
+		out, exitCode, err := dispatch.Dispatch(context.Background(), opts, runner)
+		if err != nil {
+			t.Fatalf("unexpected dispatch error: %v", err)
+		}
+		if exitCode != 0 {
+			t.Fatalf("exitCode = %d, want 0", exitCode)
+		}
+
+		reloaded, err := lane.Load(repoDir, out.Lane)
+		if err != nil {
+			t.Fatalf("lane.Load failed: %v", err)
+		}
+		if !reflect.DeepEqual(reloaded.Checks, replacementChecks) {
+			t.Errorf("reloaded.Checks = %v, want replacement %v", reloaded.Checks, replacementChecks)
+		}
+
+		briefPath := filepath.Join(lane.LaneDir(repoDir, out.Lane), "brief.md")
+		briefBytes, err := os.ReadFile(briefPath)
+		if err != nil {
+			t.Fatalf("read brief.md failed: %v", err)
+		}
+		briefContent := string(briefBytes)
+		wantAttest1 := "- As the final verification run exactly `lucind-ai attest run -- sh -c 'golangci-lint run'` and do not edit files afterwards."
+		wantAttest2 := "- As the final verification run exactly `lucind-ai attest run -- sh -c 'go test -race ./...'` and do not edit files afterwards."
+		if !strings.Contains(briefContent, wantAttest1) {
+			t.Errorf("brief.md missing replacement attest 1: %s", briefContent)
+		}
+		if !strings.Contains(briefContent, wantAttest2) {
+			t.Errorf("brief.md missing replacement attest 2: %s", briefContent)
+		}
+		if strings.Contains(briefContent, "- As the final verification run exactly `lucind-ai attest run -- sh -c 'go test ./...'`") {
+			t.Errorf("brief.md should not contain old check: %s", briefContent)
+		}
+	})
+
+	t.Run("RejectEmptyOrWhitespaceChecks", func(t *testing.T) {
+		t.Setenv("HERDR_ENV", "1")
+		repoDir := t.TempDir()
+		initGitRepo(t, repoDir)
+
+		badChecksList := [][]string{
+			{""},
+			{"   "},
+			{"\t\n"},
+			{"go test ./...", "  "},
+		}
+
+		for _, badChecks := range badChecksList {
+			opts := dispatch.Options{
+				Cwd:    repoDir,
+				Allow:  []string{"pkg/**"},
+				Brief:  "Should fail",
+				Checks: badChecks,
+				Detach: true,
+			}
+			_, exitCode, err := dispatch.Dispatch(context.Background(), opts, nil)
+			if exitCode != 1 {
+				t.Errorf("expected exitCode 1 for checks %v, got %d", badChecks, exitCode)
+			}
+			if err == nil || !strings.Contains(err.Error(), "check command cannot be empty") {
+				t.Errorf("expected 'check command cannot be empty' for checks %v, got %v", badChecks, err)
+			}
+		}
+	})
+}
+

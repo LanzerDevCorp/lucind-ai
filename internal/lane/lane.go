@@ -22,6 +22,7 @@ type Lane struct {
 	Cwd       string    `json:"cwd"`
 	BaseTree  string    `json:"base_tree"`
 	Allow     []string  `json:"allow"`
+	Checks    []string  `json:"checks,omitempty"`
 	Model     string    `json:"model"`
 	PaneID    string    `json:"pane_id"`
 	Status    Status    `json:"status"`
@@ -74,6 +75,11 @@ func ReceiptPath(root, id string) string {
 // ResultPath returns the path to result.json for a given lane under root.
 func ResultPath(root, id string) string {
 	return filepath.Join(LaneDir(root, id), "result.json")
+}
+
+// CheckCommand returns the canonical attested command string for a check.
+func CheckCommand(check string) string {
+	return "sh -c " + check
 }
 
 // GenerateID generates a new lane ID in the format YYYYMMDD-HHMMSS-<4 lowercase hex> (UTC).
@@ -152,7 +158,7 @@ func atomicWriteJSON(destPath string, v any) error {
 // Create finds the git toplevel for cwd, computes base tree hash using attest.TreeHash,
 // generates a lane id, initializes a Lane with Version: 1, Status: "running", timestamps,
 // saves to .lucind/lanes/<id>/lane.json, and returns the Lane.
-func Create(ctx context.Context, cwd string, allow []string, model string) (Lane, error) {
+func Create(ctx context.Context, cwd string, allow []string, model string, checks ...string) (Lane, error) {
 	if cwd == "" {
 		cwd = "."
 	}
@@ -176,12 +182,18 @@ func Create(ctx context.Context, cwd string, allow []string, model string) (Lane
 		allow = []string{}
 	}
 
+	var laneChecks []string
+	if len(checks) > 0 {
+		laneChecks = checks
+	}
+
 	lane := Lane{
 		Version:   1,
 		ID:        id,
 		Cwd:       cwd,
 		BaseTree:  baseTree,
 		Allow:     allow,
+		Checks:    laneChecks,
 		Model:     model,
 		PaneID:    "",
 		Status:    StatusRunning,

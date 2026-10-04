@@ -22,7 +22,7 @@ import (
 	"github.com/LanzerDevCorp/lucind-ai/internal/dispatch"
 )
 
-const usage = "usage: lucind-ai dispatch --cwd <dir> --allow <glob>... --brief <file|-> [--model M] [--timeout D] [--detach] [--lane <id>] [--min-quota F]\n" +
+const usage = "usage: lucind-ai dispatch --cwd <dir> --allow <glob>... --brief <file|-> [--check <cmd>]... [--model M] [--timeout D] [--detach] [--lane <id>] [--min-quota F]\n" +
 	"       lucind-ai wait <lane> [--cwd <dir>] [--timeout D]\n" +
 	"       lucind-ai check [--out <path>]\n" +
 	"       lucind-ai accept --lane <id>\n" +
@@ -33,7 +33,7 @@ const usage = "usage: lucind-ai dispatch --cwd <dir> --allow <glob>... --brief <
 	"       lucind-ai --version"
 
 const (
-	dispatchUsage = "usage: lucind-ai dispatch --cwd <dir> --allow <glob>... --brief <file|-> [--model M] [--timeout D] [--detach] [--lane <id>] [--min-quota F]"
+	dispatchUsage = "usage: lucind-ai dispatch --cwd <dir> --allow <glob>... --brief <file|-> [--check <cmd>]... [--model M] [--timeout D] [--detach] [--lane <id>] [--min-quota F]"
 	waitUsage     = "usage: lucind-ai wait <lane> [--cwd <dir>] [--timeout D]"
 )
 
@@ -243,6 +243,23 @@ func (s *stringSliceFlag) Set(val string) error {
 	return nil
 }
 
+type checkSliceFlag []string
+
+func (s *checkSliceFlag) String() string {
+	if s == nil || len(*s) == 0 {
+		return ""
+	}
+	return strings.Join(*s, ", ")
+}
+
+func (s *checkSliceFlag) Set(val string) error {
+	if strings.TrimSpace(val) == "" {
+		return errors.New("check command cannot be empty")
+	}
+	*s = append(*s, val)
+	return nil
+}
+
 func parseDuration(s string) (time.Duration, error) {
 	s = strings.TrimSpace(s)
 	if s == "" {
@@ -269,6 +286,8 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 	cwd := fs.String("cwd", "", "working directory (required)")
 	var allow stringSliceFlag
 	fs.Var(&allow, "allow", "allowed glob pattern (repeatable or comma-separated, required)")
+	var checks checkSliceFlag
+	fs.Var(&checks, "check", "verification command to run and attest (repeatable)")
 	briefPath := fs.String("brief", "", "path to brief file or '-' for stdin (required)")
 	model := fs.String("model", "", "model override")
 	timeoutStr := fs.String("timeout", "60m", "timeout duration")
@@ -353,6 +372,7 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 		Cwd:      *cwd,
 		LaneID:   *laneID,
 		Allow:    allow,
+		Checks:   checks,
 		Model:    *model,
 		Brief:    briefContent,
 		MinQuota: *minQuota,

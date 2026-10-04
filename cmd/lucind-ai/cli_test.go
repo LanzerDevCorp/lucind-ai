@@ -73,7 +73,7 @@ func writeChecksScript(t *testing.T, repoDir string, exitCode int, output string
 func TestUsageAndHelp(t *testing.T) {
 	ctx := context.Background()
 
-	wantUsage := `usage: lucind-ai dispatch --cwd <dir> --allow <glob>... --brief <file|-> [--model M] [--timeout D] [--detach] [--lane <id>] [--min-quota F]
+	wantUsage := `usage: lucind-ai dispatch --cwd <dir> --allow <glob>... --brief <file|-> [--check <cmd>]... [--model M] [--timeout D] [--detach] [--lane <id>] [--min-quota F]
        lucind-ai wait <lane> [--cwd <dir>] [--timeout D]
        lucind-ai check [--out <path>]
        lucind-ai accept --lane <id>
@@ -392,7 +392,7 @@ func TestAcceptSubcommand(t *testing.T) {
 
 func TestDispatchHelp(t *testing.T) {
 	ctx := context.Background()
-	wantUsageLine := "usage: lucind-ai dispatch --cwd <dir> --allow <glob>... --brief <file|-> [--model M] [--timeout D] [--detach] [--lane <id>] [--min-quota F]"
+	wantUsageLine := "usage: lucind-ai dispatch --cwd <dir> --allow <glob>... --brief <file|-> [--check <cmd>]... [--model M] [--timeout D] [--detach] [--lane <id>] [--min-quota F]"
 	for _, flag := range []string{"--help", "-help", "-h", "help"} {
 		t.Run("flag_"+flag, func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
@@ -404,7 +404,7 @@ func TestDispatchHelp(t *testing.T) {
 			if !strings.Contains(out, wantUsageLine) {
 				t.Errorf("stdout missing usage line; got %q", out)
 			}
-			for _, expectedFlag := range []string{"-cwd", "-allow", "-brief", "-model", "-timeout", "-detach", "-lane", "-min-quota"} {
+			for _, expectedFlag := range []string{"-cwd", "-allow", "-check", "-brief", "-model", "-timeout", "-detach", "-lane", "-min-quota"} {
 				if !strings.Contains(out, expectedFlag) {
 					t.Errorf("stdout missing flag %q; got %q", expectedFlag, out)
 				}
@@ -438,7 +438,7 @@ func TestWaitHelp(t *testing.T) {
 
 func TestDispatchMissingRequiredFlags(t *testing.T) {
 	ctx := context.Background()
-	wantUsageLine := "usage: lucind-ai dispatch --cwd <dir> --allow <glob>... --brief <file|-> [--model M] [--timeout D] [--detach] [--lane <id>] [--min-quota F]"
+	wantUsageLine := "usage: lucind-ai dispatch --cwd <dir> --allow <glob>... --brief <file|-> [--check <cmd>]... [--model M] [--timeout D] [--detach] [--lane <id>] [--min-quota F]"
 
 	tests := []struct {
 		name    string
@@ -469,6 +469,16 @@ func TestDispatchMissingRequiredFlags(t *testing.T) {
 			name:    "invalid timeout",
 			args:    []string{"dispatch", "--cwd", "/tmp", "--allow", "src/**", "--brief", "b.md", "--timeout", "xyz"},
 			wantErr: "invalid --timeout",
+		},
+		{
+			name:    "empty check flag",
+			args:    []string{"dispatch", "--cwd", "/tmp", "--allow", "src/**", "--brief", "b.md", "--check", ""},
+			wantErr: "check command cannot be empty",
+		},
+		{
+			name:    "whitespace check flag",
+			args:    []string{"dispatch", "--cwd", "/tmp", "--allow", "src/**", "--brief", "b.md", "--check", "   "},
+			wantErr: "check command cannot be empty",
 		},
 	}
 
@@ -572,6 +582,8 @@ func TestDispatchExecution(t *testing.T) {
 		"--cwd", repoDir,
 		"--allow", "src/**,pkg/**",
 		"--allow", "cmd/**",
+		"--check", "go test ./...",
+		"--check", "echo 'a,b'",
 		"--brief", briefFile,
 		"--model", "gemini-3.8-flash-high",
 		"--timeout", "30m",
@@ -590,6 +602,16 @@ func TestDispatchExecution(t *testing.T) {
 	wantAllow := []string{"src/**", "pkg/**", "cmd/**"}
 	if len(capturedOpts.Allow) != len(wantAllow) {
 		t.Errorf("captured Allow = %v, want %v", capturedOpts.Allow, wantAllow)
+	}
+	wantChecks := []string{"go test ./...", "echo 'a,b'"}
+	if len(capturedOpts.Checks) != len(wantChecks) {
+		t.Errorf("captured Checks = %v, want %v", capturedOpts.Checks, wantChecks)
+	} else {
+		for i, c := range wantChecks {
+			if capturedOpts.Checks[i] != c {
+				t.Errorf("captured Checks[%d] = %q, want %q", i, capturedOpts.Checks[i], c)
+			}
+		}
 	}
 	if capturedOpts.Brief != "Implement feature X" {
 		t.Errorf("captured Brief = %q, want 'Implement feature X'", capturedOpts.Brief)
