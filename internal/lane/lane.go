@@ -31,23 +31,27 @@ type Lane struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// Evidence holds attestations or check logs for a completed lane receipt.
-type Evidence struct {
-	Attestation *string `json:"attestation"`
-	CheckLog    *string `json:"check_log"`
+// CheckEvidence holds an attestation or check log for a single check in a completed lane receipt.
+type CheckEvidence struct {
+	Check       string  `json:"check"`
+	Attestation *string `json:"attestation,omitempty"`
+	CheckLog    *string `json:"check_log,omitempty"`
 }
+
+// Evidence is an alias for CheckEvidence.
+type Evidence = CheckEvidence
 
 // Receipt records the final outcome and verification evidence for a lane.
 type Receipt struct {
-	Version      int       `json:"version"`
-	Lane         string    `json:"lane"`
-	FinalTree    string    `json:"final_tree"`
-	BaseTree     string    `json:"base_tree"`
-	ChangedFiles []string  `json:"changed_files"`
-	Verdict      string    `json:"verdict"`
-	Reasons      []string  `json:"reasons"`
-	Evidence     Evidence  `json:"evidence"`
-	CreatedAt    time.Time `json:"created_at"`
+	Version      int             `json:"version"`
+	Lane         string          `json:"lane"`
+	FinalTree    string          `json:"final_tree"`
+	BaseTree     string          `json:"base_tree"`
+	ChangedFiles []string        `json:"changed_files"`
+	Verdict      string          `json:"verdict"`
+	Reasons      []string        `json:"reasons"`
+	Evidence     []CheckEvidence `json:"evidence"`
+	CreatedAt    time.Time       `json:"created_at"`
 }
 
 const (
@@ -266,6 +270,9 @@ func WriteReceipt(root, id string, receipt Receipt) error {
 	}
 	if receipt.Reasons == nil {
 		receipt.Reasons = []string{}
+	}
+	if receipt.Evidence == nil {
+		receipt.Evidence = []CheckEvidence{}
 	}
 	if receipt.CreatedAt.IsZero() {
 		receipt.CreatedAt = time.Now().UTC()

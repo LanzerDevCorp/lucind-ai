@@ -333,7 +333,7 @@ func TestAcceptSubcommand(t *testing.T) {
 	{
 		repoDir := initRepo(t)
 		writeChecksScript(t, repoDir, 0, "PASS: all checks passed")
-		l, err := lane.Create(ctx, repoDir, []string{"src/**"}, "test-model")
+		l, err := lane.Create(ctx, repoDir, []string{"src/**"}, "test-model", "sh lucind-checks.sh")
 		if err != nil {
 			t.Fatalf("create lane: %v", err)
 		}
@@ -368,6 +368,35 @@ func TestAcceptSubcommand(t *testing.T) {
 			t.Fatalf("create lane: %v", err)
 		}
 		writeResultJSON(t, repoDir, l.ID, "failed")
+
+		cwd, err := os.Getwd()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chdir(repoDir); err != nil {
+			t.Fatal(err)
+		}
+
+		var stdout, stderr bytes.Buffer
+		code := run(ctx, []string{"accept", "--lane", l.ID}, &stdout, &stderr)
+		_ = os.Chdir(cwd)
+
+		if code != 1 {
+			t.Fatalf("run(accept --lane %s) exit code = %d, want 1; stderr = %q, stdout = %q", l.ID, code, stderr.String(), stdout.String())
+		}
+		if !strings.Contains(stderr.String(), fmt.Sprintf("lane %s rejected", l.ID)) {
+			t.Errorf("stderr = %q, want 'lane %s rejected'", stderr.String(), l.ID)
+		}
+	}
+
+	// 5. Rejection flow: lane with failing check -> exit 1
+	{
+		repoDir := initRepo(t)
+		l, err := lane.Create(ctx, repoDir, []string{"src/**"}, "test-model", "exit 1")
+		if err != nil {
+			t.Fatalf("create lane: %v", err)
+		}
+		writeResultJSON(t, repoDir, l.ID, "done")
 
 		cwd, err := os.Getwd()
 		if err != nil {
