@@ -67,9 +67,10 @@ func constructBrief(userBrief, laneID string, allow []string, absResultPath stri
 	if len(checks) == 0 {
 		sb.WriteString("- This lane requires no verification command.\n")
 	} else {
+		sb.WriteString("- As the final verification, after your last edit, run these commands exactly as listed and do not edit files afterwards:\n")
 		for _, c := range checks {
 			quoted := "'" + strings.ReplaceAll(c, "'", `'\''`) + "'"
-			sb.WriteString(fmt.Sprintf("- As the final verification run exactly `lucind-ai attest run -- sh -c %s` and do not edit files afterwards.\n", quoted))
+			sb.WriteString(fmt.Sprintf("  - `lucind-ai attest run -- sh -c %s`\n", quoted))
 		}
 	}
 	sb.WriteString("- Do not edit outside the allowed globs.\n")
@@ -144,6 +145,12 @@ func Dispatch(ctx context.Context, opts Options, runner HerdrRunner) (Output, in
 		}
 		if err := loadedLane.Save(repoRoot); err != nil {
 			return Output{}, 1, fmt.Errorf("save lane %s: %w", opts.LaneID, err)
+		}
+		laneDir := lane.LaneDir(repoRoot, opts.LaneID)
+		resultFile := filepath.Join(laneDir, "result.json")
+		prevFile := filepath.Join(laneDir, "result.prev.json")
+		if err := os.Rename(resultFile, prevFile); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return Output{}, 1, fmt.Errorf("rename previous result: %w", err)
 		}
 		l = loadedLane
 	} else {

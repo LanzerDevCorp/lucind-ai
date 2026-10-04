@@ -502,6 +502,9 @@ func TestConstructBrief(t *testing.T) {
 		if strings.Contains(brief, "attest run") {
 			t.Errorf("brief should not contain attest run, got: %s", brief)
 		}
+		if strings.Contains(brief, "As the final verification") {
+			t.Errorf("brief should not contain verification intro line, got: %s", brief)
+		}
 		if !strings.HasSuffix(strings.TrimSpace(brief), "- Do not edit outside the allowed globs.") {
 			t.Errorf("brief should end with edit constraint bullet, got: %s", brief)
 		}
@@ -510,7 +513,14 @@ func TestConstructBrief(t *testing.T) {
 	t.Run("one check", func(t *testing.T) {
 		checks := []string{"go test ./..."}
 		brief := dispatch.ConstructBrief("Brief description", laneID, allow, absResultPath, checks)
-		wantAttest := "- As the final verification run exactly `lucind-ai attest run -- sh -c 'go test ./...'` and do not edit files afterwards."
+		wantIntro := "- As the final verification, after your last edit, run these commands exactly as listed and do not edit files afterwards:\n"
+		wantAttest := "  - `lucind-ai attest run -- sh -c 'go test ./...'`\n"
+		if !strings.Contains(brief, wantIntro) {
+			t.Errorf("brief missing expected intro line: %q in: %s", wantIntro, brief)
+		}
+		if strings.Count(brief, wantIntro) != 1 {
+			t.Errorf("brief should contain intro line exactly once, got %d", strings.Count(brief, wantIntro))
+		}
 		if !strings.Contains(brief, wantAttest) {
 			t.Errorf("brief missing expected attest line: %q in: %s", wantAttest, brief)
 		}
@@ -525,18 +535,26 @@ func TestConstructBrief(t *testing.T) {
 	t.Run("multiple checks", func(t *testing.T) {
 		checks := []string{"go test ./...", "golangci-lint run"}
 		brief := dispatch.ConstructBrief("Brief description", laneID, allow, absResultPath, checks)
-		wantAttest1 := "- As the final verification run exactly `lucind-ai attest run -- sh -c 'go test ./...'` and do not edit files afterwards."
-		wantAttest2 := "- As the final verification run exactly `lucind-ai attest run -- sh -c 'golangci-lint run'` and do not edit files afterwards."
+		wantIntro := "- As the final verification, after your last edit, run these commands exactly as listed and do not edit files afterwards:\n"
+		wantAttest1 := "  - `lucind-ai attest run -- sh -c 'go test ./...'`\n"
+		wantAttest2 := "  - `lucind-ai attest run -- sh -c 'golangci-lint run'`\n"
+		if !strings.Contains(brief, wantIntro) {
+			t.Errorf("brief missing expected intro line: %q in: %s", wantIntro, brief)
+		}
+		if strings.Count(brief, wantIntro) != 1 {
+			t.Errorf("brief should contain intro line exactly once, got %d", strings.Count(brief, wantIntro))
+		}
 		if !strings.Contains(brief, wantAttest1) {
 			t.Errorf("brief missing expected attest line 1: %q in: %s", wantAttest1, brief)
 		}
 		if !strings.Contains(brief, wantAttest2) {
 			t.Errorf("brief missing expected attest line 2: %q in: %s", wantAttest2, brief)
 		}
+		idxIntro := strings.Index(brief, wantIntro)
 		idx1 := strings.Index(brief, wantAttest1)
 		idx2 := strings.Index(brief, wantAttest2)
-		if idx1 >= idx2 {
-			t.Errorf("expected attest lines in order, got idx1=%d idx2=%d", idx1, idx2)
+		if idxIntro >= idx1 || idx1 >= idx2 {
+			t.Errorf("expected intro before attest1 before attest2, got idxIntro=%d idx1=%d idx2=%d", idxIntro, idx1, idx2)
 		}
 		if strings.Contains(brief, "- This lane requires no verification command.") {
 			t.Errorf("brief should not contain no verification command note: %s", brief)
@@ -549,9 +567,24 @@ func TestConstructBrief(t *testing.T) {
 	t.Run("quoting with single quotes and and-operator", func(t *testing.T) {
 		check := `echo 'hello' && test`
 		brief := dispatch.ConstructBrief("Brief description", laneID, allow, absResultPath, []string{check})
-		wantAttest := `- As the final verification run exactly ` + "`" + `lucind-ai attest run -- sh -c 'echo '\''hello'\'' && test'` + "`" + ` and do not edit files afterwards.`
+		wantAttest := "  - `lucind-ai attest run -- sh -c 'echo '\\''hello'\\'' && test'`\n"
 		if !strings.Contains(brief, wantAttest) {
 			t.Errorf("brief missing properly quoted attest line: %q in: %s", wantAttest, brief)
+		}
+	})
+
+	t.Run("three checks", func(t *testing.T) {
+		checks := []string{"cmd1", "cmd2", "cmd3"}
+		brief := dispatch.ConstructBrief("Brief description", laneID, allow, absResultPath, checks)
+		wantIntro := "- As the final verification, after your last edit, run these commands exactly as listed and do not edit files afterwards:\n"
+		if strings.Count(brief, wantIntro) != 1 {
+			t.Errorf("brief should contain intro line exactly once, got %d", strings.Count(brief, wantIntro))
+		}
+		for _, c := range checks {
+			wantItem := fmt.Sprintf("  - `lucind-ai attest run -- sh -c '%s'`\n", c)
+			if !strings.Contains(brief, wantItem) {
+				t.Errorf("brief missing item %q: %s", wantItem, brief)
+			}
 		}
 	})
 }
@@ -595,8 +628,15 @@ func TestDispatchChecks(t *testing.T) {
 			t.Fatalf("read brief.md failed: %v", err)
 		}
 		briefContent := string(briefBytes)
-		wantAttest1 := "- As the final verification run exactly `lucind-ai attest run -- sh -c 'go test ./...'` and do not edit files afterwards."
-		wantAttest2 := "- As the final verification run exactly `lucind-ai attest run -- sh -c 'golangci-lint run'` and do not edit files afterwards."
+		wantIntro := "- As the final verification, after your last edit, run these commands exactly as listed and do not edit files afterwards:\n"
+		wantAttest1 := "  - `lucind-ai attest run -- sh -c 'go test ./...'`\n"
+		wantAttest2 := "  - `lucind-ai attest run -- sh -c 'golangci-lint run'`\n"
+		if !strings.Contains(briefContent, wantIntro) {
+			t.Errorf("brief.md missing intro line: %s", briefContent)
+		}
+		if strings.Count(briefContent, wantIntro) != 1 {
+			t.Errorf("brief.md should have intro line exactly once, got %d", strings.Count(briefContent, wantIntro))
+		}
 		if !strings.Contains(briefContent, wantAttest1) {
 			t.Errorf("brief.md missing attest line 1: %s", briefContent)
 		}
@@ -658,7 +698,11 @@ func TestDispatchChecks(t *testing.T) {
 		if err != nil {
 			t.Fatalf("read brief.md failed: %v", err)
 		}
-		wantAttest := "- As the final verification run exactly `lucind-ai attest run -- sh -c 'go test ./...'` and do not edit files afterwards."
+		wantIntro := "- As the final verification, after your last edit, run these commands exactly as listed and do not edit files afterwards:\n"
+		wantAttest := "  - `lucind-ai attest run -- sh -c 'go test ./...'`\n"
+		if !strings.Contains(string(briefBytes), wantIntro) {
+			t.Errorf("brief.md did not contain intro line: %s", string(briefBytes))
+		}
 		if !strings.Contains(string(briefBytes), wantAttest) {
 			t.Errorf("brief.md did not contain preserved check: %s", string(briefBytes))
 		}
@@ -716,15 +760,19 @@ func TestDispatchChecks(t *testing.T) {
 			t.Fatalf("read brief.md failed: %v", err)
 		}
 		briefContent := string(briefBytes)
-		wantAttest1 := "- As the final verification run exactly `lucind-ai attest run -- sh -c 'golangci-lint run'` and do not edit files afterwards."
-		wantAttest2 := "- As the final verification run exactly `lucind-ai attest run -- sh -c 'go test -race ./...'` and do not edit files afterwards."
+		wantIntro := "- As the final verification, after your last edit, run these commands exactly as listed and do not edit files afterwards:\n"
+		wantAttest1 := "  - `lucind-ai attest run -- sh -c 'golangci-lint run'`\n"
+		wantAttest2 := "  - `lucind-ai attest run -- sh -c 'go test -race ./...'`\n"
+		if !strings.Contains(briefContent, wantIntro) {
+			t.Errorf("brief.md missing intro line: %s", briefContent)
+		}
 		if !strings.Contains(briefContent, wantAttest1) {
 			t.Errorf("brief.md missing replacement attest 1: %s", briefContent)
 		}
 		if !strings.Contains(briefContent, wantAttest2) {
 			t.Errorf("brief.md missing replacement attest 2: %s", briefContent)
 		}
-		if strings.Contains(briefContent, "- As the final verification run exactly `lucind-ai attest run -- sh -c 'go test ./...'`") {
+		if strings.Contains(briefContent, "go test ./...") {
 			t.Errorf("brief.md should not contain old check: %s", briefContent)
 		}
 	})
@@ -1008,5 +1056,237 @@ func TestDispatch_Behavior5_MatchingCwd_Symlink_Proceeds(t *testing.T) {
 	}
 	if out.PaneID != "w1:pSym" {
 		t.Errorf("out.PaneID = %q, want \"w1:pSym\"", out.PaneID)
+	}
+}
+
+func TestDispatch_Continuation_RenamesResultToPrevResult(t *testing.T) {
+	t.Setenv("HERDR_ENV", "1")
+	repoDir := t.TempDir()
+	initGitRepo(t, repoDir)
+
+	createdLane, err := lane.Create(context.Background(), repoDir, []string{"pkg/**"}, "gemini-3.8-flash-high")
+	if err != nil {
+		t.Fatalf("lane.Create failed: %v", err)
+	}
+	createdLane.PaneID = "w1:pContRename"
+	createdLane.Status = lane.StatusFailed
+	if err := createdLane.Save(repoDir); err != nil {
+		t.Fatalf("lane.Save failed: %v", err)
+	}
+
+	laneDir := lane.LaneDir(repoDir, createdLane.ID)
+	resultPath := filepath.Join(laneDir, "result.json")
+	prevPath := filepath.Join(laneDir, "result.prev.json")
+	if err := os.WriteFile(resultPath, []byte(`{"status": "old"}`), 0644); err != nil {
+		t.Fatalf("write result.json failed: %v", err)
+	}
+
+	runner := newFakeHerdrRunner()
+	runner.handlers["agent prompt"] = func(args []string) ([]byte, error) {
+		return []byte(`{"result": {"submitted": true}}`), nil
+	}
+
+	opts := dispatch.Options{
+		Cwd:    repoDir,
+		LaneID: createdLane.ID,
+		Brief:  "Resume and rename result",
+		Detach: true,
+	}
+
+	_, exitCode, err := dispatch.Dispatch(context.Background(), opts, runner)
+	if err != nil {
+		t.Fatalf("unexpected dispatch error: %v", err)
+	}
+	if exitCode != 0 {
+		t.Errorf("exitCode = %d, want 0", exitCode)
+	}
+
+	if _, err := os.Stat(resultPath); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("result.json should not exist, err=%v", err)
+	}
+	prevBytes, err := os.ReadFile(prevPath)
+	if err != nil {
+		t.Fatalf("read result.prev.json failed: %v", err)
+	}
+	if string(prevBytes) != `{"status": "old"}` {
+		t.Errorf("result.prev.json content = %q, want %q", string(prevBytes), `{"status": "old"}`)
+	}
+}
+
+func TestDispatch_Continuation_ReplacesOlderPrevResult(t *testing.T) {
+	t.Setenv("HERDR_ENV", "1")
+	repoDir := t.TempDir()
+	initGitRepo(t, repoDir)
+
+	createdLane, err := lane.Create(context.Background(), repoDir, []string{"pkg/**"}, "gemini-3.8-flash-high")
+	if err != nil {
+		t.Fatalf("lane.Create failed: %v", err)
+	}
+	createdLane.PaneID = "w1:pContReplace"
+	createdLane.Status = lane.StatusFailed
+	if err := createdLane.Save(repoDir); err != nil {
+		t.Fatalf("lane.Save failed: %v", err)
+	}
+
+	laneDir := lane.LaneDir(repoDir, createdLane.ID)
+	resultPath := filepath.Join(laneDir, "result.json")
+	prevPath := filepath.Join(laneDir, "result.prev.json")
+	if err := os.WriteFile(prevPath, []byte(`{"status": "ancient"}`), 0644); err != nil {
+		t.Fatalf("write result.prev.json failed: %v", err)
+	}
+	if err := os.WriteFile(resultPath, []byte(`{"status": "previous"}`), 0644); err != nil {
+		t.Fatalf("write result.json failed: %v", err)
+	}
+
+	runner := newFakeHerdrRunner()
+	runner.handlers["agent prompt"] = func(args []string) ([]byte, error) {
+		return []byte(`{"result": {"submitted": true}}`), nil
+	}
+
+	opts := dispatch.Options{
+		Cwd:    repoDir,
+		LaneID: createdLane.ID,
+		Brief:  "Resume and replace older prev result",
+		Detach: true,
+	}
+
+	_, exitCode, err := dispatch.Dispatch(context.Background(), opts, runner)
+	if err != nil {
+		t.Fatalf("unexpected dispatch error: %v", err)
+	}
+	if exitCode != 0 {
+		t.Errorf("exitCode = %d, want 0", exitCode)
+	}
+
+	if _, err := os.Stat(resultPath); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("result.json should not exist, err=%v", err)
+	}
+	prevBytes, err := os.ReadFile(prevPath)
+	if err != nil {
+		t.Fatalf("read result.prev.json failed: %v", err)
+	}
+	if string(prevBytes) != `{"status": "previous"}` {
+		t.Errorf("result.prev.json content = %q, want %q", string(prevBytes), `{"status": "previous"}`)
+	}
+}
+
+func TestDispatch_Continuation_ToleratesMissingResult(t *testing.T) {
+	t.Setenv("HERDR_ENV", "1")
+	repoDir := t.TempDir()
+	initGitRepo(t, repoDir)
+
+	createdLane, err := lane.Create(context.Background(), repoDir, []string{"pkg/**"}, "gemini-3.8-flash-high")
+	if err != nil {
+		t.Fatalf("lane.Create failed: %v", err)
+	}
+	createdLane.PaneID = "w1:pContMissing"
+	createdLane.Status = lane.StatusFailed
+	if err := createdLane.Save(repoDir); err != nil {
+		t.Fatalf("lane.Save failed: %v", err)
+	}
+
+	laneDir := lane.LaneDir(repoDir, createdLane.ID)
+	resultPath := filepath.Join(laneDir, "result.json")
+	prevPath := filepath.Join(laneDir, "result.prev.json")
+
+	runner := newFakeHerdrRunner()
+	runner.handlers["agent prompt"] = func(args []string) ([]byte, error) {
+		return []byte(`{"result": {"submitted": true}}`), nil
+	}
+
+	opts := dispatch.Options{
+		Cwd:    repoDir,
+		LaneID: createdLane.ID,
+		Brief:  "Resume with no result.json",
+		Detach: true,
+	}
+
+	_, exitCode, err := dispatch.Dispatch(context.Background(), opts, runner)
+	if err != nil {
+		t.Fatalf("unexpected dispatch error: %v", err)
+	}
+	if exitCode != 0 {
+		t.Errorf("exitCode = %d, want 0", exitCode)
+	}
+
+	if _, err := os.Stat(resultPath); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("result.json should not exist, err=%v", err)
+	}
+	if _, err := os.Stat(prevPath); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("result.prev.json should not exist, err=%v", err)
+	}
+}
+
+func TestDispatch_NewLane_DoesNotTouchOrCreatePrevResult(t *testing.T) {
+	t.Setenv("HERDR_ENV", "1")
+	repoDir := t.TempDir()
+	initGitRepo(t, repoDir)
+
+	runner := setupFakeRunnerForNewLane(t, "w1:pNewNoPrev")
+
+	opts := dispatch.Options{
+		Cwd:    repoDir,
+		Allow:  []string{"*"},
+		Brief:  "New lane should not have prev result",
+		Detach: true,
+	}
+
+	out, exitCode, err := dispatch.Dispatch(context.Background(), opts, runner)
+	if err != nil {
+		t.Fatalf("unexpected dispatch error: %v", err)
+	}
+	if exitCode != 0 {
+		t.Errorf("exitCode = %d, want 0", exitCode)
+	}
+
+	laneDir := lane.LaneDir(repoDir, out.Lane)
+	prevPath := filepath.Join(laneDir, "result.prev.json")
+	if _, err := os.Stat(prevPath); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("result.prev.json should not exist for new lane, err=%v", err)
+	}
+}
+
+func TestDispatch_Continuation_RenameErrorReturned(t *testing.T) {
+	t.Setenv("HERDR_ENV", "1")
+	repoDir := t.TempDir()
+	initGitRepo(t, repoDir)
+
+	createdLane, err := lane.Create(context.Background(), repoDir, []string{"pkg/**"}, "gemini-3.8-flash-high")
+	if err != nil {
+		t.Fatalf("lane.Create failed: %v", err)
+	}
+	createdLane.PaneID = "w1:pContErr"
+	createdLane.Status = lane.StatusFailed
+	if err := createdLane.Save(repoDir); err != nil {
+		t.Fatalf("lane.Save failed: %v", err)
+	}
+
+	laneDir := lane.LaneDir(repoDir, createdLane.ID)
+	resultPath := filepath.Join(laneDir, "result.json")
+	prevPath := filepath.Join(laneDir, "result.prev.json")
+	if err := os.WriteFile(resultPath, []byte(`{"status": "old"}`), 0644); err != nil {
+		t.Fatalf("write result.json failed: %v", err)
+	}
+	if err := os.Mkdir(prevPath, 0755); err != nil {
+		t.Fatalf("mkdir result.prev.json failed: %v", err)
+	}
+
+	runner := newFakeHerdrRunner()
+	opts := dispatch.Options{
+		Cwd:    repoDir,
+		LaneID: createdLane.ID,
+		Brief:  "Resume with rename error",
+		Detach: true,
+	}
+
+	_, exitCode, err := dispatch.Dispatch(context.Background(), opts, runner)
+	if err == nil {
+		t.Fatal("expected error when rename fails, got nil")
+	}
+	if exitCode != 1 {
+		t.Errorf("exitCode = %d, want 1", exitCode)
+	}
+	if !strings.Contains(err.Error(), "rename previous result:") {
+		t.Errorf("expected error to contain 'rename previous result:', got: %v", err)
 	}
 }

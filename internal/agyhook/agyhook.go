@@ -237,6 +237,7 @@ func Stop(ctx context.Context, laneID string, stdin []byte) []byte {
 		if errors.Is(readErr, fs.ErrNotExist) {
 			msg = "the file does not exist"
 		}
+		logf(root, laneID, "stop: retry %d/%d: %s", l.Retries, MaxRetries, msg)
 		return cont(fmt.Sprintf("The result envelope at %s is missing or invalid: %s. Write a valid envelope that satisfies the result schema (see the lucind-result skill) to that exact path before stopping.", resultPath, msg))
 	}
 
