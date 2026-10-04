@@ -63,7 +63,7 @@ Route per task is recorded when started (inline or delegated, with trigger evide
 - [ ] T4 `lucind-ai install`: embed the Claude skill, copy it to `~/.claude/skills/lucind`, then
       run the existing agy plugin setup; Makefile `install` calls it.
 
-- [ ] T5 Bug: `dispatch` passes a relative `--cwd` (for example `.`) unresolved to
+- [x] T5 Bug: `dispatch` passes a relative `--cwd` (for example `.`) unresolved to
       `herdr pane split --cwd`, so the pane opens in the herdr server's home and the agy
       PreToolUse hook denies every tool call (`git rev-parse --show-toplevel` fails, lane hangs).
       Fix 1: resolve `--cwd` to an absolute path at the start of `Dispatch` and report it in the
@@ -71,6 +71,14 @@ Route per task is recorded when started (inline or delegated, with trigger evide
       expected one; on mismatch close the pane and fail with both paths. Found when lane
       `20261004-052728-9ea1` died this way. Idea parked, not in scope: pass the repo root to the
       hook in an env var (`LUCIND_REPO`) so it stops depending on the pane cwd.
+
+      Route: delegated to agy via lane `20261004-054348-0962`. Accepted, commit `09aab78`.
+- [ ] T6 Pane lifecycle guidance in `plugin/claude-code/skills/lucind/SKILL.md` (skill only, no
+      Go): after `accept`, the orchestrator decides per lane. Default: close the pane with
+      `herdr pane close <pane_id>`. Alternative: leave it open to ask the implementer follow-up
+      questions about the diff with its fresh context (`herdr agent prompt <pane_id> ...`), then
+      close it. Also use `--cwd "$PWD"` in the dispatch example. No `accept --close-pane` flag
+      for now (it would change the lucind-ai contract). Found when pane `w1:p13` stayed open.
 
 ## Acceptance criteria
 
