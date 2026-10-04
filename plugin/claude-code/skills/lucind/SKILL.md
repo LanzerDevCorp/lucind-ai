@@ -58,17 +58,59 @@ Free Markdown, not validated by lucind-ai. Include: goal, scope, acceptance crit
 covers lane id, allowed globs, result path and the final `lucind-ai attest run -- sh lucind-checks.sh`.
 Keep `--allow` as narrow as the task: it is enforced by agy's PreToolUse hook and again by `accept`.
 
-When the task needs project skills, add this section to the brief, one exact `SKILL.md` path per
-line, and nothing else under it:
+### Brief sections
+
+Each one is its own Markdown heading. A section that ends at the next heading must contain only
+what is described here (no explanatory prose), so put prose under a following heading.
+
+- `## Allowed edit surfaces`: the same set as `--allow`. Exact repo-relative paths or narrow
+  globs, one per line; never `.`, a bare repository root, or an absolute path; paths containing
+  whitespace go in whole-entry backticks. List pre-existing untracked targets agy may write and
+  the directories where new files are authorized. Nothing beyond the task: a surface wider than
+  the task is the same defect as no surface at all.
+- `## Skills to load before work`: one exact `SKILL.md` path per line, absolute. Resolve them
+  yourself (skill registry or `~/.claude/skills`); agy reads those files before touching code and
+  does not rediscover skills. Omit when no skill applies.
+- `## Hard stops`: one line per condition that must stop agy. The envelope requires one
+  `hard_stops` entry per hard stop in the brief (`[]` when none), so list them here.
+- `## Verification`: the exact commands agy must run, each reported as
+  `<command>: <observed result>` in `done_criteria[].evidence`. The final
+  `lucind-ai attest run -- sh lucind-checks.sh` from the footer still applies.
+- `## Known environmental failures` (optional): exact test names or command lines already
+  failing on the base. Any other failing required command means the lane is not `done`.
+- `## Test-first policy`: when a relevant runnable deterministic test and a clear expected outcome
+  exist, observe RED before implementing, then GREEN, then refactor while tests stay green. Tests
+  or frameworks being present alone do not establish applicability. For passive documentation,
+  unavailable runners, or no meaningful runnable RED, state the exception and run proportionate
+  functional or structural checks. Name the applicable runner and the evidence or exception; never
+  invent RED/GREEN evidence or a runner.
+- `## Feature document`: the repo-relative locator `odd/tasks/<feature-name>.md`. Read the actual
+  file (and reconcile it with its Engram mirror `odd/<feature-name>/tasks`) before delegating, pass
+  the relevant context in the brief, and tell agy to read the document before editing. Omit for
+  small work with no feature document.
+- `## Language contract`: generated technical artifacts (code, comments, tests, fixtures, UI
+  copy, docs) default to English regardless of conversation language. If another language is
+  explicitly requested for an artifact, use a neutral/professional register unless a specific tone
+  or regional variant is requested.
+- `## Size heuristic`: about 400 authored changed lines per task (additions plus deletions) is a
+  planning heuristic only, not an acceptance criterion, hard cap, or automatic stop. If the
+  correct, clear solution naturally exceeds it, say why and continue. Never delete spaces, blank
+  lines or comments to save lines, omit tests, minify, add gratuitous abstractions, or split
+  artificially to fit it.
+- `## Remote scope`: only when remote work is authorized. State the exact destination, operation
+  and credential/session; delegation cannot expand it. Omit otherwise, and agy stays local.
+- `## Key Learnings` as the closing instruction: after writing its normal result envelope, agy
+  closes its final response text with a `## Key Learnings` block of 1-5 numbered items, each a
+  standalone factual sentence of at least 20 characters and at least 4 words, omitting the block
+  when there is genuinely no reusable learning.
+
+Example of the skills section:
 
 ```markdown
 ## Skills to load before work
 /abs/path/to/skill-a/SKILL.md
 /abs/path/to/skill-b/SKILL.md
 ```
-
-Resolve the paths yourself (skill registry or `~/.claude/skills`); agy reads those files before
-touching code. Omit the section when no skill applies.
 
 ## Parallelism and worktrees
 
