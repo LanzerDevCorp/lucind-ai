@@ -510,4 +510,3 @@ func runWait(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fmt.Fprintln(stdout, string(data))
 	return exitCode
 }
-

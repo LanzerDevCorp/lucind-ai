@@ -836,4 +836,3 @@ func TestWaitExecution(t *testing.T) {
 		t.Fatalf("exit code = %d, want 4", code)
 	}
 }
-

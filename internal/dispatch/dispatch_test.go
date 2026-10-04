@@ -124,11 +124,11 @@ func TestDispatch_NewLane_HappyPath(t *testing.T) {
 	runner := setupFakeRunnerForNewLane(t, "w1:pLane1")
 
 	opts := dispatch.Options{
-		Cwd:      repoDir,
-		Allow:    []string{"internal/**", "cmd/**"},
-		Model:    "gemini-3.8-flash-high",
-		Brief:    "# Implement Feature A\nPlease implement feature A carefully.",
-		Detach:   true,
+		Cwd:    repoDir,
+		Allow:  []string{"internal/**", "cmd/**"},
+		Model:  "gemini-3.8-flash-high",
+		Brief:  "# Implement Feature A\nPlease implement feature A carefully.",
+		Detach: true,
 	}
 
 	out, exitCode, err := dispatch.Dispatch(context.Background(), opts, runner)
@@ -1010,4 +1010,3 @@ func TestDispatch_Behavior5_MatchingCwd_Symlink_Proceeds(t *testing.T) {
 		t.Errorf("out.PaneID = %q, want \"w1:pSym\"", out.PaneID)
 	}
 }
-

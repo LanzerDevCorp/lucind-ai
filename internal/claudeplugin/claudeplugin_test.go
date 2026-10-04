@@ -267,4 +267,3 @@ func TestInstall_HomeResolutionFailure(t *testing.T) {
 		t.Skip("os.UserHomeDir() did not fail without HOME in this environment")
 	}
 }
-

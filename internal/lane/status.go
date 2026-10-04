@@ -12,9 +12,9 @@ const (
 	StatusRejected Status = "rejected"
 
 	// Deprecated aliases kept for compatibility during migration.
-	Running  = StatusRunning
-	Done     = StatusDone
-	Failed   = StatusFailed
+	Running         = StatusRunning
+	Done            = StatusDone
+	Failed          = StatusFailed
 	Pending  Status = "pending"
 	Blocked  Status = "blocked"
 	Deviated Status = "deviated"

@@ -282,4 +282,3 @@ func resolveSymlinks(path string) string {
 	}
 	return filepath.Clean(resolved)
 }
-

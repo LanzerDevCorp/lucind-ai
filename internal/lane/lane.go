@@ -321,4 +321,3 @@ func MarkStopped(root, id string) (Status, error) {
 
 	return finalStatus, nil
 }
-

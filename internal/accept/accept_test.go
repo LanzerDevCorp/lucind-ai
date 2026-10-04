@@ -849,7 +849,7 @@ func TestAccept_TwoChecksOneAttestedRunsOnlyMissing(t *testing.T) {
 	repoDir := t.TempDir()
 	initGitRepo(t, repoDir)
 
-	check1 := "exit 42"                  // attested, would fail if executed
+	check1 := "exit 42"                         // attested, would fail if executed
 	check2 := "echo 'check 2 ran successfully'" // not attested, runs and passes
 
 	l, err := lane.Create(ctx, repoDir, []string{"src/**"}, "test-model", check1, check2)

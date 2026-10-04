@@ -169,4 +169,3 @@ func ClosePane(ctx context.Context, runner HerdrRunner, paneID string) error {
 	}
 	return nil
 }
-
