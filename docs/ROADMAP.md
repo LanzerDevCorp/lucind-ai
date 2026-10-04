@@ -7,6 +7,19 @@ What exists is in [`product.md`](product.md).
 - **agy-only contract** (`feature/agy-only-contract`): single provider, `dispatch`/`wait`,
   per-lane JSON state, embedded agy plugin (PreToolUse/Stop hooks), `accept` with allowed-path and
   attestation checks, Claude skill `lucind`. Orchestration, ledger and other providers removed.
+  Delivered as a chain of PRs (#5–#11) merged through #12.
+- **Leftover cleanup** (`lucind-cleanup`, `chore/remove-packet-leftovers`, #13): static agy model
+  list and the other non-blocking leftovers of the contract; packet-era rules, skills, backups,
+  stray files and stale cursor-agent proposals removed.
+- **Per-lane checks and `lucind-ai install`** (`feature/lane-checks-and-install`, #14): the
+  orchestrator picks the attested checks per lane with `--check` (the hardcoded
+  `lucind-checks.sh` is deprecated); one flagless `lucind-ai install` sets up the agy plugin and
+  the Claude skill.
+- **Stop-hook retries** (`feature/lane-stop-retries`): hook payload logging, `wait` revalidates
+  the result before reporting `failed`, the retry budget resets after a quiet window and is
+  capped, and the stop counters reset on lane continuation. Verified with real probe lanes.
+- **Superseded:** the multi-provider herdr work (`herdr-agent-factory`, `herdr-interactive-agents`)
+  predates the agy-only contract; its interactive-pane and Stop-hook ideas survive in it.
 
 ## Next
 
