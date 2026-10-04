@@ -536,9 +536,9 @@ func TestReadInteractionRequiredValid(t *testing.T) {
 		"hard_stops": [],
 		"interaction": {
 			"question": "Which database engine should be used?",
-			"reason": "Specification does not select between postgres and sqlite",
-			"unblock_response": "Specify postgres or sqlite in packet options",
-			"options": ["postgres", "sqlite"]
+			"reason": "Specification does not select between postgres and mysql",
+			"unblock_response": "Specify postgres or mysql in packet options",
+			"options": ["postgres", "mysql"]
 		}
 	}`
 	fsys := fstest.MapFS{
@@ -559,14 +559,14 @@ func TestReadInteractionRequiredValid(t *testing.T) {
 	if e.Interaction.Question != "Which database engine should be used?" {
 		t.Errorf("Question = %q, want expected", e.Interaction.Question)
 	}
-	if e.Interaction.Reason != "Specification does not select between postgres and sqlite" {
+	if e.Interaction.Reason != "Specification does not select between postgres and mysql" {
 		t.Errorf("Reason = %q, want expected", e.Interaction.Reason)
 	}
-	if e.Interaction.UnblockResponse != "Specify postgres or sqlite in packet options" {
+	if e.Interaction.UnblockResponse != "Specify postgres or mysql in packet options" {
 		t.Errorf("UnblockResponse = %q, want expected", e.Interaction.UnblockResponse)
 	}
-	if len(e.Interaction.Options) != 2 || e.Interaction.Options[0] != "postgres" || e.Interaction.Options[1] != "sqlite" {
-		t.Errorf("Options = %v, want [postgres sqlite]", e.Interaction.Options)
+	if len(e.Interaction.Options) != 2 || e.Interaction.Options[0] != "postgres" || e.Interaction.Options[1] != "mysql" {
+		t.Errorf("Options = %v, want [postgres mysql]", e.Interaction.Options)
 	}
 	if got, want := e.LaneStatus(), lane.Blocked; got != want {
 		t.Errorf("LaneStatus() = %v, want %v", got, want)
