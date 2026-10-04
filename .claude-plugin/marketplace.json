@@ -1,14 +1,14 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "lucind-ai",
-  "description": "Multi-agent orchestration: route already-decided work across execution, audit and human lanes without stalling the conversation",
+  "description": "Claude orchestrates, Antigravity (agy) implements through herdr, and lucind-ai enforces the deterministic lane contract.",
   "owner": {
     "name": "LanzerDevCorp"
   },
   "plugins": [
     {
       "name": "lucind-ai",
-      "description": "Supervisor pattern for CLI agents. Opus holds the ledger and dispatches surgical packets; agy executes in parallel, gpt-5.6-sol audits, the human runs whatever touches a secret.",
+      "description": "Claude orchestrates, Antigravity (agy) implements through herdr, and lucind-ai enforces the deterministic lane contract (result envelope, allowed paths, test attestation).",
       "version": "2.0.20",
       "author": {
         "name": "LanzerDevCorp"
