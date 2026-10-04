@@ -211,7 +211,7 @@ func TestLegacyPacketDigestPinned(t *testing.T) {
 	legacyP.ReadOnlyPaths = []string{"docs/auth.md"}
 	d := run.PacketDigest(legacyP, []string{"internal/run"})
 
-	const want = "sha256:4f84afdbf169af18ccdb0b7dd712116a548e1c281814fd2ffd1e9c7c3f5ffec7"
+	const want = "sha256:8a2a1e45654ff017ab12fc7f53638303bff66b2a6be03121e2494eb8befa00c0"
 	if d != want {
 		t.Fatalf("packetDigest = %q, want literal pin %q", d, want)
 	}

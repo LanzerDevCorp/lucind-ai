@@ -1,7 +1,6 @@
 package packet_test
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -89,46 +88,6 @@ func TestParseModelAbsentLeavesFieldEmpty(t *testing.T) {
 	}
 	if p.Model != "" {
 		t.Errorf("Model = %q, want empty", p.Model)
-	}
-}
-
-func TestParseAgentPresentIsParsed(t *testing.T) {
-	src := "---\n" +
-		"id: author-dag\n" +
-		"executor: opencode\n" +
-		"routed_by: DAG authoring, specialist agent required\n" +
-		"agent: lucind-dag\n" +
-		"---\n" +
-		"\n" +
-		"## Goal\n"
-
-	p, err := packet.Parse(strings.NewReader(src))
-	if err != nil {
-		t.Fatalf("Parse() error = %v, want nil", err)
-	}
-	if p.Agent != "lucind-dag" {
-		t.Errorf("Agent = %q, want %q", p.Agent, "lucind-dag")
-	}
-}
-
-// TestParseAgentAbsentLeavesFieldEmpty mirrors
-// TestParseModelAbsentLeavesFieldEmpty: an absent agent key leaves
-// Packet.Agent at its zero value, no default injected.
-func TestParseAgentAbsentLeavesFieldEmpty(t *testing.T) {
-	src := "---\n" +
-		"id: fix-auth\n" +
-		"executor: agy\n" +
-		"routed_by: touches auth, Tier A verification required\n" +
-		"---\n" +
-		"\n" +
-		"## Goal\n"
-
-	p, err := packet.Parse(strings.NewReader(src))
-	if err != nil {
-		t.Fatalf("Parse() error = %v, want nil", err)
-	}
-	if p.Agent != "" {
-		t.Errorf("Agent = %q, want empty", p.Agent)
 	}
 }
 
@@ -926,60 +885,6 @@ func TestSkillAssetContract(t *testing.T) {
 	}
 }
 
-func TestSkillTreesByteIdentical(t *testing.T) {
-	claude := filepath.Join("..", "..", "plugin", "claude-code", "skills", "lucind-ai")
-	opencode := filepath.Join("..", "..", "plugin", "opencode", "skills", "lucind-ai")
-	claudeFiles := skillTreeFiles(t, claude)
-	opencodeFiles := skillTreeFiles(t, opencode)
-	if len(claudeFiles) != len(opencodeFiles) {
-		t.Fatalf("skill tree file counts differ: claude=%d opencode=%d", len(claudeFiles), len(opencodeFiles))
-	}
-	for rel, want := range claudeFiles {
-		got, ok := opencodeFiles[rel]
-		if !ok {
-			t.Errorf("OpenCode tree missing %s (present in Claude tree)", rel)
-			continue
-		}
-		if !bytes.Equal(want, got) {
-			t.Errorf("skill file %s differs between Claude and OpenCode trees", rel)
-		}
-	}
-	for rel := range opencodeFiles {
-		if _, ok := claudeFiles[rel]; !ok {
-			t.Errorf("OpenCode tree has extra file %s (absent from Claude tree)", rel)
-		}
-	}
-}
-
-func skillTreeFiles(t *testing.T, root string) map[string][]byte {
-	t.Helper()
-	files := make(map[string][]byte)
-	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if entry.IsDir() {
-			return nil
-		}
-		rel, err := filepath.Rel(root, path)
-		if err != nil {
-			return err
-		}
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		files[filepath.ToSlash(rel)] = data
-		return nil
-	})
-	if err != nil {
-		t.Fatalf("walk %s: %v", root, err)
-	}
-	if len(files) == 0 {
-		t.Fatalf("skill tree %s is empty", root)
-	}
-	return files
-}
 
 // pluginManifest mirrors the fields this test reads from
 // plugin/claude-code/.claude-plugin/plugin.json.
@@ -1328,7 +1233,6 @@ func TestRemainingPacketTemplatesContract(t *testing.T) {
 
 	roots := []string{
 		filepath.Join("..", "..", "plugin", "claude-code", "skills", "lucind-ai", "assets"),
-		filepath.Join("..", "..", "plugin", "opencode", "skills", "lucind-ai", "assets"),
 	}
 
 	for _, assetsDir := range roots {
@@ -1777,7 +1681,7 @@ func TestParseEscalation(t *testing.T) {
 	})
 
 	t.Run("valid 3 rungs with empty models", func(t *testing.T) {
-		src := "---\nid: test-lane\nexecutor: agy\nrouted_by: test\nverification: [\"go test ./...\"]\ncommit_message: feat: x\nescalation: [{\"executor\":\"herdr-agy\"},{\"executor\":\"cursor-agent\",\"model\":\"claude-3.7-sonnet\"},{\"executor\":\"opencode\"}]\n---\n\n## Goal\nTest\n"
+		src := "---\nid: test-lane\nexecutor: agy\nrouted_by: test\nverification: [\"go test ./...\"]\ncommit_message: feat: x\nescalation: [{\"executor\":\"herdr-agy\"},{\"executor\":\"agy\",\"model\":\"gemini-3.8-flash-low\"},{\"executor\":\"herdr-agy\"}]\n---\n\n## Goal\nTest\n"
 		p, err := packet.Parse(strings.NewReader(src))
 		if err != nil {
 			t.Fatalf("Parse() error = %v, want nil", err)
@@ -1788,8 +1692,8 @@ func TestParseEscalation(t *testing.T) {
 		if p.Escalation[0].Executor != "herdr-agy" || p.Escalation[0].Model != "" {
 			t.Errorf("Escalation[0] = %+v, want {herdr-agy, empty}", p.Escalation[0])
 		}
-		if p.Escalation[2].Executor != "opencode" || p.Escalation[2].Model != "" {
-			t.Errorf("Escalation[2] = %+v, want {opencode, empty}", p.Escalation[2])
+		if p.Escalation[2].Executor != "herdr-agy" || p.Escalation[2].Model != "" {
+			t.Errorf("Escalation[2] = %+v, want {herdr-agy, empty}", p.Escalation[2])
 		}
 	})
 

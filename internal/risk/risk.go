@@ -1,7 +1,5 @@
 // Package risk defines a minimal deterministic risk classifier for a candidate change
 // set and the mapping from risk tier to required verification.
-//
-// Judges via cursor-agent are NOT implemented yet; this package only declares the plan.
 package risk
 
 import (

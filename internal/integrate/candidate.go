@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/LanzerDevCorp/lucind-ai/internal/reconcile"
-	"github.com/LanzerDevCorp/lucind-ai/internal/resolve"
 	"github.com/LanzerDevCorp/lucind-ai/internal/worktree"
 )
 
@@ -22,7 +21,7 @@ type CandidateParams struct {
 	TargetRef         string
 	ExpectedTargetSHA string
 	AllowedPaths      []string
-	Invoker           resolve.Invoker
+	Invoker           func(ctx context.Context, worktreePath, prompt string) (string, error)
 	Timeout           time.Duration
 	MaxConflictLines  int
 	Runner            worktree.GitRunner
@@ -56,20 +55,6 @@ func ResolveAndPromoteCandidate(ctx context.Context, params CandidateParams) (Ca
 		checkFn = Check
 	}
 
-	timeout := params.Timeout
-	if timeout <= 0 {
-		timeout = resolve.DefaultTimeout
-	}
-
-	maxConflictLines := params.MaxConflictLines
-	if maxConflictLines <= 0 {
-		maxConflictLines = resolve.MaxConflictLines
-	}
-
-	invoker := params.Invoker
-	if invoker == nil {
-		invoker = resolve.RealInvoker
-	}
 
 	// Pre-flight check: validate expected source and target refs have not changed
 	currentSourceSHA, err := worktree.ResolveCommitSHA(ctx, runner, params.PrimaryRoot, params.SourceRef)
@@ -117,63 +102,47 @@ func ResolveAndPromoteCandidate(ctx context.Context, params CandidateParams) (Ca
 	mergeCmd := exec.CommandContext(ctx, "git", "-C", wt.Path, "merge", "--no-ff", params.ExpectedSourceSHA)
 	mergeOut, mergeErr := mergeCmd.CombinedOutput()
 
-	var resolveOutcome resolve.CandidateOutcome
+	var resolveOutput string
 	if mergeErr != nil {
-		// Conflicted merge; execute bounded candidate resolver
-		resolveOutcome, err = resolve.ResolveCandidateMerge(ctx, resolve.CandidateOptions{
-			WorktreePath:     wt.Path,
-			BaseSHA:          params.ExpectedTargetSHA,
-			AllowedPaths:     params.AllowedPaths,
-			Invoker:          invoker,
-			Timeout:          timeout,
-			MaxConflictLines: maxConflictLines,
-		})
-		if err != nil || !resolveOutcome.Resolved {
-			failureReason := resolveOutcome.FailureReason
-			if failureReason == "" && err != nil {
-				failureReason = err.Error()
-			}
-			if failureReason == "" {
-				failureReason = strings.TrimSpace(string(mergeOut))
-			}
-			if params.ReconcileService != nil && params.CandidateID != "" {
-				_, _ = params.ReconcileService.UpdateCandidateStatus(ctx, params.CandidateID, reconcile.CandidateStatusFailed, "", failureReason)
-			}
-			// Preserve worktree and evidence for inspection on failure
-			return CandidateResult{
-				CandidateID:   params.CandidateID,
-				Status:        reconcile.CandidateStatusFailed,
-				Output:        resolveOutcome.Output,
-				FailureReason: failureReason,
-				WorktreePath:  wt.Path,
-			}, nil
+		failureReason := strings.TrimSpace(string(mergeOut))
+		if failureReason == "" {
+			failureReason = mergeErr.Error()
 		}
-	} else {
-		// Clean merge; still enforce no markers and allowed_paths scope
-		if hasMarkers, markerFiles, _ := resolve.ScanConflictMarkers(wt.Path); hasMarkers {
-			failureReason := fmt.Sprintf("conflict markers remain in worktree: %s", strings.Join(markerFiles, ", "))
-			if params.ReconcileService != nil && params.CandidateID != "" {
-				_, _ = params.ReconcileService.UpdateCandidateStatus(ctx, params.CandidateID, reconcile.CandidateStatusFailed, "", failureReason)
-			}
-			return CandidateResult{
-				CandidateID:   params.CandidateID,
-				Status:        reconcile.CandidateStatusFailed,
-				FailureReason: failureReason,
-				WorktreePath:  wt.Path,
-			}, nil
+		if params.ReconcileService != nil && params.CandidateID != "" {
+			_, _ = params.ReconcileService.UpdateCandidateStatus(ctx, params.CandidateID, reconcile.CandidateStatusFailed, "", failureReason)
 		}
-		if offending, _ := resolve.EnforceAllowedPaths(ctx, wt.Path, params.ExpectedTargetSHA, params.AllowedPaths); len(offending) > 0 {
-			failureReason := fmt.Sprintf("actual diff touched paths outside declared allowed_paths: %s", strings.Join(offending, ", "))
-			if params.ReconcileService != nil && params.CandidateID != "" {
-				_, _ = params.ReconcileService.UpdateCandidateStatus(ctx, params.CandidateID, reconcile.CandidateStatusFailed, "", failureReason)
-			}
-			return CandidateResult{
-				CandidateID:   params.CandidateID,
-				Status:        reconcile.CandidateStatusFailed,
-				FailureReason: failureReason,
-				WorktreePath:  wt.Path,
-			}, nil
+		return CandidateResult{
+			CandidateID:   params.CandidateID,
+			Status:        reconcile.CandidateStatusFailed,
+			FailureReason: failureReason,
+			WorktreePath:  wt.Path,
+		}, nil
+	}
+
+	// Clean merge; still enforce no markers and allowed_paths scope
+	if hasMarkers, markerFiles, _ := ScanConflictMarkers(wt.Path); hasMarkers {
+		failureReason := fmt.Sprintf("conflict markers remain in worktree: %s", strings.Join(markerFiles, ", "))
+		if params.ReconcileService != nil && params.CandidateID != "" {
+			_, _ = params.ReconcileService.UpdateCandidateStatus(ctx, params.CandidateID, reconcile.CandidateStatusFailed, "", failureReason)
 		}
+		return CandidateResult{
+			CandidateID:   params.CandidateID,
+			Status:        reconcile.CandidateStatusFailed,
+			FailureReason: failureReason,
+			WorktreePath:  wt.Path,
+		}, nil
+	}
+	if offending, _ := EnforceAllowedPaths(ctx, wt.Path, params.ExpectedTargetSHA, params.AllowedPaths); len(offending) > 0 {
+		failureReason := fmt.Sprintf("actual diff touched paths outside declared allowed_paths: %s", strings.Join(offending, ", "))
+		if params.ReconcileService != nil && params.CandidateID != "" {
+			_, _ = params.ReconcileService.UpdateCandidateStatus(ctx, params.CandidateID, reconcile.CandidateStatusFailed, "", failureReason)
+		}
+		return CandidateResult{
+			CandidateID:   params.CandidateID,
+			Status:        reconcile.CandidateStatusFailed,
+			FailureReason: failureReason,
+			WorktreePath:  wt.Path,
+		}, nil
 	}
 
 	// Run mandatory checks
@@ -190,7 +159,7 @@ func ResolveAndPromoteCandidate(ctx context.Context, params CandidateParams) (Ca
 		return CandidateResult{
 			CandidateID:   params.CandidateID,
 			Status:        reconcile.CandidateStatusFailed,
-			Output:        resolveOutcome.Output,
+			Output:        resolveOutput,
 			Checks:        checkOut,
 			FailureReason: failureReason,
 			WorktreePath:  wt.Path,
@@ -267,7 +236,7 @@ func ResolveAndPromoteCandidate(ctx context.Context, params CandidateParams) (Ca
 		CandidateID:  params.CandidateID,
 		Status:       reconcile.CandidateStatusIntegrated,
 		CandidateSHA: candSHA,
-		Output:       resolveOutcome.Output,
+		Output:       resolveOutput,
 		Checks:       checkOut,
 		Promoted:     true,
 		WorktreePath: wt.Path,

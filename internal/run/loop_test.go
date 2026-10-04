@@ -84,7 +84,7 @@ func TestBuildAttemptPlan(t *testing.T) {
 			MaxIterations: 3,
 			Escalation: []packet.EscalationRung{
 				{Executor: "herdr-agy"},
-				{Executor: "cursor-agent"},
+				{Executor: "agy"},
 			},
 		}
 		plan := run.BuildAttemptPlanForTest(p)
@@ -517,7 +517,7 @@ func TestTotalAttemptsCapNeverExceedsMax(t *testing.T) {
 	p.Verification = []string{"go test ./..."}
 	p.Escalation = []packet.EscalationRung{
 		{Executor: "herdr-agy"},
-		{Executor: "cursor-agent"},
+		{Executor: "agy"},
 	}
 
 	report, err := run.Execute(context.Background(), deps, p)

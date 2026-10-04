@@ -25,9 +25,6 @@ func TestConcreteExecutorsExposeReadOnlyPathsToChild(t *testing.T) {
 		make func(string) executor.Executor
 	}{
 		{name: "agy", make: func(binary string) executor.Executor { return executor.Agy{Binary: binary} }},
-		{name: "opencode", make: func(binary string) executor.Executor { return executor.Opencode{Binary: binary} }},
-		{name: "claude", make: func(binary string) executor.Executor { return executor.Claude{Binary: binary} }},
-		{name: "cursor-agent", make: func(binary string) executor.Executor { return executor.CursorAgent{Binary: binary} }},
 	}
 
 	for _, tt := range tests {

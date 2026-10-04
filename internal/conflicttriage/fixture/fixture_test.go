@@ -149,8 +149,8 @@ func TestFixturePackets_DisjointAndValidParentRef(t *testing.T) {
 			t.Errorf("FeatureTarget(%s): %v", e.Name(), err)
 		}
 	}
-	if !contains(names, "claude_judge.md") || !contains(names, "opencode_judge.md") {
-		t.Errorf("packets = %v, want claude_judge.md and opencode_judge.md", names)
+	if !contains(names, "feat_a.md") || !contains(names, "feat_b.md") {
+		t.Errorf("packets = %v, want feat_a.md and feat_b.md", names)
 	}
 	if err := packet.DisjointAllowedPaths(packets); err != nil {
 		t.Errorf("DisjointAllowedPaths: %v", err)

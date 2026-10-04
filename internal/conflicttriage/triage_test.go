@@ -12,10 +12,10 @@ import (
 	"time"
 
 	"github.com/LanzerDevCorp/lucind-ai/internal/conflicttriage"
+	"github.com/LanzerDevCorp/lucind-ai/internal/integrate"
 	"github.com/LanzerDevCorp/lucind-ai/internal/ledger"
 	"github.com/LanzerDevCorp/lucind-ai/internal/overlap"
 	"github.com/LanzerDevCorp/lucind-ai/internal/reconcile"
-	"github.com/LanzerDevCorp/lucind-ai/internal/resolve"
 )
 
 func openTriageLedger(t *testing.T) *ledger.Ledger {
@@ -143,7 +143,7 @@ func TestTriageAgent_BusinessHunkPinsHighRisk(t *testing.T) {
 		if err != nil {
 			return "", err
 		}
-		return string(raw), resolve.ErrSemanticAmbiguity
+		return string(raw), integrate.ErrSemanticAmbiguity
 	}
 
 	result, err := conflicttriage.RunTriage(ctx, conflicttriage.RunOptions{
@@ -157,7 +157,7 @@ func TestTriageAgent_BusinessHunkPinsHighRisk(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunTriage() error = %v, want nil (fail-open must not return ErrSemanticAmbiguity)", err)
 	}
-	if errors.Is(err, resolve.ErrSemanticAmbiguity) {
+	if errors.Is(err, integrate.ErrSemanticAmbiguity) {
 		t.Fatalf("RunTriage() returned ErrSemanticAmbiguity, want fail-open")
 	}
 
@@ -344,7 +344,7 @@ func TestTriageAgent_OutOfScopeEditsFailCandidate(t *testing.T) {
 	if err == nil {
 		t.Fatal("RunTriage() error = nil, want out-of-scope invariant failure")
 	}
-	if !errors.Is(err, resolve.ErrOutOfScopeEdits) {
+	if !errors.Is(err, integrate.ErrOutOfScopeEdits) {
 		t.Errorf("error = %v, want ErrOutOfScopeEdits", err)
 	}
 

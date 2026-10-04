@@ -383,7 +383,6 @@ func TestExecuteBatchEnsureLaneFailedUpdatesLaneMetadata(t *testing.T) {
 
 	failed := batchPacket("lane-fails-to-start")
 	failed.Model = "ensure-model"
-	failed.Agent = "ensure-agent"
 	failed.SDDPhase = "apply"
 	failed.FanoutGroup = "batch"
 	failed.Skill = "lucind-apply"
@@ -902,7 +901,7 @@ func (r *recordingFakeExecutor) KnownModels() []string {
 func TestExecuteBatchDispatchesDifferentExecutorsPerPacket(t *testing.T) {
 	root := t.TempDir()
 	agyExec := &recordingFakeExecutor{}
-	cursorExec := &recordingFakeExecutor{}
+	herdrAgyExec := &recordingFakeExecutor{}
 
 	p1 := packet.Packet{
 		ID:                "lane-agy",
@@ -915,14 +914,14 @@ func TestExecuteBatchDispatchesDifferentExecutorsPerPacket(t *testing.T) {
 		Body:              "prompt for agy",
 	}
 	p2 := packet.Packet{
-		ID:                "lane-cursor",
-		Executor:          "cursor-agent",
-		RoutedBy:          "rule cursor",
-		Feature:           "feat-lane-cursor",
+		ID:                "lane-herdr-agy",
+		Executor:          "herdr-agy",
+		RoutedBy:          "rule herdr-agy",
+		Feature:           "feat-lane-herdr-agy",
 		ParentRef:         "refs/heads/main",
 		BaseSHA:           "b000000000000000000000000000000000000000",
 		ExpectedParentSHA: "b000000000000000000000000000000000000000",
-		Body:              "prompt for cursor",
+		Body:              "prompt for herdr-agy",
 	}
 
 	deps := newBatchTestDeps(t, func(id string) string {
@@ -935,8 +934,8 @@ func TestExecuteBatchDispatchesDifferentExecutorsPerPacket(t *testing.T) {
 		switch name {
 		case "agy":
 			return agyExec, nil
-		case "cursor-agent":
-			return cursorExec, nil
+		case "herdr-agy":
+			return herdrAgyExec, nil
 		default:
 			return nil, fmt.Errorf("unexpected executor name %q", name)
 		}
@@ -965,19 +964,19 @@ func TestExecuteBatchDispatchesDifferentExecutorsPerPacket(t *testing.T) {
 		t.Errorf("agyExec worktree = %q, want %q", agyReqs[0].WorktreePath, wantPath)
 	}
 
-	// Verify cursor executor saw only lane-cursor's prompt and worktree
-	cursorExec.mu.Lock()
-	cursorReqs := append([]executor.Request(nil), cursorExec.requests...)
-	cursorExec.mu.Unlock()
+	// Verify herdr-agy executor saw only lane-herdr-agy's prompt and worktree
+	herdrAgyExec.mu.Lock()
+	herdrAgyReqs := append([]executor.Request(nil), herdrAgyExec.requests...)
+	herdrAgyExec.mu.Unlock()
 
-	if len(cursorReqs) != 1 {
-		t.Fatalf("cursorExec saw %d requests, want 1", len(cursorReqs))
+	if len(herdrAgyReqs) != 1 {
+		t.Fatalf("herdrAgyExec saw %d requests, want 1", len(herdrAgyReqs))
 	}
-	if cursorReqs[0].Prompt != "prompt for cursor" {
-		t.Errorf("cursorExec prompt = %q, want %q", cursorReqs[0].Prompt, "prompt for cursor")
+	if herdrAgyReqs[0].Prompt != "prompt for herdr-agy" {
+		t.Errorf("herdrAgyExec prompt = %q, want %q", herdrAgyReqs[0].Prompt, "prompt for herdr-agy")
 	}
-	if wantPath := root + "/lane-cursor"; cursorReqs[0].WorktreePath != wantPath {
-		t.Errorf("cursorExec worktree = %q, want %q", cursorReqs[0].WorktreePath, wantPath)
+	if wantPath := root + "/lane-herdr-agy"; herdrAgyReqs[0].WorktreePath != wantPath {
+		t.Errorf("herdrAgyExec worktree = %q, want %q", herdrAgyReqs[0].WorktreePath, wantPath)
 	}
 }
 

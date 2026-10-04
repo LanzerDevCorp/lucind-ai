@@ -93,7 +93,6 @@ func testPacket() packet.Packet {
 		ExpectedParentSHA: "b000000000000000000000000000000000000000",
 		Body:              "do the thing",
 		Model:             "test-model",
-		Agent:             "test-agent",
 		SDDPhase:          "apply",
 		FanoutGroup:       "ledger",
 		Skill:             "lucind-apply",
@@ -123,9 +122,9 @@ func TestExecuteUpdatesLaneMetadataAfterRegisterLane(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetLaneMetadata() error = %v", err)
 	}
-	if got.Model != p.Model || got.Agent != p.Agent || got.Feature != p.Feature {
-		t.Fatalf("metadata model/agent/feature = (%q,%q,%q), want (%q,%q,%q)",
-			got.Model, got.Agent, got.Feature, p.Model, p.Agent, p.Feature)
+	if got.Model != p.Model || got.Feature != p.Feature {
+		t.Fatalf("metadata model/feature = (%q,%q), want (%q,%q)",
+			got.Model, got.Feature, p.Model, p.Feature)
 	}
 	if got.SDDPhase != p.SDDPhase || got.FanoutGroup != p.FanoutGroup {
 		t.Fatalf("metadata sdd_phase/fanout_group = (%q,%q), want (%q,%q)",

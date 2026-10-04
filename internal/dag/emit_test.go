@@ -42,7 +42,7 @@ func TestEmit_SuccessfulSplitWritesPackets(t *testing.T) {
 			},
 			{
 				ID:           "apply-serve",
-				Executor:     "cursor-agent",
+				Executor:     "agy",
 				RoutedBy:     "HTTP isolated after ledger exists",
 				AllowedPaths: []string{"internal/serve/", "cmd/lucind-ai/cli.go"},
 				DependsOn:    []string{"apply-ledger"},
@@ -107,7 +107,7 @@ func TestEmit_SuccessfulSplitWritesPackets(t *testing.T) {
 	if err != nil {
 		t.Fatalf("packet.Parse failed for emitted serve: %v", err)
 	}
-	if pServe.ID != "apply-serve" || pServe.Executor != "cursor-agent" || pServe.RoutedBy != "HTTP isolated after ledger exists" || pServe.Model != "" {
+	if pServe.ID != "apply-serve" || pServe.Executor != "agy" || pServe.RoutedBy != "HTTP isolated after ledger exists" || pServe.Model != "" {
 		t.Errorf("pServe field mismatch: %+v", pServe)
 	}
 	if !slices.Equal(pServe.AllowedPaths, []string{"internal/serve/", "cmd/lucind-ai/cli.go"}) {
@@ -115,89 +115,6 @@ func TestEmit_SuccessfulSplitWritesPackets(t *testing.T) {
 	}
 	if pServe.Body != body2 {
 		t.Errorf("pServe body mismatch: got %q, want %q", pServe.Body, body2)
-	}
-}
-
-func TestEmit_AgentFieldEmittedWhenSet(t *testing.T) {
-	tempDir := t.TempDir()
-	bodiesDir := filepath.Join(tempDir, "bodies")
-	if err := os.MkdirAll(bodiesDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	body := "## Goal\n\nAuthor the DAG\n"
-	if err := os.WriteFile(filepath.Join(bodiesDir, "author-dag.md"), []byte(body), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	d := dag.DAG{
-		Change: "test-change",
-		Packets: []dag.Node{
-			{
-				ID:       "author-dag",
-				Executor: "opencode",
-				RoutedBy: "DAG authoring, specialist agent required",
-				Agent:    "lucind-dag",
-				BodyPath: "bodies/author-dag.md",
-			},
-		},
-	}
-
-	outDir := filepath.Join(tempDir, "packets")
-	if err := dag.Emit(d, tempDir, outDir); err != nil {
-		t.Fatalf("Emit failed: %v", err)
-	}
-
-	content, err := os.ReadFile(filepath.Join(outDir, "author-dag.md"))
-	if err != nil {
-		t.Fatalf("failed to read emitted packet: %v", err)
-	}
-	if !strings.Contains(string(content), "agent: lucind-dag") {
-		t.Errorf("expected agent in emitted packet frontmatter, got:\n%s", content)
-	}
-
-	p, err := packet.Parse(strings.NewReader(string(content)))
-	if err != nil {
-		t.Fatalf("packet.Parse failed for emitted packet: %v", err)
-	}
-	if p.Agent != "lucind-dag" {
-		t.Errorf("Agent = %q, want %q", p.Agent, "lucind-dag")
-	}
-}
-
-func TestEmit_AgentFieldOmittedWhenEmpty(t *testing.T) {
-	tempDir := t.TempDir()
-	bodiesDir := filepath.Join(tempDir, "bodies")
-	if err := os.MkdirAll(bodiesDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	body := "## Goal\n\nLedger CRUD implementation\n"
-	if err := os.WriteFile(filepath.Join(bodiesDir, "apply-ledger.md"), []byte(body), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	d := dag.DAG{
-		Change: "test-change",
-		Packets: []dag.Node{
-			{
-				ID:       "apply-ledger",
-				Executor: "agy",
-				RoutedBy: "schema and CRUD isolated from HTTP",
-				BodyPath: "bodies/apply-ledger.md",
-			},
-		},
-	}
-
-	outDir := filepath.Join(tempDir, "packets")
-	if err := dag.Emit(d, tempDir, outDir); err != nil {
-		t.Fatalf("Emit failed: %v", err)
-	}
-
-	content, err := os.ReadFile(filepath.Join(outDir, "apply-ledger.md"))
-	if err != nil {
-		t.Fatalf("failed to read emitted packet: %v", err)
-	}
-	if strings.Contains(string(content), "agent:") {
-		t.Errorf("expected no agent line in emitted packet when omitted, got:\n%s", content)
 	}
 }
 
@@ -324,10 +241,9 @@ func TestEmit_FeatureTargetFieldsRoundTrip(t *testing.T) {
 // content already opens with a "---" frontmatter block -- e.g. because it
 // was authored as a complete standalone packet, or because a prior split
 // already wrote Emit's own frontmatter into the same file. Without
-// stripping, the emitted body's first line is literally "---", which a
-// yargs-based executor CLI (opencode) parses as an unknown flag rather than
-// the positional prompt, printing its own --help and exiting 1 instead of
-// ever dispatching.
+// stripping, the emitted body's first line is literally "---", which an
+// executor CLI parses as an unknown flag rather than the positional prompt,
+// printing its own --help and exiting 1 instead of ever dispatching.
 func TestEmit_StripsPreexistingFrontmatterFromBody(t *testing.T) {
 	tempDir := t.TempDir()
 	bodiesDir := filepath.Join(tempDir, "bodies")
@@ -337,16 +253,16 @@ func TestEmit_StripsPreexistingFrontmatterFromBody(t *testing.T) {
 
 	// A body_path that is itself a complete standalone packet, stale
 	// frontmatter and all.
-	stale := "---\nid: schema-v6\nexecutor: opencode\nbase_sha: 705cf492348202e3106bd80c12961ad4ea45aafd\n---\n\n# Apply schema-v6\n\nDo the thing.\n"
+	stale := "---\nid: schema-v6\nexecutor: agy\nbase_sha: 705cf492348202e3106bd80c12961ad4ea45aafd\n---\n\n# Apply schema-v6\n\nDo the thing.\n"
 	if err := os.WriteFile(filepath.Join(bodiesDir, "schema-v6.md"), []byte(stale), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
 	node := dag.Node{
 		ID:           "schema-v6",
-		Executor:     "opencode",
+		Executor:     "agy",
 		RoutedBy:     "schema migration",
-		Model:        "openai/gpt-5.6-sol",
+		Model:        "gemini-3.8-flash-low",
 		AllowedPaths: []string{"internal/ledger/schema.go"},
 		DependsOn:    []string{},
 		BodyPath:     "bodies/schema-v6.md",

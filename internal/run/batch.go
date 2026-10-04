@@ -231,7 +231,6 @@ func ensureLaneFailed(ctx context.Context, deps Deps, p packet.Packet, now time.
 		RunID:        deps.RunID,
 		LaneID:       p.ID,
 		Model:        p.Model,
-		Agent:        p.Agent,
 		SDDPhase:     p.SDDPhase,
 		FanoutGroup:  p.FanoutGroup,
 		LaneRole:     p.LaneRole,

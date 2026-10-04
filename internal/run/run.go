@@ -395,7 +395,6 @@ func Execute(ctx context.Context, deps Deps, p packet.Packet) (Report, error) {
 		RunID:        deps.RunID,
 		LaneID:       p.ID,
 		Model:        p.Model,
-		Agent:        p.Agent,
 		SDDPhase:     p.SDDPhase,
 		FanoutGroup:  p.FanoutGroup,
 		LaneRole:     p.LaneRole,
@@ -538,7 +537,6 @@ func Execute(ctx context.Context, deps Deps, p packet.Packet) (Report, error) {
 			Prompt:         prompt,
 			WorktreePath:   wt.Path,
 			Model:          model,
-			Agent:          p.Agent,
 			AllowedPaths:   append([]string(nil), p.AllowedPaths...),
 			ReadOnlyPaths:  append([]string(nil), p.ReadOnlyPaths...),
 			RequiredSkills: append([]string(nil), p.RequiredSkills...),
@@ -862,7 +860,7 @@ func normalizeAllowedPaths(paths []string) ([]string, error) {
 }
 
 func packetDigest(p packet.Packet, paths []string) string {
-	parts := []string{"packet:v1", p.ID, p.Executor, p.RoutedBy, p.Model, p.Agent,
+	parts := []string{"packet:v1", p.ID, p.Executor, p.RoutedBy, p.Model,
 		fmt.Sprint(p.ReadOnly), p.Feature, p.ParentRef, p.BaseSHA, p.ExpectedParentSHA,
 		fmt.Sprint(p.LegacyMain), p.SDDPhase, p.FanoutGroup, p.Skill, skillset.DigestBody(p.Body)}
 	parts = append(parts, paths...)
