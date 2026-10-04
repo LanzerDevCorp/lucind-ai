@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/LanzerDevCorp/lucind-ai/internal/dispatch"
 	"github.com/LanzerDevCorp/lucind-ai/internal/lane"
@@ -705,6 +706,63 @@ func TestDispatchChecks(t *testing.T) {
 		}
 		if !strings.Contains(string(briefBytes), wantAttest) {
 			t.Errorf("brief.md did not contain preserved check: %s", string(briefBytes))
+		}
+	})
+
+	// A follow-up turn is a fresh start for the Stop hook: the retry budget, the total
+	// continue counter and the last counted stop must not leak from the previous turn.
+	t.Run("ContinuationResetsStopCounters", func(t *testing.T) {
+		t.Setenv("HERDR_ENV", "1")
+		repoDir := t.TempDir()
+		initGitRepo(t, repoDir)
+
+		createdLane, err := lane.Create(context.Background(), repoDir, []string{"pkg/**"}, "gemini-3.8-flash-high")
+		if err != nil {
+			t.Fatalf("lane.Create failed: %v", err)
+		}
+		lastStop := time.Now().UTC()
+		createdLane.PaneID = "w1:pCont2"
+		createdLane.Status = lane.StatusFailed
+		createdLane.Retries = 2
+		createdLane.Continues = 7
+		createdLane.LastStopAt = &lastStop
+		if err := createdLane.Save(repoDir); err != nil {
+			t.Fatalf("lane.Save failed: %v", err)
+		}
+
+		runner := newFakeHerdrRunner()
+		runner.handlers["agent prompt"] = func(args []string) ([]byte, error) {
+			return []byte(`{"result": {"submitted": true}}`), nil
+		}
+
+		out, exitCode, err := dispatch.Dispatch(context.Background(), dispatch.Options{
+			Cwd:    repoDir,
+			LaneID: createdLane.ID,
+			Brief:  "Follow-up turn",
+			Detach: true,
+		}, runner)
+		if err != nil {
+			t.Fatalf("unexpected dispatch error: %v", err)
+		}
+		if exitCode != 0 {
+			t.Fatalf("exitCode = %d, want 0", exitCode)
+		}
+
+		reloaded, err := lane.Load(repoDir, out.Lane)
+		if err != nil {
+			t.Fatalf("lane.Load failed: %v", err)
+		}
+		if reloaded.Status != lane.StatusRunning {
+			t.Errorf("Status = %q, want %q", reloaded.Status, lane.StatusRunning)
+		}
+		if reloaded.Retries != 0 {
+			t.Errorf("Retries = %d, want 0", reloaded.Retries)
+		}
+		if reloaded.Continues != 0 {
+			t.Errorf("Continues = %d, want 0", reloaded.Continues)
+		}
+		if reloaded.LastStopAt != nil {
+			t.Errorf("LastStopAt = %v, want nil", reloaded.LastStopAt)
 		}
 	})
 

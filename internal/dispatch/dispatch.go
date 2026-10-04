@@ -140,6 +140,8 @@ func Dispatch(ctx context.Context, opts Options, runner HerdrRunner) (Output, in
 		}
 		loadedLane.Status = lane.StatusRunning
 		loadedLane.Retries = 0
+		loadedLane.Continues = 0
+		loadedLane.LastStopAt = nil
 		if len(opts.Checks) > 0 {
 			loadedLane.Checks = opts.Checks
 		}
