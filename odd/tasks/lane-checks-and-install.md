@@ -114,7 +114,9 @@ Route per task is recorded when started (inline or delegated, with trigger evide
 - [x] T14 (commit `d35c7a6`; logging only) Make the Stop hook log every retry with its reason in
       `hook.log`; decide separately whether stops while a subagent is still running should consume
       retries (see T15).
-- [ ] T15 PROGRESS (branch `feature/lane-stop-retries`): T15a done (commit `7ff6a75`, lane
+- [x] T15 DONE (branch `feature/lane-stop-retries`; T15c commit `03900dc`, lane
+      `20261004-075930-8771`; follow-up fix: a continuation also resets `continues` and
+      `last_stop_at`, so the total cap of 10 means re-entries within one turn). T15a done (commit `7ff6a75`, lane
       `20261004-074526-c8f9`; `wait` revalidates `result.json` with a 10 min grace, hook logs every
       Stop payload). T15b done with two probe lanes (not accepted, panes closed). Data:
       probe 1, agy told to stop without writing: 3 Stops, all `fullyIdle=true`, `executionNum`
