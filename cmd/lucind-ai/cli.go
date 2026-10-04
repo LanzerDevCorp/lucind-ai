@@ -24,7 +24,7 @@ import (
 
 const usage = "usage: lucind-ai dispatch --cwd <dir> --allow <glob>... --brief <file|-> [--check <cmd>]... [--model M] [--timeout D] [--detach] [--lane <id>] [--min-quota F]\n" +
 	"       lucind-ai wait <lane> [--cwd <dir>] [--timeout D]\n" +
-	"       lucind-ai check [--out <path>]\n" +
+	"       lucind-ai check [--out <path>]   (deprecated)\n" +
 	"       lucind-ai accept --lane <id>\n" +
 	"       lucind-ai attest run -- <command> [args...]\n" +
 	"       lucind-ai attest verify --command \"<exact command string>\"\n" +
@@ -80,7 +80,7 @@ func runCheck(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 	fs := flag.NewFlagSet("check", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
-		fmt.Fprintln(stderr, "usage: lucind-ai check [--out <path>]")
+		fmt.Fprintln(stderr, "usage: lucind-ai check [--out <path>] (deprecated)")
 		fs.PrintDefaults()
 	}
 

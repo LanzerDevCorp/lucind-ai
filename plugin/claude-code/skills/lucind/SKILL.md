@@ -33,7 +33,7 @@ Load the `herdr` skill too; this skill assumes its pane/agent commands.
 
 ```bash
 lucind-ai dispatch --cwd <dir> --allow '<glob>' [--allow ...] --brief <file|-> \
-  [--model M] [--timeout 60m] [--detach] [--min-quota 0.1]
+  [--check '<cmd>']... [--model M] [--timeout 60m] [--detach] [--min-quota 0.1]
 lucind-ai wait <lane>            # only after --detach
 lucind-ai accept --lane <id>     # run from the lane's repo
 ```
@@ -47,15 +47,19 @@ lucind-ai accept --lane <id>     # run from the lane's repo
   For a formal follow-up turn with wait + validation: `dispatch --lane <id> --brief ...`.
 - On `timeout`: inspect the pane, nudge, or close it yourself. lucind-ai does nothing more.
 - `accept` writes `receipt.json` and accepts only when: the result envelope is valid; every file
-  changed since the base tree matches an `--allow` glob; and an attestation of
-  `sh lucind-checks.sh` matches the final tree (otherwise it runs the checks itself).
+  changed since the base tree matches an `--allow` glob; and each check is verified.
+  `--check '<cmd>'` is optional and repeatable: the orchestrator picks the checks that fit the
+  change (a lint, one test type, e2e, or the whole suite); with none, `accept` requires no
+  attestation. `accept` reuses a valid attestation per check on the final tree and runs only
+  the missing ones.
   **Never re-run tests yourself after an accepted receipt** — the attestation is the proof.
 
 ## Writing a brief
 
 Free Markdown, not validated by lucind-ai. Include: goal, scope, acceptance criteria, constraints
-(TDD, style), and what to report in the result envelope. The footer added by `dispatch` already
-covers lane id, allowed globs, result path and the final `lucind-ai attest run -- sh lucind-checks.sh`.
+(TDD, style), and what to report in the result envelope. The contract footer added by `dispatch` already
+covers lane id, allowed globs, result path, and the final verification commands (each
+`lucind-ai attest run -- sh -c '<check>'`, or noting none when zero checks).
 Keep `--allow` as narrow as the task: it is enforced by agy's PreToolUse hook and again by `accept`.
 
 ### Brief sections
@@ -74,8 +78,9 @@ what is described here (no explanatory prose), so put prose under a following he
 - `## Hard stops`: one line per condition that must stop agy. The envelope requires one
   `hard_stops` entry per hard stop in the brief (`[]` when none), so list them here.
 - `## Verification`: the exact commands agy must run, each reported as
-  `<command>: <observed result>` in `done_criteria[].evidence`. The final
-  `lucind-ai attest run -- sh lucind-checks.sh` from the footer still applies.
+  `<command>: <observed result>` in `done_criteria[].evidence`. The final verification
+  command(s) from the contract footer (`lucind-ai attest run -- sh -c '<check>'`, if any)
+  still apply.
 - `## Known environmental failures` (optional): exact test names or command lines already
   failing on the base. Any other failing required command means the lane is not `done`.
 - `## Test-first policy`: when a relevant runnable deterministic test and a clear expected outcome

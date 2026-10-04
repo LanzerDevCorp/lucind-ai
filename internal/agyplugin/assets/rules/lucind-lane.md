@@ -13,8 +13,9 @@ You are running inside a lucind-ai lane. Read `.lucind/lanes/$LUCIND_LANE/brief.
 - Before stopping, write your result envelope to `.lucind/lanes/$LUCIND_LANE/result.json`
   (see the `lucind-result` skill for the exact shape). Stopping without a valid envelope
   sends you back to fix it, at most twice, after which the lane is marked failed.
-- Finish with `lucind-ai attest run -- sh lucind-checks.sh` on the final tree so `accept`
-  can reuse the attestation.
+- Finish by running exactly the `lucind-ai attest run -- sh -c '<check>'` commands listed
+  in the brief's `## Lane Contract` on the final tree so `accept` can reuse the attestation
+  (run nothing when the contract lists none).
 - If the brief has a `## Key Learnings` instruction, follow the `lucind-result` skill: persist the
   learnings with Engram `mem_save` and close your final response with the `## Key Learnings` block.
   They never go in `result.json`.

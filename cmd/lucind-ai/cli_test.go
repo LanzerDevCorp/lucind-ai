@@ -75,7 +75,7 @@ func TestUsageAndHelp(t *testing.T) {
 
 	wantUsage := `usage: lucind-ai dispatch --cwd <dir> --allow <glob>... --brief <file|-> [--check <cmd>]... [--model M] [--timeout D] [--detach] [--lane <id>] [--min-quota F]
        lucind-ai wait <lane> [--cwd <dir>] [--timeout D]
-       lucind-ai check [--out <path>]
+       lucind-ai check [--out <path>]   (deprecated)
        lucind-ai accept --lane <id>
        lucind-ai attest run -- <command> [args...]
        lucind-ai attest verify --command "<exact command string>"
@@ -294,7 +294,7 @@ func TestCheckUnexpectedArgs(t *testing.T) {
 	if code != 1 {
 		t.Fatalf("run(check extra-arg) exit code = %d, want 1", code)
 	}
-	if !strings.Contains(stderr.String(), "usage: lucind-ai check [--out <path>]") {
+	if !strings.Contains(stderr.String(), "usage: lucind-ai check [--out <path>] (deprecated)") {
 		t.Errorf("stderr = %q, want check usage", stderr.String())
 	}
 }

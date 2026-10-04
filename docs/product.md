@@ -13,7 +13,7 @@ lucind-ai owns only what is reproducible without judgment:
 - result-envelope validation against a schema
 - tree-hash attestation of test runs (HMAC)
 - allowed-path enforcement
-- pass/fail checks (`lucind-checks.sh`)
+- pass/fail lane checks
 
 Everything else belongs to Claude: when to parallelize, merging, conflict resolution, retries,
 review, model choice, branches and worktrees.
@@ -22,7 +22,7 @@ review, model choice, branches and worktrees.
 
 ```text
 Claude --dispatch--> lane (new herdr pane, agy, LUCIND_LANE=<id>)
-agy edits inside --allow globs --> attest run -- sh lucind-checks.sh --> result.json
+agy edits inside --allow globs --> attest run (per lane check) --> result.json
 agy Stop hook validates result.json (max 2 re-entries) --> lane done|failed
 Claude --accept--> receipt.json (accepted | rejected)
 ```
@@ -31,11 +31,11 @@ Claude --accept--> receipt.json (accepted | rejected)
 
 | Command | What it does |
 |---|---|
-| `dispatch --cwd <dir> --allow <glob>... --brief <file\|-> [--model M] [--timeout D] [--detach] [--lane <id>] [--min-quota F]` | Create a lane, record the base tree, open an agy pane, send the brief. Blocks until the lane is `done`/`failed`/`timeout`, or returns immediately with `--detach`. `--lane <id>` continues a lane in the same pane. |
+| `dispatch --cwd <dir> --allow <glob>... --brief <file\|-> [--check <cmd>]... [--model M] [--timeout D] [--detach] [--lane <id>] [--min-quota F]` | Create a lane, record the base tree, open an agy pane, send the brief. Blocks until the lane is `done`/`failed`/`timeout`, or returns immediately with `--detach`. `--lane <id>` continues a lane in the same pane. |
 | `wait <lane> [--cwd <dir>] [--timeout D]` | Block on a detached lane and validate its result. |
-| `accept --lane <id>` | Write `receipt.json`. Accepts only if the result is valid, every file changed since the base tree matches an `--allow` glob, and an attestation of `sh lucind-checks.sh` matches the final tree (otherwise it runs the checks). |
+| `accept --lane <id>` | Write `receipt.json`. Accepts only if the result is valid, every file changed since base tree matches `--allow`, and valid attestations match the final tree for all lane checks (otherwise running any missing checks); requires no attestation when zero checks were specified. |
 | `attest run -- <cmd>` / `attest verify --command <cmd>` | Run a command and sign `{command, exit code, tree hash}`; verify a matching passing attestation. See [`attestation.md`](attestation.md). |
-| `check [--out <path>]` | Run `lucind-checks.sh` (scrubbed env, timeout, process-group kill). |
+| `check [--out <path>]` | Run `lucind-checks.sh` (deprecated; scrubbed env, timeout, process-group kill). |
 | `hook pre-tool-use\|stop` | Handlers called by the agy plugin. Pass-through without `LUCIND_LANE`. |
 | `plugin install [--dir <staging root>]` | Render the embedded agy plugin into a staging dir (`$XDG_DATA_HOME/lucind-ai/agy-plugin/lucind`) and register it with `agy plugin install` (lands in `~/.gemini/config/plugins/lucind/`; requires `agy` on PATH). A plugin merely dropped into `~/.gemini/antigravity-cli/plugins/` validates but is never loaded, so the obsolete copy there is removed. |
 | `--version` | Exact build (`git describe`). |
@@ -51,7 +51,7 @@ Plain JSON under `<git toplevel>/.lucind/lanes/<id>/` (id = `YYYYMMDD-HHMMSS-<4 
 | File | Content |
 |---|---|
 | `brief.md` | The brief plus the contract footer. |
-| `lane.json` | Base tree hash, allowed globs, model, pane id, status (`running\|done\|failed\|timeout\|accepted\|rejected`). |
+| `lane.json` | Base tree hash, allowed globs, checks list, model, pane id, status (`running\|done\|failed\|timeout\|accepted\|rejected`). |
 | `result.json` | Envelope written by agy. |
 | `receipt.json` | Base/final tree, changed files, verdict, reasons, evidence. |
 

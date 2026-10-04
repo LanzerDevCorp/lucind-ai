@@ -65,11 +65,13 @@ rejected). Saving to memory is bookkeeping and does not replace the final respon
 
 ## Attest the final tree
 
-After your last edit, run exactly:
+After your last edit, run each verification command listed in the brief's `## Lane Contract` under:
 
 ```bash
-lucind-ai attest run -- sh lucind-checks.sh
+lucind-ai attest run -- sh -c '<check>'
 ```
 
-Do not edit files afterwards: the attestation is bound to the exact tree, and `lucind-ai accept`
+Run each command exactly as listed in the contract footer. Run nothing when the contract lists none or requires no verification command.
+
+Do not edit files afterwards: each attestation is bound to the exact tree, and `lucind-ai accept`
 rejects a stale one. Never read the attest key or the attestations directory.
