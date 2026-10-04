@@ -2,6 +2,9 @@ package dispatch_test
 
 import (
 	"context"
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -69,6 +72,23 @@ func TestWait_Done(t *testing.T) {
 	}
 }
 
+func writeResultEnvelope(t *testing.T, repoDir, laneID, status string) {
+	t.Helper()
+	dir := lane.LaneDir(repoDir, laneID)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatalf("mkdir lane dir failed: %v", err)
+	}
+	content := fmt.Sprintf(`{
+		"lane_id": %q,
+		"status": %q,
+		"summary": "Lane result summary",
+		"hard_stops": []
+	}`, laneID, status)
+	if err := os.WriteFile(filepath.Join(dir, "result.json"), []byte(content), 0644); err != nil {
+		t.Fatalf("write result.json failed: %v", err)
+	}
+}
+
 func TestWait_Failed(t *testing.T) {
 	t.Setenv("HERDR_ENV", "1")
 	repoDir := t.TempDir()
@@ -90,6 +110,7 @@ func TestWait_Failed(t *testing.T) {
 			current, _ := lane.Load(repoDir, l.ID)
 			current.Status = lane.StatusFailed
 			_ = current.Save(repoDir)
+			writeResultEnvelope(t, repoDir, l.ID, "failed")
 		}
 	}, 1*time.Millisecond)
 	defer dispatch.ResetSleepForTesting()
@@ -204,5 +225,221 @@ func TestDispatch_BlockingWait_TimeoutNeverClosesPanes(t *testing.T) {
 		if strings.Contains(joined, "close") || strings.Contains(joined, "kill") {
 			t.Errorf("forbidden command during blocking wait timeout: %s", joined)
 		}
+	}
+}
+
+func TestWait_Failed_ValidDoneEnvelope(t *testing.T) {
+	t.Setenv("HERDR_ENV", "1")
+	repoDir := t.TempDir()
+	initGitRepo(t, repoDir)
+
+	l, err := lane.Create(context.Background(), repoDir, []string{"**"}, "gemini-3.8-flash-high")
+	if err != nil {
+		t.Fatalf("lane.Create failed: %v", err)
+	}
+	l.PaneID = "w1:pWaitDoneEnv"
+	l.Status = lane.StatusFailed
+	if err := l.Save(repoDir); err != nil {
+		t.Fatalf("lane.Save failed: %v", err)
+	}
+
+	writeResultEnvelope(t, repoDir, l.ID, "done")
+
+	runner := newFakeHerdrRunner()
+	out, exitCode, err := dispatch.Wait(context.Background(), repoDir, l.ID, 5*time.Second, runner)
+	if err != nil {
+		t.Fatalf("unexpected Wait error: %v", err)
+	}
+	if exitCode != 0 {
+		t.Errorf("exitCode = %d, want 0", exitCode)
+	}
+	if out.Status != "done" {
+		t.Errorf("out.Status = %q, want \"done\"", out.Status)
+	}
+
+	reloaded, err := lane.Load(repoDir, l.ID)
+	if err != nil {
+		t.Fatalf("lane.Load failed: %v", err)
+	}
+	if reloaded.Status != lane.StatusDone {
+		t.Errorf("reloaded.Status = %q, want %q", reloaded.Status, lane.StatusDone)
+	}
+}
+
+func TestWait_Failed_ValidNonDoneEnvelope(t *testing.T) {
+	t.Setenv("HERDR_ENV", "1")
+	repoDir := t.TempDir()
+	initGitRepo(t, repoDir)
+
+	l, err := lane.Create(context.Background(), repoDir, []string{"**"}, "gemini-3.8-flash-high")
+	if err != nil {
+		t.Fatalf("lane.Create failed: %v", err)
+	}
+	l.PaneID = "w1:pWaitNonDoneEnv"
+	l.Status = lane.StatusFailed
+	if err := l.Save(repoDir); err != nil {
+		t.Fatalf("lane.Save failed: %v", err)
+	}
+
+	writeResultEnvelope(t, repoDir, l.ID, "failed")
+
+	var pollCount int32
+	dispatch.SetSleepForTesting(func(d time.Duration) {
+		atomic.AddInt32(&pollCount, 1)
+	}, 1*time.Millisecond)
+	defer dispatch.ResetSleepForTesting()
+
+	runner := newFakeHerdrRunner()
+	out, exitCode, err := dispatch.Wait(context.Background(), repoDir, l.ID, 5*time.Second, runner)
+	if err != nil {
+		t.Fatalf("unexpected Wait error: %v", err)
+	}
+	if exitCode != 3 {
+		t.Errorf("exitCode = %d, want 3", exitCode)
+	}
+	if out.Status != "failed" {
+		t.Errorf("out.Status = %q, want \"failed\"", out.Status)
+	}
+	if pollCount != 0 {
+		t.Errorf("pollCount = %d, want 0 (should return immediately)", pollCount)
+	}
+}
+
+func TestWait_Failed_NoEnvelope_EnvelopeAppears(t *testing.T) {
+	t.Setenv("HERDR_ENV", "1")
+	repoDir := t.TempDir()
+	initGitRepo(t, repoDir)
+
+	l, err := lane.Create(context.Background(), repoDir, []string{"**"}, "gemini-3.8-flash-high")
+	if err != nil {
+		t.Fatalf("lane.Create failed: %v", err)
+	}
+	l.PaneID = "w1:pWaitLateEnv"
+	l.Status = lane.StatusFailed
+	if err := l.Save(repoDir); err != nil {
+		t.Fatalf("lane.Save failed: %v", err)
+	}
+
+	dispatch.SetExhaustionGraceForTesting(5 * time.Minute)
+	defer dispatch.ResetExhaustionGraceForTesting()
+
+	var pollCount int32
+	dispatch.SetSleepForTesting(func(d time.Duration) {
+		count := atomic.AddInt32(&pollCount, 1)
+		if count >= 2 {
+			writeResultEnvelope(t, repoDir, l.ID, "done")
+		}
+	}, 1*time.Millisecond)
+	defer dispatch.ResetSleepForTesting()
+
+	runner := newFakeHerdrRunner()
+	out, exitCode, err := dispatch.Wait(context.Background(), repoDir, l.ID, 5*time.Second, runner)
+	if err != nil {
+		t.Fatalf("unexpected Wait error: %v", err)
+	}
+	if exitCode != 0 {
+		t.Errorf("exitCode = %d, want 0", exitCode)
+	}
+	if out.Status != "done" {
+		t.Errorf("out.Status = %q, want \"done\"", out.Status)
+	}
+	if pollCount < 2 {
+		t.Errorf("pollCount = %d, want >= 2", pollCount)
+	}
+
+	reloaded, err := lane.Load(repoDir, l.ID)
+	if err != nil {
+		t.Fatalf("lane.Load failed: %v", err)
+	}
+	if reloaded.Status != lane.StatusDone {
+		t.Errorf("reloaded.Status = %q, want %q", reloaded.Status, lane.StatusDone)
+	}
+}
+
+func TestWait_Failed_NoEnvelope_GraceExpires(t *testing.T) {
+	t.Setenv("HERDR_ENV", "1")
+	repoDir := t.TempDir()
+	initGitRepo(t, repoDir)
+
+	l, err := lane.Create(context.Background(), repoDir, []string{"**"}, "gemini-3.8-flash-high")
+	if err != nil {
+		t.Fatalf("lane.Create failed: %v", err)
+	}
+	l.PaneID = "w1:pWaitGraceExpires"
+	l.Status = lane.StatusFailed
+	if err := l.Save(repoDir); err != nil {
+		t.Fatalf("lane.Save failed: %v", err)
+	}
+
+	dispatch.SetExhaustionGraceForTesting(10 * time.Millisecond)
+	defer dispatch.ResetExhaustionGraceForTesting()
+
+	var pollCount int32
+	dispatch.SetSleepForTesting(func(d time.Duration) {
+		atomic.AddInt32(&pollCount, 1)
+		time.Sleep(3 * time.Millisecond)
+	}, 1*time.Millisecond)
+	defer dispatch.ResetSleepForTesting()
+
+	runner := newFakeHerdrRunner()
+	out, exitCode, err := dispatch.Wait(context.Background(), repoDir, l.ID, 5*time.Second, runner)
+	if err != nil {
+		t.Fatalf("unexpected Wait error: %v", err)
+	}
+	if exitCode != 3 {
+		t.Errorf("exitCode = %d, want 3", exitCode)
+	}
+	if out.Status != "failed" {
+		t.Errorf("out.Status = %q, want \"failed\"", out.Status)
+	}
+	if pollCount < 2 {
+		t.Errorf("pollCount = %d, want >= 2 (should poll during grace)", pollCount)
+	}
+}
+
+func TestWait_Failed_NoEnvelope_DeadlineCapsGrace(t *testing.T) {
+	t.Setenv("HERDR_ENV", "1")
+	repoDir := t.TempDir()
+	initGitRepo(t, repoDir)
+
+	l, err := lane.Create(context.Background(), repoDir, []string{"**"}, "gemini-3.8-flash-high")
+	if err != nil {
+		t.Fatalf("lane.Create failed: %v", err)
+	}
+	l.PaneID = "w1:pWaitDeadlineCaps"
+	l.Status = lane.StatusFailed
+	if err := l.Save(repoDir); err != nil {
+		t.Fatalf("lane.Save failed: %v", err)
+	}
+
+	// Grace is large (10 minutes), but overall wait timeout is short (5 milliseconds)
+	dispatch.SetExhaustionGraceForTesting(10 * time.Minute)
+	defer dispatch.ResetExhaustionGraceForTesting()
+
+	var pollCount int32
+	dispatch.SetSleepForTesting(func(d time.Duration) {
+		atomic.AddInt32(&pollCount, 1)
+		time.Sleep(2 * time.Millisecond)
+	}, 1*time.Millisecond)
+	defer dispatch.ResetSleepForTesting()
+
+	runner := newFakeHerdrRunner()
+	out, exitCode, err := dispatch.Wait(context.Background(), repoDir, l.ID, 5*time.Millisecond, runner)
+	if err != nil {
+		t.Fatalf("unexpected Wait error: %v", err)
+	}
+	if exitCode != 4 {
+		t.Errorf("exitCode = %d, want 4 for timeout", exitCode)
+	}
+	if out.Status != "timeout" {
+		t.Errorf("out.Status = %q, want \"timeout\"", out.Status)
+	}
+
+	reloaded, err := lane.Load(repoDir, l.ID)
+	if err != nil {
+		t.Fatalf("lane.Load failed: %v", err)
+	}
+	if reloaded.Status != lane.StatusTimeout {
+		t.Errorf("reloaded.Status = %q, want %q", reloaded.Status, lane.StatusTimeout)
 	}
 }

@@ -3,6 +3,7 @@ package agyhook
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -349,6 +350,107 @@ func TestStop_RetryLogging(t *testing.T) {
 		logContent := string(logBytes)
 		if strings.Contains(logContent, "stop: retry") {
 			t.Fatalf("hook.log should not contain any retry lines for valid result; got:\n%s", logContent)
+		}
+	})
+}
+
+func TestStop_PayloadLogging(t *testing.T) {
+	t.Run("payload logged with all fields and fullyIdle true", func(t *testing.T) {
+		root := newLaneRepo(t)
+		payload := []byte(`{
+			"workspacePaths": ["` + root + `"],
+			"executionNum": 3,
+			"terminationReason": "goal_achieved",
+			"fullyIdle": true,
+			"error": ""
+		}`)
+		got := decode(t, Stop(context.Background(), laneID, payload))
+		if got["decision"] != "continue" {
+			t.Fatalf("got %v, want continue", got)
+		}
+		logBytes, err := os.ReadFile(filepath.Join(lane.LaneDir(root, laneID), "hook.log"))
+		if err != nil {
+			t.Fatalf("reading hook.log: %v", err)
+		}
+		want := `stop: payload executionNum=3 terminationReason=goal_achieved fullyIdle=true error=""`
+		if !strings.Contains(string(logBytes), want) {
+			t.Fatalf("hook.log does not contain %q; got:\n%s", want, string(logBytes))
+		}
+	})
+
+	t.Run("payload logged with fullyIdle false before early return", func(t *testing.T) {
+		root := newLaneRepo(t)
+		payload := []byte(`{
+			"workspacePaths": ["` + root + `"],
+			"executionNum": 1,
+			"terminationReason": "interrupted",
+			"fullyIdle": false,
+			"error": "user aborted"
+		}`)
+		got := decode(t, Stop(context.Background(), laneID, payload))
+		if len(got) != 0 {
+			t.Fatalf("got %v, want {}", got)
+		}
+		logBytes, err := os.ReadFile(filepath.Join(lane.LaneDir(root, laneID), "hook.log"))
+		if err != nil {
+			t.Fatalf("reading hook.log: %v", err)
+		}
+		want := `stop: payload executionNum=1 terminationReason=interrupted fullyIdle=false error="user aborted"`
+		if !strings.Contains(string(logBytes), want) {
+			t.Fatalf("hook.log does not contain %q; got:\n%s", want, string(logBytes))
+		}
+	})
+
+	t.Run("payload logged with fullyIdle absent/unset", func(t *testing.T) {
+		root := newLaneRepo(t)
+		payload := []byte(`{
+			"workspacePaths": ["` + root + `"],
+			"executionNum": 42,
+			"terminationReason": "max_turns",
+			"error": "something went wrong"
+		}`)
+		got := decode(t, Stop(context.Background(), laneID, payload))
+		if got["decision"] != "continue" {
+			t.Fatalf("got %v, want continue", got)
+		}
+		logBytes, err := os.ReadFile(filepath.Join(lane.LaneDir(root, laneID), "hook.log"))
+		if err != nil {
+			t.Fatalf("reading hook.log: %v", err)
+		}
+		want := `stop: payload executionNum=42 terminationReason=max_turns fullyIdle=unset error="something went wrong"`
+		if !strings.Contains(string(logBytes), want) {
+			t.Fatalf("hook.log does not contain %q; got:\n%s", want, string(logBytes))
+		}
+	})
+
+	t.Run("invalid json writes nothing to hook.log", func(t *testing.T) {
+		root := newLaneRepo(t)
+		got := decode(t, Stop(context.Background(), laneID, []byte("not valid json")))
+		if len(got) != 0 {
+			t.Fatalf("got %v, want {}", got)
+		}
+		logPath := filepath.Join(lane.LaneDir(root, laneID), "hook.log")
+		if _, err := os.Stat(logPath); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("hook.log should not exist, got err: %v", err)
+		}
+	})
+
+	t.Run("invalid lane id writes nothing to hook.log", func(t *testing.T) {
+		root := newLaneRepo(t)
+		payload := []byte(`{
+			"workspacePaths": ["` + root + `"],
+			"executionNum": 1,
+			"terminationReason": "goal_achieved",
+			"fullyIdle": true,
+			"error": ""
+		}`)
+		got := decode(t, Stop(context.Background(), "../../invalid", payload))
+		if len(got) != 0 {
+			t.Fatalf("got %v, want {}", got)
+		}
+		logPath := filepath.Join(lane.LaneDir(root, laneID), "hook.log")
+		if _, err := os.Stat(logPath); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("hook.log should not exist, got err: %v", err)
 		}
 	})
 }

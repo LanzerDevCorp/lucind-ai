@@ -34,9 +34,12 @@ type toolCall struct {
 }
 
 type payload struct {
-	WorkspacePaths []string  `json:"workspacePaths"`
-	ToolCall       *toolCall `json:"toolCall"`
-	FullyIdle      *bool     `json:"fullyIdle"`
+	WorkspacePaths    []string  `json:"workspacePaths"`
+	ToolCall          *toolCall `json:"toolCall"`
+	ExecutionNum      int       `json:"executionNum"`
+	TerminationReason string    `json:"terminationReason"`
+	FullyIdle         *bool     `json:"fullyIdle"`
+	Error             string    `json:"error"`
 }
 
 // fileWriteTool matches agy tools that modify a file. Observed names:
@@ -207,6 +210,15 @@ func Stop(ctx context.Context, laneID string, stdin []byte) []byte {
 	if err != nil {
 		return end()
 	}
+	idle := "unset"
+	if p.FullyIdle != nil {
+		if *p.FullyIdle {
+			idle = "true"
+		} else {
+			idle = "false"
+		}
+	}
+	logf(root, laneID, "stop: payload executionNum=%d terminationReason=%s fullyIdle=%s error=%q", p.ExecutionNum, p.TerminationReason, idle, p.Error)
 	if p.FullyIdle != nil && !*p.FullyIdle {
 		return end()
 	}
