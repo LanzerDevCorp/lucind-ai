@@ -222,6 +222,14 @@ Route per task is recorded when started (inline or delegated, with trigger evide
   `accept` (no re-run). Parent spot check: `go test ./...` clean, `go vet ./...` clean,
   `gofmt -l .` empty. `lane.json` showed `failed` with `retries: 2` before accept (see T15).
 
+- T15 verification with the installed binary `ba8e0e1` (two real probe lanes, not accepted):
+  stuck agent (replies OK and stops, gaps of 5 s and 3 s) still fails fast: 3 Stops, retries 1/2
+  and 2/2, then `lane marked failed (retries, retries=2)`. Slow agent (three turns, each with
+  `sleep 70`, Stops 1m21s and 1m23s apart) survives: `retry budget reset after 1m21s` and
+  `after 1m23s`, each Stop spent retry 1/2, and the lane ended `done (retries=1)` with
+  `continues: 3`. With the previous hook the third Stop would have failed the lane. Panes were
+  laid out per the new skill section (Claude left, lanes stacked right, resized to 84/36).
+
 ## Next step
 
 T10 (global CLAUDE.md rewrite) is excluded by the user's goal and stays pending. T15 waits for
