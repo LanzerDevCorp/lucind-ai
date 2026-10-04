@@ -75,7 +75,7 @@ Route per task is recorded when started (inline or delegated, with trigger evide
       hook in an env var (`LUCIND_REPO`) so it stops depending on the pane cwd.
 
       Route: delegated to agy via lane `20261004-054348-0962`. Accepted, commit `09aab78`.
-- [ ] T6 Pane lifecycle guidance in `plugin/claude-code/skills/lucind/SKILL.md` (skill only, no
+- [x] T6 (commit `c9f3aba`, inline) Pane lifecycle guidance in `plugin/claude-code/skills/lucind/SKILL.md` (skill only, no
       Go): after `accept`, the orchestrator decides per lane. Default: close the pane with
       `herdr pane close <pane_id>`. Alternative: leave it open to ask the implementer follow-up
       questions about the diff with its fresh context (`herdr agent prompt <pane_id> ...`), then
@@ -104,7 +104,7 @@ Route per task is recorded when started (inline or delegated, with trigger evide
       `MaxRetries = 2`). Observed retries across lanes: 2, 1, 2, 1, 0, 2. A third early stop would
       mark the lane failed while agy is still working, so it is a real fragility, and the hook logs
       nothing about each retry (only the final `lane marked done (retries=N)`). Follow-ups T13/T14.
-- [ ] T12 Format with `gofmt`: lanes left unformatted files (`gofmt -l` lists several; `status.go`
+- [x] T12 (commit `2f99eb5`, inline, `gofmt -l .` now empty) Format with `gofmt`: lanes left unformatted files (`gofmt -l` lists several; `status.go`
       was already unformatted on `dev`). One `style:` commit, then use `test -z "$(gofmt -l ...)"`
       as a `--check` in later lanes.
 - [ ] T13 Bug: on a continuation (`dispatch --lane <id>`) the previous `result.json` stays on disk,
@@ -178,5 +178,5 @@ Route per task is recorded when started (inline or delegated, with trigger evide
 
 ## Next step
 
-T6 (skill pane lifecycle, inline), T12 (gofmt), then one lane for T7, T13 and T14; then T11.
+One lane for T7, T13 and T14 (checks include gofmt); then T11.
 T10 is excluded by the user's goal and stays pending.
