@@ -150,7 +150,20 @@ Route per task is recorded when started (inline or delegated, with trigger evide
       logs from the next lanes before choosing between (a) not spending retries while a subagent
       is running, (b) a higher `MaxRetries`, (c) letting `wait` re-read `result.json` before
       reporting `failed`.
-- [ ] T10 Rewrite the global `~/.claude/CLAUDE.md` orchestration rules so code-changing work is
+- [x] T10 DONE (inline design + native writer, file outside the repo): appended a user-owned block
+      `<!-- lucind:dispatch -->` (52 lines) after `@RTK.md` at the end of `~/.claude/CLAUDE.md`
+      instead of editing the gentle-ai managed blocks, because `gentle-ai sync` rewrites those and
+      never touches content outside its markers (`InjectMarkdownSection`, verified in
+      `gentle-ai/internal/components/filemerge/section.go`). The block says the delegation
+      triggers still decide WHEN and lucind-ai decides WHO: free agy for read-only work, lanes for
+      code, a native writer only outside the repo, verification through lane `--check`
+      attestations (no native verifier agent by default). Native exceptions kept: review actors
+      (`review-*`), judgment-day (`jd-*`, only on request), `Explore`, and `sdd-*` only when the
+      user invokes `gentle-sdd-*`. No silent fallback when `HERDR_ENV` or agy is unavailable.
+      Verified: the old 71395 bytes are an exact prefix (same sha256), 2 new markers, the 6
+      gentle-ai markers unchanged. Takes effect in new sessions. To undo, delete the lines between
+      the two `lucind:dispatch` markers.
+      Original task: Rewrite the global `~/.claude/CLAUDE.md` orchestration rules so code-changing work is
       dispatched through lucind-ai, and native Claude subagents become the exception (user request).
 - [x] T11 Verified: agy does persist Key Learnings. Engram holds observations that the orchestrator
       did not write and that match the lanes (for example "Herdr pane cwd fail-fast validation",
