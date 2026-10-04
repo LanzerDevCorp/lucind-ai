@@ -95,7 +95,10 @@ Route per task is recorded when started (inline or delegated, with trigger evide
 
 ## Commits
 
-(pending)
+- T1: `8c3b84d` feat(dispatch). Review assessment: risk medium (`executable_change`), 643 lines,
+  `review_due: true` (`slice_budget_reached`), but native review preflight returned
+  `stop: rdd_disabled`, so the tier outcome is unmanaged (RDD is off for this clone; not enabled
+  on the user's behalf).
 
 ## Next step
 
