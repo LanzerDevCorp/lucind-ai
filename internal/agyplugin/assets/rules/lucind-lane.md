@@ -15,3 +15,6 @@ You are running inside a lucind-ai lane. Read `.lucind/lanes/$LUCIND_LANE/brief.
   sends you back to fix it, at most twice, after which the lane is marked failed.
 - Finish with `lucind-ai attest run -- sh lucind-checks.sh` on the final tree so `accept`
   can reuse the attestation.
+- If the brief has a `## Key Learnings` instruction, follow the `lucind-result` skill: persist the
+  learnings with Engram `mem_save` and close your final response with the `## Key Learnings` block.
+  They never go in `result.json`.

@@ -49,6 +49,20 @@ Paths outside the repository go in `external_changes` (`path`, `change`, `why`, 
 Any status other than `done` ends the lane as failed without a retry; a missing or
 schema-invalid file sends you back to fix it (at most twice).
 
+## Key Learnings (when the brief asks for them)
+
+No hook captures them for you, so you persist them yourself. Do this before the attest step:
+
+1. Write 1-5 numbered learnings, each a standalone factual sentence of at least 20 characters and
+   at least 4 words. Skip everything below when there is genuinely no reusable learning.
+2. Save each one with the Engram `mem_save` tool (`capture_prompt: false`). If the call fails or
+   times out, continue: memory failures never block the lane.
+3. After `result.json` is written and the tree is attested, close your final response text with a
+   `## Key Learnings` block holding the same numbered items.
+
+Key Learnings are optional and never belong in `result.json` (unknown top-level properties are
+rejected). Saving to memory is bookkeeping and does not replace the final response.
+
 ## Attest the final tree
 
 After your last edit, run exactly:
