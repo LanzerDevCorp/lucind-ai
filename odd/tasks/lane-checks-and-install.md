@@ -114,7 +114,23 @@ Route per task is recorded when started (inline or delegated, with trigger evide
 - [x] T14 (commit `d35c7a6`; logging only) Make the Stop hook log every retry with its reason in
       `hook.log`; decide separately whether stops while a subagent is still running should consume
       retries (see T15).
-- [ ] T15 (plan, branch `feature/lane-stop-retries`; user chose to do (a) and (c)) Three steps:
+- [ ] T15 PROGRESS (branch `feature/lane-stop-retries`): T15a done (commit `7ff6a75`, lane
+      `20261004-074526-c8f9`; `wait` revalidates `result.json` with a 10 min grace, hook logs every
+      Stop payload). T15b done with two probe lanes (not accepted, panes closed). Data:
+      probe 1, agy told to stop without writing: 3 Stops, all `fullyIdle=true`, `executionNum`
+      0,1,2, gaps of 3 s and 7 s, lane `failed` after the 2 retries. Probe 2, orchestrator ends
+      its turn while the worker runs `sleep 90`: Stops during the 90 s had `fullyIdle=false` and
+      spent no retry (so the existing `fullyIdle` check already covers a running subagent); the
+      first Stop after the worker finished had `fullyIdle=true` with no `result.json` yet (race:
+      the orchestrator had not processed the worker's report) and spent 1 retry, then agy wrote
+      the envelope and the lane ended `done (retries=1)`. Lane `c8f9` earlier burned its retries
+      in 1m48s and 3 s. Conclusion: `fullyIdle=false` is reliable; the real problem is
+      `fullyIdle=true` stops without a result between agent actions. T15c design (progress-aware
+      budget): the retry budget resets when at least `RetryQuietWindow` (60 s) passed since the
+      last counted retry, so only consecutive quick stops exhaust it (probe 1 still fails in
+      seconds), plus a hard cap on total continues per lane (10) so a stuck agent cannot loop
+      forever. `lane.json` gets `last_stop_at` and `continues`.
+      Original plan (kept for reference), three steps:
       T15a lane: `wait` revalidates `result.json` before reporting `failed` (option c, grace
       period after retry exhaustion) and the Stop hook logs the full payload of every Stop
       (`executionNum`, `terminationReason`, `fullyIdle`, retry counter), all with unit tests that
