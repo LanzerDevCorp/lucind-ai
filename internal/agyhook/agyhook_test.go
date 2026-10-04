@@ -14,8 +14,8 @@ import (
 
 const laneID = "20260101-120000-abcd"
 
-const validResult = `{"packet_id":"x","status":"done","summary":"ok","hard_stops":[]}`
-const blockedResult = `{"packet_id":"x","status":"blocked","summary":"stuck","hard_stops":[]}`
+const validResult = `{"lane_id":"x","status":"done","summary":"ok","hard_stops":[]}`
+const blockedResult = `{"lane_id":"x","status":"blocked","summary":"stuck","hard_stops":[]}`
 
 // newLaneRepo creates a git repository with a running lane and isolates the
 // attest key/state locations under the temp dir.

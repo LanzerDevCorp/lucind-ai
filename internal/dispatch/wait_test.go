@@ -27,7 +27,7 @@ func TestWait_Done(t *testing.T) {
 	repoDir := t.TempDir()
 	initGitRepo(t, repoDir)
 
-	l, err := lane.Create(context.Background(), repoDir, []string{"**"}, "gemini-3.7-flash-high")
+	l, err := lane.Create(context.Background(), repoDir, []string{"**"}, "gemini-3.8-flash-high")
 	if err != nil {
 		t.Fatalf("lane.Create failed: %v", err)
 	}
@@ -74,7 +74,7 @@ func TestWait_Failed(t *testing.T) {
 	repoDir := t.TempDir()
 	initGitRepo(t, repoDir)
 
-	l, err := lane.Create(context.Background(), repoDir, []string{"**"}, "gemini-3.7-flash-high")
+	l, err := lane.Create(context.Background(), repoDir, []string{"**"}, "gemini-3.8-flash-high")
 	if err != nil {
 		t.Fatalf("lane.Create failed: %v", err)
 	}
@@ -112,7 +112,7 @@ func TestWait_Timeout(t *testing.T) {
 	repoDir := t.TempDir()
 	initGitRepo(t, repoDir)
 
-	l, err := lane.Create(context.Background(), repoDir, []string{"**"}, "gemini-3.7-flash-high")
+	l, err := lane.Create(context.Background(), repoDir, []string{"**"}, "gemini-3.8-flash-high")
 	if err != nil {
 		t.Fatalf("lane.Create failed: %v", err)
 	}

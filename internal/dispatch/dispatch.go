@@ -175,12 +175,16 @@ func Dispatch(ctx context.Context, opts Options, runner HerdrRunner) (Output, in
 		if out, err := runner.Run(ctx, startArgs...); err != nil {
 			return Output{}, 1, fmt.Errorf("herdr agent start: %w (output: %s)", err, string(out))
 		}
+		// The agy TUI drops input sent before it is idle, so wait for readiness.
+		waitArgs := []string{"agent", "wait", l.PaneID, "--until", "idle", "--timeout", "60000"}
+		if out, err := runner.Run(ctx, waitArgs...); err != nil {
+			return Output{}, 1, fmt.Errorf("herdr agent wait: %w (output: %s)", err, string(out))
+		}
 	}
 
 	promptText := fmt.Sprintf("Read and follow %s", absBriefPath)
-	promptArgs := []string{"agent", "prompt", l.PaneID, promptText}
-	if out, err := runner.Run(ctx, promptArgs...); err != nil {
-		return Output{}, 1, fmt.Errorf("herdr agent prompt: %w (output: %s)", err, string(out))
+	if err := sendPrompt(ctx, runner, l.PaneID, promptText, absBriefPath); err != nil {
+		return Output{}, 1, err
 	}
 
 	// 7. Wait loop or detach
@@ -200,4 +204,34 @@ func Dispatch(ctx context.Context, opts Options, runner HerdrRunner) (Output, in
 		timeout = 60 * time.Minute
 	}
 	return waitLoop(ctx, repoRoot, l.ID, cwd, timeout)
+}
+
+// sendPrompt submits the prompt and has herdr confirm that agy started a turn
+// (working) or is blocked. When herdr reports an error (for example
+// agent_prompt_stalled) it does not resend blindly: it reads the pane and
+// resends once only if the brief path is absent, otherwise it treats the
+// prompt as delivered.
+func sendPrompt(ctx context.Context, runner HerdrRunner, paneID, text, marker string) error {
+	args := []string{
+		"agent", "prompt", paneID, text,
+		"--wait", "--until", "working", "--until", "blocked", "--timeout", "30000",
+	}
+	out, err := runner.Run(ctx, args...)
+	if err == nil {
+		return nil
+	}
+	firstErr := fmt.Errorf("herdr agent prompt: %w (output: %s)", err, string(out))
+
+	readArgs := []string{"pane", "read", paneID, "--source", "recent-unwrapped", "--lines", "40"}
+	pane, rerr := runner.Run(ctx, readArgs...)
+	if rerr != nil {
+		return fmt.Errorf("%w; pane read failed: %v", firstErr, rerr)
+	}
+	if strings.Contains(string(pane), marker) {
+		return nil
+	}
+	if out, err := runner.Run(ctx, args...); err != nil {
+		return fmt.Errorf("herdr agent prompt (resend): %w (output: %s)", err, string(out))
+	}
+	return nil
 }

@@ -47,9 +47,9 @@ func runGit(t *testing.T, dir string, args ...string) string {
 func writeResultJSON(t *testing.T, repoDir, laneID, status string) {
 	t.Helper()
 	env := fmt.Sprintf(`{
-  "packet_id": %q,
+  "lane_id": %q,
   "status": %q,
-  "summary": "Completed packet work.",
+  "summary": "Completed lane work.",
   "hard_stops": []
 }`, laneID, status)
 	resPath := lane.ResultPath(repoDir, laneID)
@@ -80,7 +80,7 @@ func TestUsageAndHelp(t *testing.T) {
        lucind-ai attest run -- <command> [args...]
        lucind-ai attest verify --command "<exact command string>"
        lucind-ai hook pre-tool-use|stop   (agy plugin handlers; stdin JSON)
-       lucind-ai plugin install [--dir <plugins root>]
+       lucind-ai plugin install [--dir <staging root>]   (registers via agy plugin install)
        lucind-ai --version`
 
 	// 1. Missing args prints usage to stderr and exits 1
@@ -573,7 +573,7 @@ func TestDispatchExecution(t *testing.T) {
 		"--allow", "src/**,pkg/**",
 		"--allow", "cmd/**",
 		"--brief", briefFile,
-		"--model", "gemini-3.7-flash-high",
+		"--model", "gemini-3.8-flash-high",
 		"--timeout", "30m",
 		"--detach",
 		"--lane", "existing-lane",
@@ -594,8 +594,8 @@ func TestDispatchExecution(t *testing.T) {
 	if capturedOpts.Brief != "Implement feature X" {
 		t.Errorf("captured Brief = %q, want 'Implement feature X'", capturedOpts.Brief)
 	}
-	if capturedOpts.Model != "gemini-3.7-flash-high" {
-		t.Errorf("captured Model = %q, want 'gemini-3.7-flash-high'", capturedOpts.Model)
+	if capturedOpts.Model != "gemini-3.8-flash-high" {
+		t.Errorf("captured Model = %q, want 'gemini-3.8-flash-high'", capturedOpts.Model)
 	}
 	if capturedOpts.Timeout != 30*time.Minute {
 		t.Errorf("captured Timeout = %v, want 30m", capturedOpts.Timeout)

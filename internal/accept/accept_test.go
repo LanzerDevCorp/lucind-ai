@@ -42,9 +42,9 @@ func runGit(t *testing.T, dir string, args ...string) string {
 func writeResultJSON(t *testing.T, repoDir, laneID, status string) {
 	t.Helper()
 	env := fmt.Sprintf(`{
-  "packet_id": %q,
+  "lane_id": %q,
   "status": %q,
-  "summary": "Completed packet work.",
+  "summary": "Completed lane work.",
   "hard_stops": []
 }`, laneID, status)
 	resPath := lane.ResultPath(repoDir, laneID)

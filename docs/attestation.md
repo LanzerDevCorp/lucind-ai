@@ -93,7 +93,7 @@ Git tree hashing excludes files that match `.gitignore` patterns:
 
 ## Dispatcher commit
 
-For packets declaring `commit_message`:
+For lanes declaring `commit_message`:
 - **Worker role**: The worker implements changes and writes `.lucind/result.json` with status `done`, without committing (`commit: ""` in result envelope; worktree `HEAD` matches `baseSHA`).
 - **Verification under attestation**: The dispatcher executes each command in `verification` sequentially under attestation (`attest.RunAndRecord`). Any non-zero exit code halts execution and fails the lane (`lane.Failed`). An execution error blocks the lane (`lane.Blocked`).
 - **Attestation gate**: After all commands succeed, `attest.HasValidAttestation` checks that each verification command has a valid HMAC attestation for the current worktree tree hash. If missing, the lane is blocked (`lane.Blocked`).
