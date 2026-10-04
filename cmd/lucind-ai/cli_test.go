@@ -3,13 +3,16 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/LanzerDevCorp/lucind-ai/internal/dispatch"
 	"github.com/LanzerDevCorp/lucind-ai/internal/lane"
 )
 
@@ -70,7 +73,9 @@ func writeChecksScript(t *testing.T, repoDir string, exitCode int, output string
 func TestUsageAndHelp(t *testing.T) {
 	ctx := context.Background()
 
-	wantUsage := `usage: lucind-ai check [--out <path>]
+	wantUsage := `usage: lucind-ai dispatch --cwd <dir> --allow <glob>... --brief <file|-> [--model M] [--timeout D] [--detach] [--lane <id>] [--min-quota F]
+       lucind-ai wait <lane> [--cwd <dir>] [--timeout D]
+       lucind-ai check [--out <path>]
        lucind-ai accept --lane <id>
        lucind-ai attest run -- <command> [args...]
        lucind-ai attest verify --command "<exact command string>"
@@ -135,6 +140,13 @@ func TestUsageAndHelp(t *testing.T) {
 		if strings.Contains(usage, deleted) {
 			t.Errorf("usage string unexpectedly contains deleted command %q", deleted)
 		}
+	}
+
+	if !strings.Contains(usage, "lucind-ai dispatch") {
+		t.Errorf("usage string unexpectedly missing 'lucind-ai dispatch'")
+	}
+	if !strings.Contains(usage, "lucind-ai wait") {
+		t.Errorf("usage string unexpectedly missing 'lucind-ai wait'")
 	}
 }
 
@@ -376,3 +388,399 @@ func TestAcceptSubcommand(t *testing.T) {
 		}
 	}
 }
+
+func TestDispatchHelp(t *testing.T) {
+	ctx := context.Background()
+	wantUsageLine := "usage: lucind-ai dispatch --cwd <dir> --allow <glob>... --brief <file|-> [--model M] [--timeout D] [--detach] [--lane <id>] [--min-quota F]"
+	for _, flag := range []string{"--help", "-help", "-h", "help"} {
+		t.Run("flag_"+flag, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			code := run(ctx, []string{"dispatch", flag}, &stdout, &stderr)
+			if code != 0 {
+				t.Fatalf("run(dispatch %s) exit code = %d, want 0; stderr = %q", flag, code, stderr.String())
+			}
+			out := stdout.String()
+			if !strings.Contains(out, wantUsageLine) {
+				t.Errorf("stdout missing usage line; got %q", out)
+			}
+			for _, expectedFlag := range []string{"-cwd", "-allow", "-brief", "-model", "-timeout", "-detach", "-lane", "-min-quota"} {
+				if !strings.Contains(out, expectedFlag) {
+					t.Errorf("stdout missing flag %q; got %q", expectedFlag, out)
+				}
+			}
+		})
+	}
+}
+
+func TestWaitHelp(t *testing.T) {
+	ctx := context.Background()
+	wantUsageLine := "usage: lucind-ai wait <lane> [--cwd <dir>] [--timeout D]"
+	for _, flag := range []string{"--help", "-help", "-h", "help"} {
+		t.Run("flag_"+flag, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			code := run(ctx, []string{"wait", flag}, &stdout, &stderr)
+			if code != 0 {
+				t.Fatalf("run(wait %s) exit code = %d, want 0; stderr = %q", flag, code, stderr.String())
+			}
+			out := stdout.String()
+			if !strings.Contains(out, wantUsageLine) {
+				t.Errorf("stdout missing usage line; got %q", out)
+			}
+			for _, expectedFlag := range []string{"-cwd", "-timeout"} {
+				if !strings.Contains(out, expectedFlag) {
+					t.Errorf("stdout missing flag %q; got %q", expectedFlag, out)
+				}
+			}
+		})
+	}
+}
+
+func TestDispatchMissingRequiredFlags(t *testing.T) {
+	ctx := context.Background()
+	wantUsageLine := "usage: lucind-ai dispatch --cwd <dir> --allow <glob>... --brief <file|-> [--model M] [--timeout D] [--detach] [--lane <id>] [--min-quota F]"
+
+	tests := []struct {
+		name    string
+		args    []string
+		wantErr string
+	}{
+		{
+			name:    "no flags",
+			args:    []string{"dispatch"},
+			wantErr: "--cwd is required",
+		},
+		{
+			name:    "missing allow and brief",
+			args:    []string{"dispatch", "--cwd", "/tmp"},
+			wantErr: "--allow is required",
+		},
+		{
+			name:    "missing brief",
+			args:    []string{"dispatch", "--cwd", "/tmp", "--allow", "src/**"},
+			wantErr: "--brief is required",
+		},
+		{
+			name:    "unexpected positional arg",
+			args:    []string{"dispatch", "--cwd", "/tmp", "--allow", "src/**", "--brief", "b.md", "unexpected"},
+			wantErr: "unexpected argument(s)",
+		},
+		{
+			name:    "invalid timeout",
+			args:    []string{"dispatch", "--cwd", "/tmp", "--allow", "src/**", "--brief", "b.md", "--timeout", "xyz"},
+			wantErr: "invalid --timeout",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			code := run(ctx, tc.args, &stdout, &stderr)
+			if code != 1 {
+				t.Fatalf("run(%v) exit code = %d, want 1", tc.args, code)
+			}
+			errOut := stderr.String()
+			if !strings.Contains(errOut, tc.wantErr) {
+				t.Errorf("stderr missing %q; got %q", tc.wantErr, errOut)
+			}
+			if !strings.Contains(errOut, wantUsageLine) {
+				t.Errorf("stderr missing usage line; got %q", errOut)
+			}
+		})
+	}
+}
+
+func TestWaitMissingLane(t *testing.T) {
+	ctx := context.Background()
+	wantUsageLine := "usage: lucind-ai wait <lane> [--cwd <dir>] [--timeout D]"
+
+	tests := []struct {
+		name    string
+		args    []string
+		wantErr string
+	}{
+		{
+			name:    "no args",
+			args:    []string{"wait"},
+			wantErr: "lane is required",
+		},
+		{
+			name:    "only cwd flag",
+			args:    []string{"wait", "--cwd", "/tmp"},
+			wantErr: "lane is required",
+		},
+		{
+			name:    "unexpected extra positional arg",
+			args:    []string{"wait", "lane-1", "extra"},
+			wantErr: "unexpected argument(s)",
+		},
+		{
+			name:    "invalid timeout",
+			args:    []string{"wait", "lane-1", "--timeout", "invalid"},
+			wantErr: "invalid --timeout",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			code := run(ctx, tc.args, &stdout, &stderr)
+			if code != 1 {
+				t.Fatalf("run(%v) exit code = %d, want 1", tc.args, code)
+			}
+			errOut := stderr.String()
+			if !strings.Contains(errOut, tc.wantErr) {
+				t.Errorf("stderr missing %q; got %q", tc.wantErr, errOut)
+			}
+			if !strings.Contains(errOut, wantUsageLine) {
+				t.Errorf("stderr missing usage line; got %q", errOut)
+			}
+		})
+	}
+}
+
+func TestDispatchExecution(t *testing.T) {
+	ctx := context.Background()
+	repoDir := initRepo(t)
+
+	briefFile := filepath.Join(repoDir, "task_brief.md")
+	if err := os.WriteFile(briefFile, []byte("Implement feature X"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	origDispatchRun := dispatchRun
+	defer func() { dispatchRun = origDispatchRun }()
+
+	var capturedOpts dispatch.Options
+	mockOutput := dispatch.Output{
+		Lane:       "20261003-120000-abcd",
+		PaneID:     "w1:p1",
+		Cwd:        repoDir,
+		Status:     "running",
+		ResultPath: filepath.Join(repoDir, ".lucind/lanes/20261003-120000-abcd/result.json"),
+	}
+
+	// 1. Success with file brief and multiple allows
+	dispatchRun = func(c context.Context, opts dispatch.Options, runner dispatch.HerdrRunner) (dispatch.Output, int, error) {
+		capturedOpts = opts
+		return mockOutput, 0, nil
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := run(ctx, []string{
+		"dispatch",
+		"--cwd", repoDir,
+		"--allow", "src/**,pkg/**",
+		"--allow", "cmd/**",
+		"--brief", briefFile,
+		"--model", "gemini-3.7-flash-high",
+		"--timeout", "30m",
+		"--detach",
+		"--lane", "existing-lane",
+		"--min-quota", "0.5",
+	}, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("run(dispatch) exit code = %d, want 0; stderr = %q", code, stderr.String())
+	}
+
+	if capturedOpts.Cwd != repoDir {
+		t.Errorf("captured Cwd = %q, want %q", capturedOpts.Cwd, repoDir)
+	}
+	wantAllow := []string{"src/**", "pkg/**", "cmd/**"}
+	if len(capturedOpts.Allow) != len(wantAllow) {
+		t.Errorf("captured Allow = %v, want %v", capturedOpts.Allow, wantAllow)
+	}
+	if capturedOpts.Brief != "Implement feature X" {
+		t.Errorf("captured Brief = %q, want 'Implement feature X'", capturedOpts.Brief)
+	}
+	if capturedOpts.Model != "gemini-3.7-flash-high" {
+		t.Errorf("captured Model = %q, want 'gemini-3.7-flash-high'", capturedOpts.Model)
+	}
+	if capturedOpts.Timeout != 30*time.Minute {
+		t.Errorf("captured Timeout = %v, want 30m", capturedOpts.Timeout)
+	}
+	if !capturedOpts.Detach {
+		t.Errorf("captured Detach = false, want true")
+	}
+	if capturedOpts.LaneID != "existing-lane" {
+		t.Errorf("captured LaneID = %q, want 'existing-lane'", capturedOpts.LaneID)
+	}
+	if capturedOpts.MinQuota != 0.5 {
+		t.Errorf("captured MinQuota = %v, want 0.5", capturedOpts.MinQuota)
+	}
+
+	var outJSON dispatch.Output
+	if err := json.Unmarshal(stdout.Bytes(), &outJSON); err != nil {
+		t.Fatalf("failed to parse stdout as JSON: %v; output = %q", err, stdout.String())
+	}
+	if outJSON.Lane != mockOutput.Lane {
+		t.Errorf("outJSON.Lane = %q, want %q", outJSON.Lane, mockOutput.Lane)
+	}
+
+	// 2. Brief from stdin
+	origStdin := stdinReader
+	defer func() { stdinReader = origStdin }()
+	stdinReader = strings.NewReader("stdin brief content")
+
+	stdout.Reset()
+	stderr.Reset()
+	code = run(ctx, []string{
+		"dispatch",
+		"--cwd", repoDir,
+		"--allow", "src/**",
+		"--brief", "-",
+	}, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("run(dispatch --brief -) exit code = %d, want 0; stderr = %q", code, stderr.String())
+	}
+	if capturedOpts.Brief != "stdin brief content" {
+		t.Errorf("captured Brief = %q, want 'stdin brief content'", capturedOpts.Brief)
+	}
+
+	// 3. Exit code 3 (failed lane)
+	dispatchRun = func(c context.Context, opts dispatch.Options, runner dispatch.HerdrRunner) (dispatch.Output, int, error) {
+		out := mockOutput
+		out.Status = "failed"
+		return out, 3, nil
+	}
+	stdout.Reset()
+	stderr.Reset()
+	code = run(ctx, []string{
+		"dispatch",
+		"--cwd", repoDir,
+		"--allow", "src/**",
+		"--brief", briefFile,
+	}, &stdout, &stderr)
+	if code != 3 {
+		t.Fatalf("exit code = %d, want 3", code)
+	}
+	if !strings.Contains(stdout.String(), `"status": "failed"`) {
+		t.Errorf("stdout should contain failed status JSON; got %q", stdout.String())
+	}
+
+	// 4. Exit code 4 (timeout)
+	dispatchRun = func(c context.Context, opts dispatch.Options, runner dispatch.HerdrRunner) (dispatch.Output, int, error) {
+		out := mockOutput
+		out.Status = "timeout"
+		return out, 4, nil
+	}
+	stdout.Reset()
+	stderr.Reset()
+	code = run(ctx, []string{
+		"dispatch",
+		"--cwd", repoDir,
+		"--allow", "src/**",
+		"--brief", briefFile,
+	}, &stdout, &stderr)
+	if code != 4 {
+		t.Fatalf("exit code = %d, want 4", code)
+	}
+	if !strings.Contains(stdout.String(), `"status": "timeout"`) {
+		t.Errorf("stdout should contain timeout status JSON; got %q", stdout.String())
+	}
+}
+
+func TestWaitExecution(t *testing.T) {
+	ctx := context.Background()
+	repoDir := initRepo(t)
+
+	origWaitRun := waitRun
+	defer func() { waitRun = origWaitRun }()
+
+	var capturedRepoRoot, capturedLaneID string
+	var capturedTimeout time.Duration
+
+	mockOutput := dispatch.Output{
+		Lane:       "20261003-120000-abcd",
+		PaneID:     "w1:pWait1",
+		Cwd:        repoDir,
+		Status:     "done",
+		ResultPath: filepath.Join(repoDir, ".lucind/lanes/20261003-120000-abcd/result.json"),
+	}
+
+	waitRun = func(c context.Context, repoRoot, laneID string, timeout time.Duration, runner dispatch.HerdrRunner) (dispatch.Output, int, error) {
+		capturedRepoRoot = repoRoot
+		capturedLaneID = laneID
+		capturedTimeout = timeout
+		return mockOutput, 0, nil
+	}
+
+	// 1. Positional lane first: lucind-ai wait <lane> [--cwd <dir>] [--timeout D]
+	var stdout, stderr bytes.Buffer
+	code := run(ctx, []string{
+		"wait", "20261003-120000-abcd",
+		"--cwd", repoDir,
+		"--timeout", "45m",
+	}, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("run(wait) exit code = %d, want 0; stderr = %q", code, stderr.String())
+	}
+	if capturedLaneID != "20261003-120000-abcd" {
+		t.Errorf("captured LaneID = %q, want '20261003-120000-abcd'", capturedLaneID)
+	}
+	if capturedRepoRoot != repoDir {
+		t.Errorf("captured RepoRoot = %q, want %q", capturedRepoRoot, repoDir)
+	}
+	if capturedTimeout != 45*time.Minute {
+		t.Errorf("captured Timeout = %v, want 45m", capturedTimeout)
+	}
+	var outJSON dispatch.Output
+	if err := json.Unmarshal(stdout.Bytes(), &outJSON); err != nil {
+		t.Fatalf("failed to parse stdout as JSON: %v; output = %q", err, stdout.String())
+	}
+	if outJSON.Status != "done" {
+		t.Errorf("outJSON.Status = %q, want 'done'", outJSON.Status)
+	}
+
+	// 2. Flags first: lucind-ai wait [--flags] <lane>
+	stdout.Reset()
+	stderr.Reset()
+	code = run(ctx, []string{
+		"wait",
+		"--cwd", repoDir,
+		"--timeout", "15m",
+		"20261003-120000-abcd",
+	}, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("run(wait flags first) exit code = %d, want 0; stderr = %q", code, stderr.String())
+	}
+	if capturedLaneID != "20261003-120000-abcd" {
+		t.Errorf("captured LaneID = %q, want '20261003-120000-abcd'", capturedLaneID)
+	}
+
+	// 3. Exit code 3 (failed lane)
+	waitRun = func(c context.Context, repoRoot, laneID string, timeout time.Duration, runner dispatch.HerdrRunner) (dispatch.Output, int, error) {
+		out := mockOutput
+		out.Status = "failed"
+		return out, 3, nil
+	}
+	stdout.Reset()
+	stderr.Reset()
+	code = run(ctx, []string{
+		"wait", "20261003-120000-abcd",
+		"--cwd", repoDir,
+	}, &stdout, &stderr)
+	if code != 3 {
+		t.Fatalf("exit code = %d, want 3", code)
+	}
+
+	// 4. Exit code 4 (timeout)
+	waitRun = func(c context.Context, repoRoot, laneID string, timeout time.Duration, runner dispatch.HerdrRunner) (dispatch.Output, int, error) {
+		out := mockOutput
+		out.Status = "timeout"
+		return out, 4, nil
+	}
+	stdout.Reset()
+	stderr.Reset()
+	code = run(ctx, []string{
+		"wait", "20261003-120000-abcd",
+		"--cwd", repoDir,
+	}, &stdout, &stderr)
+	if code != 4 {
+		t.Fatalf("exit code = %d, want 4", code)
+	}
+}
+

@@ -108,7 +108,7 @@ Route for every task: delegated to agy via herdr (multi-file, deletion-heavy wor
   `rules init|generate`. Introduce `.lucind/lanes/<id>/` JSON state. Keep `attest`, `check`,
   `accept` (adapted to lane files), `hook`, result schema, agy quota gate.
   Acceptance: checks green; CLI usage lists only surviving commands.
-- [ ] **T3 — Packetless `dispatch` / `wait`.** Start from `feature/herdr-direct-dispatch`
+- [x] **T3 — Packetless `dispatch` / `wait`.** Start from `feature/herdr-direct-dispatch`
   ideas. Base tree hash, `LUCIND_LANE`, blocking/detach, `--lane` continuation, timeout
   semantics, pane never closed. Acceptance: unit tests with a fake herdr; checks green.
 - [ ] **T4 — agy plugin + `plugin install`.** Embedded plugin (plugin.json, hooks.json,
@@ -154,6 +154,11 @@ Route for every task: delegated to agy via herdr (multi-file, deletion-heavy wor
   agytrust, attest, check, executor, lane, result. CLI: check, accept --lane, attest run|verify,
   hook stop, --version. Orchestrator re-run of `sh lucind-checks.sh`: exit 0, 9/9 packages ok;
   `rg -l 'sqlite|ledger' --glob '*.go'` empty. Own glob matcher (no new dependency).
+- **T3** (route: delegated to agy pane w1:pW → worker subagents). Commits `9023192`,
+  `66c42c6`, `eaa2513`, `9bc089e`. New `internal/dispatch` with a `HerdrRunner` seam; legacy
+  executor runners pruned. Orchestrator re-run of `sh lucind-checks.sh`: exit 0, 10/10 packages;
+  argv spot check: `pane split ... --env LUCIND_LANE=<id>`, `agent start ... --dangerously-skip-permissions`,
+  footer asks for `lucind-ai attest run -- sh lucind-checks.sh`; no pane close/kill calls.
 
 ## Decisions log (taken autonomously; for user review)
 
@@ -185,7 +190,16 @@ Route for every task: delegated to agy via herdr (multi-file, deletion-heavy wor
   (Claude plugin version sync); `plugin/claude-code` is rebuilt in T5.
 - D16: accept reuses only an attestation of the exact command `sh lucind-checks.sh`; the lane
   brief footer tells agy to finish with `lucind-ai attest run -- sh lucind-checks.sh`.
+- D22 (agy, T3): dropped `Envelope.LaneStatus()` to avoid a lane↔result import cycle.
+- D23 (agy, T3): `MarkStopped` → `done` only for a valid result with status `done`; missing,
+  invalid or non-done (blocked/deviated/failed) → `failed`. T4 retries only missing/invalid.
+- D24 (agy, T3): legacy runners (`agy.go`, `herdr.go`, `herdr_interactive.go`, `executor.go`)
+  removed; `AgyQuota`, `DefaultModel`, `KnownModels`, `ResolveModel` kept.
+- D25 (agy, T3): pane split direction = right when width >= 2*height, else down; right on error.
+- D26 (process): when every saved agy account is below ~5% of the 5h window, wait for the reset
+  instead of moving heavy work to Claude (keeps the agy-heavy split). 2026-10-03 15:30: all three
+  saved accounts at ~3% remaining; T4 scheduled for ~18:33 local in a fresh agy session.
 
 ## Next step
 
-T3.
+T4.
