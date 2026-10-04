@@ -82,7 +82,7 @@ Route per task is recorded when started (inline or delegated, with trigger evide
       close it. Also use `--cwd "$PWD"` in the dispatch example. No `accept --close-pane` flag
       for now (it would change the lucind-ai contract). Found when pane `w1:p13` stayed open.
 
-- [ ] T7 Polish the dispatch footer: it repeats "As the final verification run exactly..." once
+- [x] T7 (commit `d35c7a6`, lane `20261004-064637-d5cb`) Polish the dispatch footer: it repeats "As the final verification run exactly..." once
       per check; print one intro line and a list of commands.
 - [x] T8 Fix the `worker` role in the `lucind-roles` agy plugin. Root cause (per
       `docs/provider-docs/gemini/subagents.md`): custom agent frontmatter `tools` defaults to `[]`,
@@ -107,15 +107,29 @@ Route per task is recorded when started (inline or delegated, with trigger evide
 - [x] T12 (commit `2f99eb5`, inline, `gofmt -l .` now empty) Format with `gofmt`: lanes left unformatted files (`gofmt -l` lists several; `status.go`
       was already unformatted on `dev`). One `style:` commit, then use `test -z "$(gofmt -l ...)"`
       as a `--check` in later lanes.
-- [ ] T13 Bug: on a continuation (`dispatch --lane <id>`) the previous `result.json` stays on disk,
+- [x] T13 (commit `d35c7a6`) Bug: on a continuation (`dispatch --lane <id>`) the previous `result.json` stays on disk,
       so the Stop hook accepts the stale envelope and marks the lane `done` while agy is still
       working (seen in T4's follow-up turn). Move the old file aside (for example
       `result.prev.json`) when continuing so a fresh envelope is required.
-- [ ] T14 Make the Stop hook log every retry with its reason in `hook.log`; decide separately
-      whether stops while a subagent is still running should consume retries.
+- [x] T14 (commit `d35c7a6`; logging only) Make the Stop hook log every retry with its reason in
+      `hook.log`; decide separately whether stops while a subagent is still running should consume
+      retries (see T15).
+- [ ] T15 Decide and fix retry exhaustion. Lane `20261004-064637-d5cb` ended with `lane.json`
+      status `failed` (`retries: 2`) although agy kept working and later wrote a valid `done`
+      envelope; `accept` only reads the envelope, so it was accepted, but `wait` and `dispatch`
+      reported failure. Same root cause as T9. Wait for data first: the binary built from
+      `d35c7a6` is the first whose Stop hook logs each retry reason in `hook.log`, so read those
+      logs from the next lanes before choosing between (a) not spending retries while a subagent
+      is running, (b) a higher `MaxRetries`, (c) letting `wait` re-read `result.json` before
+      reporting `failed`.
 - [ ] T10 Rewrite the global `~/.claude/CLAUDE.md` orchestration rules so code-changing work is
       dispatched through lucind-ai, and native Claude subagents become the exception (user request).
-- [ ] T11 Verify in a real lane that agy actually persists Key Learnings with Engram `mem_save`
+- [x] T11 Verified: agy does persist Key Learnings. Engram holds observations that the orchestrator
+      did not write and that match the lanes (for example "Herdr pane cwd fail-fast validation",
+      "Embedding asset trees across Go packages with go:embed", "Declarative lane checks
+      verification"). Caveat: they can encode mistakes (one note about symlink handling was vague
+      around the overreach fixed in T4), so they are not reviewed truth.
+      Original task: Verify in a real lane that agy actually persists Key Learnings with Engram `mem_save`
       (no hook captures them; only the instruction in the agy plugin asks for it).
 
 ## Follow-up details
@@ -176,7 +190,11 @@ Route per task is recorded when started (inline or delegated, with trigger evide
   both checks itself. First real `make install`: all three components installed, skill copy equals
   the repo source, installed `worker` equals the embedded one.
 
+- T7/T13/T14: first lane with three checks including `gofmt`; all three attestations reused by
+  `accept` (no re-run). Parent spot check: `go test ./...` clean, `go vet ./...` clean,
+  `gofmt -l .` empty. `lane.json` showed `failed` with `retries: 2` before accept (see T15).
+
 ## Next step
 
-One lane for T7, T13 and T14 (checks include gofmt); then T11.
-T10 is excluded by the user's goal and stays pending.
+T10 (global CLAUDE.md rewrite) is excluded by the user's goal and stays pending. T15 waits for
+retry data from `hook.log` in upcoming lanes.
