@@ -32,7 +32,7 @@ Load the `herdr` skill too; this skill assumes its pane/agent commands.
 ### Lane (code changes)
 
 ```bash
-lucind-ai dispatch --cwd <dir> --allow '<glob>' [--allow ...] --brief <file|-> \
+lucind-ai dispatch --cwd "$PWD" --allow '<glob>' [--allow ...] --brief <file|-> \
   [--check '<cmd>']... [--model M] [--timeout 60m] [--detach] [--min-quota 0.1]
 lucind-ai wait <lane>            # only after --detach
 lucind-ai accept --lane <id>     # run from the lane's repo
@@ -53,6 +53,16 @@ lucind-ai accept --lane <id>     # run from the lane's repo
   attestation. `accept` reuses a valid attestation per check on the final tree and runs only
   the missing ones.
   **Never re-run tests yourself after an accepted receipt** — the attestation is the proof.
+- **Review before `accept`.** `status: done` only means agy wrote a valid envelope, not that the
+  brief was fully delivered. Compare `git status` and `git diff --stat` and the envelope's
+  `done_criteria` with the brief's scope items; if something is missing, send a follow-up turn to
+  the same lane (`dispatch --lane <id> --brief ...`, including the full original brief) instead of
+  accepting. Mind that a continuation can be marked `done` early by the stale previous
+  `result.json`: wait until `result.json` is newer than `brief.md` and agy is idle.
+- **After `accept`, decide what to do with the pane** (lucind-ai never closes it). Default: close
+  it with `herdr pane close <pane_id>`. If reviewing the diff left a doubt about the
+  implementation, leave it open and ask agy with `herdr agent prompt <pane_id> "..."`, reusing the
+  implementer's fresh context; close it once the question is settled.
 
 ## Writing a brief
 
