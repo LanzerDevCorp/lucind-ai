@@ -61,7 +61,9 @@ Route per task is recorded when started (inline or delegated, with trigger evide
       docs (`docs/attestation.md`, `docs/product.md`, `README.md`, `CONTEXT.md`), `cli.go:153`
       log label; mark the `check` subcommand deprecated in help.
 - [ ] T4 `lucind-ai install`: embed the Claude skill, copy it to `~/.claude/skills/lucind`, then
-      run the existing agy plugin setup; Makefile `install` calls it.
+      run the existing agy plugin setup; Makefile `install` calls it. Also embed and install the
+      `lucind-roles` agy plugin (`plugin.json`, `agents/worker.md` with the `tools` frontmatter
+      from T8), so a fresh machine gets a working worker role; its source is not in the repo today.
 
 - [x] T5 Bug: `dispatch` passes a relative `--cwd` (for example `.`) unresolved to
       `herdr pane split --cwd`, so the pane opens in the herdr server's home and the agy
@@ -82,9 +84,20 @@ Route per task is recorded when started (inline or delegated, with trigger evide
 
 - [ ] T7 Polish the dispatch footer: it repeats "As the final verification run exactly..." once
       per check; print one intro line and a list of commands.
-- [ ] T8 Update the `worker` role in the `lucind-roles` agy plugin (registered with
-      `enable_write_tools: false`, which blocks implementer subagents) or document `impl-worker`.
-      See "Follow-up details".
+- [x] T8 Fix the `worker` role in the `lucind-roles` agy plugin. Root cause (per
+      `docs/provider-docs/gemini/subagents.md`): custom agent frontmatter `tools` defaults to `[]`,
+      and `worker.md` declared none, so the role had no tools. Fix: declared `tools`
+      (`view_file`, `write_to_file`, `replace_file_content`, `multi_replace_file_content`,
+      `list_dir`, `find_by_name`, `grep_search`, `run_command`), plus `subagent: true` and
+      `mainAgent: false`, in the installed copy
+      `~/.gemini/config/plugins/lucind-roles/agents/worker.md` (outside this repo, so done inline,
+      not as a lane; backup kept in the session scratchpad). Probe with a free agy: the worker
+      created a file with `write_to_file` and ran `go test ./internal/lane/...` and `go version`
+      with `run_command`, all succeeded. The docs warn that a misspelled tool name can hang the
+      subagent, so names were copied from the documented list. `commandExecutionPolicy` left at
+      its default (`sandbox`); its semantics are undocumented and the probe did not need a change.
+      Remaining: the role source is not in this repo, so a re-registration could overwrite the
+      fix; T4 must ship `lucind-roles` as an embedded asset and install it.
 - [ ] T9 Find out why lane `20261004-054348-0962` (T5) needed `retries: 2` on the result envelope.
 - [ ] T10 Rewrite the global `~/.claude/CLAUDE.md` orchestration rules so code-changing work is
       dispatched through lucind-ai, and native Claude subagents become the exception (user request).
