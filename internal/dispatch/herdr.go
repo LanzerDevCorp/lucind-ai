@@ -133,3 +133,40 @@ func SplitPane(ctx context.Context, runner HerdrRunner, direction, cwd, laneID s
 
 	return paneID, nil
 }
+
+type paneGetResponse struct {
+	Result struct {
+		Pane struct {
+			Cwd string `json:"cwd"`
+		} `json:"pane"`
+	} `json:"result"`
+}
+
+// GetPaneCwd queries herdr for the working directory of a pane.
+func GetPaneCwd(ctx context.Context, runner HerdrRunner, paneID string) (string, error) {
+	out, err := runner.Run(ctx, "pane", "get", paneID)
+	if err != nil {
+		return "", fmt.Errorf("herdr pane get: %w (output: %s)", err, string(out))
+	}
+
+	var resp paneGetResponse
+	if err := json.Unmarshal(out, &resp); err != nil {
+		return "", fmt.Errorf("parse herdr pane get response: %w", err)
+	}
+
+	if resp.Result.Pane.Cwd == "" {
+		return "", fmt.Errorf("pane get did not return a cwd: %s", string(out))
+	}
+
+	return resp.Result.Pane.Cwd, nil
+}
+
+// ClosePane closes a pane in herdr.
+func ClosePane(ctx context.Context, runner HerdrRunner, paneID string) error {
+	out, err := runner.Run(ctx, "pane", "close", paneID)
+	if err != nil {
+		return fmt.Errorf("herdr pane close: %w (output: %s)", err, string(out))
+	}
+	return nil
+}
+

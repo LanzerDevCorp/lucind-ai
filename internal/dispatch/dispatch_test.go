@@ -52,8 +52,20 @@ func setupFakeRunnerForNewLane(t *testing.T, newPaneID string) *fakeHerdrRunner 
 			}
 		}`), nil
 	}
+	var lastSplitCwd string
 	runner.handlers["pane split"] = func(args []string) ([]byte, error) {
+		for i := 0; i < len(args)-1; i++ {
+			if args[i] == "--cwd" {
+				lastSplitCwd = args[i+1]
+			}
+		}
 		return []byte(fmt.Sprintf(`{"result": {"pane": {"pane_id": %q}}}`, newPaneID)), nil
+	}
+	runner.handlers["pane get"] = func(args []string) ([]byte, error) {
+		return []byte(fmt.Sprintf(`{"result": {"pane": {"pane_id": %q, "cwd": %q}}}`, newPaneID, lastSplitCwd)), nil
+	}
+	runner.handlers["pane close"] = func(args []string) ([]byte, error) {
+		return []byte(`{"result": {"closed": true}}`), nil
 	}
 	runner.handlers["agent start"] = func(args []string) ([]byte, error) {
 		return []byte(`{"result": {"started": true}}`), nil
@@ -180,10 +192,10 @@ func TestDispatch_NewLane_HappyPath(t *testing.T) {
 	}
 
 	// 3. Verify herdr runner command sequence:
-	// layout -> split -> agent start -> agent wait (idle) -> agent prompt
+	// layout -> split -> pane get -> agent start -> agent wait (idle) -> agent prompt
 	calls := runner.Calls()
-	if len(calls) != 5 {
-		t.Fatalf("expected 5 herdr calls, got %d: %v", len(calls), calls)
+	if len(calls) != 6 {
+		t.Fatalf("expected 6 herdr calls, got %d: %v", len(calls), calls)
 	}
 
 	// layout
@@ -202,34 +214,39 @@ func TestDispatch_NewLane_HappyPath(t *testing.T) {
 		t.Errorf("call 1 missing --no-focus: %v", splitArgs)
 	}
 
+	// pane get
+	if !reflect.DeepEqual(calls[2], []string{"pane", "get", "w1:pLane1"}) {
+		t.Errorf("call 2 = %v, want pane get w1:pLane1", calls[2])
+	}
+
 	// agent start lane-<last 4 of id> --kind agy --pane <pane_id> -- --dangerously-skip-permissions --model <model>
-	startArgs := calls[2]
+	startArgs := calls[3]
 	last4 := out.Lane[len(out.Lane)-4:]
 	wantAgentName := "lane-" + last4
 	if startArgs[0] != "agent" || startArgs[1] != "start" || startArgs[2] != wantAgentName {
-		t.Errorf("call 2 = %v, want agent start %s", startArgs, wantAgentName)
+		t.Errorf("call 3 = %v, want agent start %s", startArgs, wantAgentName)
 	}
 	if !containsSlice(startArgs, []string{"--kind", "agy", "--pane", "w1:pLane1"}) {
-		t.Errorf("call 2 missing kind agy and pane: %v", startArgs)
+		t.Errorf("call 3 missing kind agy and pane: %v", startArgs)
 	}
 	if !containsSlice(startArgs, []string{"--", "--dangerously-skip-permissions", "--model", "gemini-3.8-flash-high"}) {
-		t.Errorf("call 2 missing agent options: %v", startArgs)
+		t.Errorf("call 3 missing agent options: %v", startArgs)
 	}
 
 	// agent wait <pane_id> --until idle --timeout 60000
-	if !reflect.DeepEqual(calls[3], []string{"agent", "wait", "w1:pLane1", "--until", "idle", "--timeout", "60000"}) {
-		t.Errorf("call 3 = %v, want agent wait until idle", calls[3])
+	if !reflect.DeepEqual(calls[4], []string{"agent", "wait", "w1:pLane1", "--until", "idle", "--timeout", "60000"}) {
+		t.Errorf("call 4 = %v, want agent wait until idle", calls[4])
 	}
 
 	// agent prompt <pane_id> "Read and follow <abs brief.md>" --wait --until working --until blocked
-	promptArgs := calls[4]
+	promptArgs := calls[5]
 	if promptArgs[0] != "agent" || promptArgs[1] != "prompt" || promptArgs[2] != "w1:pLane1" {
-		t.Errorf("call 4 = %v, want agent prompt w1:pLane1", promptArgs)
+		t.Errorf("call 5 = %v, want agent prompt w1:pLane1", promptArgs)
 	}
 	absBriefPath, _ := filepath.Abs(briefPath)
 	wantPrompt := fmt.Sprintf("Read and follow %s", absBriefPath)
 	if promptArgs[3] != wantPrompt {
-		t.Errorf("call 4 prompt text = %q, want %q", promptArgs[3], wantPrompt)
+		t.Errorf("call 5 prompt text = %q, want %q", promptArgs[3], wantPrompt)
 	}
 	if !reflect.DeepEqual(promptArgs[4:], wantPromptTail()) {
 		t.Errorf("prompt flags = %v, want %v", promptArgs[4:], wantPromptTail())
@@ -741,5 +758,256 @@ func TestDispatchChecks(t *testing.T) {
 			}
 		}
 	})
+}
+
+func TestDispatch_Behavior1_RelativeCwd_ReachesSplitPaneAsAbs(t *testing.T) {
+	t.Setenv("HERDR_ENV", "1")
+	repoDir := t.TempDir()
+	initGitRepo(t, repoDir)
+	t.Chdir(repoDir)
+
+	runner := setupFakeRunnerForNewLane(t, "w1:pRel")
+
+	opts := dispatch.Options{
+		Cwd:    ".",
+		Allow:  []string{"*"},
+		Brief:  "test relative cwd reaches split pane as abs",
+		Detach: true,
+	}
+
+	_, exitCode, err := dispatch.Dispatch(context.Background(), opts, runner)
+	if err != nil {
+		t.Fatalf("unexpected dispatch error: %v", err)
+	}
+	if exitCode != 0 {
+		t.Errorf("exitCode = %d, want 0", exitCode)
+	}
+
+	var splitCwd string
+	for _, call := range runner.Calls() {
+		if len(call) >= 2 && call[0] == "pane" && call[1] == "split" {
+			for i := 0; i < len(call)-1; i++ {
+				if call[i] == "--cwd" {
+					splitCwd = call[i+1]
+					break
+				}
+			}
+		}
+	}
+	if splitCwd == "" {
+		t.Fatal("pane split was not called or missing --cwd")
+	}
+	if !filepath.IsAbs(splitCwd) {
+		t.Errorf("pane split cwd is not absolute: %q", splitCwd)
+	}
+	expectedAbs, _ := filepath.Abs(".")
+	if splitCwd != expectedAbs {
+		t.Errorf("pane split cwd = %q, want %q", splitCwd, expectedAbs)
+	}
+}
+
+func TestDispatch_Behavior2_OutputCwd_IsAbsolute(t *testing.T) {
+	t.Setenv("HERDR_ENV", "1")
+	repoDir := t.TempDir()
+	initGitRepo(t, repoDir)
+	t.Chdir(repoDir)
+
+	runner := setupFakeRunnerForNewLane(t, "w1:pOutAbs")
+
+	opts := dispatch.Options{
+		Cwd:    ".",
+		Allow:  []string{"*"},
+		Brief:  "test output cwd absolute",
+		Detach: true,
+	}
+
+	out, exitCode, err := dispatch.Dispatch(context.Background(), opts, runner)
+	if err != nil {
+		t.Fatalf("unexpected dispatch error: %v", err)
+	}
+	if exitCode != 0 {
+		t.Errorf("exitCode = %d, want 0", exitCode)
+	}
+	if !filepath.IsAbs(out.Cwd) {
+		t.Errorf("out.Cwd is not absolute: %q", out.Cwd)
+	}
+	expectedAbs, _ := filepath.Abs(".")
+	if out.Cwd != expectedAbs {
+		t.Errorf("out.Cwd = %q, want %q", out.Cwd, expectedAbs)
+	}
+}
+
+func TestDispatch_Behavior3_CwdMismatch_ClosesPaneAndErrors(t *testing.T) {
+	t.Setenv("HERDR_ENV", "1")
+	repoDir := t.TempDir()
+	initGitRepo(t, repoDir)
+
+	runner := setupFakeRunnerForNewLane(t, "w1:pMismatch")
+	wrongDir := filepath.Join(repoDir, "other_dir")
+	runner.handlers["pane get"] = func(args []string) ([]byte, error) {
+		return []byte(fmt.Sprintf(`{"result": {"pane": {"pane_id": "w1:pMismatch", "cwd": %q}}}`, wrongDir)), nil
+	}
+
+	opts := dispatch.Options{
+		Cwd:    repoDir,
+		Allow:  []string{"*"},
+		Brief:  "test cwd mismatch",
+		Detach: true,
+	}
+
+	_, exitCode, err := dispatch.Dispatch(context.Background(), opts, runner)
+	if err == nil {
+		t.Fatal("expected error on cwd mismatch, got nil")
+	}
+	if exitCode != 1 {
+		t.Errorf("exitCode = %d, want 1", exitCode)
+	}
+	absRepoDir, _ := filepath.Abs(repoDir)
+	if !strings.Contains(err.Error(), absRepoDir) || !strings.Contains(err.Error(), wrongDir) {
+		t.Errorf("error %q should contain expected %q and actual %q", err.Error(), absRepoDir, wrongDir)
+	}
+	if !strings.Contains(err.Error(), "pane cwd mismatch:") {
+		t.Errorf("error %q should mention 'pane cwd mismatch:'", err.Error())
+	}
+
+	calls := runner.Calls()
+	closed := false
+	for _, c := range calls {
+		if len(c) >= 3 && c[0] == "pane" && c[1] == "close" && c[2] == "w1:pMismatch" {
+			closed = true
+			break
+		}
+	}
+	if !closed {
+		t.Errorf("expected pane close w1:pMismatch to be called, calls: %v", calls)
+	}
+
+	if countCalls(calls, "agent", "start") != 0 {
+		t.Errorf("agent start should not be called on cwd mismatch")
+	}
+}
+
+func TestDispatch_Behavior4_PaneGetFailure_ClosesPaneAndErrors(t *testing.T) {
+	t.Setenv("HERDR_ENV", "1")
+	repoDir := t.TempDir()
+	initGitRepo(t, repoDir)
+
+	runner := setupFakeRunnerForNewLane(t, "w1:pGetFail")
+	runner.handlers["pane get"] = func(args []string) ([]byte, error) {
+		return []byte("pane get failed"), errors.New("exit 1")
+	}
+
+	opts := dispatch.Options{
+		Cwd:    repoDir,
+		Allow:  []string{"*"},
+		Brief:  "test pane get failure",
+		Detach: true,
+	}
+
+	_, exitCode, err := dispatch.Dispatch(context.Background(), opts, runner)
+	if err == nil {
+		t.Fatal("expected error on pane get failure, got nil")
+	}
+	if exitCode != 1 {
+		t.Errorf("exitCode = %d, want 1", exitCode)
+	}
+	if !strings.Contains(err.Error(), "verify pane cwd:") {
+		t.Errorf("error %q should mention 'verify pane cwd:'", err.Error())
+	}
+
+	calls := runner.Calls()
+	closed := false
+	for _, c := range calls {
+		if len(c) >= 3 && c[0] == "pane" && c[1] == "close" && c[2] == "w1:pGetFail" {
+			closed = true
+			break
+		}
+	}
+	if !closed {
+		t.Errorf("expected pane close w1:pGetFail to be called, calls: %v", calls)
+	}
+
+	if countCalls(calls, "agent", "start") != 0 {
+		t.Errorf("agent start should not be called when pane get fails")
+	}
+}
+
+func TestDispatch_Behavior5_MatchingCwd_Proceeds(t *testing.T) {
+	t.Setenv("HERDR_ENV", "1")
+	repoDir := t.TempDir()
+	initGitRepo(t, repoDir)
+
+	runner := setupFakeRunnerForNewLane(t, "w1:pMatch")
+
+	opts := dispatch.Options{
+		Cwd:    repoDir,
+		Allow:  []string{"*"},
+		Brief:  "test matching cwd proceeds",
+		Detach: true,
+	}
+
+	out, exitCode, err := dispatch.Dispatch(context.Background(), opts, runner)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if exitCode != 0 {
+		t.Errorf("exitCode = %d, want 0", exitCode)
+	}
+	if out.PaneID != "w1:pMatch" {
+		t.Errorf("out.PaneID = %q, want \"w1:pMatch\"", out.PaneID)
+	}
+
+	calls := runner.Calls()
+	getCalls := 0
+	for _, c := range calls {
+		if len(c) >= 3 && c[0] == "pane" && c[1] == "get" && c[2] == "w1:pMatch" {
+			getCalls++
+		}
+	}
+	if getCalls != 1 {
+		t.Errorf("expected 1 pane get call, got %d", getCalls)
+	}
+
+	if countCalls(calls, "pane", "close") != 0 {
+		t.Errorf("pane close should not be called when cwd matches")
+	}
+
+	if countCalls(calls, "agent", "start") != 1 {
+		t.Errorf("agent start should be called when cwd matches")
+	}
+}
+
+func TestDispatch_Behavior5_MatchingCwd_Symlink_Proceeds(t *testing.T) {
+	t.Setenv("HERDR_ENV", "1")
+	repoDir := t.TempDir()
+	initGitRepo(t, repoDir)
+
+	symlinkDir := filepath.Join(t.TempDir(), "symlink_dir")
+	if err := os.Symlink(repoDir, symlinkDir); err != nil {
+		t.Skipf("cannot create symlink: %v", err)
+	}
+
+	runner := setupFakeRunnerForNewLane(t, "w1:pSym")
+	runner.handlers["pane get"] = func(args []string) ([]byte, error) {
+		return []byte(fmt.Sprintf(`{"result": {"pane": {"pane_id": "w1:pSym", "cwd": %q}}}`, repoDir)), nil
+	}
+
+	opts := dispatch.Options{
+		Cwd:    symlinkDir,
+		Allow:  []string{"*"},
+		Brief:  "test symlink matching",
+		Detach: true,
+	}
+
+	out, exitCode, err := dispatch.Dispatch(context.Background(), opts, runner)
+	if err != nil {
+		t.Fatalf("unexpected error on symlink match: %v", err)
+	}
+	if exitCode != 0 {
+		t.Errorf("exitCode = %d, want 0", exitCode)
+	}
+	if out.PaneID != "w1:pSym" {
+		t.Errorf("out.PaneID = %q, want \"w1:pSym\"", out.PaneID)
+	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 
@@ -203,4 +204,116 @@ func TestSplitPane_Errors(t *testing.T) {
 			t.Fatal("expected error, got nil")
 		}
 	})
+}
+
+func TestGetPaneCwd_Success(t *testing.T) {
+	runner := newFakeHerdrRunner()
+	runner.handlers["pane get"] = func(args []string) ([]byte, error) {
+		return []byte(`{"result": {"pane": {"pane_id": "w1:p1", "cwd": "/workspace/my-project"}}}`), nil
+	}
+
+	cwd, err := dispatch.GetPaneCwd(context.Background(), runner, "w1:p1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cwd != "/workspace/my-project" {
+		t.Errorf("GetPaneCwd() = %q, want %q", cwd, "/workspace/my-project")
+	}
+
+	wantArgs := []string{"pane", "get", "w1:p1"}
+	calls := runner.Calls()
+	if len(calls) != 1 || !reflect.DeepEqual(calls[0], wantArgs) {
+		t.Errorf("GetPaneCwd calls = %v, want %v", calls, [][]string{wantArgs})
+	}
+}
+
+func TestGetPaneCwd_Errors(t *testing.T) {
+	t.Run("runner error", func(t *testing.T) {
+		runner := newFakeHerdrRunner()
+		runner.handlers["pane get"] = func(args []string) ([]byte, error) {
+			return []byte("pane not found"), errors.New("exit 1")
+		}
+		_, err := dispatch.GetPaneCwd(context.Background(), runner, "w1:p1")
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if !strings.Contains(err.Error(), "herdr pane get:") || !strings.Contains(err.Error(), "pane not found") {
+			t.Errorf("unexpected error format: %v", err)
+		}
+	})
+
+	t.Run("invalid json", func(t *testing.T) {
+		runner := newFakeHerdrRunner()
+		runner.handlers["pane get"] = func(args []string) ([]byte, error) {
+			return []byte("invalid json output"), nil
+		}
+		_, err := dispatch.GetPaneCwd(context.Background(), runner, "w1:p1")
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if !strings.Contains(err.Error(), "parse herdr pane get response:") {
+			t.Errorf("unexpected error format: %v", err)
+		}
+	})
+
+	t.Run("empty cwd", func(t *testing.T) {
+		runner := newFakeHerdrRunner()
+		runner.handlers["pane get"] = func(args []string) ([]byte, error) {
+			return []byte(`{"result": {"pane": {"pane_id": "w1:p1", "cwd": ""}}}`), nil
+		}
+		_, err := dispatch.GetPaneCwd(context.Background(), runner, "w1:p1")
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if !strings.Contains(err.Error(), "pane get did not return a cwd:") {
+			t.Errorf("unexpected error format: %v", err)
+		}
+	})
+
+	t.Run("missing cwd field", func(t *testing.T) {
+		runner := newFakeHerdrRunner()
+		runner.handlers["pane get"] = func(args []string) ([]byte, error) {
+			return []byte(`{"result": {"pane": {"pane_id": "w1:p1"}}}`), nil
+		}
+		_, err := dispatch.GetPaneCwd(context.Background(), runner, "w1:p1")
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if !strings.Contains(err.Error(), "pane get did not return a cwd:") {
+			t.Errorf("unexpected error format: %v", err)
+		}
+	})
+}
+
+func TestClosePane_Success(t *testing.T) {
+	runner := newFakeHerdrRunner()
+	runner.handlers["pane close"] = func(args []string) ([]byte, error) {
+		return []byte(`{"result": {"closed": true}}`), nil
+	}
+
+	err := dispatch.ClosePane(context.Background(), runner, "w1:p1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	wantArgs := []string{"pane", "close", "w1:p1"}
+	calls := runner.Calls()
+	if len(calls) != 1 || !reflect.DeepEqual(calls[0], wantArgs) {
+		t.Errorf("ClosePane calls = %v, want %v", calls, [][]string{wantArgs})
+	}
+}
+
+func TestClosePane_Errors(t *testing.T) {
+	runner := newFakeHerdrRunner()
+	runner.handlers["pane close"] = func(args []string) ([]byte, error) {
+		return []byte("pane already closed"), errors.New("exit 1")
+	}
+
+	err := dispatch.ClosePane(context.Background(), runner, "w1:p1")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "herdr pane close:") || !strings.Contains(err.Error(), "pane already closed") {
+		t.Errorf("unexpected error format: %v", err)
+	}
 }

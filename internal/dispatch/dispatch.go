@@ -88,6 +88,16 @@ func Dispatch(ctx context.Context, opts Options, runner HerdrRunner) (Output, in
 		return Output{}, 1, errors.New("herdr is the only supported runtime: HERDR_ENV must be set to 1")
 	}
 
+	cwd := opts.Cwd
+	if cwd == "" {
+		cwd = "."
+	}
+	absCwd, err := filepath.Abs(cwd)
+	if err != nil {
+		return Output{}, 1, fmt.Errorf("resolve abs cwd: %w", err)
+	}
+	cwd = absCwd
+
 	for _, c := range opts.Checks {
 		if strings.TrimSpace(c) == "" {
 			return Output{}, 1, fmt.Errorf("check command cannot be empty")
@@ -105,10 +115,6 @@ func Dispatch(ctx context.Context, opts Options, runner HerdrRunner) (Output, in
 		runner = DefaultHerdrRunner{}
 	}
 
-	cwd := opts.Cwd
-	if cwd == "" {
-		cwd = "."
-	}
 	repoRoot, err := attest.RepoToplevel(ctx, cwd)
 	if err != nil {
 		return Output{}, 1, fmt.Errorf("resolve repo root: %w", err)
@@ -176,6 +182,17 @@ func Dispatch(ctx context.Context, opts Options, runner HerdrRunner) (Output, in
 		if err != nil {
 			return Output{}, 1, fmt.Errorf("split pane: %w", err)
 		}
+
+		paneCwd, err := GetPaneCwd(ctx, runner, paneID)
+		if err != nil {
+			_ = ClosePane(ctx, runner, paneID)
+			return Output{}, 1, fmt.Errorf("verify pane cwd: %w", err)
+		}
+		if resolveSymlinks(cwd) != resolveSymlinks(paneCwd) {
+			_ = ClosePane(ctx, runner, paneID)
+			return Output{}, 1, fmt.Errorf("pane cwd mismatch: expected %s, got %s", cwd, paneCwd)
+		}
+
 		l.PaneID = paneID
 		if err := l.Save(repoRoot); err != nil {
 			return Output{}, 1, fmt.Errorf("save lane with pane id: %w", err)
@@ -257,3 +274,12 @@ func sendPrompt(ctx context.Context, runner HerdrRunner, paneID, text, marker st
 	}
 	return nil
 }
+
+func resolveSymlinks(path string) string {
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return filepath.Clean(path)
+	}
+	return filepath.Clean(resolved)
+}
+
