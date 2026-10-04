@@ -875,6 +875,125 @@ func TestLaneChecksJSONSerialization(t *testing.T) {
 	})
 }
 
+func TestLaneLastStopAtAndContinuesJSON(t *testing.T) {
+	t.Run("without fields unmarshals and loads with zero values", func(t *testing.T) {
+		jsonWithout := `{
+			"version": 1,
+			"id": "20261003-215144-zero",
+			"cwd": "/test",
+			"base_tree": "abc",
+			"allow": [],
+			"model": "m",
+			"pane_id": "",
+			"status": "running",
+			"retries": 0,
+			"created_at": "2026-10-03T21:51:44Z",
+			"updated_at": "2026-10-03T21:51:44Z"
+		}`
+		var ln lane.Lane
+		if err := json.Unmarshal([]byte(jsonWithout), &ln); err != nil {
+			t.Fatalf("Unmarshal failed: %v", err)
+		}
+		if ln.LastStopAt != nil {
+			t.Errorf("ln.LastStopAt = %v, want nil", ln.LastStopAt)
+		}
+		if ln.Continues != 0 {
+			t.Errorf("ln.Continues = %d, want 0", ln.Continues)
+		}
+
+		tempDir := t.TempDir()
+		laneDir := lane.LaneDir(tempDir, ln.ID)
+		if err := os.MkdirAll(laneDir, 0755); err != nil {
+			t.Fatalf("MkdirAll failed: %v", err)
+		}
+		if err := os.WriteFile(lane.LanePath(tempDir, ln.ID), []byte(jsonWithout), 0644); err != nil {
+			t.Fatalf("WriteFile failed: %v", err)
+		}
+		loaded, err := lane.Load(tempDir, ln.ID)
+		if err != nil {
+			t.Fatalf("Load failed: %v", err)
+		}
+		if loaded.LastStopAt != nil {
+			t.Errorf("loaded.LastStopAt = %v, want nil", loaded.LastStopAt)
+		}
+		if loaded.Continues != 0 {
+			t.Errorf("loaded.Continues = %d, want 0", loaded.Continues)
+		}
+	})
+
+	t.Run("when fields are set Save and Load preserve their values", func(t *testing.T) {
+		tempDir := t.TempDir()
+		stopTime := time.Date(2026, 10, 4, 12, 0, 0, 0, time.UTC)
+		ln := lane.Lane{
+			Version:    1,
+			ID:         "20261003-215144-set1",
+			Status:     lane.StatusDone,
+			LastStopAt: &stopTime,
+			Continues:  3,
+		}
+		if err := lane.Save(tempDir, ln); err != nil {
+			t.Fatalf("Save failed: %v", err)
+		}
+
+		loaded, err := lane.Load(tempDir, ln.ID)
+		if err != nil {
+			t.Fatalf("Load failed: %v", err)
+		}
+		if loaded.LastStopAt == nil {
+			t.Fatal("loaded.LastStopAt is nil, want non-nil")
+		}
+		if !loaded.LastStopAt.Equal(stopTime) {
+			t.Errorf("loaded.LastStopAt = %v, want %v", loaded.LastStopAt, stopTime)
+		}
+		if loaded.Continues != 3 {
+			t.Errorf("loaded.Continues = %d, want 3", loaded.Continues)
+		}
+	})
+
+	t.Run("when fields are zero marshaling and Save omit them from JSON", func(t *testing.T) {
+		ln := lane.Lane{
+			Version:    1,
+			ID:         "20261003-215144-omit",
+			Status:     lane.StatusRunning,
+			LastStopAt: nil,
+			Continues:  0,
+		}
+		data, err := json.Marshal(ln)
+		if err != nil {
+			t.Fatalf("Marshal failed: %v", err)
+		}
+		var raw map[string]any
+		if err := json.Unmarshal(data, &raw); err != nil {
+			t.Fatalf("Unmarshal raw failed: %v", err)
+		}
+		if _, exists := raw["last_stop_at"]; exists {
+			t.Errorf("expected 'last_stop_at' to be omitted from JSON when nil, got %v", raw["last_stop_at"])
+		}
+		if _, exists := raw["continues"]; exists {
+			t.Errorf("expected 'continues' to be omitted from JSON when 0, got %v", raw["continues"])
+		}
+
+		tempDir := t.TempDir()
+		if err := lane.Save(tempDir, ln); err != nil {
+			t.Fatalf("Save failed: %v", err)
+		}
+		savedData, err := os.ReadFile(lane.LanePath(tempDir, ln.ID))
+		if err != nil {
+			t.Fatalf("ReadFile failed: %v", err)
+		}
+		var savedRaw map[string]any
+		if err := json.Unmarshal(savedData, &savedRaw); err != nil {
+			t.Fatalf("Unmarshal savedRaw failed: %v", err)
+		}
+		if _, exists := savedRaw["last_stop_at"]; exists {
+			t.Errorf("expected 'last_stop_at' omitted in saved JSON, got %v", savedRaw["last_stop_at"])
+		}
+		if _, exists := savedRaw["continues"]; exists {
+			t.Errorf("expected 'continues' omitted in saved JSON, got %v", savedRaw["continues"])
+		}
+	})
+}
+
 func TestLaneCreateWithChecks(t *testing.T) {
 	ctx := context.Background()
 
