@@ -53,10 +53,22 @@ lucind-ai accept --lane <id>     # run from the lane's repo
 
 ## Writing a brief
 
-Free Markdown. Include: goal, scope, acceptance criteria, constraints (TDD, style), and what to
-report in the result envelope. The footer added by `dispatch` already covers lane id, allowed
-globs, result path and the final `lucind-ai attest run -- sh lucind-checks.sh`. Keep `--allow`
-as narrow as the task: it is enforced by agy's PreToolUse hook and again by `accept`.
+Free Markdown, not validated by lucind-ai. Include: goal, scope, acceptance criteria, constraints
+(TDD, style), and what to report in the result envelope. The footer added by `dispatch` already
+covers lane id, allowed globs, result path and the final `lucind-ai attest run -- sh lucind-checks.sh`.
+Keep `--allow` as narrow as the task: it is enforced by agy's PreToolUse hook and again by `accept`.
+
+When the task needs project skills, add this section to the brief, one exact `SKILL.md` path per
+line, and nothing else under it:
+
+```markdown
+## Skills to load before work
+/abs/path/to/skill-a/SKILL.md
+/abs/path/to/skill-b/SKILL.md
+```
+
+Resolve the paths yourself (skill registry or `~/.claude/skills`); agy reads those files before
+touching code. Omit the section when no skill applies.
 
 ## Parallelism and worktrees
 
