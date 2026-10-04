@@ -60,7 +60,7 @@ Route per task is recorded when started (inline or delegated, with trigger evide
 - [x] T3 (lane `20261004-060931-1de1`, agy, `retries: 0`) Deprecate `lucind-checks.sh`: update agy rule and `lucind-result` skill, Claude skill,
       docs (`docs/attestation.md`, `docs/product.md`, `README.md`, `CONTEXT.md`), `cli.go:153`
       log label; mark the `check` subcommand deprecated in help.
-- [ ] T4 `lucind-ai install`: embed the Claude skill, copy it to `~/.claude/skills/lucind`, then
+- [x] T4 (commit `113ae0d`, lane `20261004-063252-cfc0`, agy + a follow-up turn) `lucind-ai install`: embed the Claude skill, copy it to `~/.claude/skills/lucind`, then
       run the existing agy plugin setup; Makefile `install` calls it. Also embed and install the
       `lucind-roles` agy plugin (`plugin.json`, `agents/worker.md` with the `tools` frontmatter
       from T8), so a fresh machine gets a working worker role; its source is not in the repo today.
@@ -98,7 +98,21 @@ Route per task is recorded when started (inline or delegated, with trigger evide
       its default (`sandbox`); its semantics are undocumented and the probe did not need a change.
       Remaining: the role source is not in this repo, so a re-registration could overwrite the
       fix; T4 must ship `lucind-roles` as an embedded asset and install it.
-- [ ] T9 Find out why lane `20261004-054348-0962` (T5) needed `retries: 2` on the result envelope.
+- [x] T9 Find out why lane `20261004-054348-0962` (T5) needed `retries: 2` on the result envelope.
+      Finding: agy's orchestrator goes idle while its worker subagent is still running, so the
+      Stop hook sees no valid `result.json` and spends a retry (`internal/agyhook/agyhook.go:226`,
+      `MaxRetries = 2`). Observed retries across lanes: 2, 1, 2, 1, 0, 2. A third early stop would
+      mark the lane failed while agy is still working, so it is a real fragility, and the hook logs
+      nothing about each retry (only the final `lane marked done (retries=N)`). Follow-ups T13/T14.
+- [ ] T12 Format with `gofmt`: lanes left unformatted files (`gofmt -l` lists several; `status.go`
+      was already unformatted on `dev`). One `style:` commit, then use `test -z "$(gofmt -l ...)"`
+      as a `--check` in later lanes.
+- [ ] T13 Bug: on a continuation (`dispatch --lane <id>`) the previous `result.json` stays on disk,
+      so the Stop hook accepts the stale envelope and marks the lane `done` while agy is still
+      working (seen in T4's follow-up turn). Move the old file aside (for example
+      `result.prev.json`) when continuing so a fresh envelope is required.
+- [ ] T14 Make the Stop hook log every retry with its reason in `hook.log`; decide separately
+      whether stops while a subagent is still running should consume retries.
 - [ ] T10 Rewrite the global `~/.claude/CLAUDE.md` orchestration rules so code-changing work is
       dispatched through lucind-ai, and native Claude subagents become the exception (user request).
 - [ ] T11 Verify in a real lane that agy actually persists Key Learnings with Engram `mem_save`
@@ -153,6 +167,16 @@ Route per task is recorded when started (inline or delegated, with trigger evide
   `Verifier.Verify`/`integrate.Check`/`ChecksHash` text from `docs/attestation.md`; verified those
   symbols no longer exist in the Go code.
 
+- T4: first turn reported `done` with only the `lucind-roles` part; the orchestrator rejected it
+  as incomplete and sent a follow-up turn to the same lane. Review also found agy's
+  `claudeplugin` removed every symlink component from `$HOME` down to the skill directory (it
+  would delete a dotfiles-managed `~/.claude`) and had a test requiring it; fixed inline with RED
+  then GREEN (only the destination symlink is replaced; parents are written through). Parent
+  checks: `go test ./...` 357 passed, `go vet ./...` clean; stale attestations made `accept` run
+  both checks itself. First real `make install`: all three components installed, skill copy equals
+  the repo source, installed `worker` equals the embedded one.
+
 ## Next step
 
-T4 (`lucind-ai install`) and T6 (skill pane lifecycle, inline), then the follow-up tasks T7-T11.
+T6 (skill pane lifecycle, inline), T12 (gofmt), then one lane for T7, T13 and T14; then T11.
+T10 is excluded by the user's goal and stays pending.
