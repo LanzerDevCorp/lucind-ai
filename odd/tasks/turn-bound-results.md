@@ -72,7 +72,8 @@ the herdr idle wait on continuation.
 - [x] T2 (commit `28e4295`, lane `20261005-004502-3c2c`, agy) Lane model: `Turn` field in `lane.json`; `Create` sets 1; `ResultFile` helper
       (`result-<turn>.json`, `result.json` when `turn == 0`); `MarkStopped` reads the current turn file.
       Files: `internal/lane/lane.go`, `internal/lane/lane_test.go`. Route: delegated lane.
-- [ ] T3 Dispatch and wait: a continuation increments and persists `turn`, no rename to
+- [x] T3 (commit `c4f615c`, lane `20261005-005347-eeec`, agy; agy made the commit itself, kept after
+      review: author and message are correct. Later briefs forbid git write commands) Dispatch and wait: a continuation increments and persists `turn`, no rename to
       `result.prev.json`; the brief footer and `Output.ResultPath` name the turn file; `wait` reads the
       turn file and revalidates it before reporting done, including the failed to done recovery.
       Files: `internal/dispatch/dispatch.go`, `wait.go`, their tests, `cmd/lucind-ai/cli_test.go` if
@@ -103,6 +104,12 @@ Created after exploration (explorer report plus verified reads of `dispatch.go`,
 `agyhook.go`). T1 and T2 done and verified (lint clean, lane package 89 tests pass with `-race`,
 lane accepted with attested checks).
 
+T3 verified: 77 dispatch tests pass with `-race`, lint clean, lane accepted. T3 also exposed that
+the PreToolUse hook only allows writing `result.json` under `.lucind/` (`agyhook.go:190`), so T4
+restricts it to the current turn file.
+
 ## Next step
 
-T3 lane (dispatch and wait), then T4, then T5 and `make install`.
+T4 lane (hook, accept, payload log, remove the fallback and `ResultPath`), then T5.
+Do NOT run `make install` between T3 and T4: the installed hook still reads `result.json` while the
+new `dispatch` tells agy to write `result-<turn>.json`. Install once after T4.
