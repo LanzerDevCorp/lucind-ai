@@ -29,6 +29,7 @@ const usage = "usage: lucind-ai dispatch --cwd <dir> --allow <glob>... --brief <
 	"       lucind-ai attest run -- <command> [args...]\n" +
 	"       lucind-ai attest verify --command \"<exact command string>\"\n" +
 	"       lucind-ai hook pre-tool-use|stop   (agy plugin handlers; stdin JSON)\n" +
+	"       lucind-ai skills select --brief <file|-> [--allow <glob>]... [--cwd <dir>] [--registry <path>] [--threshold <float>]\n" +
 	"       lucind-ai plugin install [--dir <staging root>]   (registers via agy plugin install)\n" +
 	"       lucind-ai install\n" +
 	"       lucind-ai --version"
@@ -69,6 +70,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return attestDispatch(ctx, args[1:], stdout, stderr)
 	case "hook":
 		return hookDispatch(ctx, args[1:], os.Stdin, stdout, stderr)
+	case "skills":
+		return skillsDispatch(ctx, args[1:], stdout, stderr)
 	case "plugin":
 		return pluginDispatch(ctx, args[1:], stdout, stderr)
 	case "install":

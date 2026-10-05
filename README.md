@@ -22,6 +22,7 @@ dispatch (lane + agy pane) -> agy edits within --allow -> attest run -> result-<
 | `attest run -- <cmd>` / `attest verify --command <cmd>` | HMAC tree-hash attestation of a test run. |
 | `check` | Run `lucind-checks.sh` (deprecated). |
 | `hook pre-tool-use\|stop` | agy plugin handlers. |
+| `skills select --brief <file\|-> [--allow <glob>]... [--cwd <dir>] [--registry <path>] [--threshold <float>]` | Ask Jev which skills to load for a brief. |
 | `plugin install` | Install the embedded agy plugin. |
 | `install` | Install the Claude skill, the `lucind` agy plugin, and the `lucind-roles` agy plugin. |
 | `--version` | Exact build. |
@@ -41,4 +42,5 @@ Installs the binary and runs `lucind-ai install`, which installs the Claude skil
 - [`docs/product.md`](docs/product.md): design, state files, plugin, what was removed.
 - [`docs/ROADMAP.md`](docs/ROADMAP.md): what is next.
 - [`docs/attestation.md`](docs/attestation.md): HMAC attestation details.
+- [`docs/skill-selection.md`](docs/skill-selection.md): Jev skill selection subcommand and contract.
 - [`plugin/claude-code/skills/lucind/SKILL.md`](plugin/claude-code/skills/lucind/SKILL.md): how Claude drives lanes.
