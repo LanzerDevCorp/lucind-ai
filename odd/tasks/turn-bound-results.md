@@ -82,9 +82,9 @@ the herdr idle wait on continuation.
       payload (truncated) in `hook.log`; remove deprecated `lane.ResultPath`.
       Files: `internal/agyhook/agyhook.go`, `internal/accept/accept.go`, their tests,
       `internal/lane/lane.go`. Route: delegated lane.
-- [ ] T5a (inline, commit `1e1baf7`) The agy-facing rule `lucind-lane.md` and skill `lucind-result` told agy to write
+- [x] T5a (inline, commit `1e1baf7`) The agy-facing rule `lucind-lane.md` and skill `lucind-result` told agy to write
       `result.json`, contradicting the footer and the new hook: fixed first and reinstalled.
-- [ ] T5b Docs and skills (lane): `CONTEXT.md`, `docs/attestation.md`, `docs/product.md`, `README.md`,
+- [x] T5b (commit `41e1202`, lane `20261005-011507-22a2`, agy) Docs and skills (lane): `CONTEXT.md`, `docs/attestation.md`, `docs/product.md`, `README.md`,
       `plugin/claude-code/skills/lucind/SKILL.md`, `internal/agyplugin/assets/rules/lucind-lane.md`,
       `internal/agyplugin/assets/skills/lucind-result/SKILL.md`, `docs/ROADMAP.md`; then `make install`.
       Route: delegated lane (passive docs, no RED).
@@ -112,7 +112,17 @@ restricts it to the current turn file.
 
 T4 verified (see above); `make install` run after T4 (binary `497987c`) and again after T5a (`1e1baf7`).
 
+T5b verified: lint clean, lane accepted, docs diff reviewed. **Real-lane evidence** (lane
+`20261005-011507-22a2`, first lane run with the new binary): it closed through `result-1.json`, and
+`hook.log` holds 7 `stop: raw payload` lines. The payload keys are `artifactDirectoryPath`,
+`conversationId`, `error`, `executionNum`, `fullyIdle`, `modelName`, `terminationReason`,
+`transcriptPath`, `workspacePaths`: there is a conversation id but no turn id. The lane showed three
+conversations, two with `fullyIdle=true`, and both retries were spent before the result existed.
+Recorded in roadmap item 4.
+
+Not covered by real-lane evidence: a continuation (turn 2). It is covered by unit tests only;
+exercise it in the real-lane stability trials (roadmap item 1).
+
 ## Next step
 
-T5b lane (remaining docs, skill and roadmap), `make install`, then check the evidence of that lane:
-`result-1.json` in its lane directory and `stop: raw payload` lines in its `hook.log`.
+Decide the merge of `feature/turn-bound-results` into `dev` (user).

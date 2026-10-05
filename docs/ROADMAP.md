@@ -39,11 +39,13 @@ What exists is in [`product.md`](product.md).
 2. **Shell-write escape.** PreToolUse sees file-write tools; shell writes are caught only at
    `accept`. Measure how often it matters before adding anything.
 3. **Stale agy trust entries after a crash** in `~/.gemini/antigravity-cli/settings.json`.
-4. **Idle detection.** Completion no longer depends on herdr idle (decided by the current turn's
-   result file plus the Stop hook); what remains is to read the raw Stop payloads in a few real
-   lanes and, if agy sends a turn or conversation identifier, use it to ignore Stops from earlier
-   turns.
-5. **RTK support.** Install RTK as part of the lucind-ai setup (today it is wired by hand in the
+4. **Stops from other conversations.** Completion no longer depends on herdr idle (decided by the
+   current turn's result file plus the Stop hook). The raw Stop payload carries `conversationId` and
+   `transcriptPath`, but no turn id. One real lane showed three conversations, two of them with
+   `fullyIdle=true`, and both retries were spent by Stops that arrived before the result existed
+   (`hook.log` of lane `20261005-011507-22a2`). Hypothesis, not verified: Stops from sub-conversations
+   spend the retry budget and inject the nudge. Next: record the lane's main `conversationId`
+   (first PreToolUse or Stop) and ignore Stops from the others; check it over a few real lanes.5. **RTK support.** Install RTK as part of the lucind-ai setup (today it is wired by hand in the
    global Claude config: `@RTK.md` include plus the `rtk hook claude` PreToolUse hook).
 6. **Research gentle-ai reviews in depth.** Understand how receipt-driven development (RDD) works
    end to end: review lifecycle, receipts and lineage, consent, correction, and how it interacts
