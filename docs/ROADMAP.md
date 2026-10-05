@@ -24,6 +24,10 @@ What exists is in [`product.md`](product.md).
   `--check 'golangci-lint run'` for lanes.
 - **`--allow` on lane continuations** (`fix(dispatch)`): a continuation now persists the new globs in
   `lane.json`, which the agy hook and `accept` enforce, instead of only rewriting the brief footer.
+- **Per-turn result files** (`feature/turn-bound-results`): a lane is done only when the current
+  turn delivered its own result file (`result-<turn>.json`); earlier turns stay as history;
+  Stop hook payload logging in `hook.log`; deterministic `TestLaneIDFormat` uniqueness test using
+  distinct seconds.
 - **Superseded:** the multi-provider herdr work (`herdr-agent-factory`, `herdr-interactive-agents`)
   predates the agy-only contract; its interactive-pane and Stop-hook ideas survive in it.
 
@@ -35,8 +39,10 @@ What exists is in [`product.md`](product.md).
 2. **Shell-write escape.** PreToolUse sees file-write tools; shell writes are caught only at
    `accept`. Measure how often it matters before adding anything.
 3. **Stale agy trust entries after a crash** in `~/.gemini/antigravity-cli/settings.json`.
-4. **Idle detection.** herdr `agent` idle detection is unreliable with agy; the Stop hook is the
-   completion signal today.
+4. **Idle detection.** Completion no longer depends on herdr idle (decided by the current turn's
+   result file plus the Stop hook); what remains is to read the raw Stop payloads in a few real
+   lanes and, if agy sends a turn or conversation identifier, use it to ignore Stops from earlier
+   turns.
 5. **RTK support.** Install RTK as part of the lucind-ai setup (today it is wired by hand in the
    global Claude config: `@RTK.md` include plus the `rtk hook claude` PreToolUse hook).
 6. **Research gentle-ai reviews in depth.** Understand how receipt-driven development (RDD) works
@@ -45,13 +51,6 @@ What exists is in [`product.md`](product.md).
 7. **Inject the `lucind:dispatch` block into the global `~/.claude/CLAUDE.md`.** `lucind-ai install`
    should write it (idempotent, between its own markers, outside the gentle-ai ones) so the
    dispatch precedence rules stop being hand-maintained.
-8. **Premature `done` on lane continuations.** The Stop hook can mark a continued lane `done` while
-   agy is still working, reusing the previous `result.json`; seen twice while fixing lint. Verify
-   what the hook sees (`hook.log`: `lane marked done` right after a `fullyIdle=true` from the old
-   turn) and require a result newer than `brief.md`.
-9. **Flaky `TestLaneIDFormat`.** Lane IDs carry only 16 random bits per second, so the uniqueness
-   check can collide (one failure in a full `-race` run, 20/20 passes on repeat). Widen the suffix
-   or make the test deterministic.
 
 ## Only if needed
 

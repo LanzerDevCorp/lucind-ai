@@ -22,8 +22,8 @@ review, model choice, branches and worktrees.
 
 ```text
 Claude --dispatch--> lane (new herdr pane, agy, LUCIND_LANE=<id>)
-agy edits inside --allow globs --> attest run (per lane check) --> result.json
-agy Stop hook validates result.json (max 2 re-entries) --> lane done|failed
+agy edits inside --allow globs --> attest run (per lane check) --> result-<turn>.json
+agy Stop hook validates result-<turn>.json (max 2 re-entries) --> lane done|failed
 Claude --accept--> receipt.json (accepted | rejected)
 ```
 
@@ -52,8 +52,8 @@ Plain JSON under `<git toplevel>/.lucind/lanes/<id>/` (id = `YYYYMMDD-HHMMSS-<4 
 | File | Content |
 |---|---|
 | `brief.md` | The brief plus the contract footer. |
-| `lane.json` | Base tree hash, allowed globs, checks list, model, pane id, status (`running\|done\|failed\|timeout\|accepted\|rejected`). |
-| `result.json` | Envelope written by agy. |
+| `lane.json` | Base tree hash, allowed globs, checks list, model, pane id, turn (1 on create, incremented by every continuation), status (`running\|done\|failed\|timeout\|accepted\|rejected`). |
+| `result-<turn>.json` | Envelope written by agy for the current turn (earlier turns stay as history; legacy lanes without turn use `result.json`). |
 | `receipt.json` | Base/final tree, changed files, verdict, reasons, evidence. |
 
 Attestations live in `$XDG_STATE_HOME/lucind-ai/attestations/`, outside the repo.
@@ -62,11 +62,12 @@ Attestations live in `$XDG_STATE_HOME/lucind-ai/attestations/`, outside the repo
 
 Embedded in the binary, installed globally by `plugin install`.
 
-- **PreToolUse**: denies writes outside the lane's globs (except the lane's `result.json`),
-  protects all other `.lucind/**` paths, and denies reading the HMAC key or writing the
+- **PreToolUse**: denies writes outside the lane's globs (except the current turn's result
+  file), protects all other `.lucind/**` paths, and denies reading the HMAC key or writing the
   attestations directory.
-- **Stop**: validates `result.json`; if missing or invalid it re-enters agy with the schema
-  error, at most 2 times, then marks the lane `failed`.
+- **Stop**: validates the current turn's result file; if missing or invalid it re-enters agy with
+  the schema error (max 2 times), then marks the lane `failed`. Logs the raw Stop payload in
+  `hook.log`.
 - **Rule + skill** (`lucind-lane`, `lucind-result`): describe the result contract and
   `lucind-ai attest run`.
 

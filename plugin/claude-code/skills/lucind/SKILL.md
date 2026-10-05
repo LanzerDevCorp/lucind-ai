@@ -41,7 +41,9 @@ lucind-ai accept --lane <id>     # run from the lane's repo
 - `dispatch` creates `.lucind/lanes/<id>/`, records the base tree, opens a new pane with
   `LUCIND_LANE=<id>`, starts agy and sends it the brief plus a contract footer.
 - Blocks until agy's Stop hook marks the lane `done`/`failed`; prints one JSON object
-  `{lane, pane_id, cwd, status, result_path}`. Exit codes: 0 done, 1 error, 3 failed, 4 timeout.
+  `{lane, pane_id, cwd, status, result_path}` (`result_path` printed by `dispatch` and `wait` is
+  the current turn's result file, `.lucind/lanes/<id>/result-<turn>.json`). Exit codes: 0 done,
+  1 error, 3 failed, 4 timeout.
 - The pane is **never** closed or killed by lucind-ai. Talk to agy freely with
   `herdr agent prompt <pane_id> ...`; the contract is checked once, at `accept`, on the final tree.
   For a formal follow-up turn with wait + validation: `dispatch --lane <id> --brief ...`.
@@ -57,8 +59,11 @@ lucind-ai accept --lane <id>     # run from the lane's repo
   brief was fully delivered. Compare `git status` and `git diff --stat` and the envelope's
   `done_criteria` with the brief's scope items; if something is missing, send a follow-up turn to
   the same lane (`dispatch --lane <id> --brief ...`, including the full original brief) instead of
-  accepting. Mind that a continuation can be marked `done` early by the stale previous
-  `result.json`: wait until `result.json` is newer than `brief.md` and agy is idle.
+  accepting. Results use per-turn files (`result-<turn>.json`), and only the current turn's result
+  file counts (the Stop hook, `wait`, and `accept` ignore valid results from other turns). Note the
+  known limit: a Stop from a previous turn that is still finishing cannot be told apart from a
+  current one, and can spend a retry and inject the "write the envelope" nudge into the new turn
+  (the retry budget resets after 60 s without a counted stop).
 - **After `accept`, decide what to do with the pane** (lucind-ai never closes it). Default: close
   it with `herdr pane close <pane_id>`. If reviewing the diff left a doubt about the
   implementation, leave it open and ask agy with `herdr agent prompt <pane_id> "..."`, reusing the

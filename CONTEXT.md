@@ -27,7 +27,8 @@ the lane runs and again by `accept` on every file changed since the base tree.
 _Avoid_: Write scope or informal file list
 
 **Result envelope**:
-The `result.json` agy writes at the end of a lane, validated against
+The per-turn result envelope (`result-<turn>.json` for the current turn, or `result.json` for
+legacy lanes without `turn`) agy writes at the end of a lane, validated against
 `internal/result/result.schema.json` and keyed by `lane_id`. The Stop hook re-enters agy with the
 schema error at most twice before marking the lane `failed`.
 _Avoid_: Packet or report
