@@ -22,19 +22,20 @@ import (
 	"github.com/LanzerDevCorp/lucind-ai/internal/dispatch"
 )
 
-const usage = "usage: lucind-ai dispatch --cwd <dir> --allow <glob>... --brief <file|-> [--check <cmd>]... [--model M] [--timeout D] [--detach] [--lane <id>] [--min-quota F]\n" +
+const usage = "usage: lucind-ai dispatch --cwd <dir> [--allow <glob>]... --brief <file|-> [--auto-skills] [--check <cmd>]... [--model M] [--timeout D] [--detach] [--lane <id>] [--min-quota F]\n" +
 	"       lucind-ai wait <lane> [--cwd <dir>] [--timeout D]\n" +
 	"       lucind-ai check [--out <path>]   (deprecated)\n" +
 	"       lucind-ai accept --lane <id>\n" +
 	"       lucind-ai attest run -- <command> [args...]\n" +
 	"       lucind-ai attest verify --command \"<exact command string>\"\n" +
 	"       lucind-ai hook pre-tool-use|stop   (agy plugin handlers; stdin JSON)\n" +
+	"       lucind-ai skills select --brief <file|-> [--allow <glob>]... [--cwd <dir>] [--registry <path>] [--threshold <float>]\n" +
 	"       lucind-ai plugin install [--dir <staging root>]   (registers via agy plugin install)\n" +
 	"       lucind-ai install\n" +
 	"       lucind-ai --version"
 
 const (
-	dispatchUsage = "usage: lucind-ai dispatch --cwd <dir> --allow <glob>... --brief <file|-> [--check <cmd>]... [--model M] [--timeout D] [--detach] [--lane <id>] [--min-quota F]"
+	dispatchUsage = "usage: lucind-ai dispatch --cwd <dir> [--allow <glob>]... --brief <file|-> [--auto-skills] [--check <cmd>]... [--model M] [--timeout D] [--detach] [--lane <id>] [--min-quota F]"
 	waitUsage     = "usage: lucind-ai wait <lane> [--cwd <dir>] [--timeout D]"
 )
 
@@ -69,6 +70,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return attestDispatch(ctx, args[1:], stdout, stderr)
 	case "hook":
 		return hookDispatch(ctx, args[1:], os.Stdin, stdout, stderr)
+	case "skills":
+		return skillsDispatch(ctx, args[1:], stdout, stderr)
 	case "plugin":
 		return pluginDispatch(ctx, args[1:], stdout, stderr)
 	case "install":
@@ -289,7 +292,7 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 
 	cwd := fs.String("cwd", "", "working directory (required)")
 	var allow stringSliceFlag
-	fs.Var(&allow, "allow", "allowed glob pattern (repeatable or comma-separated, required)")
+	fs.Var(&allow, "allow", "allowed glob pattern (repeatable or comma-separated, required for new lane)")
 	var checks checkSliceFlag
 	fs.Var(&checks, "check", "verification command to run and attest (repeatable)")
 	briefPath := fs.String("brief", "", "path to brief file or '-' for stdin (required)")
@@ -298,6 +301,7 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 	detach := fs.Bool("detach", false, "detach and return immediately without waiting")
 	laneID := fs.String("lane", "", "lane identifier for continuation")
 	minQuota := fs.Float64("min-quota", 0, "minimum quota required")
+	autoSkills := fs.Bool("auto-skills", false, "automatically select and inject relevant skills using Jev")
 
 	if len(args) > 0 && (args[0] == "help" || args[0] == "-h" || args[0] == "--help" || args[0] == "-help") {
 		fs.Usage()
@@ -330,7 +334,7 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 		return 1
 	}
 
-	if len(allow) == 0 {
+	if len(allow) == 0 && strings.TrimSpace(*laneID) == "" {
 		_, _ = fmt.Fprintln(stderr, "lucind-ai: dispatch: --allow is required")
 		usageBuf.Reset()
 		fs.Usage()
@@ -373,15 +377,17 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 	}
 
 	opts := dispatch.Options{
-		Cwd:      *cwd,
-		LaneID:   *laneID,
-		Allow:    allow,
-		Checks:   checks,
-		Model:    *model,
-		Brief:    briefContent,
-		MinQuota: *minQuota,
-		Detach:   *detach,
-		Timeout:  timeout,
+		Cwd:        *cwd,
+		LaneID:     *laneID,
+		Allow:      allow,
+		Checks:     checks,
+		Model:      *model,
+		Brief:      briefContent,
+		MinQuota:   *minQuota,
+		Detach:     *detach,
+		Timeout:    timeout,
+		AutoSkills: *autoSkills,
+		Stderr:     stderr,
 	}
 
 	out, exitCode, err := dispatchRun(ctx, opts, nil)

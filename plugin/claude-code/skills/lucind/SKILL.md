@@ -32,8 +32,8 @@ Load the `herdr` skill too; this skill assumes its pane/agent commands.
 ### Lane (code changes)
 
 ```bash
-lucind-ai dispatch --cwd "$PWD" --allow '<glob>' [--allow ...] --brief <file|-> \
-  [--check '<cmd>']... [--model M] [--timeout 60m] [--detach] [--min-quota 0.1]
+lucind-ai dispatch --cwd "$PWD" [--allow '<glob>']... --brief <file|-> \
+  [--auto-skills] [--check '<cmd>']... [--model M] [--timeout 60m] [--detach] [--min-quota 0.1]
 lucind-ai wait <lane>            # only after --detach
 lucind-ai accept --lane <id>     # run from the lane's repo
 ```
@@ -46,7 +46,9 @@ lucind-ai accept --lane <id>     # run from the lane's repo
   1 error, 3 failed, 4 timeout.
 - The pane is **never** closed or killed by lucind-ai. Talk to agy freely with
   `herdr agent prompt <pane_id> ...`; the contract is checked once, at `accept`, on the final tree.
-  For a formal follow-up turn with wait + validation: `dispatch --lane <id> --brief ...`.
+  For a formal follow-up turn with wait + validation: `dispatch --lane <id> --brief ...`. For
+  follow-up turns `dispatch --lane <id> --brief ...`, `--allow` is optional: when omitted, the
+  lane's stored globs apply; when given, they replace the stored globs.
 - On `timeout`: inspect the pane, nudge, or close it yourself. lucind-ai does nothing more.
 - `accept` writes `receipt.json` and accepts only when: the result envelope is valid; every file
   changed since the base tree matches an `--allow` glob; and each check is verified.
@@ -60,10 +62,10 @@ lucind-ai accept --lane <id>     # run from the lane's repo
   `done_criteria` with the brief's scope items; if something is missing, send a follow-up turn to
   the same lane (`dispatch --lane <id> --brief ...`, including the full original brief) instead of
   accepting. Results use per-turn files (`result-<turn>.json`), and only the current turn's result
-  file counts (the Stop hook, `wait`, and `accept` ignore valid results from other turns). Note the
-  known limit: a Stop from a previous turn that is still finishing cannot be told apart from a
-  current one, and can spend a retry and inject the "write the envelope" nudge into the new turn
-  (the retry budget resets after 60 s without a counted stop).
+  file counts (the Stop hook, `wait`, and `accept` ignore valid results from other turns). Worker
+  Stops and Stops from previous conversations without the current turn's brief are ignored and cannot
+  steal retries or prematurely mark done; only the current turn's main conversation with `fullyIdle=true`
+  decides done or triggers retry nudges.
 - **After `accept`, decide what to do with the pane** (lucind-ai never closes it). Default: close
   it with `herdr pane close <pane_id>`. If reviewing the diff left a doubt about the
   implementation, leave it open and ask agy with `herdr agent prompt <pane_id> "..."`, reusing the
@@ -119,9 +121,13 @@ what is described here (no explanatory prose), so put prose under a following he
   whitespace go in whole-entry backticks. List pre-existing untracked targets agy may write and
   the directories where new files are authorized. Nothing beyond the task: a surface wider than
   the task is the same defect as no surface at all.
-- `## Skills to load before work`: one exact `SKILL.md` path per line, absolute. Resolve them
-  yourself (skill registry or `~/.claude/skills`); agy reads those files before touching code and
-  does not rediscover skills. Omit when no skill applies.
+- `## Skills to load before work`: one exact `SKILL.md` path per line, absolute. With
+  `--auto-skills`, the orchestrator omits the section and does not read the skill registry:
+  lucind-ai asks Jev using `.atl/skill-registry.md` and `TYPESAFE_API_KEY`, records
+  `skills-<turn>.json`, and a hand-written section always wins. Without the flag, resolve them
+  yourself and pass the real file path (resolve symlinks; for example
+  `.agents/skills/<name>/SKILL.md`), since lane workers are not Claude; agy reads those files
+  before touching code and does not rediscover skills. Omit when no skill applies.
 - `## Hard stops`: one line per condition that must stop agy. The envelope requires one
   `hard_stops` entry per hard stop in the brief (`[]` when none), so list them here.
 - `## Verification`: the exact commands agy must run, each reported as
@@ -186,4 +192,4 @@ fresh agy session; an open session does not pick up new credentials reliably.
 
 ## Setup
 
-`lucind-ai install` installs the Claude skill into `~/.claude/skills/lucind`, the `lucind` agy plugin, and the `lucind-roles` agy plugin. `make install` builds the binary and runs `lucind-ai install`. Check the build with `lucind-ai -v` before dispatching.
+`lucind-ai install` installs the Claude skill into `~/.claude/skills/lucind`, the `lucind` agy plugin, the `lucind-roles` agy plugin, and writes the lucind dispatch block into `~/.claude/CLAUDE.md` (`--no-claude-md` to skip). `make install` builds the binary and runs `lucind-ai install`. Check the build with `lucind-ai -v` before dispatching.

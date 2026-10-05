@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,15 +17,17 @@ import (
 
 // Options holds parameters for dispatching a lane.
 type Options struct {
-	Cwd      string
-	LaneID   string
-	Allow    []string
-	Checks   []string
-	Model    string
-	Brief    string
-	MinQuota float64
-	Detach   bool
-	Timeout  time.Duration
+	Cwd        string
+	LaneID     string
+	Allow      []string
+	Checks     []string
+	Model      string
+	Brief      string
+	MinQuota   float64
+	Detach     bool
+	Timeout    time.Duration
+	AutoSkills bool
+	Stderr     io.Writer
 }
 
 // Output is the structured outcome of dispatch or wait.
@@ -178,7 +181,12 @@ func Dispatch(ctx context.Context, opts Options, runner HerdrRunner) (Output, in
 		return Output{}, 1, fmt.Errorf("resolve abs result path: %w", err)
 	}
 
-	briefText := constructBrief(opts.Brief, l.ID, l.Allow, absResultPath, l.Checks)
+	userBrief := opts.Brief
+	if opts.AutoSkills {
+		userBrief = handleAutoSkills(ctx, repoRoot, l, userBrief, l.Allow, opts.Stderr)
+	}
+
+	briefText := constructBrief(userBrief, l.ID, l.Allow, absResultPath, l.Checks)
 	briefPath := filepath.Join(lane.LaneDir(repoRoot, l.ID), "brief.md")
 	if err := os.WriteFile(briefPath, []byte(briefText), 0644); err != nil {
 		return Output{}, 1, fmt.Errorf("write brief.md: %w", err)

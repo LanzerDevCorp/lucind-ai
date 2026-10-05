@@ -8,22 +8,36 @@ import (
 	"path/filepath"
 
 	"github.com/LanzerDevCorp/lucind-ai/internal/agyplugin"
+	"github.com/LanzerDevCorp/lucind-ai/internal/claudemd"
 	"github.com/LanzerDevCorp/lucind-ai/internal/claudeplugin"
+	claudecode "github.com/LanzerDevCorp/lucind-ai/plugin/claude-code"
 )
 
-var claudeInstall = claudeplugin.Install
+var (
+	claudeInstall   = claudeplugin.Install
+	claudemdInstall = claudemd.Install
+	userHomeDir     = os.UserHomeDir
+)
 
-const installUsage = "usage: lucind-ai install"
+const installUsage = "usage: lucind-ai install [--no-claude-md]"
 
 func runInstall(ctx context.Context, args []string, stdout, stderr io.Writer) int {
-	if len(args) > 0 {
-		if len(args) == 1 {
-			switch args[0] {
-			case "--help", "-help", "-h", "help":
-				_, _ = fmt.Fprintln(stdout, installUsage)
-				return 0
-			}
+	var noClaudeMD bool
+	switch len(args) {
+	case 0:
+		// default options
+	case 1:
+		switch args[0] {
+		case "--help", "-help", "-h", "help":
+			_, _ = fmt.Fprintln(stdout, installUsage)
+			return 0
+		case "--no-claude-md":
+			noClaudeMD = true
+		default:
+			_, _ = fmt.Fprintln(stderr, installUsage)
+			return 1
 		}
+	default:
 		_, _ = fmt.Fprintln(stderr, installUsage)
 		return 1
 	}
@@ -80,6 +94,22 @@ func runInstall(ctx context.Context, args []string, stdout, stderr io.Writer) in
 		return 1
 	}
 	_, _ = fmt.Fprintf(stdout, "installed lucind-roles via agy plugin install (staged at %s)\n", rolesDir)
+
+	// 4. Claude dispatch block
+	if !noClaudeMD {
+		home, err := userHomeDir()
+		if err != nil {
+			_, _ = fmt.Fprintf(stderr, "lucind-ai: install claude md: resolve user home directory: %v\n", err)
+			return 1
+		}
+		target := filepath.Join(home, ".claude", "CLAUDE.md")
+		outcome, err := claudemdInstall(target, claudecode.Dispatch)
+		if err != nil {
+			_, _ = fmt.Fprintf(stderr, "lucind-ai: install claude md: %v\n", err)
+			return 1
+		}
+		_, _ = fmt.Fprintf(stdout, "lucind dispatch block %s in %s\n", outcome, target)
+	}
 
 	return 0
 }

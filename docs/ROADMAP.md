@@ -37,6 +37,11 @@ What exists is in [`product.md`](product.md).
   write outside `--allow` (missed by the hook, rejected by `accept`); ending a turn without the
   envelope (the Stop retry nudged agy, which then wrote it). No timeouts and no crashes. Limits: one
   model, trivial tasks, and agy was told to probe the limits.
+- **Install `lucind:dispatch` block into `~/.claude/CLAUDE.md`** (`feature/install-claude-md`): `lucind-ai install`
+  (and `make install`) writes the dispatch block into `~/.claude/CLAUDE.md` idempotently, creates parent
+  directories if needed, preserves surrounding content byte-for-byte, writes through symlinks, keeps
+  one backup `<target>.lucind-ai.bak`, fails safely on malformed markers, and can be skipped with
+  `--no-claude-md`.
 - **Superseded:** the multi-provider herdr work (`herdr-agent-factory`, `herdr-interactive-agents`)
   predates the agy-only contract; its interactive-pane and Stop-hook ideas survive in it.
 
@@ -48,23 +53,42 @@ What exists is in [`product.md`](product.md).
    orchestrator has to clean it. How often it matters is still unmeasured: agy only did it because
    the brief asked. Keep measuring on real tasks before adding anything.
 2. **Stale agy trust entries after a crash** in `~/.gemini/antigravity-cli/settings.json`.
-3. **Stops from other conversations.** Completion no longer depends on herdr idle (decided by the
-   current turn's result file plus the Stop hook). The raw Stop payload carries `conversationId` and
-   `transcriptPath`, but no turn id. Each lane runs several agy conversations: one reports
-   `fullyIdle=false` throughout and its first `fullyIdle=true` Stop arrives after the lane is already
-   marked done; the decisions come from the others. In single-turn probes the same conversation
-   triggered both the retry nudge and the `done`; after a continuation (P3) they were different
-   conversations, so `conversationId` alone does not identify a main conversation. Look at
-   `transcriptPath` before filtering. About 4 of 7 turns needed the retry nudge (agy ends a turn
-   before writing the envelope), never more than one, which leaves a margin of one retry.
-4. **RTK support.** Install RTK as part of the lucind-ai setup (today it is wired by hand in the
+3. **Stops from other conversations** (fixed in `feature/lane-stop-main-conversation`). The Stop hook
+   now inspects `transcriptPath` step 0: main conversations contain `Read and follow .../.lucind/lanes/<id>/brief.md`
+   with source `USER_EXPLICIT` (or empty), while worker conversations contain `SYSTEM`/`SYSTEM_MESSAGE`
+   with `sender=`. Role classifications are cached in `<laneDir>/conversations/<id>`. Worker Stops
+   are ignored without nudging or consuming retries. Main conversation Stops with `fullyIdle=false` are
+   ignored while worker subagents run; only main Stops with `fullyIdle=true` decide done/retry/failed.
+   Continuation turns across differing main conversation IDs are resolved independently via the current
+   turn's brief marker.
+   **Owner review: this is a poor solution, replace it.** Classifying conversations by parsing step 0
+   of agy's private transcript format couples lucind-ai to undocumented internals (`source`, `type`,
+   the exact dispatch prompt wording) and breaks silently if any of them change. Look for a
+   supported signal instead: a parent/child id in the Stop payload, an agy hook or API that marks
+   subagents, or lucind-ai owning the main conversation id at dispatch time.
+4. **Briefs do not make agy load skills first; evaluate sending the prompt directly.** Owner
+   observation: agy does not follow the brief literally. Dispatch sends `Read and follow <brief.md>`,
+   and agy does not read the `## Skills to load before work` files before starting, even with the
+   section right after the title. Evaluate sending the brief content itself as the prompt (instead
+   of a pointer to a file to read), and measure skill loading with the envelope's `skills_loaded`
+   (it came back `null` in the first `--auto-skills` lane, so the worker contract must require it).
+   Confirmed in lane `20261005-050638-3cba` (owner screenshots): main agy read the lane rule, the
+   brief, `lane.json`, the feature document and `lucind-result`, then went straight to code without
+   opening any listed `SKILL.md`. Asked afterwards, agy admitted it read only `golang-cli` and did
+   **not pass the skill paths to its two worker subagents**, so the brief fails twice: the main
+   conversation does not load skills first, and it does not propagate them to workers (although
+   `roles/agents/worker.md` step 1 tells workers to read them). The envelope still listed every
+   skill in `skills_loaded`, so that field alone is not trustworthy evidence. Plan, in order:
+   1. Send the prompt directly, without `brief.md`, with the skills section first.
+   2. If that is not enough, force it with a hook (for example a PreToolUse that blocks writes until
+      every listed `SKILL.md` was read in that conversation).
+   3. Measure in both the main and the worker conversations from the transcripts, not only from
+      `skills_loaded`.
+5. **RTK support.** Install RTK as part of the lucind-ai setup (today it is wired by hand in the
    global Claude config: `@RTK.md` include plus the `rtk hook claude` PreToolUse hook).
-5. **Research gentle-ai reviews in depth.** Understand how receipt-driven development (RDD) works
+6. **Research gentle-ai reviews in depth.** Understand how receipt-driven development (RDD) works
    end to end: review lifecycle, receipts and lineage, consent, correction, and how it interacts
    with lucind-ai lanes and `accept`.
-6. **Inject the `lucind:dispatch` block into the global `~/.claude/CLAUDE.md`.** `lucind-ai install`
-   should write it (idempotent, between its own markers, outside the gentle-ai ones) so the
-   dispatch precedence rules stop being hand-maintained.
 
 ## Only if needed
 

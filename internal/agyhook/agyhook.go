@@ -8,11 +8,13 @@
 package agyhook
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -47,6 +49,22 @@ type payload struct {
 	TerminationReason string    `json:"terminationReason"`
 	FullyIdle         *bool     `json:"fullyIdle"`
 	Error             string    `json:"error"`
+	ConversationID    string    `json:"conversationId"`
+	TranscriptPath    string    `json:"transcriptPath"`
+}
+
+type role string
+
+const (
+	roleUnknown role = "unknown"
+	roleMain    role = "main"
+	roleWorker  role = "worker"
+)
+
+type transcriptStep struct {
+	Source  string `json:"source"`
+	Type    string `json:"type"`
+	Content string `json:"content"`
 }
 
 // fileWriteTool matches agy tools that modify a file. Observed names:
@@ -200,6 +218,98 @@ func PreToolUse(ctx context.Context, laneID string, stdin []byte) []byte {
 	return allow()
 }
 
+func classifyConversation(laneID, transcriptPath string) (role, error) {
+	if transcriptPath == "" {
+		return roleUnknown, errors.New("transcript path is empty")
+	}
+	if strings.HasPrefix(transcriptPath, "~/") {
+		if home, err := os.UserHomeDir(); err == nil {
+			transcriptPath = filepath.Join(home, transcriptPath[2:])
+		}
+	}
+	f, err := os.Open(transcriptPath)
+	if err != nil {
+		return roleUnknown, fmt.Errorf("open transcript: %w", err)
+	}
+	defer func() { _ = f.Close() }()
+
+	reader := bufio.NewReader(f)
+	line, err := reader.ReadBytes('\n')
+	if err != nil && !errors.Is(err, io.EOF) {
+		return roleUnknown, fmt.Errorf("read transcript: %w", err)
+	}
+	if len(bytes.TrimSpace(line)) == 0 {
+		return roleUnknown, errors.New("transcript is empty")
+	}
+
+	var step transcriptStep
+	if err := json.Unmarshal(line, &step); err != nil {
+		return roleUnknown, fmt.Errorf("decode transcript step: %w", err)
+	}
+
+	briefTarget := ".lucind/lanes/" + laneID + "/brief.md"
+	isMainSource := step.Source == "" || step.Source == "USER_EXPLICIT"
+	isMain := isMainSource &&
+		strings.Contains(step.Content, "Read and follow") &&
+		strings.Contains(filepath.ToSlash(step.Content), briefTarget)
+	if isMain {
+		return roleMain, nil
+	}
+
+	isWorker := step.Source == "SYSTEM" ||
+		step.Type == "SYSTEM_MESSAGE" ||
+		strings.Contains(step.Content, "<SYSTEM_MESSAGE>") ||
+		strings.Contains(step.Content, "sender=") ||
+		strings.Contains(strings.ToLower(step.Content), "worker")
+	if isWorker {
+		return roleWorker, nil
+	}
+
+	return roleUnknown, errors.New("transcript marker not recognized")
+}
+
+func sanitizeConvID(id string) string {
+	if id == "" {
+		return ""
+	}
+	var b strings.Builder
+	for _, r := range id {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
+			b.WriteRune(r)
+		} else {
+			b.WriteRune('_')
+		}
+	}
+	return b.String()
+}
+
+func getOrClassifyRole(root, laneID string, p payload) (role, error) {
+	convDir := filepath.Join(lane.LaneDir(root, laneID), "conversations")
+	convID := sanitizeConvID(p.ConversationID)
+	if convID != "" {
+		cachePath := filepath.Join(convDir, convID)
+		if data, err := os.ReadFile(cachePath); err == nil {
+			cached := role(strings.TrimSpace(string(data)))
+			if cached == roleMain || cached == roleWorker {
+				return cached, nil
+			}
+		}
+	}
+
+	r, err := classifyConversation(laneID, p.TranscriptPath)
+	if err != nil {
+		return roleUnknown, err
+	}
+
+	if convID != "" && (r == roleMain || r == roleWorker) {
+		if err := os.MkdirAll(convDir, 0o755); err == nil {
+			cachePath := filepath.Join(convDir, convID)
+			_ = os.WriteFile(cachePath, []byte(r), 0o644)
+		}
+	}
+	return r, nil
+}
+
 // Stop evaluates the lane result when agy stops and either ends the session
 // or re-enters the agent loop to fix result.json.
 func Stop(ctx context.Context, laneID string, stdin []byte) []byte {
@@ -240,9 +350,24 @@ func Stop(ctx context.Context, laneID string, stdin []byte) []byte {
 		}
 	}
 	logf(root, laneID, "stop: payload executionNum=%d terminationReason=%s fullyIdle=%s error=%q", p.ExecutionNum, p.TerminationReason, idle, p.Error)
-	if p.FullyIdle != nil && !*p.FullyIdle {
+
+	r, err := getOrClassifyRole(root, laneID, p)
+	switch r {
+	case roleWorker:
+		logf(root, laneID, "stop: ignored worker conversation %s", p.ConversationID)
 		return end()
+	case roleMain:
+		if p.FullyIdle != nil && !*p.FullyIdle {
+			logf(root, laneID, "stop: main conversation not fully idle")
+			return end()
+		}
+	case roleUnknown:
+		logf(root, laneID, "stop: transcript unreadable or marker unknown (%v), falling back to fullyIdle alone", err)
+		if p.FullyIdle != nil && !*p.FullyIdle {
+			return end()
+		}
 	}
+
 	l, err := lane.Load(root, laneID)
 	if err != nil {
 		logf(root, laneID, "stop: %v", err)

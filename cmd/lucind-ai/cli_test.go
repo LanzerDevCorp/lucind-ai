@@ -78,13 +78,14 @@ func writeChecksScript(t *testing.T, repoDir string, exitCode int, output string
 func TestUsageAndHelp(t *testing.T) {
 	ctx := context.Background()
 
-	wantUsage := `usage: lucind-ai dispatch --cwd <dir> --allow <glob>... --brief <file|-> [--check <cmd>]... [--model M] [--timeout D] [--detach] [--lane <id>] [--min-quota F]
+	wantUsage := `usage: lucind-ai dispatch --cwd <dir> [--allow <glob>]... --brief <file|-> [--auto-skills] [--check <cmd>]... [--model M] [--timeout D] [--detach] [--lane <id>] [--min-quota F]
        lucind-ai wait <lane> [--cwd <dir>] [--timeout D]
        lucind-ai check [--out <path>]   (deprecated)
        lucind-ai accept --lane <id>
        lucind-ai attest run -- <command> [args...]
        lucind-ai attest verify --command "<exact command string>"
        lucind-ai hook pre-tool-use|stop   (agy plugin handlers; stdin JSON)
+       lucind-ai skills select --brief <file|-> [--allow <glob>]... [--cwd <dir>] [--registry <path>] [--threshold <float>]
        lucind-ai plugin install [--dir <staging root>]   (registers via agy plugin install)
        lucind-ai install
        lucind-ai --version`
@@ -443,7 +444,7 @@ func TestAcceptSubcommand(t *testing.T) {
 
 func TestDispatchHelp(t *testing.T) {
 	ctx := context.Background()
-	wantUsageLine := "usage: lucind-ai dispatch --cwd <dir> --allow <glob>... --brief <file|-> [--check <cmd>]... [--model M] [--timeout D] [--detach] [--lane <id>] [--min-quota F]"
+	wantUsageLine := "usage: lucind-ai dispatch --cwd <dir> [--allow <glob>]... --brief <file|-> [--auto-skills] [--check <cmd>]... [--model M] [--timeout D] [--detach] [--lane <id>] [--min-quota F]"
 	for _, flag := range []string{"--help", "-help", "-h", "help"} {
 		t.Run("flag_"+flag, func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
@@ -455,7 +456,7 @@ func TestDispatchHelp(t *testing.T) {
 			if !strings.Contains(out, wantUsageLine) {
 				t.Errorf("stdout missing usage line; got %q", out)
 			}
-			for _, expectedFlag := range []string{"-cwd", "-allow", "-check", "-brief", "-model", "-timeout", "-detach", "-lane", "-min-quota"} {
+			for _, expectedFlag := range []string{"-cwd", "-allow", "-check", "-brief", "-model", "-timeout", "-detach", "-lane", "-min-quota", "-auto-skills"} {
 				if !strings.Contains(out, expectedFlag) {
 					t.Errorf("stdout missing flag %q; got %q", expectedFlag, out)
 				}
@@ -489,7 +490,7 @@ func TestWaitHelp(t *testing.T) {
 
 func TestDispatchMissingRequiredFlags(t *testing.T) {
 	ctx := context.Background()
-	wantUsageLine := "usage: lucind-ai dispatch --cwd <dir> --allow <glob>... --brief <file|-> [--check <cmd>]... [--model M] [--timeout D] [--detach] [--lane <id>] [--min-quota F]"
+	wantUsageLine := "usage: lucind-ai dispatch --cwd <dir> [--allow <glob>]... --brief <file|-> [--auto-skills] [--check <cmd>]... [--model M] [--timeout D] [--detach] [--lane <id>] [--min-quota F]"
 
 	tests := []struct {
 		name    string
@@ -857,3 +858,166 @@ func TestWaitExecution(t *testing.T) {
 		t.Fatalf("exit code = %d, want 4", code)
 	}
 }
+
+func TestDispatch_AutoSkillsFlag(t *testing.T) {
+	ctx := context.Background()
+	repoDir := initRepo(t)
+
+	briefFile := filepath.Join(repoDir, "task_brief.md")
+	if err := os.WriteFile(briefFile, []byte("Implement feature X"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	origDispatchRun := dispatchRun
+	defer func() { dispatchRun = origDispatchRun }()
+
+	var capturedOpts dispatch.Options
+	mockOutput := dispatch.Output{
+		Lane:       "20261003-120000-abcd",
+		PaneID:     "w1:p1",
+		Cwd:        repoDir,
+		Status:     "running",
+		ResultPath: filepath.Join(repoDir, ".lucind/lanes/20261003-120000-abcd/result.json"),
+	}
+	dispatchRun = func(c context.Context, opts dispatch.Options, runner dispatch.HerdrRunner) (dispatch.Output, int, error) {
+		capturedOpts = opts
+		return mockOutput, 0, nil
+	}
+
+	// 1. With --auto-skills flag: AutoSkills is true and Stderr is wired
+	var stdout, stderr bytes.Buffer
+	code := run(ctx, []string{
+		"dispatch",
+		"--cwd", repoDir,
+		"--allow", "src/**",
+		"--brief", briefFile,
+		"--auto-skills",
+	}, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("run(dispatch --auto-skills) exit code = %d, want 0; stderr = %q", code, stderr.String())
+	}
+	if !capturedOpts.AutoSkills {
+		t.Errorf("capturedOpts.AutoSkills = false, want true")
+	}
+	if capturedOpts.Stderr != &stderr {
+		t.Errorf("capturedOpts.Stderr = %v, want %v", capturedOpts.Stderr, &stderr)
+	}
+
+	// 2. Without --auto-skills flag: AutoSkills is false and Stderr is wired
+	stdout.Reset()
+	stderr.Reset()
+	capturedOpts = dispatch.Options{}
+	code = run(ctx, []string{
+		"dispatch",
+		"--cwd", repoDir,
+		"--allow", "src/**",
+		"--brief", briefFile,
+	}, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("run(dispatch without --auto-skills) exit code = %d, want 0; stderr = %q", code, stderr.String())
+	}
+	if capturedOpts.AutoSkills {
+		t.Errorf("capturedOpts.AutoSkills = true, want false")
+	}
+	if capturedOpts.Stderr != &stderr {
+		t.Errorf("capturedOpts.Stderr = %v, want %v", capturedOpts.Stderr, &stderr)
+	}
+}
+
+func TestDispatchLaneAllow(t *testing.T) {
+	ctx := context.Background()
+	repoDir := initRepo(t)
+
+	briefFile := filepath.Join(repoDir, "task_brief.md")
+	if err := os.WriteFile(briefFile, []byte("brief content"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	origDispatchRun := dispatchRun
+	defer func() { dispatchRun = origDispatchRun }()
+
+	var capturedOpts dispatch.Options
+	mockOutput := dispatch.Output{
+		Lane:       "test-lane-123",
+		PaneID:     "w1:p1",
+		Cwd:        repoDir,
+		Status:     "running",
+		ResultPath: filepath.Join(repoDir, ".lucind/lanes/test-lane-123/result.json"),
+	}
+	dispatchRun = func(c context.Context, opts dispatch.Options, runner dispatch.HerdrRunner) (dispatch.Output, int, error) {
+		capturedOpts = opts
+		return mockOutput, 0, nil
+	}
+
+	// 1. dispatch without --lane and without --allow fails with exit code 1 and stderr containing "--allow is required"
+	{
+		var stdout, stderr bytes.Buffer
+		code := run(ctx, []string{
+			"dispatch",
+			"--cwd", repoDir,
+			"--brief", briefFile,
+		}, &stdout, &stderr)
+
+		if code != 1 {
+			t.Fatalf("run(dispatch without --lane and without --allow) exit code = %d, want 1", code)
+		}
+		if !strings.Contains(stderr.String(), "--allow is required") {
+			t.Errorf("stderr missing '--allow is required'; got %q", stderr.String())
+		}
+	}
+
+	// 2. dispatch with --lane and without --allow succeeds (exit code 0), passing empty Allow in dispatch.Options
+	{
+		var stdout, stderr bytes.Buffer
+		capturedOpts = dispatch.Options{}
+		code := run(ctx, []string{
+			"dispatch",
+			"--cwd", repoDir,
+			"--brief", briefFile,
+			"--lane", "lane-456",
+		}, &stdout, &stderr)
+
+		if code != 0 {
+			t.Fatalf("run(dispatch with --lane and without --allow) exit code = %d, want 0; stderr = %q", code, stderr.String())
+		}
+		if len(capturedOpts.Allow) != 0 {
+			t.Errorf("capturedOpts.Allow = %v, want empty", capturedOpts.Allow)
+		}
+		if capturedOpts.LaneID != "lane-456" {
+			t.Errorf("capturedOpts.LaneID = %q, want 'lane-456'", capturedOpts.LaneID)
+		}
+	}
+
+	// 3. dispatch with --lane and with --allow succeeds (exit code 0), passing specified Allow in dispatch.Options
+	{
+		var stdout, stderr bytes.Buffer
+		capturedOpts = dispatch.Options{}
+		code := run(ctx, []string{
+			"dispatch",
+			"--cwd", repoDir,
+			"--brief", briefFile,
+			"--lane", "lane-456",
+			"--allow", "cmd/**,pkg/**",
+		}, &stdout, &stderr)
+
+		if code != 0 {
+			t.Fatalf("run(dispatch with --lane and with --allow) exit code = %d, want 0; stderr = %q", code, stderr.String())
+		}
+		wantAllow := []string{"cmd/**", "pkg/**"}
+		if len(capturedOpts.Allow) != len(wantAllow) {
+			t.Fatalf("capturedOpts.Allow = %v, want %v", capturedOpts.Allow, wantAllow)
+		}
+		for i, a := range wantAllow {
+			if capturedOpts.Allow[i] != a {
+				t.Errorf("capturedOpts.Allow[%d] = %q, want %q", i, capturedOpts.Allow[i], a)
+			}
+		}
+		if capturedOpts.LaneID != "lane-456" {
+			t.Errorf("capturedOpts.LaneID = %q, want 'lane-456'", capturedOpts.LaneID)
+		}
+	}
+}
+
+

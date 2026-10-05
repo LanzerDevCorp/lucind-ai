@@ -1327,3 +1327,87 @@ func TestLaneTurn(t *testing.T) {
 	}
 }
 
+func TestSkillsFileName(t *testing.T) {
+	tests := []struct {
+		turn int
+		want string
+	}{
+		{-1, "skills.json"},
+		{0, "skills.json"},
+		{1, "skills-1.json"},
+		{2, "skills-2.json"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.want, func(t *testing.T) {
+			got := lane.SkillsFileName(tt.turn)
+			if got != tt.want {
+				t.Errorf("SkillsFileName(%d) = %q, want %q", tt.turn, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSkillsFilePath(t *testing.T) {
+	root := "/test/repo"
+	id := "20261003-215144-a1b2"
+
+	tests := []struct {
+		name string
+		lane lane.Lane
+		want string
+	}{
+		{
+			name: "legacy turn 0",
+			lane: lane.Lane{ID: id, Turn: 0},
+			want: filepath.Join(root, ".lucind", "lanes", id, "skills.json"),
+		},
+		{
+			name: "negative turn",
+			lane: lane.Lane{ID: id, Turn: -1},
+			want: filepath.Join(root, ".lucind", "lanes", id, "skills.json"),
+		},
+		{
+			name: "turn 1",
+			lane: lane.Lane{ID: id, Turn: 1},
+			want: filepath.Join(root, ".lucind", "lanes", id, "skills-1.json"),
+		},
+		{
+			name: "turn 2",
+			lane: lane.Lane{ID: id, Turn: 2},
+			want: filepath.Join(root, ".lucind", "lanes", id, "skills-2.json"),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := lane.SkillsFilePath(root, tt.lane)
+			if got != tt.want {
+				t.Errorf("SkillsFilePath() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAtomicWriteJSON(t *testing.T) {
+	tempDir := t.TempDir()
+	targetFile := filepath.Join(tempDir, "sub", "test.json")
+
+	data := map[string]string{"key": "value"}
+	if err := lane.AtomicWriteJSON(targetFile, data); err != nil {
+		t.Fatalf("AtomicWriteJSON failed: %v", err)
+	}
+
+	content, err := os.ReadFile(targetFile)
+	if err != nil {
+		t.Fatalf("ReadFile failed: %v", err)
+	}
+	var readBack map[string]string
+	if err := json.Unmarshal(content, &readBack); err != nil {
+		t.Fatalf("Unmarshal failed: %v", err)
+	}
+	if readBack["key"] != "value" {
+		t.Errorf("readBack[key] = %q, want value", readBack["key"])
+	}
+}
+
