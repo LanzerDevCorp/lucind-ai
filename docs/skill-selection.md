@@ -166,7 +166,7 @@ lucind-ai dispatch \
 
 - **Opt-in**: Automated selection is active only when `--auto-skills` is explicitly supplied.
 - **Registry and Jev evaluation**: Reads candidate skills from `<repo-root>/.atl/skill-registry.md` and calls Jev using `TYPESAFE_API_KEY`.
-- **Brief injection**: When skills are selected (passing threshold 0.7), `lucind-ai` appends the `## Skills to load before work` section before the lane contract footer.
+- **Brief injection**: When skills are selected (passing threshold 0.7), `lucind-ai` inserts the `## Skills to load before work` section right after the brief's leading `# ` title (or at the top when the brief has no title), so the worker loads skills before reading the goal and scope.
 - **Manual override takes precedence**: If the brief already contains `## Skills to load before work`, Jev is not called and the brief is kept unchanged.
 - **Fail open**: On any error (such as a missing registry, unset `TYPESAFE_API_KEY`, network failure, or API error), `lucind-ai` warns on `stderr` and dispatches without the section. Dispatch never fails due to selector errors.
 - **Always writes lane record**: Always writes `.lucind/lanes/<id>/skills-<turn>.json` recording selection decisions and telemetry for each turn.

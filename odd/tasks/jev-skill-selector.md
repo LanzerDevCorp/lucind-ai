@@ -91,4 +91,5 @@ and holds T2.
 ## Progress
 
 - RDD: off (clone-local), so no native review runs.
-- Next: owner decision on section placement, then `make install`.
+- Done: T1, T2 and the placement change; `make install` run. Next: set `TYPESAFE_API_KEY`, run
+  the live test, then compare `skills-<turn>.json` with `skills_loaded` over real lanes.

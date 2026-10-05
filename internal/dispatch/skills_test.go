@@ -133,6 +133,68 @@ func TestAutoSkills_BriefAlreadyHasSection(t *testing.T) {
 	}
 }
 
+func TestAutoSkills_SectionPlacement(t *testing.T) {
+	section := "## Skills to load before work\n/skills/golang-cli/SKILL.md"
+	tests := []struct {
+		name       string
+		brief      string
+		wantPrefix string
+	}{
+		{
+			name:       "no title puts the section first",
+			brief:      "## Goal\nDo X.\n",
+			wantPrefix: section + "\n\n## Goal\nDo X.",
+		},
+		{
+			name:       "leading blank lines before the title",
+			brief:      "\n\n# Task\n\n## Goal\nDo X.\n",
+			wantPrefix: "# Task\n\n" + section + "\n\n## Goal\nDo X.",
+		},
+		{
+			name:       "title only",
+			brief:      "# Task\n",
+			wantPrefix: "# Task\n\n" + section + "\n\n---\n## Lane Contract",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("HERDR_ENV", "1")
+			repoDir := t.TempDir()
+			initGitRepo(t, repoDir)
+			runner := setupFakeRunnerForNewLane(t, "w1:pLane1")
+
+			dispatch.SetSkillSelectorForTesting(func(ctx context.Context, repoRoot string, in skillselect.Input) (skillselect.Result, error) {
+				return skillselect.Result{Decisions: []skillselect.Decision{
+					{Name: "golang-cli", Path: "/skills/golang-cli/SKILL.md", Probability: 0.9, Selected: true},
+				}}, nil
+			})
+			t.Cleanup(dispatch.ResetSkillSelectorForTesting)
+
+			opts := dispatch.Options{
+				Cwd:        repoDir,
+				AutoSkills: true,
+				Model:      "gemini-3.8-flash-high",
+				Allow:      []string{"internal/**"},
+				Brief:      tt.brief,
+				Detach:     true,
+			}
+			out, exitCode, err := dispatch.Dispatch(context.Background(), opts, runner)
+			if err != nil || exitCode != 0 {
+				t.Fatalf("Dispatch() = exit %d, err %v; want 0, nil", exitCode, err)
+			}
+
+			content, err := os.ReadFile(filepath.Join(lane.LaneDir(repoDir, out.Lane), "brief.md"))
+			if err != nil {
+				t.Fatalf("read brief.md: %v", err)
+			}
+			if !strings.HasPrefix(string(content), tt.wantPrefix) {
+				t.Errorf("brief.md prefix mismatch:\ngot:\n%s\nwant prefix:\n%s", content, tt.wantPrefix)
+			}
+		})
+	}
+}
+
 func TestAutoSkills_SelectorSuccess_WithSelectedSkills(t *testing.T) {
 	t.Setenv("HERDR_ENV", "1")
 	repoDir := t.TempDir()
@@ -206,6 +268,10 @@ func TestAutoSkills_SelectorSuccess_WithSelectedSkills(t *testing.T) {
 	}
 	if sectionIdx > footerIdx {
 		t.Errorf("skills section appears after Lane Contract footer: section at %d, footer at %d", sectionIdx, footerIdx)
+	}
+	wantPrefix := "# Implement Feature C\n\n## Skills to load before work\n/skills/golang-cli/SKILL.md\n\nPlease do it well."
+	if !strings.HasPrefix(content, wantPrefix) {
+		t.Errorf("skills section is not right after the title:\ngot:\n%s\nwant prefix:\n%s", content, wantPrefix)
 	}
 
 	// Verify skills-1.json records injected: true and the decisions
@@ -901,5 +967,3 @@ func TestDefaultSkillSelector_ResolvesSymlinks(t *testing.T) {
 		t.Errorf("decision path = %q, want canonical path %q", rec.Result.Decisions[0].Path, canonicalPath)
 	}
 }
-
-

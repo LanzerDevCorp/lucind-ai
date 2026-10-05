@@ -83,6 +83,27 @@ func redactAPIKey(msg string) string {
 	return msg
 }
 
+// insertSkillsSection places the skills section right after the brief's leading "# " title, or at
+// the top when the first non-empty line is not a title. Loading skills is a precondition, so the
+// worker should meet it before the goal and scope instead of after them.
+func insertSkillsSection(brief, section string) string {
+	sec := strings.TrimRight(section, "\n")
+	body := strings.TrimLeft(brief, "\n")
+	if strings.TrimSpace(body) == "" {
+		return sec
+	}
+
+	title, rest, _ := strings.Cut(body, "\n")
+	if !strings.HasPrefix(title, "# ") {
+		return sec + "\n\n" + body
+	}
+	rest = strings.TrimLeft(rest, "\n")
+	if rest == "" {
+		return title + "\n\n" + sec
+	}
+	return title + "\n\n" + sec + "\n\n" + rest
+}
+
 func handleAutoSkills(ctx context.Context, repoRoot string, l lane.Lane, brief string, allow []string, stderr io.Writer) string {
 	w := stderr
 	if w == nil {
@@ -126,12 +147,7 @@ func handleAutoSkills(ctx context.Context, repoRoot string, l lane.Lane, brief s
 
 	sec := skillselect.Section(result.Decisions)
 	if sec != "" {
-		var newBrief string
-		if brief == "" {
-			newBrief = strings.TrimRight(sec, "\n")
-		} else {
-			newBrief = strings.TrimRight(brief, "\n") + "\n\n" + strings.TrimRight(sec, "\n")
-		}
+		newBrief := insertSkillsSection(brief, sec)
 		record := SkillsRecord{
 			Turn:     l.Turn,
 			Injected: true,
