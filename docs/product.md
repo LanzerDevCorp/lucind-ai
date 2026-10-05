@@ -31,7 +31,7 @@ Claude --accept--> receipt.json (accepted | rejected)
 
 | Command | What it does |
 |---|---|
-| `dispatch --cwd <dir> --allow <glob>... --brief <file\|-> [--check <cmd>]... [--model M] [--timeout D] [--detach] [--lane <id>] [--min-quota F]` | Create a lane, record the base tree, open an agy pane, send the brief. Blocks until the lane is `done`/`failed`/`timeout`, or returns immediately with `--detach`. `--lane <id>` continues a lane in the same pane. |
+| `dispatch --cwd <dir> --allow <glob>... --prompt <file\|-> [--check <cmd>]... [--model M] [--timeout D] [--detach] [--lane <id>] [--min-quota F]` | Create a lane, record the base tree, open an agy pane, send the prompt directly. Blocks until the lane is `done`/`failed`/`timeout`, or returns immediately with `--detach`. `--lane <id>` continues a lane in the same pane. |
 | `wait <lane> [--cwd <dir>] [--timeout D]` | Block on a detached lane and validate its result. |
 | `accept --lane <id>` | Write `receipt.json`. Accepts only if the result is valid, every file changed since base tree matches `--allow`, and valid attestations match the final tree for all lane checks (otherwise running any missing checks); requires no attestation when zero checks were specified. |
 | `attest run -- <cmd>` / `attest verify --command <cmd>` | Run a command and sign `{command, exit code, tree hash}`; verify a matching passing attestation. See [`attestation.md`](attestation.md). |
@@ -51,7 +51,7 @@ Plain JSON under `<git toplevel>/.lucind/lanes/<id>/` (id = `YYYYMMDD-HHMMSS-<4 
 
 | File | Content |
 |---|---|
-| `brief.md` | The brief plus the contract footer. |
+| `prompt.md` | The exact prompt sent to agy (recorded for reference; not referenced from the prompt itself). |
 | `lane.json` | Base tree hash, allowed globs, checks list, model, pane id, turn (1 on create, incremented by every continuation), status (`running\|done\|failed\|timeout\|accepted\|rejected`). |
 | `result-<turn>.json` | Envelope written by agy for the current turn (earlier turns stay as history; legacy lanes without turn use `result.json`). |
 | `receipt.json` | Base/final tree, changed files, verdict, reasons, evidence. |
@@ -88,7 +88,7 @@ This feature deleted judgment from the binary; Claude does it better and cheaper
 | `integrate`/`run` (merge, bisect, revert, CAS promote), `resolve`, `judges` | Merging and review are Claude's. Plain git. |
 | `explore`, `split`/`dag` | Read-only work needs no contract. |
 | `feature`, leases, `reconcile`, `defect`, SQLite ledger | Replaced by per-lane JSON files. |
-| Packet files, `rules init\|generate` | The brief is free Markdown; the plugin carries the rules. |
+| Packet files, `rules init\|generate` | The prompt is free Markdown; the plugin carries the rules. |
 | Per-lane worktrees, `worktree cleanup` | Worktrees only for parallel writers, created by Claude. |
 | `usage` log, `plugin/opencode` | No consumer. |
 

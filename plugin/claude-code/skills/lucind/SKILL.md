@@ -32,22 +32,22 @@ Load the `herdr` skill too; this skill assumes its pane/agent commands.
 ### Lane (code changes)
 
 ```bash
-lucind-ai dispatch --cwd "$PWD" [--allow '<glob>']... --brief <file|-> \
+lucind-ai dispatch --cwd "$PWD" [--allow '<glob>']... --prompt <file|-> \
   [--auto-skills] [--check '<cmd>']... [--model M] [--timeout 60m] [--detach] [--min-quota 0.1]
 lucind-ai wait <lane>            # only after --detach
 lucind-ai accept --lane <id>     # run from the lane's repo
 ```
 
 - `dispatch` creates `.lucind/lanes/<id>/`, records the base tree, opens a new pane with
-  `LUCIND_LANE=<id>`, starts agy and sends it the brief plus a contract footer.
+  `LUCIND_LANE=<id>`, starts agy and sends it the prompt directly plus a contract footer.
 - Blocks until agy's Stop hook marks the lane `done`/`failed`; prints one JSON object
   `{lane, pane_id, cwd, status, result_path}` (`result_path` printed by `dispatch` and `wait` is
   the current turn's result file, `.lucind/lanes/<id>/result-<turn>.json`). Exit codes: 0 done,
   1 error, 3 failed, 4 timeout.
 - The pane is **never** closed or killed by lucind-ai. Talk to agy freely with
   `herdr agent prompt <pane_id> ...`; the contract is checked once, at `accept`, on the final tree.
-  For a formal follow-up turn with wait + validation: `dispatch --lane <id> --brief ...`. For
-  follow-up turns `dispatch --lane <id> --brief ...`, `--allow` is optional: when omitted, the
+  For a formal follow-up turn with wait + validation: `dispatch --lane <id> --prompt ...`. For
+  follow-up turns `dispatch --lane <id> --prompt ...`, `--allow` is optional: when omitted, the
   lane's stored globs apply; when given, they replace the stored globs.
 - On `timeout`: inspect the pane, nudge, or close it yourself. lucind-ai does nothing more.
 - `accept` writes `receipt.json` and accepts only when: the result envelope is valid; every file
@@ -58,12 +58,12 @@ lucind-ai accept --lane <id>     # run from the lane's repo
   the missing ones.
   **Never re-run tests yourself after an accepted receipt** — the attestation is the proof.
 - **Review before `accept`.** `status: done` only means agy wrote a valid envelope, not that the
-  brief was fully delivered. Compare `git status` and `git diff --stat` and the envelope's
-  `done_criteria` with the brief's scope items; if something is missing, send a follow-up turn to
-  the same lane (`dispatch --lane <id> --brief ...`, including the full original brief) instead of
+  task was fully delivered. Compare `git status` and `git diff --stat` and the envelope's
+  `done_criteria` with the task's scope items; if something is missing, send a follow-up turn to
+  the same lane (`dispatch --lane <id> --prompt ...`, including the full original prompt) instead of
   accepting. Results use per-turn files (`result-<turn>.json`), and only the current turn's result
   file counts (the Stop hook, `wait`, and `accept` ignore valid results from other turns). Worker
-  Stops and Stops from previous conversations without the current turn's brief are ignored and cannot
+  Stops and Stops from previous conversations without the current turn's prompt are ignored and cannot
   steal retries or prematurely mark done; only the current turn's main conversation with `fullyIdle=true`
   decides done or triggers retry nudges.
 - **After `accept`, decide what to do with the pane** (lucind-ai never closes it). Default: close
@@ -103,15 +103,16 @@ How to get it:
 Parallel lanes need `--detach`, and parallel writers still need one worktree each. With three or
 more stacked panes the heights get small; prefer fewer parallel lanes.
 
-## Writing a brief
+## Writing a prompt
 
-Free Markdown, not validated by lucind-ai. Include: goal, scope, acceptance criteria, constraints
-(TDD, style), and what to report in the result envelope. The contract footer added by `dispatch` already
-covers lane id, allowed globs, result path, and the final verification commands (each
+Free Markdown, not validated by lucind-ai. The prompt is sent directly to agy (and recorded to
+`.lucind/lanes/<id>/prompt.md`), with any skills section moved to the top right after the lane marker.
+Include: goal, scope, acceptance criteria, constraints (TDD, style), and what to report in the result envelope.
+The contract footer added by `dispatch` already covers lane id, allowed globs, result path, and the final verification commands (each
 `lucind-ai attest run -- sh -c '<check>'`, or noting none when zero checks).
 Keep `--allow` as narrow as the task: it is enforced by agy's PreToolUse hook and again by `accept`.
 
-### Brief sections
+### Prompt sections
 
 Each one is its own Markdown heading. A section that ends at the next heading must contain only
 what is described here (no explanatory prose), so put prose under a following heading.
@@ -121,7 +122,8 @@ what is described here (no explanatory prose), so put prose under a following he
   whitespace go in whole-entry backticks. List pre-existing untracked targets agy may write and
   the directories where new files are authorized. Nothing beyond the task: a surface wider than
   the task is the same defect as no surface at all.
-- `## Skills to load before work`: one exact `SKILL.md` path per line, absolute. With
+- `## Skills to load before work`: one exact `SKILL.md` path per line, absolute. This section is
+  placed first in the prompt sent to agy so skills are loaded before work begins. With
   `--auto-skills`, the orchestrator omits the section and does not read the skill registry:
   lucind-ai asks Jev using `.atl/skill-registry.md` and `TYPESAFE_API_KEY`, records
   `skills-<turn>.json`, and a hand-written section always wins. Without the flag, resolve them
@@ -129,7 +131,7 @@ what is described here (no explanatory prose), so put prose under a following he
   `.agents/skills/<name>/SKILL.md`), since lane workers are not Claude; agy reads those files
   before touching code and does not rediscover skills. Omit when no skill applies.
 - `## Hard stops`: one line per condition that must stop agy. The envelope requires one
-  `hard_stops` entry per hard stop in the brief (`[]` when none), so list them here.
+  `hard_stops` entry per hard stop in the prompt (`[]` when none), so list them here.
 - `## Verification`: the exact commands agy must run, each reported as
   `<command>: <observed result>` in `done_criteria[].evidence`. The final verification
   command(s) from the contract footer (`lucind-ai attest run -- sh -c '<check>'`, if any)
@@ -144,7 +146,7 @@ what is described here (no explanatory prose), so put prose under a following he
   invent RED/GREEN evidence or a runner.
 - `## Feature document`: the repo-relative locator `odd/tasks/<feature-name>.md`. Read the actual
   file (and reconcile it with its Engram mirror `odd/<feature-name>/tasks`) before delegating, pass
-  the relevant context in the brief, and tell agy to read the document before editing. Omit for
+  the relevant context in the prompt, and tell agy to read the document before editing. Omit for
   small work with no feature document.
 - `## Language contract`: generated technical artifacts (code, comments, tests, fixtures, UI
   copy, docs) default to English regardless of conversation language. If another language is

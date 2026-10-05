@@ -42,6 +42,11 @@ What exists is in [`product.md`](product.md).
   directories if needed, preserves surrounding content byte-for-byte, writes through symlinks, keeps
   one backup `<target>.lucind-ai.bak`, fails safely on malformed markers, and can be skipped with
   `--no-claude-md`.
+- **Direct prompt dispatch** (`feature/direct-prompt-dispatch`): dispatch sends the task content itself
+  directly to agy as the prompt (with the skills section placed first after the lane marker), dropped the
+  `Read and follow <brief.md>` pointer and removed `--brief` in favor of `--prompt` across `dispatch` and
+  `skills select`. The exact prompt is persisted to `prompt.md` for records, and the Stop hook classifies
+  the main conversation using the `lucind-lane: <laneID>` marker line.
 - **Superseded:** the multi-provider herdr work (`herdr-agent-factory`, `herdr-interactive-agents`)
   predates the agy-only contract; its interactive-pane and Stop-hook ideas survive in it.
 
@@ -79,7 +84,6 @@ What exists is in [`product.md`](product.md).
    conversation does not load skills first, and it does not propagate them to workers (although
    `roles/agents/worker.md` step 1 tells workers to read them). The envelope still listed every
    skill in `skills_loaded`, so that field alone is not trustworthy evidence. Plan, in order:
-   1. Send the prompt directly, without `brief.md`, with the skills section first.
    2. If that is not enough, force it with a hook (for example a PreToolUse that blocks writes until
       every listed `SKILL.md` was read in that conversation).
    3. Measure in both the main and the worker conversations from the transcripts, not only from

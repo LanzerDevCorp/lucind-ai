@@ -1,12 +1,12 @@
 ---
 name: lucind-result
-description: Write the lucind-ai result envelope (result-<turn>.json) and attest the final tree when finishing work inside a lucind-ai lane. Use when LUCIND_LANE is set or the brief points at .lucind/lanes/<id>/brief.md.
+description: Write the lucind-ai result envelope (result-<turn>.json) and attest the final tree when finishing work inside a lucind-ai lane. Use when LUCIND_LANE is set or when working inside a lane.
 ---
 
 # lucind-result
 
 Inside a lane (`LUCIND_LANE=<id>`) you finish by writing
-`.lucind/lanes/<id>/result-<turn>.json`, where `<turn>` is the `turn` in `lane.json`; the brief's
+`.lucind/lanes/<id>/result-<turn>.json`, where `<turn>` is the `turn` in `lane.json`; the prompt's
 contract footer gives the exact path. A legacy lane without `turn` uses `result.json`. Only the
 current turn's file counts: a result written to any other file is ignored and the hook denies the
 write. The file is validated against a strict JSON schema (unknown top-level properties are rejected).
@@ -33,14 +33,14 @@ write. The file is validated against a strict JSON schema (unknown top-level pro
 ```
 
 Required: `lane_id`, `status`, `summary`, `hard_stops` (one `{hard_stop, fired, note}` entry
-per hard stop in the brief; `[]` when the brief lists none).
+per hard stop in the prompt; `[]` when the prompt lists none).
 
 `status` is one of:
 
 - `done`: every criterion met and no hard stop fired. Only this status passes the lane.
-- `blocked`: a decision is needed that the brief does not authorize. Add `questions`
+- `blocked`: a decision is needed that the prompt does not authorize. Add `questions`
   (`question`, `why_blocking`, optional `options`, `recommendation`).
-- `deviated`: you had to depart from the brief. Add `deviations` (`expected`, `actual`, `reason`).
+- `deviated`: you had to depart from the prompt. Add `deviations` (`expected`, `actual`, `reason`).
 - `failed`: technical failure.
 - `interaction_required`: you need an answer to proceed. Add `interaction`
   (`question`, `reason`, `unblock_response`).
@@ -51,7 +51,7 @@ Paths outside the repository go in `external_changes` (`path`, `change`, `why`, 
 Any status other than `done` ends the lane as failed without a retry; a missing or
 schema-invalid file sends you back to fix it (at most twice).
 
-## Key Learnings (when the brief asks for them)
+## Key Learnings (when the prompt asks for them)
 
 No hook captures them for you, so you persist them yourself. Do this before the attest step:
 
@@ -67,7 +67,7 @@ rejected). Saving to memory is bookkeeping and does not replace the final respon
 
 ## Attest the final tree
 
-After your last edit, run each verification command listed in the brief's `## Lane Contract` under:
+After your last edit, run each verification command listed in the prompt's `## Lane Contract` under:
 
 ```bash
 lucind-ai attest run -- sh -c '<check>'
