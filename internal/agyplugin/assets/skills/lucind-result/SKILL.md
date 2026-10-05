@@ -1,13 +1,15 @@
 ---
 name: lucind-result
-description: Write the lucind-ai result envelope (result.json) and attest the final tree when finishing work inside a lucind-ai lane. Use when LUCIND_LANE is set or the brief points at .lucind/lanes/<id>/brief.md.
+description: Write the lucind-ai result envelope (result-<turn>.json) and attest the final tree when finishing work inside a lucind-ai lane. Use when LUCIND_LANE is set or the brief points at .lucind/lanes/<id>/brief.md.
 ---
 
 # lucind-result
 
 Inside a lane (`LUCIND_LANE=<id>`) you finish by writing
-`.lucind/lanes/<id>/result.json`. It is validated against a strict JSON schema
-(unknown top-level properties are rejected).
+`.lucind/lanes/<id>/result-<turn>.json`, where `<turn>` is the `turn` in `lane.json`; the brief's
+contract footer gives the exact path. A legacy lane without `turn` uses `result.json`. Only the
+current turn's file counts: a result written to any other file is ignored and the hook denies the
+write. The file is validated against a strict JSON schema (unknown top-level properties are rejected).
 
 ## Envelope
 
@@ -57,10 +59,10 @@ No hook captures them for you, so you persist them yourself. Do this before the 
    at least 4 words. Skip everything below when there is genuinely no reusable learning.
 2. Save each one with the Engram `mem_save` tool (`capture_prompt: false`). If the call fails or
    times out, continue: memory failures never block the lane.
-3. After `result.json` is written and the tree is attested, close your final response text with a
+3. After the result file is written and the tree is attested, close your final response text with a
    `## Key Learnings` block holding the same numbered items.
 
-Key Learnings are optional and never belong in `result.json` (unknown top-level properties are
+Key Learnings are optional and never belong in the result file (unknown top-level properties are
 rejected). Saving to memory is bookkeeping and does not replace the final response.
 
 ## Attest the final tree
