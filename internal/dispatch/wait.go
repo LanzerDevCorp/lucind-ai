@@ -44,7 +44,6 @@ func waitLoop(ctx context.Context, repoRoot, laneID, cwd string, timeout time.Du
 		timeout = 60 * time.Minute
 	}
 	deadline := time.Now().Add(timeout)
-	absResultPath, _ := filepath.Abs(lane.ResultPath(repoRoot, laneID))
 	var graceDeadline time.Time
 
 	for {
@@ -52,6 +51,8 @@ func waitLoop(ctx context.Context, repoRoot, laneID, cwd string, timeout time.Du
 		if err != nil {
 			return Output{}, 1, fmt.Errorf("load lane %s: %w", laneID, err)
 		}
+
+		absResultPath, _ := filepath.Abs(lane.ResultFilePath(repoRoot, l))
 
 		outCwd := cwd
 		if outCwd == "" {
@@ -69,10 +70,14 @@ func waitLoop(ctx context.Context, repoRoot, laneID, cwd string, timeout time.Du
 		}
 
 		if l.Status == lane.StatusDone {
-			return makeOut(string(lane.StatusDone)), 0, nil
+			env, err := result.Read(os.DirFS(lane.LaneDir(repoRoot, laneID)), lane.ResultFileName(l.Turn))
+			if err == nil && env.Status == "done" {
+				return makeOut(string(lane.StatusDone)), 0, nil
+			}
+			return makeOut(string(lane.StatusFailed)), 3, nil
 		}
 		if l.Status == lane.StatusFailed {
-			env, err := result.Read(os.DirFS(lane.LaneDir(repoRoot, laneID)), "result.json")
+			env, err := result.Read(os.DirFS(lane.LaneDir(repoRoot, laneID)), lane.ResultFileName(l.Turn))
 			if err == nil {
 				if env.Status == "done" {
 					_, _ = lane.MarkStopped(repoRoot, laneID)

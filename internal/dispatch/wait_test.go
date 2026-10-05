@@ -43,6 +43,7 @@ func TestWait_Done(t *testing.T) {
 	dispatch.SetSleepForTesting(func(d time.Duration) {
 		count := atomic.AddInt32(&pollCount, 1)
 		if count >= 2 {
+			writeResultEnvelope(t, repoDir, l.ID, "done")
 			current, _ := lane.Load(repoDir, l.ID)
 			current.Status = lane.StatusDone
 			_ = current.Save(repoDir)
@@ -70,9 +71,12 @@ func TestWait_Done(t *testing.T) {
 	if out.ResultPath == "" {
 		t.Error("out.ResultPath should not be empty")
 	}
+	if !strings.HasSuffix(out.ResultPath, "result-1.json") {
+		t.Errorf("out.ResultPath = %q, want ending with result-1.json", out.ResultPath)
+	}
 }
 
-func writeResultEnvelope(t *testing.T, repoDir, laneID, status string) {
+func writeTurnResultEnvelope(t *testing.T, repoDir, laneID string, turn int, status string) {
 	t.Helper()
 	dir := lane.LaneDir(repoDir, laneID)
 	if err := os.MkdirAll(dir, 0755); err != nil {
@@ -84,9 +88,20 @@ func writeResultEnvelope(t *testing.T, repoDir, laneID, status string) {
 		"summary": "Lane result summary",
 		"hard_stops": []
 	}`, laneID, status)
-	if err := os.WriteFile(filepath.Join(dir, "result.json"), []byte(content), 0644); err != nil {
-		t.Fatalf("write result.json failed: %v", err)
+	filename := lane.ResultFileName(turn)
+	if err := os.WriteFile(filepath.Join(dir, filename), []byte(content), 0644); err != nil {
+		t.Fatalf("write %s failed: %v", filename, err)
 	}
+}
+
+func writeResultEnvelope(t *testing.T, repoDir, laneID, status string) {
+	t.Helper()
+	l, err := lane.Load(repoDir, laneID)
+	turn := 1
+	if err == nil {
+		turn = l.Turn
+	}
+	writeTurnResultEnvelope(t, repoDir, laneID, turn, status)
 }
 
 func TestWait_Failed(t *testing.T) {
@@ -102,6 +117,9 @@ func TestWait_Failed(t *testing.T) {
 	if err := l.Save(repoDir); err != nil {
 		t.Fatalf("lane.Save failed: %v", err)
 	}
+
+	dispatch.SetExhaustionGraceForTesting(20 * time.Millisecond)
+	defer dispatch.ResetExhaustionGraceForTesting()
 
 	var pollCount int32
 	dispatch.SetSleepForTesting(func(d time.Duration) {
@@ -125,6 +143,9 @@ func TestWait_Failed(t *testing.T) {
 	}
 	if out.Status != "failed" {
 		t.Errorf("out.Status = %q, want \"failed\"", out.Status)
+	}
+	if !strings.HasSuffix(out.ResultPath, "result-1.json") {
+		t.Errorf("out.ResultPath = %q, want ending with result-1.json", out.ResultPath)
 	}
 }
 
@@ -245,6 +266,9 @@ func TestWait_Failed_ValidDoneEnvelope(t *testing.T) {
 
 	writeResultEnvelope(t, repoDir, l.ID, "done")
 
+	dispatch.SetExhaustionGraceForTesting(20 * time.Millisecond)
+	defer dispatch.ResetExhaustionGraceForTesting()
+
 	runner := newFakeHerdrRunner()
 	out, exitCode, err := dispatch.Wait(context.Background(), repoDir, l.ID, 5*time.Second, runner)
 	if err != nil {
@@ -255,6 +279,9 @@ func TestWait_Failed_ValidDoneEnvelope(t *testing.T) {
 	}
 	if out.Status != "done" {
 		t.Errorf("out.Status = %q, want \"done\"", out.Status)
+	}
+	if !strings.HasSuffix(out.ResultPath, "result-1.json") {
+		t.Errorf("out.ResultPath = %q, want ending with result-1.json", out.ResultPath)
 	}
 
 	reloaded, err := lane.Load(repoDir, l.ID)
@@ -283,6 +310,9 @@ func TestWait_Failed_ValidNonDoneEnvelope(t *testing.T) {
 
 	writeResultEnvelope(t, repoDir, l.ID, "failed")
 
+	dispatch.SetExhaustionGraceForTesting(20 * time.Millisecond)
+	defer dispatch.ResetExhaustionGraceForTesting()
+
 	var pollCount int32
 	dispatch.SetSleepForTesting(func(d time.Duration) {
 		atomic.AddInt32(&pollCount, 1)
@@ -299,6 +329,9 @@ func TestWait_Failed_ValidNonDoneEnvelope(t *testing.T) {
 	}
 	if out.Status != "failed" {
 		t.Errorf("out.Status = %q, want \"failed\"", out.Status)
+	}
+	if !strings.HasSuffix(out.ResultPath, "result-1.json") {
+		t.Errorf("out.ResultPath = %q, want ending with result-1.json", out.ResultPath)
 	}
 	if pollCount != 0 {
 		t.Errorf("pollCount = %d, want 0 (should return immediately)", pollCount)
@@ -342,6 +375,9 @@ func TestWait_Failed_NoEnvelope_EnvelopeAppears(t *testing.T) {
 	}
 	if out.Status != "done" {
 		t.Errorf("out.Status = %q, want \"done\"", out.Status)
+	}
+	if !strings.HasSuffix(out.ResultPath, "result-1.json") {
+		t.Errorf("out.ResultPath = %q, want ending with result-1.json", out.ResultPath)
 	}
 	if pollCount < 2 {
 		t.Errorf("pollCount = %d, want >= 2", pollCount)
@@ -441,5 +477,164 @@ func TestWait_Failed_NoEnvelope_DeadlineCapsGrace(t *testing.T) {
 	}
 	if reloaded.Status != lane.StatusTimeout {
 		t.Errorf("reloaded.Status = %q, want %q", reloaded.Status, lane.StatusTimeout)
+	}
+}
+
+func TestWait_Done_Turn2_MissingTurnResult_ReportsFailed(t *testing.T) {
+	t.Setenv("HERDR_ENV", "1")
+	repoDir := t.TempDir()
+	initGitRepo(t, repoDir)
+
+	l, err := lane.Create(context.Background(), repoDir, []string{"**"}, "gemini-3.8-flash-high")
+	if err != nil {
+		t.Fatalf("lane.Create failed: %v", err)
+	}
+	l.PaneID = "w1:pWaitTurn2DoneMissing"
+	l.Turn = 2
+	l.Status = lane.StatusDone
+	if err := l.Save(repoDir); err != nil {
+		t.Fatalf("lane.Save failed: %v", err)
+	}
+
+	// Only turn 1 result is written; turn 2 result is missing
+	writeTurnResultEnvelope(t, repoDir, l.ID, 1, "done")
+
+	runner := newFakeHerdrRunner()
+	out, exitCode, err := dispatch.Wait(context.Background(), repoDir, l.ID, 5*time.Second, runner)
+	if err != nil {
+		t.Fatalf("unexpected Wait error: %v", err)
+	}
+	if exitCode != 3 {
+		t.Errorf("exitCode = %d, want 3", exitCode)
+	}
+	if out.Status != "failed" {
+		t.Errorf("out.Status = %q, want \"failed\"", out.Status)
+	}
+	if !strings.HasSuffix(out.ResultPath, "result-2.json") {
+		t.Errorf("out.ResultPath = %q, want ending with result-2.json", out.ResultPath)
+	}
+}
+
+func TestWait_Done_Turn2_ValidDoneEnvelope(t *testing.T) {
+	t.Setenv("HERDR_ENV", "1")
+	repoDir := t.TempDir()
+	initGitRepo(t, repoDir)
+
+	l, err := lane.Create(context.Background(), repoDir, []string{"**"}, "gemini-3.8-flash-high")
+	if err != nil {
+		t.Fatalf("lane.Create failed: %v", err)
+	}
+	l.PaneID = "w1:pWaitTurn2DoneValid"
+	l.Turn = 2
+	l.Status = lane.StatusDone
+	if err := l.Save(repoDir); err != nil {
+		t.Fatalf("lane.Save failed: %v", err)
+	}
+
+	writeTurnResultEnvelope(t, repoDir, l.ID, 2, "done")
+
+	runner := newFakeHerdrRunner()
+	out, exitCode, err := dispatch.Wait(context.Background(), repoDir, l.ID, 5*time.Second, runner)
+	if err != nil {
+		t.Fatalf("unexpected Wait error: %v", err)
+	}
+	if exitCode != 0 {
+		t.Errorf("exitCode = %d, want 0", exitCode)
+	}
+	if out.Status != "done" {
+		t.Errorf("out.Status = %q, want \"done\"", out.Status)
+	}
+	if !strings.HasSuffix(out.ResultPath, "result-2.json") {
+		t.Errorf("out.ResultPath = %q, want ending with result-2.json", out.ResultPath)
+	}
+}
+
+func TestWait_Failed_Turn2_OnlyTurn1Envelope_ReportsFailed(t *testing.T) {
+	t.Setenv("HERDR_ENV", "1")
+	repoDir := t.TempDir()
+	initGitRepo(t, repoDir)
+
+	l, err := lane.Create(context.Background(), repoDir, []string{"**"}, "gemini-3.8-flash-high")
+	if err != nil {
+		t.Fatalf("lane.Create failed: %v", err)
+	}
+	l.PaneID = "w1:pWaitTurn2FailedOnlyTurn1"
+	l.Turn = 2
+	l.Status = lane.StatusFailed
+	if err := l.Save(repoDir); err != nil {
+		t.Fatalf("lane.Save failed: %v", err)
+	}
+
+	// Only turn 1 has a done envelope; turn 2 result is missing
+	writeTurnResultEnvelope(t, repoDir, l.ID, 1, "done")
+
+	dispatch.SetExhaustionGraceForTesting(10 * time.Millisecond)
+	defer dispatch.ResetExhaustionGraceForTesting()
+
+	var pollCount int32
+	dispatch.SetSleepForTesting(func(d time.Duration) {
+		atomic.AddInt32(&pollCount, 1)
+		time.Sleep(3 * time.Millisecond)
+	}, 1*time.Millisecond)
+	defer dispatch.ResetSleepForTesting()
+
+	runner := newFakeHerdrRunner()
+	out, exitCode, err := dispatch.Wait(context.Background(), repoDir, l.ID, 5*time.Second, runner)
+	if err != nil {
+		t.Fatalf("unexpected Wait error: %v", err)
+	}
+	if exitCode != 3 {
+		t.Errorf("exitCode = %d, want 3", exitCode)
+	}
+	if out.Status != "failed" {
+		t.Errorf("out.Status = %q, want \"failed\"", out.Status)
+	}
+	if !strings.HasSuffix(out.ResultPath, "result-2.json") {
+		t.Errorf("out.ResultPath = %q, want ending with result-2.json", out.ResultPath)
+	}
+}
+
+func TestWait_Failed_Turn2_ValidDoneEnvelope_Recovers(t *testing.T) {
+	t.Setenv("HERDR_ENV", "1")
+	repoDir := t.TempDir()
+	initGitRepo(t, repoDir)
+
+	l, err := lane.Create(context.Background(), repoDir, []string{"**"}, "gemini-3.8-flash-high")
+	if err != nil {
+		t.Fatalf("lane.Create failed: %v", err)
+	}
+	l.PaneID = "w1:pWaitTurn2FailedDoneEnv"
+	l.Turn = 2
+	l.Status = lane.StatusFailed
+	if err := l.Save(repoDir); err != nil {
+		t.Fatalf("lane.Save failed: %v", err)
+	}
+
+	writeTurnResultEnvelope(t, repoDir, l.ID, 2, "done")
+
+	dispatch.SetExhaustionGraceForTesting(10 * time.Millisecond)
+	defer dispatch.ResetExhaustionGraceForTesting()
+
+	runner := newFakeHerdrRunner()
+	out, exitCode, err := dispatch.Wait(context.Background(), repoDir, l.ID, 5*time.Second, runner)
+	if err != nil {
+		t.Fatalf("unexpected Wait error: %v", err)
+	}
+	if exitCode != 0 {
+		t.Errorf("exitCode = %d, want 0", exitCode)
+	}
+	if out.Status != "done" {
+		t.Errorf("out.Status = %q, want \"done\"", out.Status)
+	}
+	if !strings.HasSuffix(out.ResultPath, "result-2.json") {
+		t.Errorf("out.ResultPath = %q, want ending with result-2.json", out.ResultPath)
+	}
+
+	reloaded, err := lane.Load(repoDir, l.ID)
+	if err != nil {
+		t.Fatalf("lane.Load failed: %v", err)
+	}
+	if reloaded.Status != lane.StatusDone {
+		t.Errorf("reloaded.Status = %q, want %q", reloaded.Status, lane.StatusDone)
 	}
 }
