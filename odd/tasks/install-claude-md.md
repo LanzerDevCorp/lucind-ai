@@ -44,4 +44,7 @@ Local `feature-branch-chain`, branch `feature/install-claude-md` from
 ## Progress
 
 - RDD: off (clone-local).
-- Next: real install test on the global `CLAUDE.md`, then merge the chain into `dev` and push.
+- Real install test on the global `CLAUDE.md`: block stripped (0 markers), `lucind-ai install`
+  reported `appended` and the file was byte-identical to the original; a second run reported
+  `unchanged`.
+- Merged into `dev` with the whole local chain and pushed (owner request).
