@@ -45,7 +45,17 @@ func (f *fakeInstallAgy) Run(_ context.Context, args ...string) ([]byte, error) 
 	return []byte("[ok] lucind\n  hooks : 1 processed\n"), nil
 }
 
+func isolateConfig(t *testing.T) {
+	t.Helper()
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("TYPESAFE_API_KEY", "")
+	origTerm := isStdinTerminal
+	isStdinTerminal = func() bool { return false }
+	t.Cleanup(func() { isStdinTerminal = origTerm })
+}
+
 func TestInstall_AllThreeStepsInOrder(t *testing.T) {
+	isolateConfig(t)
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
@@ -56,7 +66,7 @@ func TestInstall_AllThreeStepsInOrder(t *testing.T) {
 
 	origClaude := claudeInstall
 	defer func() { claudeInstall = origClaude }()
-	claudeInstall = claudeplugin.Install
+	claudeInstall = claudeplugin.InstallVariant
 
 	var stdout, stderr bytes.Buffer
 	code := run(context.Background(), []string{"install"}, &stdout, &stderr)
@@ -66,11 +76,11 @@ func TestInstall_AllThreeStepsInOrder(t *testing.T) {
 
 	out := stdout.String()
 	lines := strings.Split(strings.TrimSpace(out), "\n")
-	if len(lines) != 4 {
-		t.Fatalf("expected 4 lines of output, got %d:\n%s", len(lines), out)
+	if len(lines) != 5 {
+		t.Fatalf("expected 5 lines of output, got %d:\n%s", len(lines), out)
 	}
 
-	idxClaude := strings.Index(out, "installed claude skill into ")
+	idxClaude := strings.Index(out, "installed claude skill (manual variant) into ")
 	idxLucind := strings.Index(out, "installed lucind via agy plugin install (staged at ")
 	idxRoles := strings.Index(out, "installed lucind-roles via agy plugin install (staged at ")
 	idxDispatch := strings.Index(out, "lucind dispatch block created in ")
@@ -121,6 +131,7 @@ func TestInstall_AllThreeStepsInOrder(t *testing.T) {
 
 func TestInstall_FailingStepStopsSequence(t *testing.T) {
 	t.Run("claude skill fails", func(t *testing.T) {
+		isolateConfig(t)
 		home := t.TempDir()
 		t.Setenv("HOME", home)
 
@@ -131,7 +142,7 @@ func TestInstall_FailingStepStopsSequence(t *testing.T) {
 
 		origClaude := claudeInstall
 		defer func() { claudeInstall = origClaude }()
-		claudeInstall = func() (string, error) {
+		claudeInstall = func(v claudeplugin.Variant) (string, error) {
 			return "", errors.New("simulated disk full")
 		}
 
@@ -156,6 +167,7 @@ func TestInstall_FailingStepStopsSequence(t *testing.T) {
 	})
 
 	t.Run("lucind plugin fails", func(t *testing.T) {
+		isolateConfig(t)
 		home := t.TempDir()
 		t.Setenv("HOME", home)
 
@@ -169,7 +181,7 @@ func TestInstall_FailingStepStopsSequence(t *testing.T) {
 
 		origClaude := claudeInstall
 		defer func() { claudeInstall = origClaude }()
-		claudeInstall = claudeplugin.Install
+		claudeInstall = claudeplugin.InstallVariant
 
 		var stdout, stderr bytes.Buffer
 		code := runInstall(context.Background(), nil, &stdout, &stderr)
@@ -177,7 +189,7 @@ func TestInstall_FailingStepStopsSequence(t *testing.T) {
 			t.Fatalf("code=%d, want 1", code)
 		}
 
-		if !strings.Contains(stdout.String(), "installed claude skill into ") {
+		if !strings.Contains(stdout.String(), "installed claude skill (manual variant) into ") {
 			t.Errorf("stdout missing claude skill success: %s", stdout.String())
 		}
 		if !strings.Contains(stderr.String(), "lucind-ai: install lucind:") || !strings.Contains(stderr.String(), "simulated lucind agy failure") {
@@ -200,6 +212,7 @@ func TestInstall_FailingStepStopsSequence(t *testing.T) {
 	})
 
 	t.Run("lucind-roles plugin fails", func(t *testing.T) {
+		isolateConfig(t)
 		home := t.TempDir()
 		t.Setenv("HOME", home)
 
@@ -213,7 +226,7 @@ func TestInstall_FailingStepStopsSequence(t *testing.T) {
 
 		origClaude := claudeInstall
 		defer func() { claudeInstall = origClaude }()
-		claudeInstall = claudeplugin.Install
+		claudeInstall = claudeplugin.InstallVariant
 
 		var stdout, stderr bytes.Buffer
 		code := runInstall(context.Background(), nil, &stdout, &stderr)
@@ -221,7 +234,7 @@ func TestInstall_FailingStepStopsSequence(t *testing.T) {
 			t.Fatalf("code=%d, want 1", code)
 		}
 
-		if !strings.Contains(stdout.String(), "installed claude skill into ") {
+		if !strings.Contains(stdout.String(), "installed claude skill (manual variant) into ") {
 			t.Errorf("stdout missing claude skill success: %s", stdout.String())
 		}
 		if !strings.Contains(stdout.String(), "installed lucind via agy plugin install (staged at ") {
@@ -247,6 +260,7 @@ func TestInstall_FailingStepStopsSequence(t *testing.T) {
 }
 
 func TestInstall_AgyMissing(t *testing.T) {
+	isolateConfig(t)
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
@@ -259,7 +273,7 @@ func TestInstall_AgyMissing(t *testing.T) {
 
 	origClaude := claudeInstall
 	defer func() { claudeInstall = origClaude }()
-	claudeInstall = claudeplugin.Install
+	claudeInstall = claudeplugin.InstallVariant
 
 	var stdout, stderr bytes.Buffer
 	code := run(context.Background(), []string{"install"}, &stdout, &stderr)
@@ -267,7 +281,7 @@ func TestInstall_AgyMissing(t *testing.T) {
 		t.Fatalf("code=%d, want 1", code)
 	}
 
-	if !strings.Contains(stdout.String(), "installed claude skill into ") {
+	if !strings.Contains(stdout.String(), "installed claude skill (manual variant) into ") {
 		t.Errorf("stdout missing claude skill install line: %s", stdout.String())
 	}
 	if !strings.Contains(stderr.String(), "lucind-ai: install lucind:") {
@@ -290,6 +304,7 @@ func TestInstall_AgyMissing(t *testing.T) {
 }
 
 func TestInstall_NoClaudeMD(t *testing.T) {
+	isolateConfig(t)
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
@@ -300,7 +315,7 @@ func TestInstall_NoClaudeMD(t *testing.T) {
 
 	origClaude := claudeInstall
 	defer func() { claudeInstall = origClaude }()
-	claudeInstall = claudeplugin.Install
+	claudeInstall = claudeplugin.InstallVariant
 
 	var stdout, stderr bytes.Buffer
 	code := run(context.Background(), []string{"install", "--no-claude-md"}, &stdout, &stderr)
@@ -310,8 +325,8 @@ func TestInstall_NoClaudeMD(t *testing.T) {
 
 	out := stdout.String()
 	lines := strings.Split(strings.TrimSpace(out), "\n")
-	if len(lines) != 3 {
-		t.Fatalf("expected 3 lines of output, got %d:\n%s", len(lines), out)
+	if len(lines) != 4 {
+		t.Fatalf("expected 4 lines of output, got %d:\n%s", len(lines), out)
 	}
 
 	if strings.Contains(out, "lucind dispatch block") {
@@ -326,6 +341,7 @@ func TestInstall_NoClaudeMD(t *testing.T) {
 
 func TestInstall_ClaudeMDFails(t *testing.T) {
 	t.Run("install fails", func(t *testing.T) {
+		isolateConfig(t)
 		home := t.TempDir()
 		t.Setenv("HOME", home)
 
@@ -336,7 +352,7 @@ func TestInstall_ClaudeMDFails(t *testing.T) {
 
 		origClaude := claudeInstall
 		defer func() { claudeInstall = origClaude }()
-		claudeInstall = claudeplugin.Install
+		claudeInstall = claudeplugin.InstallVariant
 
 		origClaudeMD := claudemdInstall
 		defer func() { claudemdInstall = origClaudeMD }()
@@ -353,7 +369,7 @@ func TestInstall_ClaudeMDFails(t *testing.T) {
 		if !strings.Contains(stderr.String(), "lucind-ai: install claude md: simulated claude md write failure") {
 			t.Errorf("stderr does not name the failed step: %s", stderr.String())
 		}
-		if !strings.Contains(stdout.String(), "installed claude skill into ") {
+		if !strings.Contains(stdout.String(), "installed claude skill (manual variant) into ") {
 			t.Errorf("stdout missing claude skill success: %s", stdout.String())
 		}
 		if !strings.Contains(stdout.String(), "installed lucind via agy plugin install") {
@@ -368,6 +384,7 @@ func TestInstall_ClaudeMDFails(t *testing.T) {
 	})
 
 	t.Run("resolve home directory fails", func(t *testing.T) {
+		isolateConfig(t)
 		home := t.TempDir()
 		t.Setenv("HOME", home)
 
@@ -378,7 +395,7 @@ func TestInstall_ClaudeMDFails(t *testing.T) {
 
 		origClaude := claudeInstall
 		defer func() { claudeInstall = origClaude }()
-		claudeInstall = claudeplugin.Install
+		claudeInstall = claudeplugin.InstallVariant
 
 		origUserHomeDir := userHomeDir
 		defer func() { userHomeDir = origUserHomeDir }()
@@ -395,7 +412,7 @@ func TestInstall_ClaudeMDFails(t *testing.T) {
 		if !strings.Contains(stderr.String(), "lucind-ai: install claude md: resolve user home directory: simulated home resolve failure") {
 			t.Errorf("stderr does not name the failed step: %s", stderr.String())
 		}
-		if !strings.Contains(stdout.String(), "installed claude skill into ") {
+		if !strings.Contains(stdout.String(), "installed claude skill (manual variant) into ") {
 			t.Errorf("stdout missing claude skill success: %s", stdout.String())
 		}
 		if !strings.Contains(stdout.String(), "installed lucind via agy plugin install") {
@@ -422,6 +439,7 @@ func TestInstall_FlagsAndArguments(t *testing.T) {
 
 	for _, args := range invalidCases {
 		t.Run("invalid_"+strings.Join(args, "_"), func(t *testing.T) {
+			isolateConfig(t)
 			var stdout, stderr bytes.Buffer
 			code := runInstall(context.Background(), args, &stdout, &stderr)
 			if code != 1 {
@@ -454,6 +472,7 @@ func TestInstall_FlagsAndArguments(t *testing.T) {
 
 	for _, args := range helpCases {
 		t.Run("help_"+strings.Join(args, "_"), func(t *testing.T) {
+			isolateConfig(t)
 			var stdout, stderr bytes.Buffer
 			code := runInstall(context.Background(), args, &stdout, &stderr)
 			if code != 0 {

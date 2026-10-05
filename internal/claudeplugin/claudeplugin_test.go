@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/LanzerDevCorp/lucind-ai/internal/claudeplugin"
@@ -35,8 +36,16 @@ func TestInstall_WritesSkillTree(t *testing.T) {
 		t.Fatalf("read embedded skill: %v", err)
 	}
 
-	if !bytes.Equal(data, embeddedData) {
-		t.Fatalf("installed content does not match embedded content")
+	expectedManual, err := claudeplugin.RenderSkill(embeddedData, claudeplugin.VariantManual)
+	if err != nil {
+		t.Fatalf("render expected manual skill: %v", err)
+	}
+
+	if !bytes.Equal(data, expectedManual) {
+		t.Fatalf("installed content does not match rendered manual content")
+	}
+	if strings.Contains(string(data), "lucind:variant") {
+		t.Errorf("installed content should not contain variant markers")
 	}
 
 	info, err := os.Stat(skillFile)
@@ -82,12 +91,16 @@ func TestInstall_IdempotentAndReplacesChangedContent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read embedded skill: %v", err)
 	}
+	expectedManual, err := claudeplugin.RenderSkill(embeddedData, claudeplugin.VariantManual)
+	if err != nil {
+		t.Fatalf("render expected manual skill: %v", err)
+	}
 
 	data, err := os.ReadFile(skillFile)
 	if err != nil {
 		t.Fatalf("read restored SKILL.md: %v", err)
 	}
-	if !bytes.Equal(data, embeddedData) {
+	if !bytes.Equal(data, expectedManual) {
 		t.Fatalf("skill file was not restored to embedded content")
 	}
 
@@ -165,7 +178,11 @@ func TestInstall_ReplacesSymlinkAndPreservesTarget(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read embedded skill: %v", err)
 	}
-	if !bytes.Equal(data, embeddedData) {
+	expectedManual, err := claudeplugin.RenderSkill(embeddedData, claudeplugin.VariantManual)
+	if err != nil {
+		t.Fatalf("render expected manual skill: %v", err)
+	}
+	if !bytes.Equal(data, expectedManual) {
 		t.Fatalf("installed SKILL.md content mismatch")
 	}
 }
@@ -266,4 +283,50 @@ func TestInstall_HomeResolutionFailure(t *testing.T) {
 	if err == nil {
 		t.Skip("os.UserHomeDir() did not fail without HOME in this environment")
 	}
+}
+
+func TestInstallVariant_AutoAndManual(t *testing.T) {
+	t.Run("auto variant", func(t *testing.T) {
+		home := t.TempDir()
+		dir, err := claudeplugin.InstallHomeVariant(home, claudeplugin.VariantAuto)
+		if err != nil {
+			t.Fatalf("InstallHomeVariant(auto): %v", err)
+		}
+		data, err := os.ReadFile(filepath.Join(dir, "SKILL.md"))
+		if err != nil {
+			t.Fatalf("read SKILL.md: %v", err)
+		}
+		content := string(data)
+		if strings.Contains(content, "lucind:variant") {
+			t.Errorf("SKILL.md contains variant marker comments: %s", content)
+		}
+		if !strings.Contains(content, "--auto-skills") {
+			t.Errorf("auto variant must include --auto-skills: %s", content)
+		}
+		if strings.Contains(content, "Automatic\n  skill selection requires") {
+			t.Errorf("auto variant should not contain manual-only explanation: %s", content)
+		}
+	})
+
+	t.Run("manual variant", func(t *testing.T) {
+		home := t.TempDir()
+		dir, err := claudeplugin.InstallHomeVariant(home, claudeplugin.VariantManual)
+		if err != nil {
+			t.Fatalf("InstallHomeVariant(manual): %v", err)
+		}
+		data, err := os.ReadFile(filepath.Join(dir, "SKILL.md"))
+		if err != nil {
+			t.Fatalf("read SKILL.md: %v", err)
+		}
+		content := string(data)
+		if strings.Contains(content, "lucind:variant") {
+			t.Errorf("SKILL.md contains variant marker comments: %s", content)
+		}
+		if strings.Contains(content, "--auto-skills") {
+			t.Errorf("manual variant must not include --auto-skills: %s", content)
+		}
+		if !strings.Contains(content, "switch to the auto-skills skill variant") {
+			t.Errorf("manual variant must mention switching to auto-skills variant: %s", content)
+		}
+	})
 }
