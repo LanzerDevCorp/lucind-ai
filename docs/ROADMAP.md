@@ -37,6 +37,11 @@ What exists is in [`product.md`](product.md).
   write outside `--allow` (missed by the hook, rejected by `accept`); ending a turn without the
   envelope (the Stop retry nudged agy, which then wrote it). No timeouts and no crashes. Limits: one
   model, trivial tasks, and agy was told to probe the limits.
+- **Install `lucind:dispatch` block into `~/.claude/CLAUDE.md`** (`feature/install-claude-md`): `lucind-ai install`
+  (and `make install`) writes the dispatch block into `~/.claude/CLAUDE.md` idempotently, creates parent
+  directories if needed, preserves surrounding content byte-for-byte, writes through symlinks, keeps
+  one backup `<target>.lucind-ai.bak`, fails safely on malformed markers, and can be skipped with
+  `--no-claude-md`.
 - **Superseded:** the multi-provider herdr work (`herdr-agent-factory`, `herdr-interactive-agents`)
   predates the agy-only contract; its interactive-pane and Stop-hook ideas survive in it.
 
@@ -61,20 +66,29 @@ What exists is in [`product.md`](product.md).
    the exact dispatch prompt wording) and breaks silently if any of them change. Look for a
    supported signal instead: a parent/child id in the Stop payload, an agy hook or API that marks
    subagents, or lucind-ai owning the main conversation id at dispatch time.
-7. **Briefs do not make agy load skills first; evaluate sending the prompt directly.** Owner
+4. **Briefs do not make agy load skills first; evaluate sending the prompt directly.** Owner
    observation: agy does not follow the brief literally. Dispatch sends `Read and follow <brief.md>`,
    and agy does not read the `## Skills to load before work` files before starting, even with the
    section right after the title. Evaluate sending the brief content itself as the prompt (instead
    of a pointer to a file to read), and measure skill loading with the envelope's `skills_loaded`
    (it came back `null` in the first `--auto-skills` lane, so the worker contract must require it).
-4. **RTK support.** Install RTK as part of the lucind-ai setup (today it is wired by hand in the
+   Confirmed in lane `20261005-050638-3cba` (owner screenshots): main agy read the lane rule, the
+   brief, `lane.json`, the feature document and `lucind-result`, then went straight to code without
+   opening any listed `SKILL.md`. Asked afterwards, agy admitted it read only `golang-cli` and did
+   **not pass the skill paths to its two worker subagents**, so the brief fails twice: the main
+   conversation does not load skills first, and it does not propagate them to workers (although
+   `roles/agents/worker.md` step 1 tells workers to read them). The envelope still listed every
+   skill in `skills_loaded`, so that field alone is not trustworthy evidence. Plan, in order:
+   1. Send the prompt directly, without `brief.md`, with the skills section first.
+   2. If that is not enough, force it with a hook (for example a PreToolUse that blocks writes until
+      every listed `SKILL.md` was read in that conversation).
+   3. Measure in both the main and the worker conversations from the transcripts, not only from
+      `skills_loaded`.
+5. **RTK support.** Install RTK as part of the lucind-ai setup (today it is wired by hand in the
    global Claude config: `@RTK.md` include plus the `rtk hook claude` PreToolUse hook).
-5. **Research gentle-ai reviews in depth.** Understand how receipt-driven development (RDD) works
+6. **Research gentle-ai reviews in depth.** Understand how receipt-driven development (RDD) works
    end to end: review lifecycle, receipts and lineage, consent, correction, and how it interacts
    with lucind-ai lanes and `accept`.
-6. **Inject the `lucind:dispatch` block into the global `~/.claude/CLAUDE.md`.** `lucind-ai install`
-   should write it (idempotent, between its own markers, outside the gentle-ai ones) so the
-   dispatch precedence rules stop being hand-maintained.
 
 ## Only if needed
 

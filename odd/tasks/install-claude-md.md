@@ -44,4 +44,4 @@ Local `feature-branch-chain`, branch `feature/install-claude-md` from
 ## Progress
 
 - RDD: off (clone-local).
-- Next: dispatch T1.
+- Next: real install test on the global `CLAUDE.md`, then merge the chain into `dev` and push.

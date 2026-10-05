@@ -192,4 +192,4 @@ fresh agy session; an open session does not pick up new credentials reliably.
 
 ## Setup
 
-`lucind-ai install` installs the Claude skill into `~/.claude/skills/lucind`, the `lucind` agy plugin, and the `lucind-roles` agy plugin. `make install` builds the binary and runs `lucind-ai install`. Check the build with `lucind-ai -v` before dispatching.
+`lucind-ai install` installs the Claude skill into `~/.claude/skills/lucind`, the `lucind` agy plugin, the `lucind-roles` agy plugin, and writes the lucind dispatch block into `~/.claude/CLAUDE.md` (`--no-claude-md` to skip). `make install` builds the binary and runs `lucind-ai install`. Check the build with `lucind-ai -v` before dispatching.
