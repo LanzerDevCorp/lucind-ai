@@ -17,10 +17,7 @@ import (
 )
 
 var (
-	isStdinTerminal = func() bool {
-		fi, err := os.Stdin.Stat()
-		return err == nil && (fi.Mode()&os.ModeCharDevice) != 0
-	}
+	isStdinTerminal = func() bool { return isTerminal(os.Stdin) }
 
 	readSecretKey = func(stderr io.Writer) (string, error) {
 		const prompt = "TYPESAFE_API_KEY (selects skills with Jev; press Enter to skip): "
@@ -76,6 +73,26 @@ var (
 	writeUserKey  = userconfig.WriteKey
 	resolveAPIKey = skillselect.ResolveKey
 )
+
+// isTerminal reports whether f is an interactive terminal. A character device is not enough:
+// /dev/null is one and is what an agent or a non-interactive shell gives as stdin, so it is
+// excluded explicitly, and stty (which fails with ENOTTY on anything that is not a terminal)
+// has the final word when it is available.
+func isTerminal(f *os.File) bool {
+	fi, err := f.Stat()
+	if err != nil || fi.Mode()&os.ModeCharDevice == 0 {
+		return false
+	}
+	if null, err := os.Stat(os.DevNull); err == nil && os.SameFile(fi, null) {
+		return false
+	}
+	if _, err := exec.LookPath("stty"); err != nil {
+		return true
+	}
+	probe := exec.Command("stty", "-g")
+	probe.Stdin = f
+	return probe.Run() == nil
+}
 
 func determineVariantAndSetupKey(stdout, stderr io.Writer) (claudeplugin.Variant, error) {
 	if key := resolveAPIKey(); key != "" {
