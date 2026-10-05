@@ -692,7 +692,7 @@ func TestMarkStopped(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Create lane: %v", err)
 		}
-		resPath := lane.ResultPath(dir, l.ID)
+		resPath := lane.ResultFilePath(dir, l)
 		if err := os.WriteFile(resPath, []byte(validDoneJSON), 0644); err != nil {
 			t.Fatalf("write result.json: %v", err)
 		}
@@ -746,7 +746,7 @@ func TestMarkStopped(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Create lane: %v", err)
 		}
-		resPath := lane.ResultPath(dir, l.ID)
+		resPath := lane.ResultFilePath(dir, l)
 		if err := os.WriteFile(resPath, []byte(schemaInvalidJSON), 0644); err != nil {
 			t.Fatalf("write result.json: %v", err)
 		}
@@ -775,7 +775,7 @@ func TestMarkStopped(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Create lane: %v", err)
 		}
-		resPath := lane.ResultPath(dir, l.ID)
+		resPath := lane.ResultFilePath(dir, l)
 		if err := os.WriteFile(resPath, []byte(validFailedJSON), 0644); err != nil {
 			t.Fatalf("write result.json: %v", err)
 		}
@@ -805,6 +805,107 @@ func TestMarkStopped(t *testing.T) {
 		}
 		if st != lane.Status("") {
 			t.Errorf("status = %v, want empty", st)
+		}
+	})
+
+	t.Run("turn 2 with only result-1.json on disk marks lane failed", func(t *testing.T) {
+		dir := t.TempDir()
+		initGitRepo(t, dir)
+		l, err := lane.Create(context.Background(), dir, nil, "gemini-3.8-flash-high")
+		if err != nil {
+			t.Fatalf("Create lane: %v", err)
+		}
+		// Write result-1.json
+		r1Path := filepath.Join(lane.LaneDir(dir, l.ID), "result-1.json")
+		if err := os.WriteFile(r1Path, []byte(validDoneJSON), 0644); err != nil {
+			t.Fatalf("write result-1.json: %v", err)
+		}
+		// Bump lane to turn 2 and save
+		l.Turn = 2
+		if err := lane.Save(dir, l); err != nil {
+			t.Fatalf("Save lane: %v", err)
+		}
+
+		st, err := lane.MarkStopped(dir, l.ID)
+		if err != nil {
+			t.Fatalf("MarkStopped error = %v, want nil", err)
+		}
+		if st != lane.StatusFailed {
+			t.Errorf("status = %v, want %v", st, lane.StatusFailed)
+		}
+
+		loaded, err := lane.Load(dir, l.ID)
+		if err != nil {
+			t.Fatalf("Load lane: %v", err)
+		}
+		if loaded.Status != lane.StatusFailed {
+			t.Errorf("loaded.Status = %v, want %v", loaded.Status, lane.StatusFailed)
+		}
+	})
+
+	t.Run("turn 2 with valid done result-2.json marks lane done", func(t *testing.T) {
+		dir := t.TempDir()
+		initGitRepo(t, dir)
+		l, err := lane.Create(context.Background(), dir, nil, "gemini-3.8-flash-high")
+		if err != nil {
+			t.Fatalf("Create lane: %v", err)
+		}
+		l.Turn = 2
+		if err := lane.Save(dir, l); err != nil {
+			t.Fatalf("Save lane: %v", err)
+		}
+		r2Path := lane.ResultFilePath(dir, l)
+		if err := os.WriteFile(r2Path, []byte(validDoneJSON), 0644); err != nil {
+			t.Fatalf("write result-2.json: %v", err)
+		}
+
+		st, err := lane.MarkStopped(dir, l.ID)
+		if err != nil {
+			t.Fatalf("MarkStopped error = %v, want nil", err)
+		}
+		if st != lane.StatusDone {
+			t.Errorf("status = %v, want %v", st, lane.StatusDone)
+		}
+
+		loaded, err := lane.Load(dir, l.ID)
+		if err != nil {
+			t.Fatalf("Load lane: %v", err)
+		}
+		if loaded.Status != lane.StatusDone {
+			t.Errorf("loaded.Status = %v, want %v", loaded.Status, lane.StatusDone)
+		}
+	})
+
+	t.Run("legacy lane with turn 0 and valid result.json marks lane done", func(t *testing.T) {
+		dir := t.TempDir()
+		initGitRepo(t, dir)
+		l, err := lane.Create(context.Background(), dir, nil, "gemini-3.8-flash-high")
+		if err != nil {
+			t.Fatalf("Create lane: %v", err)
+		}
+		l.Turn = 0
+		if err := lane.Save(dir, l); err != nil {
+			t.Fatalf("Save lane: %v", err)
+		}
+		resPath := lane.ResultPath(dir, l.ID)
+		if err := os.WriteFile(resPath, []byte(validDoneJSON), 0644); err != nil {
+			t.Fatalf("write result.json: %v", err)
+		}
+
+		st, err := lane.MarkStopped(dir, l.ID)
+		if err != nil {
+			t.Fatalf("MarkStopped error = %v, want nil", err)
+		}
+		if st != lane.StatusDone {
+			t.Errorf("status = %v, want %v", st, lane.StatusDone)
+		}
+
+		loaded, err := lane.Load(dir, l.ID)
+		if err != nil {
+			t.Fatalf("Load lane: %v", err)
+		}
+		if loaded.Status != lane.StatusDone {
+			t.Errorf("loaded.Status = %v, want %v", loaded.Status, lane.StatusDone)
 		}
 	})
 }
@@ -1078,3 +1179,121 @@ func TestLaneCreateWithChecks(t *testing.T) {
 		}
 	})
 }
+
+func TestResultFileName(t *testing.T) {
+	tests := []struct {
+		turn int
+		want string
+	}{
+		{-1, "result.json"},
+		{0, "result.json"},
+		{1, "result-1.json"},
+		{7, "result-7.json"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.want, func(t *testing.T) {
+			got := lane.ResultFileName(tt.turn)
+			if got != tt.want {
+				t.Errorf("ResultFileName(%d) = %q, want %q", tt.turn, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestResultFilePath(t *testing.T) {
+	root := "/test/repo"
+	id := "20261003-215144-a1b2"
+
+	tests := []struct {
+		name string
+		lane lane.Lane
+		want string
+	}{
+		{
+			name: "legacy turn 0",
+			lane: lane.Lane{ID: id, Turn: 0},
+			want: filepath.Join(root, ".lucind", "lanes", id, "result.json"),
+		},
+		{
+			name: "negative turn",
+			lane: lane.Lane{ID: id, Turn: -1},
+			want: filepath.Join(root, ".lucind", "lanes", id, "result.json"),
+		},
+		{
+			name: "turn 1",
+			lane: lane.Lane{ID: id, Turn: 1},
+			want: filepath.Join(root, ".lucind", "lanes", id, "result-1.json"),
+		},
+		{
+			name: "turn 7",
+			lane: lane.Lane{ID: id, Turn: 7},
+			want: filepath.Join(root, ".lucind", "lanes", id, "result-7.json"),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := lane.ResultFilePath(root, tt.lane)
+			if got != tt.want {
+				t.Errorf("ResultFilePath() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestLaneTurn(t *testing.T) {
+	ctx := context.Background()
+	repoDir := t.TempDir()
+	initGitRepo(t, repoDir)
+
+	ln, err := lane.Create(ctx, repoDir, []string{"*"}, "test-model")
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	if ln.Turn != 1 {
+		t.Fatalf("ln.Turn = %d, want 1", ln.Turn)
+	}
+
+	loaded, err := lane.Load(repoDir, ln.ID)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	if loaded.Turn != 1 {
+		t.Errorf("loaded.Turn = %d, want 1", loaded.Turn)
+	}
+
+	// Turn survives Save/Load
+	loaded.Turn = 3
+	if err := lane.Save(repoDir, loaded); err != nil {
+		t.Fatalf("Save failed: %v", err)
+	}
+
+	reloaded, err := lane.Load(repoDir, ln.ID)
+	if err != nil {
+		t.Fatalf("Load after save failed: %v", err)
+	}
+	if reloaded.Turn != 3 {
+		t.Errorf("reloaded.Turn = %d, want 3", reloaded.Turn)
+	}
+
+	// Legacy lane without turn unmarshals with Turn == 0
+	legacyJSON := `{
+		"version": 1,
+		"id": "20261003-215144-old0",
+		"cwd": "/test",
+		"base_tree": "abc",
+		"allow": [],
+		"model": "m",
+		"status": "running"
+	}`
+	var legacy lane.Lane
+	if err := json.Unmarshal([]byte(legacyJSON), &legacy); err != nil {
+		t.Fatalf("Unmarshal legacy JSON failed: %v", err)
+	}
+	if legacy.Turn != 0 {
+		t.Errorf("legacy.Turn = %d, want 0", legacy.Turn)
+	}
+}
+

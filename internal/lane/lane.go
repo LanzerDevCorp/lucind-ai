@@ -27,6 +27,7 @@ type Lane struct {
 	PaneID     string     `json:"pane_id"`
 	Status     Status     `json:"status"`
 	Retries    int        `json:"retries"`
+	Turn       int        `json:"turn"`
 	LastStopAt *time.Time `json:"last_stop_at,omitempty"`
 	Continues  int        `json:"continues,omitempty"`
 	CreatedAt  time.Time  `json:"created_at"`
@@ -78,9 +79,24 @@ func ReceiptPath(root, id string) string {
 	return filepath.Join(LaneDir(root, id), "receipt.json")
 }
 
-// ResultPath returns the path to result.json for a given lane under root.
+// ResultPath returns the legacy single-file result.json path for a given lane under root,
+// kept during migration.
 func ResultPath(root, id string) string {
 	return filepath.Join(LaneDir(root, id), "result.json")
+}
+
+// ResultFileName returns the result filename for the given turn.
+// For turn <= 0 (legacy lanes), it returns "result.json", otherwise "result-<turn>.json".
+func ResultFileName(turn int) string {
+	if turn <= 0 {
+		return "result.json"
+	}
+	return fmt.Sprintf("result-%d.json", turn)
+}
+
+// ResultFilePath returns the result file path for the current turn of the given lane under root.
+func ResultFilePath(root string, l Lane) string {
+	return filepath.Join(LaneDir(root, l.ID), ResultFileName(l.Turn))
 }
 
 // CheckCommand returns the canonical attested command string for a check.
@@ -204,6 +220,7 @@ func Create(ctx context.Context, cwd string, allow []string, model string, check
 		PaneID:    "",
 		Status:    StatusRunning,
 		Retries:   0,
+		Turn:      1,
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
@@ -297,8 +314,8 @@ func LoadReceipt(root, id string) (Receipt, error) {
 	return receipt, nil
 }
 
-// MarkStopped marks a stopped lane as done or failed based on result.json validation.
-// It loads the lane from root, validates result.json at ResultPath(root, id) using result.Read,
+// MarkStopped marks a stopped lane as done or failed based on current turn result validation.
+// It loads the lane from root, validates the current turn's result file using result.Read,
 // updates lane status and UpdatedAt timestamp, saves the lane, and returns the final status.
 func MarkStopped(root, id string) (Status, error) {
 	lane, err := Load(root, id)
@@ -307,7 +324,11 @@ func MarkStopped(root, id string) (Status, error) {
 	}
 
 	laneDir := LaneDir(root, id)
-	env, err := result.Read(os.DirFS(laneDir), "result.json")
+	env, err := result.Read(os.DirFS(laneDir), ResultFileName(lane.Turn))
+	if err != nil && lane.Turn == 1 {
+		// Transitional fallback during migration: callers of ResultPath still write result.json until T3/T4.
+		env, err = result.Read(os.DirFS(laneDir), "result.json")
+	}
 
 	finalStatus := StatusDone
 	if err != nil || env.Status != "done" {
