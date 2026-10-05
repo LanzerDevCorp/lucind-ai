@@ -411,9 +411,11 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 		if errors.As(err, &autoSkillsErr) || errors.Is(err, dispatch.ErrAutoSkillsUnavailable) {
 			reason := ""
 			isMissingKey := false
+			isKeyRejected := false
 			if autoSkillsErr != nil {
 				reason = autoSkillsErr.RedactedReason()
 				isMissingKey = autoSkillsErr.IsMissingKey()
+				isKeyRejected = autoSkillsErr.IsKeyRejected()
 			} else {
 				reason = err.Error()
 			}
@@ -421,6 +423,9 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 			_, _ = fmt.Fprintln(stderr, "lucind-ai: no lane was created. Fallback: add a \"## Skills to load before work\" section with absolute SKILL.md paths to the prompt and dispatch again (a hand-written section skips Jev).")
 			if isMissingKey {
 				_, _ = fmt.Fprintln(stderr, "lucind-ai: to store the key run lucind-ai install, or put TYPESAFE_API_KEY=... in ~/.config/lucind/env")
+			}
+			if isKeyRejected {
+				_, _ = fmt.Fprintln(stderr, "lucind-ai: the server rejected the API key; correct TYPESAFE_API_KEY (environment variable or ~/.config/lucind/env) or run lucind-ai install --reset-key (plain lucind-ai install never replaces an existing key)")
 			}
 			return ExitAutoSkillsUnavailable
 		}

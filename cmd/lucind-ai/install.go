@@ -19,31 +19,32 @@ var (
 	userHomeDir     = os.UserHomeDir
 )
 
-const installUsage = "usage: lucind-ai install [--no-claude-md]"
+const installUsage = "usage: lucind-ai install [--no-claude-md] [--reset-key]"
 
 func runInstall(ctx context.Context, args []string, stdout, stderr io.Writer) int {
-	var noClaudeMD bool
-	switch len(args) {
-	case 0:
-		// default options
-	case 1:
+	var noClaudeMD, resetKey bool
+	if len(args) == 1 {
 		switch args[0] {
 		case "--help", "-help", "-h", "help":
+			// Help is only valid on its own; next to other arguments it is a usage error.
 			_, _ = fmt.Fprintln(stdout, installUsage)
 			return 0
+		}
+	}
+	for _, arg := range args {
+		switch arg {
 		case "--no-claude-md":
 			noClaudeMD = true
+		case "--reset-key":
+			resetKey = true
 		default:
 			_, _ = fmt.Fprintln(stderr, installUsage)
 			return 1
 		}
-	default:
-		_, _ = fmt.Fprintln(stderr, installUsage)
-		return 1
 	}
 
 	// 0. API key and skill variant
-	variant, err := determineVariantAndSetupKey(stdout, stderr)
+	variant, err := determineVariantAndSetupKey(stdout, stderr, resetKey)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "lucind-ai: %v\n", err)
 		return 1
