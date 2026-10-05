@@ -39,8 +39,14 @@ an older or earlier turn can never close, pass or be accepted as the current one
 - `result.prev.json` is no longer produced; previous turns stay as `result-<N>.json`.
 - The lane ID format (`YYYYMMDD-HHMMSS-<4 hex>`) is not changed: `ValidateID` runs in the hooks.
   Only the test is fixed.
-- During migration `lane.ResultPath(root, id)` stays (marked deprecated) so every task compiles; it
-  is removed in T4.
+- During migration `lane.ResultPath(root, id)` stays as a legacy helper so every task compiles; it
+  is removed in T4. It is not marked `Deprecated:` because staticcheck SA1019 would fail the lint
+  at every caller.
+- T2 added a transitional fallback in `MarkStopped`: at turn 1, if `result-1.json` is missing it
+  reads `result.json`, because callers still write the legacy file until T3/T4. **T4 must remove
+  this fallback**; keeping it would let a stale `result.json` close a turn-1 lane again.
+- Every lane brief lists the Go skills from `.atl/skill-registry.md` under
+  `## Skills to load before work` (missed for the lint lane and T2; reviewed T2 against them).
 
 ## Scope
 
@@ -60,9 +66,10 @@ the herdr idle wait on continuation.
 
 ## Tasks
 
-- [ ] T1 Item 9: `TestLaneIDFormat` uses distinct seconds through `GenerateIDAt` for its uniqueness
+- [x] T1 (commit `4b6aff9`) Item 9: `TestLaneIDFormat` uses distinct seconds through `GenerateIDAt` for its uniqueness
       loop. File: `internal/lane/lane_test.go`. Route: inline (one mechanical, understood test file).
-- [ ] T2 Lane model: `Turn` field in `lane.json`; `Create` sets 1; `ResultFile` helper
+      RED: 8 duplicates in 400 runs; GREEN: 2000 of 2000 pass.
+- [x] T2 (commit `28e4295`, lane `20261005-004502-3c2c`, agy) Lane model: `Turn` field in `lane.json`; `Create` sets 1; `ResultFile` helper
       (`result-<turn>.json`, `result.json` when `turn == 0`); `MarkStopped` reads the current turn file.
       Files: `internal/lane/lane.go`, `internal/lane/lane_test.go`. Route: delegated lane.
 - [ ] T3 Dispatch and wait: a continuation increments and persists `turn`, no rename to
@@ -93,8 +100,9 @@ the herdr idle wait on continuation.
 ## Progress and evidence
 
 Created after exploration (explorer report plus verified reads of `dispatch.go`, `wait.go`,
-`agyhook.go`). No task started.
+`agyhook.go`). T1 and T2 done and verified (lint clean, lane package 89 tests pass with `-race`,
+lane accepted with attested checks).
 
 ## Next step
 
-T1 inline, then T2 lane.
+T3 lane (dispatch and wait), then T4, then T5 and `make install`.
