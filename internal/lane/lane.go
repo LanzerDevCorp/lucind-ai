@@ -79,12 +79,6 @@ func ReceiptPath(root, id string) string {
 	return filepath.Join(LaneDir(root, id), "receipt.json")
 }
 
-// ResultPath returns the legacy single-file result.json path for a given lane under root,
-// kept during migration.
-func ResultPath(root, id string) string {
-	return filepath.Join(LaneDir(root, id), "result.json")
-}
-
 // ResultFileName returns the result filename for the given turn.
 // For turn <= 0 (legacy lanes), it returns "result.json", otherwise "result-<turn>.json".
 func ResultFileName(turn int) string {
@@ -325,10 +319,6 @@ func MarkStopped(root, id string) (Status, error) {
 
 	laneDir := LaneDir(root, id)
 	env, err := result.Read(os.DirFS(laneDir), ResultFileName(lane.Turn))
-	if err != nil && lane.Turn == 1 {
-		// Transitional fallback during migration: callers of ResultPath still write result.json until T3/T4.
-		env, err = result.Read(os.DirFS(laneDir), "result.json")
-	}
 
 	finalStatus := StatusDone
 	if err != nil || env.Status != "done" {

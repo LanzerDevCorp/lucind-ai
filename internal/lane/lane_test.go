@@ -117,9 +117,10 @@ func TestPathHelpers(t *testing.T) {
 		t.Errorf("ReceiptPath = %q, want %q", got, wantReceiptPath)
 	}
 
-	wantResultPath := filepath.Join(wantDir, "result.json")
-	if got := lane.ResultPath(root, id); got != wantResultPath {
-		t.Errorf("ResultPath = %q, want %q", got, wantResultPath)
+	l := lane.Lane{ID: id, Turn: 1}
+	wantResultPath := filepath.Join(wantDir, "result-1.json")
+	if got := lane.ResultFilePath(root, l); got != wantResultPath {
+		t.Errorf("ResultFilePath = %q, want %q", got, wantResultPath)
 	}
 }
 
@@ -843,6 +844,35 @@ func TestMarkStopped(t *testing.T) {
 		}
 	})
 
+	t.Run("turn 1 with only result.json on disk marks lane failed", func(t *testing.T) {
+		dir := t.TempDir()
+		initGitRepo(t, dir)
+		l, err := lane.Create(context.Background(), dir, nil, "gemini-3.8-flash-high")
+		if err != nil {
+			t.Fatalf("Create lane: %v", err)
+		}
+		legacyPath := filepath.Join(lane.LaneDir(dir, l.ID), "result.json")
+		if err := os.WriteFile(legacyPath, []byte(validDoneJSON), 0644); err != nil {
+			t.Fatalf("write result.json: %v", err)
+		}
+
+		st, err := lane.MarkStopped(dir, l.ID)
+		if err != nil {
+			t.Fatalf("MarkStopped error = %v, want nil", err)
+		}
+		if st != lane.StatusFailed {
+			t.Errorf("status = %v, want %v", st, lane.StatusFailed)
+		}
+
+		loaded, err := lane.Load(dir, l.ID)
+		if err != nil {
+			t.Fatalf("Load lane: %v", err)
+		}
+		if loaded.Status != lane.StatusFailed {
+			t.Errorf("loaded.Status = %v, want %v", loaded.Status, lane.StatusFailed)
+		}
+	})
+
 	t.Run("turn 2 with valid done result-2.json marks lane done", func(t *testing.T) {
 		dir := t.TempDir()
 		initGitRepo(t, dir)
@@ -887,7 +917,7 @@ func TestMarkStopped(t *testing.T) {
 		if err := lane.Save(dir, l); err != nil {
 			t.Fatalf("Save lane: %v", err)
 		}
-		resPath := lane.ResultPath(dir, l.ID)
+		resPath := lane.ResultFilePath(dir, l)
 		if err := os.WriteFile(resPath, []byte(validDoneJSON), 0644); err != nil {
 			t.Fatalf("write result.json: %v", err)
 		}

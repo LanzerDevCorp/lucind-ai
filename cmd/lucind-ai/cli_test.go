@@ -52,7 +52,12 @@ func writeResultJSON(t *testing.T, repoDir, laneID, status string) {
   "summary": "Completed lane work.",
   "hard_stops": []
 }`, laneID, status)
-	resPath := lane.ResultPath(repoDir, laneID)
+	var resPath string
+	if l, err := lane.Load(repoDir, laneID); err == nil {
+		resPath = lane.ResultFilePath(repoDir, l)
+	} else {
+		resPath = filepath.Join(lane.LaneDir(repoDir, laneID), "result.json")
+	}
 	if err := os.MkdirAll(filepath.Dir(resPath), 0o755); err != nil {
 		t.Fatalf("mkdir lane dir: %v", err)
 	}

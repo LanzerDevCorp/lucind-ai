@@ -61,6 +61,7 @@ func TestPreToolUse(t *testing.T) {
 	root := newLaneRepo(t, "src/**", "docs/*.md")
 	keyPath := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "lucind-ai", "attest.key")
 	attDir := filepath.Join(os.Getenv("XDG_STATE_HOME"), "lucind-ai", "attestations", "abc")
+	l := loadLane(t, root)
 
 	tests := []struct {
 		name     string
@@ -77,8 +78,8 @@ func TestPreToolUse(t *testing.T) {
 		{"nested path not matched by single star", laneID, "write_to_file", map[string]any{"TargetFile": filepath.Join(root, "docs/a/x.md")}, "deny", "outside"},
 		{"write outside repo", laneID, "write_to_file", map[string]any{"TargetFile": "/etc/passwd"}, "deny", "outside"},
 		{"dot dot escape", laneID, "write_to_file", map[string]any{"TargetFile": filepath.Join(root, "src/../main.go")}, "deny", "outside"},
-		{"own result.json", laneID, "write_to_file", map[string]any{"TargetFile": lane.ResultPath(root, laneID)}, "allow", ""},
-		{"other lane result.json", laneID, "write_to_file", map[string]any{"TargetFile": lane.ResultPath(root, "20260101-120000-ffff")}, "deny", "outside"},
+		{"own result.json", laneID, "write_to_file", map[string]any{"TargetFile": lane.ResultFilePath(root, l)}, "allow", ""},
+		{"other lane result.json", laneID, "write_to_file", map[string]any{"TargetFile": lane.ResultFilePath(root, lane.Lane{ID: "20260101-120000-ffff"})}, "deny", "outside"},
 		{"lane.json is protected", laneID, "write_to_file", map[string]any{"TargetFile": lane.LanePath(root, laneID)}, "deny", "outside"},
 		{"write without a path", laneID, "write_to_file", map[string]any{}, "deny", "path"},
 		{"run_command allowed", laneID, "run_command", map[string]any{"CommandLine": "echo hi", "Cwd": root}, "allow", ""},
@@ -163,7 +164,8 @@ func stop(t *testing.T, laneEnv, root string) map[string]any {
 
 func writeResult(t *testing.T, root, body string) {
 	t.Helper()
-	if err := os.WriteFile(lane.ResultPath(root, laneID), []byte(body), 0o644); err != nil {
+	l := loadLane(t, root)
+	if err := os.WriteFile(lane.ResultFilePath(root, l), []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -218,7 +220,7 @@ func TestStop(t *testing.T) {
 				t.Fatalf("got %v, want continue", got)
 			}
 			reason, _ := got["reason"].(string)
-			if !strings.Contains(reason, lane.ResultPath(root, laneID)) {
+			if !strings.Contains(reason, lane.ResultFilePath(root, l)) {
 				t.Fatalf("reason %q must name the result path", reason)
 			}
 			l = loadLane(t, root)
@@ -780,3 +782,188 @@ func TestStop_ProgressAwareRetryBudget(t *testing.T) {
 		}
 	})
 }
+
+func TestPreToolUse_Turn(t *testing.T) {
+	root := newLaneRepo(t, "src/**")
+	l := loadLane(t, root)
+	l.Turn = 2
+	if err := l.Save(root); err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name     string
+		target   string
+		decision string
+		reason   string
+	}{
+		{
+			name:     "turn 2 write to result-2.json allowed",
+			target:   lane.ResultFilePath(root, l),
+			decision: "allow",
+		},
+		{
+			name:     "turn 2 write to result-1.json denied",
+			target:   filepath.Join(lane.LaneDir(root, laneID), "result-1.json"),
+			decision: "deny",
+			reason:   "outside",
+		},
+		{
+			name:     "turn 2 write to legacy result.json denied",
+			target:   filepath.Join(lane.LaneDir(root, laneID), "result.json"),
+			decision: "deny",
+			reason:   "outside",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := preToolUse(t, laneID, root, "write_to_file", map[string]any{"TargetFile": tc.target})
+			if got["decision"] != tc.decision {
+				t.Fatalf("decision = %v (%v), want %s", got["decision"], got["reason"], tc.decision)
+			}
+			if tc.decision == "deny" {
+				reason, _ := got["reason"].(string)
+				if !strings.Contains(reason, tc.reason) {
+					t.Fatalf("reason %q does not contain %q", reason, tc.reason)
+				}
+			}
+		})
+	}
+}
+
+func TestStop_Turn(t *testing.T) {
+	t.Run("turn 2 with only valid done result-1.json treated as missing", func(t *testing.T) {
+		root := newLaneRepo(t)
+		l := loadLane(t, root)
+		l.Turn = 2
+		if err := l.Save(root); err != nil {
+			t.Fatal(err)
+		}
+		r1Path := filepath.Join(lane.LaneDir(root, laneID), "result-1.json")
+		if err := os.WriteFile(r1Path, []byte(validResult), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		got := stop(t, laneID, root)
+		if got["decision"] != "continue" {
+			t.Fatalf("got %v, want continue", got)
+		}
+		reason, _ := got["reason"].(string)
+		wantPath := filepath.Join(lane.LaneDir(root, laneID), "result-2.json")
+		if !strings.Contains(reason, wantPath) {
+			t.Fatalf("reason %q must name current turn file %q", reason, wantPath)
+		}
+		l = loadLane(t, root)
+		if l.Status != lane.StatusRunning || l.Retries != 1 {
+			t.Fatalf("status=%s retries=%d, want running/1", l.Status, l.Retries)
+		}
+	})
+
+	t.Run("turn 2 with valid done result-2.json marks done", func(t *testing.T) {
+		root := newLaneRepo(t)
+		l := loadLane(t, root)
+		l.Turn = 2
+		if err := l.Save(root); err != nil {
+			t.Fatal(err)
+		}
+		r2Path := filepath.Join(lane.LaneDir(root, laneID), "result-2.json")
+		if err := os.WriteFile(r2Path, []byte(validResult), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		got := stop(t, laneID, root)
+		if len(got) != 0 {
+			t.Fatalf("got %v, want {}", got)
+		}
+		l = loadLane(t, root)
+		if l.Status != lane.StatusDone {
+			t.Fatalf("status=%s, want done", l.Status)
+		}
+	})
+
+	t.Run("legacy lane with turn 0 and valid result.json marks done", func(t *testing.T) {
+		root := newLaneRepo(t)
+		l := loadLane(t, root)
+		if l.Turn != 0 {
+			t.Fatalf("turn=%d, want 0", l.Turn)
+		}
+		rPath := filepath.Join(lane.LaneDir(root, laneID), "result.json")
+		if err := os.WriteFile(rPath, []byte(validResult), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		got := stop(t, laneID, root)
+		if len(got) != 0 {
+			t.Fatalf("got %v, want {}", got)
+		}
+		l = loadLane(t, root)
+		if l.Status != lane.StatusDone {
+			t.Fatalf("status=%s, want done", l.Status)
+		}
+	})
+}
+
+func TestStop_RawPayload(t *testing.T) {
+	t.Run("raw payload logged as single line", func(t *testing.T) {
+		root := newLaneRepo(t)
+		formattedPayload := []byte("{\n  \"workspacePaths\": [\"" + root + "\"],\n  \"fullyIdle\": true,\n  \"executionNum\": 1,\n  \"customField\": \"hello world\"\n}")
+		got := decode(t, Stop(context.Background(), laneID, formattedPayload))
+		if got["decision"] != "continue" {
+			t.Fatalf("got %v, want continue", got)
+		}
+		logBytes, err := os.ReadFile(filepath.Join(lane.LaneDir(root, laneID), "hook.log"))
+		if err != nil {
+			t.Fatalf("reading hook.log: %v", err)
+		}
+		logLines := strings.Split(string(logBytes), "\n")
+		var rawLine string
+		for _, line := range logLines {
+			if strings.Contains(line, "stop: raw payload ") {
+				rawLine = line
+				break
+			}
+		}
+		if rawLine == "" {
+			t.Fatalf("hook.log missing 'stop: raw payload ' line; got:\n%s", string(logBytes))
+		}
+		expectedSubstring := `stop: raw payload {"workspacePaths":["` + root + `"],"fullyIdle":true,"executionNum":1,"customField":"hello world"}`
+		if !strings.Contains(rawLine, expectedSubstring) {
+			t.Fatalf("raw line does not contain expected compacted json; got %q", rawLine)
+		}
+	})
+
+	t.Run("payload over 4096 bytes is truncated with marker", func(t *testing.T) {
+		root := newLaneRepo(t)
+		bigValue := strings.Repeat("a", 5000)
+		payload := []byte(`{"workspacePaths":["` + root + `"],"fullyIdle":true,"executionNum":1,"big":"` + bigValue + `"}`)
+		got := decode(t, Stop(context.Background(), laneID, payload))
+		if got["decision"] != "continue" {
+			t.Fatalf("got %v, want continue", got)
+		}
+		logBytes, err := os.ReadFile(filepath.Join(lane.LaneDir(root, laneID), "hook.log"))
+		if err != nil {
+			t.Fatalf("reading hook.log: %v", err)
+		}
+		logLines := strings.Split(string(logBytes), "\n")
+		var rawLine string
+		for _, line := range logLines {
+			if strings.Contains(line, "stop: raw payload ") {
+				rawLine = line
+				break
+			}
+		}
+		if rawLine == "" {
+			t.Fatalf("hook.log missing 'stop: raw payload ' line; got:\n%s", string(logBytes))
+		}
+		if !strings.HasSuffix(rawLine, "[truncated]") {
+			t.Fatalf("raw line must end with [truncated]; got %q", rawLine)
+		}
+		idx := strings.Index(rawLine, "stop: raw payload ")
+		payloadPart := rawLine[idx+len("stop: raw payload ") : len(rawLine)-len("[truncated]")]
+		if len(payloadPart) > 4096 {
+			t.Fatalf("truncated payload part length %d exceeds 4096", len(payloadPart))
+		}
+	})
+}
+

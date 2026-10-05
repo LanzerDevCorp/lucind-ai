@@ -42,18 +42,22 @@ func runGit(t *testing.T, dir string, args ...string) string {
 
 func writeResultJSON(t *testing.T, repoDir, laneID, status string) {
 	t.Helper()
+	l, err := lane.Load(repoDir, laneID)
+	if err != nil {
+		t.Fatalf("load lane %s: %v", laneID, err)
+	}
 	env := fmt.Sprintf(`{
   "lane_id": %q,
   "status": %q,
   "summary": "Completed lane work.",
   "hard_stops": []
 }`, laneID, status)
-	resPath := lane.ResultPath(repoDir, laneID)
+	resPath := lane.ResultFilePath(repoDir, l)
 	if err := os.MkdirAll(filepath.Dir(resPath), 0755); err != nil {
 		t.Fatalf("mkdir lane dir: %v", err)
 	}
 	if err := os.WriteFile(resPath, []byte(env), 0644); err != nil {
-		t.Fatalf("write result.json: %v", err)
+		t.Fatalf("write result file: %v", err)
 	}
 }
 
@@ -98,17 +102,18 @@ func TestAccept_ResultJsonMissing(t *testing.T) {
 		t.Fatalf("receipt.Verdict = %q; want %q", receipt.Verdict, lane.VerdictRejected)
 	}
 	if len(reasons) == 0 {
-		t.Fatal("expected rejection reasons for missing result.json")
+		t.Fatal("expected rejection reasons for missing result file")
 	}
+	expectedFile := lane.ResultFileName(l.Turn)
 	found := false
 	for _, r := range reasons {
-		if strings.Contains(r, "result.json") {
+		if strings.Contains(r, expectedFile) {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Fatalf("expected reason mentioning result.json, got: %v", reasons)
+		t.Fatalf("expected reason mentioning %s, got: %v", expectedFile, reasons)
 	}
 
 	// Verify lane on disk updated to rejected
@@ -140,7 +145,7 @@ func TestAccept_ResultJsonSchemaInvalid(t *testing.T) {
 		t.Fatalf("create lane: %v", err)
 	}
 
-	resPath := lane.ResultPath(repoDir, l.ID)
+	resPath := lane.ResultFilePath(repoDir, l)
 	if err := os.WriteFile(resPath, []byte(`{"invalid": true}`), 0644); err != nil {
 		t.Fatalf("write invalid result: %v", err)
 	}
@@ -155,15 +160,16 @@ func TestAccept_ResultJsonSchemaInvalid(t *testing.T) {
 	if receipt.Verdict != lane.VerdictRejected {
 		t.Fatalf("receipt.Verdict = %q; want %q", receipt.Verdict, lane.VerdictRejected)
 	}
+	expectedFile := lane.ResultFileName(l.Turn)
 	found := false
 	for _, r := range reasons {
-		if strings.Contains(r, "result.json") || strings.Contains(r, "schema") {
+		if strings.Contains(r, expectedFile) {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Fatalf("expected reason mentioning result.json or schema, got: %v", reasons)
+		t.Fatalf("expected reason mentioning %s, got: %v", expectedFile, reasons)
 	}
 }
 
@@ -996,5 +1002,118 @@ func TestAccept_ReceiptEvidencePerCheck(t *testing.T) {
 	}
 	if len(raw.Evidence) != 2 {
 		t.Fatalf("raw evidence array len = %d, want 2", len(raw.Evidence))
+	}
+}
+
+func TestAccept_Turn2_MissingResult2Refused(t *testing.T) {
+	ctx := context.Background()
+	repoDir := t.TempDir()
+	initGitRepo(t, repoDir)
+
+	l, err := lane.Create(ctx, repoDir, []string{"src/**"}, "test-model")
+	if err != nil {
+		t.Fatalf("create lane: %v", err)
+	}
+
+	// Write valid result for turn 1
+	writeResultJSON(t, repoDir, l.ID, "done")
+
+	// Advance lane to turn 2
+	l.Turn = 2
+	if err := lane.Save(repoDir, l); err != nil {
+		t.Fatalf("save lane: %v", err)
+	}
+
+	verdict, receipt, reasons, err := accept.Accept(ctx, repoDir, l.ID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if verdict != lane.VerdictRejected {
+		t.Fatalf("verdict = %q; want %q", verdict, lane.VerdictRejected)
+	}
+	if receipt.Verdict != lane.VerdictRejected {
+		t.Fatalf("receipt.Verdict = %q; want %q", receipt.Verdict, lane.VerdictRejected)
+	}
+	expectedReason := fmt.Sprintf("%s missing", lane.ResultFileName(2))
+	found := false
+	for _, r := range reasons {
+		if strings.Contains(r, expectedReason) {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected reason containing %q, got: %v", expectedReason, reasons)
+	}
+}
+
+func TestAccept_Turn2_ValidResultAccepted(t *testing.T) {
+	ctx := context.Background()
+	repoDir := t.TempDir()
+	initGitRepo(t, repoDir)
+
+	l, err := lane.Create(ctx, repoDir, []string{"src/**"}, "test-model")
+	if err != nil {
+		t.Fatalf("create lane: %v", err)
+	}
+
+	// Write valid result for turn 1
+	writeResultJSON(t, repoDir, l.ID, "done")
+
+	// Advance lane to turn 2
+	l.Turn = 2
+	if err := lane.Save(repoDir, l); err != nil {
+		t.Fatalf("save lane: %v", err)
+	}
+
+	// Write valid result for turn 2
+	writeResultJSON(t, repoDir, l.ID, "done")
+
+	verdict, receipt, reasons, err := accept.Accept(ctx, repoDir, l.ID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if verdict != lane.VerdictAccepted {
+		t.Fatalf("verdict = %q; want %q (reasons: %v)", verdict, lane.VerdictAccepted, reasons)
+	}
+	if len(reasons) != 0 {
+		t.Fatalf("expected 0 reasons, got: %v", reasons)
+	}
+	if receipt.Verdict != lane.VerdictAccepted {
+		t.Fatalf("receipt.Verdict = %q; want %q", receipt.Verdict, lane.VerdictAccepted)
+	}
+}
+
+func TestAccept_TurnLegacy_ValidResultAccepted(t *testing.T) {
+	ctx := context.Background()
+	repoDir := t.TempDir()
+	initGitRepo(t, repoDir)
+
+	l, err := lane.Create(ctx, repoDir, []string{"src/**"}, "test-model")
+	if err != nil {
+		t.Fatalf("create lane: %v", err)
+	}
+
+	// Legacy lane with Turn == 0
+	l.Turn = 0
+	if err := lane.Save(repoDir, l); err != nil {
+		t.Fatalf("save lane: %v", err)
+	}
+
+	// Write valid result (for Turn == 0, ResultFilePath writes result.json)
+	writeResultJSON(t, repoDir, l.ID, "done")
+
+	verdict, receipt, reasons, err := accept.Accept(ctx, repoDir, l.ID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if verdict != lane.VerdictAccepted {
+		t.Fatalf("verdict = %q; want %q (reasons: %v)", verdict, lane.VerdictAccepted, reasons)
+	}
+	if len(reasons) != 0 {
+		t.Fatalf("expected 0 reasons, got: %v", reasons)
+	}
+	if receipt.Verdict != lane.VerdictAccepted {
+		t.Fatalf("receipt.Verdict = %q; want %q", receipt.Verdict, lane.VerdictAccepted)
 	}
 }
