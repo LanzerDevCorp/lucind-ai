@@ -48,12 +48,12 @@ Out: retries or timeouts for Jev, changing `skills select`, validating the key a
 
 ## Tasks
 
-- [ ] T1 dispatch: run the selection before creating or mutating a lane; typed error when it fails;
+- [x] T1 dispatch: run the selection before creating or mutating a lane; typed error when it fails;
       record the skills file only after the lane exists; nothing left behind on failure.
-- [ ] T2 CLI: map the typed error to exit code 5 with the stderr guidance; update usage and docs of
+- [x] T2 CLI: map the typed error to exit code 5 with the stderr guidance; update usage and docs of
       the exit codes.
-- [ ] T3 skill: fallback paragraph in the `auto` variant and the by-hand procedure as common text.
-- [ ] T4 docs: README, product, skill-selection, ROADMAP (Done entry).
+- [x] T3 skill: fallback paragraph in the `auto` variant and the by-hand procedure as common text.
+- [x] T4 docs: README, product, skill-selection, ROADMAP (Done entry).
 
 ## Acceptance criteria
 
@@ -75,8 +75,21 @@ Out: retries or timeouts for Jev, changing `skills select`, validating the key a
 
 ## Progress
 
-Branch created. No task started.
+T1-T4 done in lane `20261005-192858-4de5` (single writer, one tree, `--auto-skills`; Jev picked 5
+skills and the envelope's `skills_loaded` listed the 6 files really read). Route: delegated (lane).
+Evidence: `golangci-lint run` clean, `CGO_ENABLED=0 go build ./...` OK, `go test ./... -race
+-count=1` green, `gofmt -l` clean (all re-run by `accept` on the final tree). Isolation: all 14
+packages pass with a `HOME` that holds a real-looking `~/.config/lucind/env`.
+End-to-end probe by the orchestrator (temporary binary, throwaway repo, real HTTP call): an
+invalid key exits 5 with the 401 reason, a missing key exits 5 with the extra install hint; in both
+cases stdout is empty, `.lucind/` is never created, and the key does not appear in any output.
+Review of `dispatch.go`: the selection runs after a read-only continuation pre-check and before
+`lane.Create` or the continuation save, as D3 requires.
+Commits: `b443ad6` (dispatch and CLI), `e56341f` (skill and docs).
+RDD: off for this clone (clone-local), so no native review.
 
 ## Next step
 
-Dispatch one lane (single writer, one tree), review the diff against this document, then `accept`.
+Merge to `dev` and `make install`. Fix the invalid key stored in `~/.config/lucind/env` (it is 107
+characters and the server rejects it), otherwise `--auto-skills` ends in exit 5 and the orchestrator
+falls back to the manual section on every lane.
