@@ -1410,4 +1410,3 @@ func TestAtomicWriteJSON(t *testing.T) {
 		t.Errorf("readBack[key] = %q, want value", readBack["key"])
 	}
 }
-

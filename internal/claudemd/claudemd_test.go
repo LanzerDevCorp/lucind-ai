@@ -700,4 +700,3 @@ func TestInstall_BrokenSymlink(t *testing.T) {
 		t.Fatalf("expected error on broken symlink, got nil")
 	}
 }
-

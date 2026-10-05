@@ -70,11 +70,11 @@ func TestReadKey_MissingFile(t *testing.T) {
 
 func TestReadKey_ParsingTolerances(t *testing.T) {
 	tests := []struct {
-		name     string
-		content  string
-		keyName  string
-		wantVal  string
-		wantErr  bool
+		name    string
+		content string
+		keyName string
+		wantVal string
+		wantErr bool
 	}{
 		{
 			name:    "simple key value",
@@ -83,7 +83,7 @@ func TestReadKey_ParsingTolerances(t *testing.T) {
 			wantVal: "my-secret-key-1",
 		},
 		{
-			name: "blank lines and comments",
+			name:    "blank lines and comments",
 			content: "\n\n# This is a comment\n   # Indented comment\nTYPESAFE_API_KEY=my-secret-key-2\n\n",
 			keyName: "TYPESAFE_API_KEY",
 			wantVal: "my-secret-key-2",
@@ -119,7 +119,7 @@ func TestReadKey_ParsingTolerances(t *testing.T) {
 			wantVal: "",
 		},
 		{
-			name: "multiple keys with target key in middle",
+			name:    "multiple keys with target key in middle",
 			content: "FOO=bar\nTYPESAFE_API_KEY=found-key\nBAZ=qux\n",
 			keyName: "TYPESAFE_API_KEY",
 			wantVal: "found-key",

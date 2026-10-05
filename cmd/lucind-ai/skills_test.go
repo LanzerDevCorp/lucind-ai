@@ -358,4 +358,3 @@ func TestSkillsSelect_KeyFromUserConfig(t *testing.T) {
 		t.Errorf("expected selectSkills to be called using key from user config")
 	}
 }
-
