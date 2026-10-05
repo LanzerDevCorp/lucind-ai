@@ -43,7 +43,7 @@ Claude --accept--> receipt.json (accepted | rejected)
 
 `dispatch`/`wait` print one JSON object. Exit codes: 0 done, 1 error, 3 failed, 4 timeout, 5 auto-skills unavailable.
 The pane is never closed or killed by lucind-ai. Requires `HERDR_ENV=1`.
-Model precedence: `--model` > `LUCIND_AGY_MODEL` > agy default.
+Model precedence: `--model` > `LUCIND_AGY_MODEL` > default `gemini-3.8-flash-medium`. `--model` takes the full key from `agy models`, so the effort is part of the key (`claude-opus-5-5-high`).
 
 ## Lane state
 

@@ -34,7 +34,7 @@ func TestResolveModel_Default(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if want := "gemini-3.8-flash-high"; got != want {
+	if want := "gemini-3.8-flash-medium"; got != want {
 		t.Errorf("ResolveModel() = %q, want %q", got, want)
 	}
 }

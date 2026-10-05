@@ -212,8 +212,19 @@ Example of the skills section:
 
 ## Models
 
-`--model` > `LUCIND_AGY_MODEL` > agy default. Fast/cheap model for exploration and validation;
-strong model for implementation and e2e.
+`--model` > `LUCIND_AGY_MODEL` > `gemini-3.8-flash-medium`. You choose the model per dispatch.
+`--model` takes the full key from `agy models`; the effort is the last segment of the key.
+
+| Family | Efforts | Use for |
+|---|---|---|
+| `gemini-3.8-flash` (also `3.7`, `3.6`) | `low` `medium` `high` | Default. Exploration, validation, routine edits. |
+| `gemini-3.1-pro` | `low` `high` | Harder reasoning at Gemini cost. |
+| `claude-sonnet-5-5` | `low` `medium` `high` | Non-trivial implementation, refactors, e2e. |
+| `claude-opus-5-5` | `low` `medium` `high` | Hardest work: tricky design, subtle bugs. |
+| `gpt-oss-120b` | `medium` | Alternative second opinion. |
+
+Example: `--model claude-opus-5-5-high`. Raise the effort before the model: `low` for mechanical
+work, `high` when the task needs reasoning. Run `agy models` if a key is rejected.
 
 ## Quota
 

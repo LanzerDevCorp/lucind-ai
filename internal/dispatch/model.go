@@ -7,7 +7,7 @@ import (
 // ResolveModel resolves the model name using the precedence:
 // 1. flagModel if non-empty
 // 2. os.Getenv("LUCIND_AGY_MODEL") if non-empty
-// 3. Default: "gemini-3.8-flash-high"
+// 3. Default: "gemini-3.8-flash-medium"
 // It validates against executor.KnownModels().
 func ResolveModel(flagModel string) (string, error) {
 	return executor.ResolveModel(flagModel)

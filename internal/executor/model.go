@@ -5,7 +5,7 @@ import (
 	"os"
 )
 
-const defaultModel = "gemini-3.8-flash-high"
+const defaultModel = "gemini-3.8-flash-medium"
 
 // knownModels mirrors the output of `agy models` as of 2026-10-03.
 // It is static and must be updated by hand when agy changes its model list.

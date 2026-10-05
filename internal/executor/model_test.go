@@ -8,7 +8,7 @@ import (
 )
 
 func TestDefaultModel(t *testing.T) {
-	want := "gemini-3.8-flash-high"
+	want := "gemini-3.8-flash-medium"
 	if got := executor.DefaultModel(); got != want {
 		t.Errorf("DefaultModel() = %q, want %q", got, want)
 	}
