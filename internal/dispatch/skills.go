@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -54,6 +55,16 @@ func (e *AutoSkillsUnavailableError) IsMissingKey() bool {
 	return errors.Is(e.Cause, skillselect.ErrMissingAPIKey) ||
 		(e.Cause != nil && (e.Cause.Error() == skillselect.ErrMissingAPIKey.Error() ||
 			strings.Contains(e.Cause.Error(), "TYPESAFE_API_KEY is not set")))
+}
+
+// IsKeyRejected reports whether the server answered 401 or 403, which means a key is configured
+// but it is not valid. That is different from a missing key: installing again does not replace it.
+func (e *AutoSkillsUnavailableError) IsKeyRejected() bool {
+	var httpErr *skillselect.HTTPError
+	if !errors.As(e.Cause, &httpErr) {
+		return false
+	}
+	return httpErr.StatusCode == http.StatusUnauthorized || httpErr.StatusCode == http.StatusForbidden
 }
 
 func (e *AutoSkillsUnavailableError) RedactedReason() string {

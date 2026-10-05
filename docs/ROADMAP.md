@@ -56,6 +56,12 @@ What exists is in [`product.md`](product.md).
   `lucind-ai install` prompts for the key when missing (without echo using `stty -echo`) and stores it with mode 0600 in
   a 0700 dir, or skips when non-interactive. Renders the Claude skill as `auto` (orchestrator passes `--auto-skills`, no
   manual skills section needed) or `manual` (fallback where orchestrator writes the section; re-running install switches variants).
+- **Invalid-key guidance and `install --reset-key`** (`fix/invalid-key-guidance`): a headless orchestrator test
+  showed that for a stored but rejected key (HTTP 401) the skill and the exit 5 message pointed to
+  `lucind-ai install`, which never replaces a key that resolves. Exit 5 now prints a different hint when the server
+  answers 401 or 403, the skill says to correct `~/.config/lucind/env` or use the new
+  `lucind-ai install --reset-key` (terminal only, empty answer keeps the current key, warns when the environment
+  variable overrides the file).
 - **Superseded:** the multi-provider herdr work (`herdr-agent-factory`, `herdr-interactive-agents`)
   predates the agy-only contract; its interactive-pane and Stop-hook ideas survive in it.
 

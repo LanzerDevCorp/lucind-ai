@@ -29,7 +29,7 @@ lucind-ai skills select --prompt <file|-> [--allow <glob>]... [--cwd <dir>] [--r
 1. The `TYPESAFE_API_KEY` environment variable (if non-empty).
 2. The user config file `$XDG_CONFIG_HOME/lucind/env` (or `~/.config/lucind/env` when `XDG_CONFIG_HOME` is unset).
 
-Running `lucind-ai install` interactively prompts for `TYPESAFE_API_KEY` and stores it with mode 0600 in `~/.config/lucind/env` (directory mode 0700). The install step automatically selects the Claude skill variant (`auto` vs `manual`) based on whether a key is configured; re-running install switches the variant when a key is configured or changed.
+Running `lucind-ai install` interactively prompts for `TYPESAFE_API_KEY` and stores it with mode 0600 in `~/.config/lucind/env` (directory mode 0700). The install step automatically selects the Claude skill variant (`auto` vs `manual`) based on whether a key is configured; re-running install switches the variant when a key is configured or changed. Plain install never replaces a key that already resolves, even one the server rejects: use `lucind-ai install --reset-key` in a terminal to replace it (an empty answer keeps the current key, and a warning is printed when the `TYPESAFE_API_KEY` environment variable is set, because it overrides the file).
 
 ## Registry Source
 
@@ -290,5 +290,12 @@ And when the cause is a missing API key, stderr includes the third line:
 
 ```text
 lucind-ai: to store the key run lucind-ai install, or put TYPESAFE_API_KEY=... in ~/.config/lucind/env
+```
+
+When the server rejected the key (HTTP 401 or 403) the third line is different, because plain
+install does not replace a key that already resolves:
+
+```text
+lucind-ai: the server rejected the API key; correct TYPESAFE_API_KEY (environment variable or ~/.config/lucind/env) or run lucind-ai install --reset-key (plain lucind-ai install never replaces an existing key)
 ```
 

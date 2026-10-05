@@ -445,7 +445,7 @@ func TestInstall_FlagsAndArguments(t *testing.T) {
 			if code != 1 {
 				t.Fatalf("code=%d, want 1 for args %v", code, args)
 			}
-			if !strings.Contains(stderr.String(), "usage: lucind-ai install [--no-claude-md]\n") {
+			if !strings.Contains(stderr.String(), "usage: lucind-ai install [--no-claude-md] [--reset-key]\n") {
 				t.Errorf("stderr missing usage line for args %v: %s", args, stderr.String())
 			}
 
@@ -457,7 +457,7 @@ func TestInstall_FlagsAndArguments(t *testing.T) {
 			if code != 1 {
 				t.Fatalf("cli run code=%d, want 1 for args %v", code, cliArgs)
 			}
-			if !strings.Contains(stderr.String(), "usage: lucind-ai install [--no-claude-md]\n") {
+			if !strings.Contains(stderr.String(), "usage: lucind-ai install [--no-claude-md] [--reset-key]\n") {
 				t.Errorf("cli run stderr missing usage line for args %v: %s", cliArgs, stderr.String())
 			}
 		})
@@ -478,7 +478,7 @@ func TestInstall_FlagsAndArguments(t *testing.T) {
 			if code != 0 {
 				t.Fatalf("code=%d, want 0 for args %v", code, args)
 			}
-			if !strings.Contains(stdout.String(), "usage: lucind-ai install [--no-claude-md]\n") {
+			if !strings.Contains(stdout.String(), "usage: lucind-ai install [--no-claude-md] [--reset-key]\n") {
 				t.Errorf("stdout missing usage line for args %v: %s", args, stdout.String())
 			}
 
@@ -490,7 +490,7 @@ func TestInstall_FlagsAndArguments(t *testing.T) {
 			if code != 0 {
 				t.Fatalf("cli run code=%d, want 0 for args %v", code, cliArgs)
 			}
-			if !strings.Contains(stdout.String(), "usage: lucind-ai install [--no-claude-md]\n") {
+			if !strings.Contains(stdout.String(), "usage: lucind-ai install [--no-claude-md] [--reset-key]\n") {
 				t.Errorf("cli run stdout missing usage line for args %v: %s", cliArgs, stdout.String())
 			}
 		})

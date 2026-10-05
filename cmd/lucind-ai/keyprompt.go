@@ -94,7 +94,39 @@ func isTerminal(f *os.File) bool {
 	return probe.Run() == nil
 }
 
-func determineVariantAndSetupKey(stdout, stderr io.Writer) (claudeplugin.Variant, error) {
+// resetStoredKey replaces the key stored in the user config after asking for a new one, which plain
+// install never does because it trusts any key that resolves. An empty answer keeps the current setup.
+func resetStoredKey(stdout, stderr io.Writer) (claudeplugin.Variant, error) {
+	if !isStdinTerminal() {
+		return claudeplugin.VariantManual, errors.New("--reset-key needs a terminal to ask for the new key")
+	}
+	_, _ = fmt.Fprintln(stderr, "lucind-ai: replacing the stored TYPESAFE_API_KEY; press Enter to keep the current one")
+	answer, err := readSecretKey(stderr)
+	if err != nil {
+		return claudeplugin.VariantManual, fmt.Errorf("read API key: %w", err)
+	}
+	if answer == "" {
+		if resolveAPIKey() != "" {
+			return claudeplugin.VariantAuto, nil
+		}
+		return claudeplugin.VariantManual, nil
+	}
+	if err := writeUserKey("TYPESAFE_API_KEY", answer); err != nil {
+		return claudeplugin.VariantManual, fmt.Errorf("store API key: %w", err)
+	}
+	if path, err := userconfig.EnvFile(); err == nil {
+		_, _ = fmt.Fprintf(stdout, "lucind-ai: stored the new TYPESAFE_API_KEY in %s\n", path)
+	}
+	if os.Getenv("TYPESAFE_API_KEY") != "" {
+		_, _ = fmt.Fprintln(stderr, "lucind-ai: the TYPESAFE_API_KEY environment variable is set and overrides the stored key; update or unset it too")
+	}
+	return claudeplugin.VariantAuto, nil
+}
+
+func determineVariantAndSetupKey(stdout, stderr io.Writer, resetKey bool) (claudeplugin.Variant, error) {
+	if resetKey {
+		return resetStoredKey(stdout, stderr)
+	}
 	if key := resolveAPIKey(); key != "" {
 		return claudeplugin.VariantAuto, nil
 	}
