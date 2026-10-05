@@ -20,26 +20,26 @@ func runInstall(ctx context.Context, args []string, stdout, stderr io.Writer) in
 		if len(args) == 1 {
 			switch args[0] {
 			case "--help", "-help", "-h", "help":
-				fmt.Fprintln(stdout, installUsage)
+				_, _ = fmt.Fprintln(stdout, installUsage)
 				return 0
 			}
 		}
-		fmt.Fprintln(stderr, installUsage)
+		_, _ = fmt.Fprintln(stderr, installUsage)
 		return 1
 	}
 
 	// 1. Claude skill
 	skillDir, err := claudeInstall()
 	if err != nil {
-		fmt.Fprintf(stderr, "lucind-ai: install claude skill: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "lucind-ai: install claude skill: %v\n", err)
 		return 1
 	}
-	fmt.Fprintf(stdout, "installed claude skill into %s\n", skillDir)
+	_, _ = fmt.Fprintf(stdout, "installed claude skill into %s\n", skillDir)
 
 	// 2. lucind agy plugin
 	root, err := agyplugin.StagingRoot()
 	if err != nil {
-		fmt.Fprintf(stderr, "lucind-ai: install lucind: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "lucind-ai: install lucind: %v\n", err)
 		return 1
 	}
 
@@ -48,13 +48,13 @@ func runInstall(ctx context.Context, args []string, stdout, stderr io.Writer) in
 		exe, err = filepath.EvalSymlinks(exe)
 	}
 	if err != nil {
-		fmt.Fprintf(stderr, "lucind-ai: install lucind: resolve binary path: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "lucind-ai: install lucind: resolve binary path: %v\n", err)
 		return 1
 	}
 
 	obsolete, err := agyplugin.ObsoleteDir()
 	if err != nil {
-		fmt.Fprintf(stderr, "lucind-ai: install lucind: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "lucind-ai: install lucind: %v\n", err)
 		return 1
 	}
 
@@ -65,10 +65,10 @@ func runInstall(ctx context.Context, args []string, stdout, stderr io.Writer) in
 		ObsoleteDir: obsolete,
 	})
 	if err != nil {
-		fmt.Fprintf(stderr, "lucind-ai: install lucind: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "lucind-ai: install lucind: %v\n", err)
 		return 1
 	}
-	fmt.Fprintf(stdout, "installed lucind via agy plugin install (staged at %s)\n", pluginDir)
+	_, _ = fmt.Fprintf(stdout, "installed lucind via agy plugin install (staged at %s)\n", pluginDir)
 
 	// 3. lucind-roles agy plugin
 	rolesDir, err := agyplugin.SetupRoles(ctx, agyplugin.Options{
@@ -76,10 +76,10 @@ func runInstall(ctx context.Context, args []string, stdout, stderr io.Writer) in
 		Agy:         pluginAgy,
 	})
 	if err != nil {
-		fmt.Fprintf(stderr, "lucind-ai: install lucind-roles: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "lucind-ai: install lucind-roles: %v\n", err)
 		return 1
 	}
-	fmt.Fprintf(stdout, "installed lucind-roles via agy plugin install (staged at %s)\n", rolesDir)
+	_, _ = fmt.Fprintf(stdout, "installed lucind-roles via agy plugin install (staged at %s)\n", rolesDir)
 
 	return 0
 }

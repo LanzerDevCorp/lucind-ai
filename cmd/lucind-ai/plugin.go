@@ -19,7 +19,7 @@ const pluginUsage = "usage: lucind-ai plugin install [--dir <staging root>]"
 // pluginDispatch handles `lucind-ai plugin`.
 func pluginDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 || args[0] != "install" {
-		fmt.Fprintln(stderr, pluginUsage)
+		_, _ = fmt.Fprintln(stderr, pluginUsage)
 		return 1
 	}
 
@@ -30,7 +30,7 @@ func pluginDispatch(ctx context.Context, args []string, stdout, stderr io.Writer
 		return 1
 	}
 	if len(fs.Args()) > 0 {
-		fmt.Fprintln(stderr, pluginUsage)
+		_, _ = fmt.Fprintln(stderr, pluginUsage)
 		return 1
 	}
 
@@ -38,7 +38,7 @@ func pluginDispatch(ctx context.Context, args []string, stdout, stderr io.Writer
 	if root == "" {
 		var err error
 		if root, err = agyplugin.StagingRoot(); err != nil {
-			fmt.Fprintf(stderr, "lucind-ai: plugin install: %v\n", err)
+			_, _ = fmt.Fprintf(stderr, "lucind-ai: plugin install: %v\n", err)
 			return 1
 		}
 	}
@@ -48,13 +48,13 @@ func pluginDispatch(ctx context.Context, args []string, stdout, stderr io.Writer
 		exe, err = filepath.EvalSymlinks(exe)
 	}
 	if err != nil {
-		fmt.Fprintf(stderr, "lucind-ai: plugin install: resolve binary path: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "lucind-ai: plugin install: resolve binary path: %v\n", err)
 		return 1
 	}
 
 	obsolete, err := agyplugin.ObsoleteDir()
 	if err != nil {
-		fmt.Fprintf(stderr, "lucind-ai: plugin install: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "lucind-ai: plugin install: %v\n", err)
 		return 1
 	}
 	pluginDir, err := agyplugin.Setup(ctx, agyplugin.Options{
@@ -64,9 +64,9 @@ func pluginDispatch(ctx context.Context, args []string, stdout, stderr io.Writer
 		ObsoleteDir: obsolete,
 	})
 	if err != nil {
-		fmt.Fprintf(stderr, "lucind-ai: plugin install: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "lucind-ai: plugin install: %v\n", err)
 		return 1
 	}
-	fmt.Fprintf(stdout, "installed lucind via agy plugin install (staged at %s)\n", pluginDir)
+	_, _ = fmt.Fprintf(stdout, "installed lucind via agy plugin install (staged at %s)\n", pluginDir)
 	return 0
 }

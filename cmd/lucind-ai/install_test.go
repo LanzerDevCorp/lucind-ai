@@ -82,7 +82,7 @@ func TestInstall_AllThreeStepsInOrder(t *testing.T) {
 		t.Errorf("stdout missing lucind-roles install line: %s", out)
 	}
 
-	if !(idxClaude < idxLucind && idxLucind < idxRoles) {
+	if idxClaude >= idxLucind || idxLucind >= idxRoles {
 		t.Errorf("expected outputs in order (claude, lucind, lucind-roles); got indices %d, %d, %d", idxClaude, idxLucind, idxRoles)
 	}
 

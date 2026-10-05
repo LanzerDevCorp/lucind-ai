@@ -171,18 +171,18 @@ func Run(ctx context.Context, repoRoot, laneID string, stdout, stderr io.Writer)
 
 	verdict, _, reasons, err := Accept(ctx, repoRoot, laneID)
 	if err != nil {
-		fmt.Fprintf(stderr, "accept: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "accept: %v\n", err)
 		return 1
 	}
 
 	if verdict == lane.VerdictAccepted {
-		fmt.Fprintf(stdout, "lane %s accepted\n", laneID)
+		_, _ = fmt.Fprintf(stdout, "lane %s accepted\n", laneID)
 		return 0
 	}
 
-	fmt.Fprintf(stderr, "lane %s rejected\n", laneID)
+	_, _ = fmt.Fprintf(stderr, "lane %s rejected\n", laneID)
 	for _, r := range reasons {
-		fmt.Fprintf(stderr, "  - %s\n", r)
+		_, _ = fmt.Fprintf(stderr, "  - %s\n", r)
 	}
 	return 1
 }

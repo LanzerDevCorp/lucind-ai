@@ -417,14 +417,14 @@ func TestHelperProcess(t *testing.T) {
 		keyPath := os.Getenv("ATTEST_KEY_PATH")
 		key, err := attest.LoadOrCreateKey(keyPath)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "LoadOrCreateKey failed: %v\n", err)
+			_, _ = fmt.Fprintf(os.Stderr, "LoadOrCreateKey failed: %v\n", err)
 			os.Exit(1)
 		}
 		if len(key) != 32 {
-			fmt.Fprintf(os.Stderr, "invalid key length: %d\n", len(key))
+			_, _ = fmt.Fprintf(os.Stderr, "invalid key length: %d\n", len(key))
 			os.Exit(3)
 		}
-		os.Stdout.Write(key)
+		_, _ = os.Stdout.Write(key)
 		os.Exit(0)
 	default:
 		os.Exit(2)

@@ -18,7 +18,9 @@ func runHook(t *testing.T, args []string, stdin string) (int, string, string) {
 
 func TestHookPreToolUse_NoLaneAllows(t *testing.T) {
 	t.Setenv("LUCIND_LANE", "")
-	os.Unsetenv("LUCIND_LANE")
+	if err := os.Unsetenv("LUCIND_LANE"); err != nil {
+		t.Fatalf("unsetenv LUCIND_LANE: %v", err)
+	}
 	code, out, _ := runHook(t, []string{"pre-tool-use"}, `{"workspacePaths":["/tmp"],"toolCall":{"name":"write_to_file","args":{}}}`)
 	if code != 0 || out != `{"decision":"allow"}` {
 		t.Fatalf("code=%d out=%q", code, out)
@@ -26,7 +28,9 @@ func TestHookPreToolUse_NoLaneAllows(t *testing.T) {
 }
 
 func TestHookStop_NoLaneEnds(t *testing.T) {
-	os.Unsetenv("LUCIND_LANE")
+	if err := os.Unsetenv("LUCIND_LANE"); err != nil {
+		t.Fatalf("unsetenv LUCIND_LANE: %v", err)
+	}
 	code, out, _ := runHook(t, []string{"stop"}, `{}`)
 	if code != 0 || out != `{}` {
 		t.Fatalf("code=%d out=%q", code, out)
@@ -34,7 +38,9 @@ func TestHookStop_NoLaneEnds(t *testing.T) {
 }
 
 func TestHook_UnknownSubcommandAndMissingFailOpen(t *testing.T) {
-	os.Unsetenv("LUCIND_LANE")
+	if err := os.Unsetenv("LUCIND_LANE"); err != nil {
+		t.Fatalf("unsetenv LUCIND_LANE: %v", err)
+	}
 	for _, args := range [][]string{nil, {"bogus"}} {
 		code, out, stderr := runHook(t, args, `{}`)
 		if code != 0 || out != `{}` || stderr == "" {

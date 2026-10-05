@@ -120,13 +120,13 @@ func Check(ctx context.Context, repoRoot string) (passed bool, output string, er
 		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
 		timer := time.NewTimer(terminationGrace)
 		select {
-		case cmdErr = <-wait:
+		case <-wait:
 			if !timer.Stop() {
 				<-timer.C
 			}
 		case <-timer.C:
 			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-			cmdErr = <-wait
+			<-wait
 		}
 		return false, out.String(), nil
 	}
