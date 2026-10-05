@@ -679,6 +679,150 @@ func TestConstructPrompt(t *testing.T) {
 	})
 }
 
+func TestConstructPrompt_LayoutEdgeCases(t *testing.T) {
+	laneID := "20261004-120000-abcd"
+	turn := 1
+	allow := []string{"internal/**", "cmd/**"}
+	absResultPath := "/workspace/.lucind/lanes/20261004-120000-abcd/result-1.json"
+	wantMarker := fmt.Sprintf("lucind-lane: %s turn: %d", laneID, turn)
+	wantFooterHeader := "---\n## Lane Contract"
+	wantFooterSuffix := "- Do not edit outside the allowed globs."
+
+	tests := []struct {
+		name       string
+		userPrompt string
+		assert     func(t *testing.T, got string)
+	}{
+		{
+			name: "skills section at the very end of the prompt",
+			userPrompt: "# Feature Title\n\nFeature description.\n\n" +
+				"## Skills to load before work\n/path/to/skill1/SKILL.md\n/path/to/skill2/SKILL.md",
+			assert: func(t *testing.T, got string) {
+				wantSkills := "## Skills to load before work\n/path/to/skill1/SKILL.md\n/path/to/skill2/SKILL.md"
+				wantRest := "# Feature Title\n\nFeature description."
+
+				idxMarker := strings.Index(got, wantMarker)
+				idxSkills := strings.Index(got, wantSkills)
+				idxRest := strings.Index(got, wantRest)
+				idxFooter := strings.Index(got, wantFooterHeader)
+
+				if idxSkills == -1 || idxRest == -1 || idxFooter == -1 {
+					t.Fatalf("missing required sections in prompt:\n%s", got)
+				}
+				if idxMarker >= idxSkills || idxSkills >= idxRest || idxRest >= idxFooter {
+					t.Errorf("expected order: marker < skills < rest < footer; got idxMarker=%d idxSkills=%d idxRest=%d idxFooter=%d",
+						idxMarker, idxSkills, idxRest, idxFooter)
+				}
+			},
+		},
+		{
+			name: "a blank line inside the section ends it",
+			userPrompt: "# Feature Title\n\n" +
+				"## Skills to load before work\n/path/to/skill1/SKILL.md\n\n/path/to/skill2/SKILL.md\n\n" +
+				"## Goal\nImplement feature.",
+			assert: func(t *testing.T, got string) {
+				// The blank line inside the skills section causes extractSkillsSection to end
+				// the skills section after skill1. Skill2 remains in the rest of the prompt.
+				wantSkills := "## Skills to load before work\n/path/to/skill1/SKILL.md"
+				wantRest := "# Feature Title\n\n/path/to/skill2/SKILL.md\n\n## Goal\nImplement feature."
+
+				idxMarker := strings.Index(got, wantMarker)
+				idxSkills := strings.Index(got, wantSkills)
+				idxRest := strings.Index(got, wantRest)
+				idxFooter := strings.Index(got, wantFooterHeader)
+
+				if idxSkills == -1 || idxRest == -1 || idxFooter == -1 {
+					t.Fatalf("missing required sections in prompt:\n%s", got)
+				}
+				if idxMarker >= idxSkills || idxSkills >= idxRest || idxRest >= idxFooter {
+					t.Errorf("expected order: marker < skills < rest < footer; got idxMarker=%d idxSkills=%d idxRest=%d idxFooter=%d",
+						idxMarker, idxSkills, idxRest, idxFooter)
+				}
+			},
+		},
+		{
+			name: "CRLF line endings and trailing spaces on the heading line",
+			userPrompt: "# Feature Title\r\n\r\n" +
+				"## Skills to load before work   \r\n/path/to/skill1/SKILL.md\r\n\r\n" +
+				"## Goal\r\nImplement feature.",
+			assert: func(t *testing.T, got string) {
+				wantSkillPath := "/path/to/skill1/SKILL.md"
+				wantTitle := "# Feature Title"
+				wantGoal := "## Goal"
+
+				idxMarker := strings.Index(got, wantMarker)
+				idxSkillsHeading := strings.Index(got, "## Skills to load before work")
+				idxSkillPath := strings.Index(got, wantSkillPath)
+				idxTitle := strings.Index(got, wantTitle)
+				idxGoal := strings.Index(got, wantGoal)
+				idxFooter := strings.Index(got, wantFooterHeader)
+
+				if idxSkillsHeading == -1 || idxSkillPath == -1 || idxTitle == -1 || idxGoal == -1 || idxFooter == -1 {
+					t.Fatalf("missing required sections in prompt:\n%s", got)
+				}
+				if idxMarker >= idxSkillsHeading || idxSkillsHeading >= idxTitle || idxTitle >= idxGoal || idxGoal >= idxFooter {
+					t.Errorf("expected order: marker < skills < title < goal < footer; got idxMarker=%d idxSkills=%d idxTitle=%d idxGoal=%d idxFooter=%d",
+						idxMarker, idxSkillsHeading, idxTitle, idxGoal, idxFooter)
+				}
+			},
+		},
+		{
+			name: "similar heading is not treated as skills section",
+			userPrompt: "# Feature Title\n\n" +
+				"## Skills to load\n/path/to/skill1/SKILL.md\n\n" +
+				"## Goal\nImplement feature.",
+			assert: func(t *testing.T, got string) {
+				// "## Skills to load" must not be extracted or moved to the top.
+				// The user prompt remains in its original order under rest.
+				wantSimilar := "## Skills to load\n/path/to/skill1/SKILL.md"
+				wantTitle := "# Feature Title"
+				wantGoal := "## Goal\nImplement feature."
+
+				if strings.Contains(got, "## Skills to load before work") {
+					t.Errorf("prompt should not contain canonical skills heading; got:\n%s", got)
+				}
+
+				idxMarker := strings.Index(got, wantMarker)
+				idxTitle := strings.Index(got, wantTitle)
+				idxSimilar := strings.Index(got, wantSimilar)
+				idxGoal := strings.Index(got, wantGoal)
+				idxFooter := strings.Index(got, wantFooterHeader)
+
+				if idxTitle == -1 || idxSimilar == -1 || idxGoal == -1 || idxFooter == -1 {
+					t.Fatalf("missing required sections in prompt:\n%s", got)
+				}
+				if idxMarker >= idxTitle || idxTitle >= idxSimilar || idxSimilar >= idxGoal || idxGoal >= idxFooter {
+					t.Errorf("expected order: marker < title < similar < goal < footer; got idxMarker=%d idxTitle=%d idxSimilar=%d idxGoal=%d idxFooter=%d",
+						idxMarker, idxTitle, idxSimilar, idxGoal, idxFooter)
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := dispatch.ConstructPrompt(tt.userPrompt, laneID, turn, allow, absResultPath, nil)
+
+			// In every case the marker line is line 1.
+			lines := strings.Split(got, "\n")
+			if len(lines) == 0 || lines[0] != wantMarker {
+				t.Fatalf("line 0 = %q, want marker %q", lines[0], wantMarker)
+			}
+
+			// In every case the footer is last.
+			trimmedGot := strings.TrimSpace(got)
+			if !strings.HasSuffix(trimmedGot, wantFooterSuffix) {
+				t.Errorf("prompt should end with %q; got suffix:\n%s", wantFooterSuffix, trimmedGot)
+			}
+			if !strings.Contains(got, wantFooterHeader) {
+				t.Fatalf("prompt missing footer header %q in:\n%s", wantFooterHeader, got)
+			}
+
+			tt.assert(t, got)
+		})
+	}
+}
+
 func TestDispatchChecks(t *testing.T) {
 	t.Run("NewLaneWithChecks", func(t *testing.T) {
 		t.Setenv("HERDR_ENV", "1")
