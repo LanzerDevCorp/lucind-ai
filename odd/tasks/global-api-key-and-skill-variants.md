@@ -49,12 +49,12 @@ Out: validating the key against Jev, `lucind-ai` flags to pass the key, other se
 
 ## Tasks
 
-- [ ] T1 userconfig: path resolution, tolerant reader, 0600 writer, and `skillselect` using env then
+- [x] T1 userconfig: path resolution, tolerant reader, 0600 writer, and `skillselect` using env then
       file (rename `KeyFromEnv` to `ResolveKey`); update the missing-key error text.
-- [ ] T2 skill variants: markers in `SKILL.md`, a render step in `claudeplugin`, both variants tested.
-- [ ] T3 install flow: resolve key, prompt when absent and a terminal exists, store it, pick the
+- [x] T2 skill variants: markers in `SKILL.md`, a render step in `claudeplugin`, both variants tested.
+- [x] T3 install flow: resolve key, prompt when absent and a terminal exists, store it, pick the
       variant, report which one was installed.
-- [ ] T4 docs: README, product, skill-selection, ROADMAP (Done entry, remove the `.env` note).
+- [x] T4 docs: README, product, skill-selection, ROADMAP (Done entry, remove the `.env` note).
 
 ## Acceptance criteria
 
@@ -74,9 +74,21 @@ Out: validating the key against Jev, `lucind-ai` flags to pass the key, other se
 
 ## Progress
 
-Branch created. No task started.
+T1-T4 done in lane `20261005-183907-f159` (single writer, one tree, `--auto-skills`; Jev picked
+6 skills and the envelope's `skills_loaded` listed the 7 files really read). Route: delegated (lane).
+Evidence: `golangci-lint run` clean, `CGO_ENABLED=0 go build ./...` OK, `go test ./... -race
+-count=1` green (`accept` re-ran the checks on the final tree). Isolation check: all 14 packages
+pass with a `HOME` that holds a real-looking `~/.config/lucind/env` and `XDG_CONFIG_HOME` unset, so
+no test reads the real config.
+Orchestrator fix after review (`cmd/lucind-ai/keyprompt.go`): Ctrl-C now restores terminal echo,
+Ctrl-D at the prompt skips instead of failing with EOF, and the prompt is printed once when `stty`
+is missing. The hidden-read path needs a real terminal, so it has no automated test.
+Commits: `4b11c58` (userconfig and key resolution), `0bd1c8d` (install flow and skill variants),
+`3ffba95` (docs). About 1,600 authored lines including tests, over the 400-line heuristic because
+it spans five packages with their tests; no size-driven rework.
+RDD: off for this clone (clone-local), so no native review.
 
 ## Next step
 
-Dispatch one lane (single writer, one tree) with `--auto-skills`, review the diff against this
-document, then `accept`.
+Merge to `dev`, run `make install`, then run `lucind-ai install` in a real terminal to store the key
+and switch the skill to the auto variant. Verify by dispatching a lane without exporting the key.
