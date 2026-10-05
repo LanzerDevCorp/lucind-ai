@@ -8,14 +8,13 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/LanzerDevCorp/lucind-ai/internal/lane"
 	"github.com/LanzerDevCorp/lucind-ai/internal/result"
 	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
 func TestReadFullyPopulatedEnvelopeRoundTrips(t *testing.T) {
 	src := `{
-		"packet_id": "fix-auth",
+		"lane_id": "fix-auth",
 		"status": "deviated",
 		"summary": "Fixed the cookie expiry bug.",
 		"hard_stops": [
@@ -29,13 +28,13 @@ func TestReadFullyPopulatedEnvelopeRoundTrips(t *testing.T) {
 			{"criterion": "cookies survive restart", "met": true, "evidence": "go test ./internal/auth/ -run TestSurvivesRestart: PASS"}
 		],
 		"questions": [
-			{"question": "should the TTL be configurable?", "why_blocking": "no default is specified in the packet", "options": ["24h", "7d"], "recommendation": "24h"}
+			{"question": "should the TTL be configurable?", "why_blocking": "no default is specified in the brief", "options": ["24h", "7d"], "recommendation": "24h"}
 		],
 		"deviations": [
 			{"expected": "edit internal/auth/session.go only", "actual": "also edited internal/auth/cookie.go", "reason": "expiry logic lived there", "reversible": true}
 		],
 		"findings": [
-			{"finding": "cookie.go has a second expiry bug", "evidence": "internal/auth/cookie.go:42", "affects": "packet fix-cookie-race"}
+			{"finding": "cookie.go has a second expiry bug", "evidence": "internal/auth/cookie.go:42", "affects": "lane fix-cookie-race"}
 		],
 		"commit": "abc1234",
 		"session_id": "sess-789"
@@ -49,8 +48,8 @@ func TestReadFullyPopulatedEnvelopeRoundTrips(t *testing.T) {
 		t.Fatalf("Read() error = %v, want nil", err)
 	}
 
-	if e.PacketID != "fix-auth" {
-		t.Errorf("PacketID = %q, want %q", e.PacketID, "fix-auth")
+	if e.LaneID != "fix-auth" {
+		t.Errorf("LaneID = %q, want %q", e.LaneID, "fix-auth")
 	}
 	if e.Status != "deviated" {
 		t.Errorf("Status = %q, want %q", e.Status, "deviated")
@@ -91,7 +90,7 @@ func TestReadFullyPopulatedEnvelopeRoundTrips(t *testing.T) {
 	}
 	wantQuestion := result.Question{
 		Question:       "should the TTL be configurable?",
-		WhyBlocking:    "no default is specified in the packet",
+		WhyBlocking:    "no default is specified in the brief",
 		Options:        []string{"24h", "7d"},
 		Recommendation: "24h",
 	}
@@ -119,20 +118,17 @@ func TestReadFullyPopulatedEnvelopeRoundTrips(t *testing.T) {
 	wantFinding := result.Finding{
 		Finding:  "cookie.go has a second expiry bug",
 		Evidence: "internal/auth/cookie.go:42",
-		Affects:  "packet fix-cookie-race",
+		Affects:  "lane fix-cookie-race",
 	}
 	if got := e.Findings[0]; got != wantFinding {
 		t.Errorf("Findings[0] = %+v, want %+v", got, wantFinding)
 	}
 
-	if got, want := e.LaneStatus(), lane.Deviated; got != want {
-		t.Errorf("LaneStatus() = %v, want %v", got, want)
-	}
 }
 
 func TestReadExternalChangesRoundTrips(t *testing.T) {
 	src := `{
-		"packet_id": "fix-mcp-config",
+		"lane_id": "fix-mcp-config",
 		"status": "done",
 		"summary": "Updated the antigravity MCP config outside the worktree.",
 		"hard_stops": [],
@@ -170,7 +166,7 @@ func TestReadExternalChangesRoundTrips(t *testing.T) {
 
 func TestReadEnvelopeWithoutExternalChangesStillParses(t *testing.T) {
 	src := `{
-		"packet_id": "fix-auth",
+		"lane_id": "fix-auth",
 		"status": "done",
 		"summary": "Did the thing.",
 		"hard_stops": []
@@ -202,7 +198,7 @@ func TestReadMissingFileReturnsClearError(t *testing.T) {
 
 func TestReadMalformedJSONReturnsClearError(t *testing.T) {
 	fsys := fstest.MapFS{
-		"result.json": {Data: []byte(`{"packet_id": "fix-auth", "status":`)},
+		"result.json": {Data: []byte(`{"lane_id": "fix-auth", "status":`)},
 	}
 
 	_, err := result.Read(fsys, "result.json")
@@ -222,7 +218,7 @@ func TestReadSchemaViolations(t *testing.T) {
 		{
 			name: "missing mandatory hard_stops",
 			src: `{
-				"packet_id": "fix-auth",
+				"lane_id": "fix-auth",
 				"status": "done",
 				"summary": "Did the thing."
 			}`,
@@ -230,7 +226,7 @@ func TestReadSchemaViolations(t *testing.T) {
 		{
 			name: "unknown top-level property",
 			src: `{
-				"packet_id": "fix-auth",
+				"lane_id": "fix-auth",
 				"status": "done",
 				"summary": "Did the thing.",
 				"hard_stops": [],
@@ -240,7 +236,7 @@ func TestReadSchemaViolations(t *testing.T) {
 		{
 			name: "read_only top-level property",
 			src: `{
-				"packet_id": "fix-auth",
+				"lane_id": "fix-auth",
 				"status": "done",
 				"summary": "Did the thing.",
 				"hard_stops": [],
@@ -250,7 +246,7 @@ func TestReadSchemaViolations(t *testing.T) {
 		{
 			name: "status outside the enum",
 			src: `{
-				"packet_id": "fix-auth",
+				"lane_id": "fix-auth",
 				"status": "in_progress",
 				"summary": "Still working.",
 				"hard_stops": []
@@ -259,7 +255,7 @@ func TestReadSchemaViolations(t *testing.T) {
 		{
 			name: "external_changes entry missing revert",
 			src: `{
-				"packet_id": "fix-auth",
+				"lane_id": "fix-auth",
 				"status": "done",
 				"summary": "Did the thing.",
 				"hard_stops": [],
@@ -271,7 +267,7 @@ func TestReadSchemaViolations(t *testing.T) {
 		{
 			name: "external_changes entry missing why",
 			src: `{
-				"packet_id": "fix-auth",
+				"lane_id": "fix-auth",
 				"status": "done",
 				"summary": "Did the thing.",
 				"hard_stops": [],
@@ -283,7 +279,7 @@ func TestReadSchemaViolations(t *testing.T) {
 		{
 			name: "external_changes entry has unknown property",
 			src: `{
-				"packet_id": "fix-auth",
+				"lane_id": "fix-auth",
 				"status": "done",
 				"summary": "Did the thing.",
 				"hard_stops": [],
@@ -301,7 +297,7 @@ func TestReadSchemaViolations(t *testing.T) {
 		{
 			name: "external_changes entry has invalid change value",
 			src: `{
-				"packet_id": "fix-auth",
+				"lane_id": "fix-auth",
 				"status": "done",
 				"summary": "Did the thing.",
 				"hard_stops": [],
@@ -334,59 +330,10 @@ func TestReadSchemaViolations(t *testing.T) {
 	}
 }
 
-func TestReadMinimalEnvelopeMapsLaneStatus(t *testing.T) {
-	tests := []struct {
-		name   string
-		status string
-		want   lane.Status
-	}{
-		{"done", "done", lane.Done},
-		{"blocked", "blocked", lane.Blocked},
-		{"deviated", "deviated", lane.Deviated},
-		{"failed", "failed", lane.Failed},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			src := `{
-				"packet_id": "fix-auth",
-				"status": "` + tt.status + `",
-				"summary": "Did the thing.",
-				"hard_stops": []
-			}`
-			fsys := fstest.MapFS{
-				"result.json": {Data: []byte(src)},
-			}
-
-			e, err := result.Read(fsys, "result.json")
-			if err != nil {
-				t.Fatalf("Read() error = %v, want nil", err)
-			}
-
-			if e.PacketID != "fix-auth" {
-				t.Errorf("PacketID = %q, want %q", e.PacketID, "fix-auth")
-			}
-			if e.Status != tt.status {
-				t.Errorf("Status = %q, want %q", e.Status, tt.status)
-			}
-			if e.Summary != "Did the thing." {
-				t.Errorf("Summary = %q, want %q", e.Summary, "Did the thing.")
-			}
-			if len(e.HardStops) != 0 {
-				t.Errorf("HardStops = %v, want empty", e.HardStops)
-			}
-
-			if got := e.LaneStatus(); got != tt.want {
-				t.Errorf("LaneStatus() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
 func TestEnvelopeCommitSchemaContract(t *testing.T) {
 	// A minimal envelope that omits commit still Reads successfully.
 	src := `{
-		"packet_id": "fix-auth",
+		"lane_id": "fix-auth",
 		"status": "done",
 		"summary": "Did the thing.",
 		"hard_stops": []
@@ -423,7 +370,7 @@ func TestEnvelopeCommitSchemaContract(t *testing.T) {
 	if !ok {
 		t.Fatal("schema properties missing 'commit'")
 	}
-	if !strings.Contains(strings.ToLower(commitProp.Description), "omitted on a read-only packet") {
+	if !strings.Contains(strings.ToLower(commitProp.Description), "omitted on a read-only lane") {
 		t.Errorf("commit description %q does not mention read-only omission", commitProp.Description)
 	}
 	if !strings.Contains(commitProp.Description, "the binary does not trust this field for enforcement") {
@@ -433,7 +380,7 @@ func TestEnvelopeCommitSchemaContract(t *testing.T) {
 
 func TestVerifyResultEnvelopeSchemaCompliance(t *testing.T) {
 	validVerifyJSON := `{
-		"packet_id": "verify-sample-cursor-agent",
+		"lane_id": "verify-sample-agy",
 		"status": "done",
 		"summary": "VERDICT: PASS. Implementation satisfies all spec requirements in specs/sample/spec.md. Mechanical checks passed cleanly.",
 		"hard_stops": [
@@ -477,8 +424,8 @@ func TestVerifyResultEnvelopeSchemaCompliance(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Read(validVerifyJSON) error = %v, want nil", err)
 	}
-	if e.PacketID != "verify-sample-cursor-agent" {
-		t.Errorf("PacketID = %q, want %q", e.PacketID, "verify-sample-cursor-agent")
+	if e.LaneID != "verify-sample-agy" {
+		t.Errorf("LaneID = %q, want %q", e.LaneID, "verify-sample-agy")
 	}
 	if e.Commit != "" {
 		t.Errorf("Commit = %q, want empty", e.Commit)
@@ -497,7 +444,7 @@ func TestVerifyResultEnvelopeSchemaCompliance(t *testing.T) {
 
 	// 2. Add unauthorized top-level property "verdict": "pass".
 	invalidVerifyJSON := `{
-		"packet_id": "verify-sample-cursor-agent",
+		"lane_id": "verify-sample-agy",
 		"status": "done",
 		"summary": "VERDICT: PASS. Implementation satisfies all spec requirements in specs/sample/spec.md. Mechanical checks passed cleanly.",
 		"verdict": "pass",
@@ -530,15 +477,15 @@ func TestVerifyResultEnvelopeSchemaCompliance(t *testing.T) {
 
 func TestReadInteractionRequiredValid(t *testing.T) {
 	src := `{
-		"packet_id": "test-interaction",
+		"lane_id": "test-interaction",
 		"status": "interaction_required",
 		"summary": "Worker needs clarification on database.",
 		"hard_stops": [],
 		"interaction": {
 			"question": "Which database engine should be used?",
-			"reason": "Specification does not select between postgres and sqlite",
-			"unblock_response": "Specify postgres or sqlite in packet options",
-			"options": ["postgres", "sqlite"]
+			"reason": "Specification does not select between postgres and mysql",
+			"unblock_response": "Specify postgres or mysql in lane options",
+			"options": ["postgres", "mysql"]
 		}
 	}`
 	fsys := fstest.MapFS{
@@ -559,23 +506,21 @@ func TestReadInteractionRequiredValid(t *testing.T) {
 	if e.Interaction.Question != "Which database engine should be used?" {
 		t.Errorf("Question = %q, want expected", e.Interaction.Question)
 	}
-	if e.Interaction.Reason != "Specification does not select between postgres and sqlite" {
+	if e.Interaction.Reason != "Specification does not select between postgres and mysql" {
 		t.Errorf("Reason = %q, want expected", e.Interaction.Reason)
 	}
-	if e.Interaction.UnblockResponse != "Specify postgres or sqlite in packet options" {
+	if e.Interaction.UnblockResponse != "Specify postgres or mysql in lane options" {
 		t.Errorf("UnblockResponse = %q, want expected", e.Interaction.UnblockResponse)
 	}
-	if len(e.Interaction.Options) != 2 || e.Interaction.Options[0] != "postgres" || e.Interaction.Options[1] != "sqlite" {
-		t.Errorf("Options = %v, want [postgres sqlite]", e.Interaction.Options)
+	if len(e.Interaction.Options) != 2 || e.Interaction.Options[0] != "postgres" || e.Interaction.Options[1] != "mysql" {
+		t.Errorf("Options = %v, want [postgres mysql]", e.Interaction.Options)
 	}
-	if got, want := e.LaneStatus(), lane.Blocked; got != want {
-		t.Errorf("LaneStatus() = %v, want %v", got, want)
-	}
+
 }
 
 func TestReadInteractionRequiredMissingInteractionFails(t *testing.T) {
 	src := `{
-		"packet_id": "test-interaction",
+		"lane_id": "test-interaction",
 		"status": "interaction_required",
 		"summary": "Worker needs clarification.",
 		"hard_stops": []
@@ -598,7 +543,7 @@ func TestReadDoneWithInteractionForbiddenFails(t *testing.T) {
 	for _, st := range statuses {
 		t.Run("status_"+st+"_forbids_interaction", func(t *testing.T) {
 			src := `{
-				"packet_id": "test-interaction",
+				"lane_id": "test-interaction",
 				"status": "` + st + `",
 				"summary": "Work status.",
 				"hard_stops": [],

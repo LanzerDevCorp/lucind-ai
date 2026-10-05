@@ -417,14 +417,14 @@ func TestHelperProcess(t *testing.T) {
 		keyPath := os.Getenv("ATTEST_KEY_PATH")
 		key, err := attest.LoadOrCreateKey(keyPath)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "LoadOrCreateKey failed: %v\n", err)
+			_, _ = fmt.Fprintf(os.Stderr, "LoadOrCreateKey failed: %v\n", err)
 			os.Exit(1)
 		}
 		if len(key) != 32 {
-			fmt.Fprintf(os.Stderr, "invalid key length: %d\n", len(key))
+			_, _ = fmt.Fprintf(os.Stderr, "invalid key length: %d\n", len(key))
 			os.Exit(3)
 		}
-		os.Stdout.Write(key)
+		_, _ = os.Stdout.Write(key)
 		os.Exit(0)
 	default:
 		os.Exit(2)
@@ -660,6 +660,147 @@ func TestHasValidAttestation(t *testing.T) {
 	}
 	if valid {
 		t.Fatalf("expected valid=false for failing entry")
+	}
+}
+
+func TestFindValidAttestation(t *testing.T) {
+	ctx := context.Background()
+	repoDir := t.TempDir()
+	initGitRepo(t, repoDir)
+
+	treeHash, err := attest.TreeHash(ctx, repoDir)
+	if err != nil {
+		t.Fatalf("TreeHash failed: %v", err)
+	}
+
+	logDir := t.TempDir()
+	key := []byte("01234567890123456789012345678901")
+	command := "sh lucind-checks.sh"
+
+	// 1. Not found initially
+	entry, path, found, err := attest.FindValidAttestation(ctx, repoDir, command, treeHash, key, logDir)
+	if err != nil {
+		t.Fatalf("FindValidAttestation error: %v", err)
+	}
+	if found || path != "" {
+		t.Fatalf("expected found=false and empty path, got found=%v path=%q", found, path)
+	}
+
+	// 2. Found after writing entry
+	writtenEntry := attest.Entry{
+		Version:    1,
+		RepoID:     "somerepoid",
+		Command:    command,
+		ExitCode:   0,
+		TreeHash:   treeHash,
+		StartedAt:  time.Now().Add(-1 * time.Second).Format(time.RFC3339Nano),
+		FinishedAt: time.Now().Format(time.RFC3339Nano),
+	}
+	writtenEntry.MAC = attest.ComputeMAC(writtenEntry, key)
+	writtenPath, err := attest.WriteEntry(logDir, writtenEntry)
+	if err != nil {
+		t.Fatalf("WriteEntry failed: %v", err)
+	}
+
+	entry, path, found, err = attest.FindValidAttestation(ctx, repoDir, command, treeHash, key, logDir)
+	if err != nil {
+		t.Fatalf("FindValidAttestation error: %v", err)
+	}
+	if !found {
+		t.Fatalf("expected found=true")
+	}
+	if path != writtenPath {
+		t.Fatalf("expected path=%q, got %q", writtenPath, path)
+	}
+	if entry.TreeHash != treeHash || entry.Command != command || entry.ExitCode != 0 {
+		t.Fatalf("entry mismatch: %+v", entry)
+	}
+
+	// 3. Different command
+	_, _, found, err = attest.FindValidAttestation(ctx, repoDir, "sh other.sh", treeHash, key, logDir)
+	if err != nil {
+		t.Fatalf("FindValidAttestation error: %v", err)
+	}
+	if found {
+		t.Fatalf("expected found=false for different command")
+	}
+
+	// 4. Different tree hash
+	_, _, found, err = attest.FindValidAttestation(ctx, repoDir, command, "0000000000000000000000000000000000000000", key, logDir)
+	if err != nil {
+		t.Fatalf("FindValidAttestation error: %v", err)
+	}
+	if found {
+		t.Fatalf("expected found=false for different tree hash")
+	}
+
+	// 5. Failing exit code
+	failingDir := t.TempDir()
+	failingEntry := writtenEntry
+	failingEntry.ExitCode = 1
+	failingEntry.MAC = attest.ComputeMAC(failingEntry, key)
+	if _, err := attest.WriteEntry(failingDir, failingEntry); err != nil {
+		t.Fatalf("WriteEntry failed: %v", err)
+	}
+	_, _, found, err = attest.FindValidAttestation(ctx, repoDir, command, treeHash, key, failingDir)
+	if err != nil {
+		t.Fatalf("FindValidAttestation error: %v", err)
+	}
+	if found {
+		t.Fatalf("expected found=false for failing exit code")
+	}
+
+	// 6. Tampered MAC
+	tamperedDir := t.TempDir()
+	tamperedEntry := writtenEntry
+	tamperedEntry.MAC = "invalidmac"
+	if _, err := attest.WriteEntry(tamperedDir, tamperedEntry); err != nil {
+		t.Fatalf("WriteEntry failed: %v", err)
+	}
+	_, _, found, err = attest.FindValidAttestation(ctx, repoDir, command, treeHash, key, tamperedDir)
+	if err != nil {
+		t.Fatalf("FindValidAttestation error: %v", err)
+	}
+	if found {
+		t.Fatalf("expected found=false for tampered MAC")
+	}
+
+	// 7. Foreign repo ID when logDir is resolved from repoRoot
+	foreignStateDir := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", foreignStateDir)
+	foreignConfigDir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", foreignConfigDir)
+	foreignKey, err := attest.LoadOrCreateKey("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	commonDir, err := attest.RepoCommonDir(ctx, repoDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repoLogDir, err := attest.ResolveStateDir(attest.RepoID(commonDir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	foreignEntry := attest.Entry{
+		Version:    1,
+		RepoID:     "foreign-repo-id",
+		Command:    command,
+		ExitCode:   0,
+		TreeHash:   treeHash,
+		StartedAt:  time.Now().Add(-1 * time.Second).Format(time.RFC3339Nano),
+		FinishedAt: time.Now().Format(time.RFC3339Nano),
+	}
+	foreignEntry.MAC = attest.ComputeMAC(foreignEntry, foreignKey)
+	if _, err := attest.WriteEntry(repoLogDir, foreignEntry); err != nil {
+		t.Fatal(err)
+	}
+	_, _, found, err = attest.FindValidAttestation(ctx, repoDir, command, treeHash, foreignKey, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if found {
+		t.Fatal("expected found=false for foreign repo ID")
 	}
 }
 

@@ -1,43 +1,48 @@
-// Package lane is the zero-dependency vocabulary shared by internal/barrier
-// and internal/ledger. It imports nothing outside the standard library, so
-// that "the barrier never imports the ledger" is a compile-time fact rather
-// than a review convention.
 package lane
 
-// Status is a lane's execution state.
+// Status represents a lane's execution and review lifecycle state.
 type Status string
 
 const (
+	StatusRunning  Status = "running"
+	StatusDone     Status = "done"
+	StatusFailed   Status = "failed"
+	StatusTimeout  Status = "timeout"
+	StatusAccepted Status = "accepted"
+	StatusRejected Status = "rejected"
+
+	// Deprecated aliases kept for compatibility during migration.
+	Running         = StatusRunning
+	Done            = StatusDone
+	Failed          = StatusFailed
 	Pending  Status = "pending"
-	Running  Status = "running"
-	Done     Status = "done"
 	Blocked  Status = "blocked"
 	Deviated Status = "deviated"
-	Failed   Status = "failed"
 )
 
-// Terminal reports whether s is one of the four terminal states
-// (done, blocked, deviated, failed). Pending and running are not terminal.
+// Terminal reports whether s is a terminal state.
+// Execution outcomes (done, failed, timeout) and review outcomes
+// (accepted, rejected) are terminal. Running is not terminal.
 func (s Status) Terminal() bool {
 	switch s {
-	case Done, Blocked, Deviated, Failed:
+	case StatusDone, StatusFailed, StatusTimeout, StatusAccepted, StatusRejected:
 		return true
 	default:
 		return false
 	}
 }
 
-// Valid reports whether s is one of the six defined statuses.
+// Valid reports whether s is one of the valid statuses.
 func (s Status) Valid() bool {
 	switch s {
-	case Pending, Running, Done, Blocked, Deviated, Failed:
+	case StatusRunning, StatusDone, StatusFailed, StatusTimeout, StatusAccepted, StatusRejected:
 		return true
 	default:
 		return false
 	}
 }
 
-// State is the only type that crosses the ledger -> barrier boundary.
+// State represents a lane identifier and its status.
 type State struct {
 	LaneID string
 	Status Status

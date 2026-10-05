@@ -138,7 +138,7 @@ func LoadOrCreateKey(path string) ([]byte, error) {
 		return nil, fmt.Errorf("create temp key file: %w", err)
 	}
 	tmpName := tmp.Name()
-	defer os.Remove(tmpName)
+	defer func() { _ = os.Remove(tmpName) }()
 	if err := tmp.Chmod(0600); err != nil {
 		_ = tmp.Close()
 		return nil, fmt.Errorf("chmod temp key file: %w", err)
@@ -220,6 +220,51 @@ func RepoID(commonDir string) string {
 	return hex.EncodeToString(sum[:])
 }
 
+// FindValidAttestation looks for a valid attestation entry matching command and expectedTreeHash signed with key.
+// If key is empty, it loads the key via LoadOrCreateKey("").
+// If logDir is empty, it resolves logDir via RepoCommonDir and ResolveStateDir for repoRoot.
+// It returns (entry, path, true, nil) if a valid attestation matching command, expectedTreeHash, exit code 0,
+// and valid MAC is found, or (Entry{}, "", false, nil) if no valid attestation exists.
+func FindValidAttestation(ctx context.Context, repoRoot, command, expectedTreeHash string, key []byte, logDir string) (Entry, string, bool, error) {
+	if len(key) == 0 {
+		var err error
+		key, err = LoadOrCreateKey("")
+		if err != nil {
+			return Entry{}, "", false, fmt.Errorf("load attestation key: %w", err)
+		}
+	}
+	var wantRepoID string
+	if logDir == "" {
+		commonDir, err := RepoCommonDir(ctx, repoRoot)
+		if err != nil {
+			return Entry{}, "", false, fmt.Errorf("resolve repo common dir: %w", err)
+		}
+		wantRepoID = RepoID(commonDir)
+		logDir, err = ResolveStateDir(wantRepoID)
+		if err != nil {
+			return Entry{}, "", false, fmt.Errorf("resolve log dir: %w", err)
+		}
+	}
+
+	items, err := readEntriesWithPaths(logDir)
+	if err != nil {
+		return Entry{}, "", false, fmt.Errorf("read entries: %w", err)
+	}
+
+	for _, item := range items {
+		e := item.Entry
+		if wantRepoID != "" && e.RepoID != wantRepoID {
+			continue
+		}
+		if e.Command == command && e.TreeHash == expectedTreeHash && e.ExitCode == 0 {
+			if VerifyMAC(e, key) {
+				return e, item.Path, true, nil
+			}
+		}
+	}
+	return Entry{}, "", false, nil
+}
+
 // HasValidAttestation checks if logDir contains a valid attestation entry matching command
 // and expectedTreeHash signed with key.
 // If key is empty, it loads the key via LoadOrCreateKey("").
@@ -227,42 +272,8 @@ func RepoID(commonDir string) string {
 // It returns (true, nil) if a valid attestation matching command, expectedTreeHash, exit code 0,
 // and valid MAC is found, or (false, nil) if no valid attestation exists.
 func HasValidAttestation(ctx context.Context, repoRoot, command, expectedTreeHash string, key []byte, logDir string) (bool, error) {
-	if len(key) == 0 {
-		var err error
-		key, err = LoadOrCreateKey("")
-		if err != nil {
-			return false, fmt.Errorf("load attestation key: %w", err)
-		}
-	}
-	var wantRepoID string
-	if logDir == "" {
-		commonDir, err := RepoCommonDir(ctx, repoRoot)
-		if err != nil {
-			return false, fmt.Errorf("resolve repo common dir: %w", err)
-		}
-		wantRepoID = RepoID(commonDir)
-		logDir, err = ResolveStateDir(wantRepoID)
-		if err != nil {
-			return false, fmt.Errorf("resolve log dir: %w", err)
-		}
-	}
-
-	entries, err := ReadEntries(logDir)
-	if err != nil {
-		return false, fmt.Errorf("read entries: %w", err)
-	}
-
-	for _, e := range entries {
-		if wantRepoID != "" && e.RepoID != wantRepoID {
-			continue
-		}
-		if e.Command == command && e.TreeHash == expectedTreeHash && e.ExitCode == 0 {
-			if VerifyMAC(e, key) {
-				return true, nil
-			}
-		}
-	}
-	return false, nil
+	_, _, found, err := FindValidAttestation(ctx, repoRoot, command, expectedTreeHash, key, logDir)
+	return found, err
 }
 
 // TreeHash computes a git tree hash of the current working tree including uncommitted
@@ -275,7 +286,7 @@ func TreeHash(ctx context.Context, repoRoot string) (string, error) {
 	tmpIndexPath := tmpFile.Name()
 	_ = tmpFile.Close()
 	_ = os.Remove(tmpIndexPath)
-	defer os.Remove(tmpIndexPath)
+	defer func() { _ = os.Remove(tmpIndexPath) }()
 
 	env := append(os.Environ(), "GIT_INDEX_FILE="+tmpIndexPath)
 
@@ -368,10 +379,13 @@ func WriteEntry(dir string, e Entry) (string, error) {
 	return finalPath, nil
 }
 
-// ReadEntries reads all valid attestation entry JSON files from dir, rejecting
-// path traversal and oversized files, and ignoring unparseable files.
-// Returned entries are sorted descending by FinishedAt.
-func ReadEntries(dir string) ([]Entry, error) {
+// EntryWithPath associates an Entry with its path on disk.
+type EntryWithPath struct {
+	Entry Entry
+	Path  string
+}
+
+func readEntriesWithPaths(dir string) ([]EntryWithPath, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -381,7 +395,7 @@ func ReadEntries(dir string) ([]Entry, error) {
 	}
 
 	cleanDir := filepath.Clean(dir)
-	var result []Entry
+	var result []EntryWithPath
 	for _, de := range entries {
 		if de.IsDir() {
 			continue
@@ -423,18 +437,33 @@ func ReadEntries(dir string) ([]Entry, error) {
 		if entry.Version == 0 || entry.Command == "" || entry.TreeHash == "" || entry.MAC == "" {
 			continue
 		}
-		result = append(result, entry)
+		result = append(result, EntryWithPath{Entry: entry, Path: cleanPath})
 	}
 
 	sort.Slice(result, func(i, j int) bool {
-		ti, erri := parseTime(result[i].FinishedAt)
-		tj, errj := parseTime(result[j].FinishedAt)
+		ti, erri := parseTime(result[i].Entry.FinishedAt)
+		tj, errj := parseTime(result[j].Entry.FinishedAt)
 		if erri == nil && errj == nil {
 			return ti.After(tj)
 		}
-		return result[i].FinishedAt > result[j].FinishedAt
+		return result[i].Entry.FinishedAt > result[j].Entry.FinishedAt
 	})
 
+	return result, nil
+}
+
+// ReadEntries reads all valid attestation entry JSON files from dir, rejecting
+// path traversal and oversized files, and ignoring unparseable files.
+// Returned entries are sorted descending by FinishedAt.
+func ReadEntries(dir string) ([]Entry, error) {
+	items, err := readEntriesWithPaths(dir)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]Entry, len(items))
+	for i, it := range items {
+		result[i] = it.Entry
+	}
 	return result, nil
 }
 

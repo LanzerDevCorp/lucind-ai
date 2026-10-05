@@ -1,0 +1,5 @@
+{
+  "name": "lucind",
+  "description": "lucind-ai lane contract for Antigravity: allowed-path enforcement, per-turn result envelope validation and attest guidance.",
+  "version": "1.0.0"
+}

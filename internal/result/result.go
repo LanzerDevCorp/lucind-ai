@@ -13,8 +13,6 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-
-	"github.com/LanzerDevCorp/lucind-ai/internal/lane"
 )
 
 // ErrSchemaInvalid is returned by Read when the envelope's JSON does not
@@ -23,8 +21,8 @@ import (
 // error carries the validator's detail.
 var ErrSchemaInvalid = errors.New("result: envelope violates the schema")
 
-// HardStop is one packet-declared hard stop and whether it fired. The
-// schema requires one entry per hard stop the packet listed, whether or
+// HardStop is one lane-declared hard stop and whether it fired. The
+// schema requires one entry per hard stop the lane listed, whether or
 // not it fired — this is the field that has twice caught a violated hard
 // stop that green done-criteria alone would have hidden.
 type HardStop struct {
@@ -65,7 +63,7 @@ type ExternalChange struct {
 	Revert string `json:"revert"`
 }
 
-// DoneCriterion is one done-criterion from the packet, with evidence that
+// DoneCriterion is one done-criterion from the lane, with evidence that
 // it was met.
 type DoneCriterion struct {
 	Criterion string `json:"criterion"`
@@ -73,7 +71,7 @@ type DoneCriterion struct {
 	Evidence  string `json:"evidence,omitempty"`
 }
 
-// Question is one question that blocks the packet, required when Status is
+// Question is one question that blocks the lane, required when Status is
 // "blocked".
 type Question struct {
 	Question       string   `json:"question"`
@@ -82,7 +80,7 @@ type Question struct {
 	Recommendation string   `json:"recommendation,omitempty"`
 }
 
-// Deviation is one departure from the packet's stated approach, required
+// Deviation is one departure from the lane's stated approach, required
 // when Status is "deviated".
 type Deviation struct {
 	Expected   string `json:"expected"`
@@ -91,7 +89,7 @@ type Deviation struct {
 	Reversible bool   `json:"reversible,omitempty"`
 }
 
-// Finding is something discovered that the packet did not ask about but
+// Finding is something discovered that the lane did not ask about but
 // that changes other work.
 type Finding struct {
 	Finding  string `json:"finding"`
@@ -110,7 +108,7 @@ type Interaction struct {
 
 // Envelope mirrors result.schema.json.
 type Envelope struct {
-	PacketID        string           `json:"packet_id"`
+	LaneID          string           `json:"lane_id"`
 	Status          string           `json:"status"`
 	Summary         string           `json:"summary"`
 	HardStops       []HardStop       `json:"hard_stops"`
@@ -124,28 +122,6 @@ type Envelope struct {
 	SkillsLoaded    []string         `json:"skills_loaded,omitempty"`
 	SessionID       string           `json:"session_id,omitempty"`
 	Interaction     *Interaction     `json:"interaction,omitempty"`
-}
-
-// LaneStatus maps the envelope's status field to the project's lane
-// vocabulary. The schema's status enum (done, blocked, deviated, failed,
-// interaction_required) maps onto the four terminal lane.Status values;
-// interaction_required maps to lane.Blocked because a terminal lane status
-// stays blocked while the structured question travels in the envelope.
-// Read having already validated the envelope against the schema is what makes
-// this mapping total in practice.
-func (e Envelope) LaneStatus() lane.Status {
-	switch e.Status {
-	case "done":
-		return lane.Done
-	case "blocked", "interaction_required":
-		return lane.Blocked
-	case "deviated":
-		return lane.Deviated
-	case "failed":
-		return lane.Failed
-	default:
-		return ""
-	}
 }
 
 // Read reads the result envelope at path in fsys, validates it against the
