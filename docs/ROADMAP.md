@@ -71,7 +71,9 @@ What exists is in [`product.md`](product.md).
    the exact dispatch prompt wording) and breaks silently if any of them change. Look for a
    supported signal instead: a parent/child id in the Stop payload, an agy hook or API that marks
    subagents, or lucind-ai owning the main conversation id at dispatch time.
-4. **Briefs do not make agy load skills first; evaluate sending the prompt directly.** Owner
+4. **Make agy load skills first and pass them to workers.** Step 1 (send the prompt directly) is
+   done and measured, see the result below; what is left is worker propagation and the
+   `skills_loaded` field. History of the problem, owner
    observation: agy does not follow the brief literally. Dispatch sends `Read and follow <brief.md>`,
    and agy does not read the `## Skills to load before work` files before starting, even with the
    section right after the title. Evaluate sending the brief content itself as the prompt (instead
@@ -83,11 +85,21 @@ What exists is in [`product.md`](product.md).
    **not pass the skill paths to its two worker subagents**, so the brief fails twice: the main
    conversation does not load skills first, and it does not propagate them to workers (although
    `roles/agents/worker.md` step 1 tells workers to read them). The envelope still listed every
-   skill in `skills_loaded`, so that field alone is not trustworthy evidence. Plan, in order:
-   2. If that is not enough, force it with a hook (for example a PreToolUse that blocks writes until
-      every listed `SKILL.md` was read in that conversation).
-   3. Measure in both the main and the worker conversations from the transcripts, not only from
-      `skills_loaded`.
+   skill in `skills_loaded`, so that field alone is not trustworthy evidence.
+   **Result of step 1** (lanes `20261005-174913-ea48` with a hand-written section and
+   `20261005-175854-e2e0` with `--auto-skills`, measured from the agy transcript, not from the
+   envelope): the main conversation opened the lane rule and `lucind-result`, then every listed
+   `SKILL.md` (5 of 5 with Jev) with `view_file` before reading any source file and before its first
+   edit. Jev ran with `TYPESAFE_API_KEY` taken from `.env` by the caller: the binary only reads the
+   environment and does not load `.env` itself. Still open:
+   - Worker propagation is unmeasured: neither probe launched a worker subagent (one conversation
+     only), so the "does not pass the skills to workers" failure was not exercised.
+   - `skills_loaded` still came back `null` although the skills were really read (agy listed them
+     in `done_criteria` instead), so the worker contract must require that field.
+   - If worker propagation fails when a lane does launch workers, force it with a hook (for example
+     a PreToolUse that blocks writes until every listed `SKILL.md` was read in that conversation).
+   - Measure the main and worker conversations from the transcripts on a lane that launches workers.
+   - `lucind-ai` could load the repo `.env` itself so `--auto-skills` works without exporting the key.
 5. **RTK support.** Install RTK as part of the lucind-ai setup (today it is wired by hand in the
    global Claude config: `@RTK.md` include plus the `rtk hook claude` PreToolUse hook).
 6. **Research gentle-ai reviews in depth.** Understand how receipt-driven development (RDD) works
