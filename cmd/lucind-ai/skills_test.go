@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/LanzerDevCorp/lucind-ai/internal/skillselect"
 )
 
 func TestSkillsSelect_FlagValidation(t *testing.T) {
@@ -223,3 +225,74 @@ func TestSkillsDispatch_Direct(t *testing.T) {
 		t.Errorf("stderr = %q, want skillsUsage", stderr.String())
 	}
 }
+
+func TestSkillsSelect_SymlinkResolution(t *testing.T) {
+	repo := initRepo(t)
+
+	briefFile := filepath.Join(repo, "brief.md")
+	if err := os.WriteFile(briefFile, []byte("Implement feature"), 0o644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+
+	skillsTargetDir := t.TempDir()
+	realSkillFile := filepath.Join(skillsTargetDir, "real-SKILL.md")
+	if err := os.WriteFile(realSkillFile, []byte("# Real Skill"), 0o644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+
+	canonicalRealSkill, err := filepath.EvalSymlinks(realSkillFile)
+	if err != nil {
+		t.Fatalf("EvalSymlinks failed: %v", err)
+	}
+
+	symlinksDir := t.TempDir()
+	symlinkSkillFile := filepath.Join(symlinksDir, "symlink-SKILL.md")
+	if err := os.Symlink(realSkillFile, symlinkSkillFile); err != nil {
+		t.Fatalf("Symlink failed: %v", err)
+	}
+
+	regDir := filepath.Join(repo, ".atl")
+	if err := os.MkdirAll(regDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll failed: %v", err)
+	}
+	regFile := filepath.Join(regDir, "skill-registry.md")
+	regContent := "# Registry\n## Skills\n\n| Skill | Trigger / description | Scope | Path |\n| --- | --- | --- | --- |\n| `my-skill` | desc | repo | `" + symlinkSkillFile + "` |\n"
+	if err := os.WriteFile(regFile, []byte(regContent), 0o644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+
+	t.Setenv("TYPESAFE_API_KEY", "mock-key")
+
+	origSelect := selectSkills
+	defer func() { selectSkills = origSelect }()
+
+	var capturedSkills []skillselect.Skill
+	selectSkills = func(ctx context.Context, client *skillselect.Client, skills []skillselect.Skill, in skillselect.Input, threshold float64) (skillselect.Result, error) {
+		capturedSkills = skills
+		return skillselect.Result{
+			Model:     "mock-model",
+			Threshold: threshold,
+			Decisions: []skillselect.Decision{},
+		}, nil
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := run(context.Background(), []string{
+		"skills", "select",
+		"--brief", briefFile,
+		"--cwd", repo,
+	}, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("run() exit code = %d, want 0 (stderr: %s)", code, stderr.String())
+	}
+
+	if len(capturedSkills) != 1 {
+		t.Fatalf("captured %d skills, want 1", len(capturedSkills))
+	}
+
+	if capturedSkills[0].Path != canonicalRealSkill {
+		t.Errorf("captured skill path = %q, want canonical real path %q", capturedSkills[0].Path, canonicalRealSkill)
+	}
+}
+

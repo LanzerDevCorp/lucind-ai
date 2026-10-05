@@ -62,8 +62,20 @@ and holds T2.
     of the exhaustive client hardening tests.
   - Not run: the live test against api.typesafe.ai (`TYPESAFE_API_KEY` is not set in this shell).
   - CLI friction found: `dispatch --lane` still requires `--allow` although the lane stores it.
-- [ ] **T2. `dispatch --auto-skills`.** Inject the section when the brief lacks it, write
+- [x] **T2. `dispatch --auto-skills`.** Inject the section when the brief lacks it, write
   `.lucind/lanes/<id>/skills-<turn>.json`, fail open; update the lucind skill docs. Route: lane.
+  - Lane `20261005-035100-7fce`, 2 turns. Turn 1 review found: a failed `skills-<turn>.json` write
+    aborted the dispatch (not fully fail-open), an unneeded mutex and exported wrapper, and no
+    symlink resolution. Turn 2 fixed them and added `skillselect.ResolvePaths` (owner correction:
+    lane workers are not Claude, so paths must be the real `.agents/skills/...` files, not the
+    `.claude/skills` symlinks the registry lists first).
+  - `accept`: accepted, with attested `golangci-lint run`, `CGO_ENABLED=0 go build ./...`,
+    `go test ./... -race -count=1`.
+  - Turn 1's lane also reported `done` while agy still had subagents running (same stale-Stop
+    limit as T1); waiting on the pane instead of the status was required.
+  - Section placement: appended at the end of the user brief (before the lane contract). Owner
+    asked whether the top is better; pending decision.
+  - T1 commit: `9f36f37` on `feature/jev-skill-selector`.
 
 ## Acceptance criteria
 
@@ -79,4 +91,4 @@ and holds T2.
 ## Progress
 
 - RDD: off (clone-local), so no native review runs.
-- Next: T2 on `feature/jev-skill-selector-t2`.
+- Next: owner decision on section placement, then `make install`.

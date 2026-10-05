@@ -150,3 +150,137 @@ Selected skills can be formatted into a task brief under the `## Skills to load 
 /home/user/.gemini/config/skills/go-testing/SKILL.md
 /home/user/git_root/lucind-ai/.agents/skills/golang-cli/SKILL.md
 ```
+
+## Automated Selection (`dispatch --auto-skills`)
+
+Rather than running `lucind-ai skills select` manually and copying paths into the task brief, the orchestrator can pass `--auto-skills` to `lucind-ai dispatch` to automate evaluation and injection:
+
+```bash
+lucind-ai dispatch \
+  --brief task-brief.md \
+  --allow "cmd/**/*.go" \
+  --auto-skills
+```
+
+### How It Works
+
+- **Opt-in**: Automated selection is active only when `--auto-skills` is explicitly supplied.
+- **Registry and Jev evaluation**: Reads candidate skills from `<repo-root>/.atl/skill-registry.md` and calls Jev using `TYPESAFE_API_KEY`.
+- **Brief injection**: When skills are selected (passing threshold 0.7), `lucind-ai` appends the `## Skills to load before work` section before the lane contract footer.
+- **Manual override takes precedence**: If the brief already contains `## Skills to load before work`, Jev is not called and the brief is kept unchanged.
+- **Fail open**: On any error (such as a missing registry, unset `TYPESAFE_API_KEY`, network failure, or API error), `lucind-ai` warns on `stderr` and dispatches without the section. Dispatch never fails due to selector errors.
+- **Always writes lane record**: Always writes `.lucind/lanes/<id>/skills-<turn>.json` recording selection decisions and telemetry for each turn.
+
+## Lane Record Format (`skills-<turn>.json`)
+
+When `--auto-skills` is enabled, `lucind-ai dispatch` always records `.lucind/lanes/<id>/skills-<turn>.json` (for example, `skills-1.json`) for the lane turn.
+
+### Schema Fields
+
+- `turn` (`int`): Turn number of the lane.
+- `injected` (`bool`): Whether the `## Skills to load before work` section was injected into the brief.
+- `skipped_reason` (`string`, optional): Reason why skill injection was skipped. Omitted when skills are injected or when an error occurs. Known values:
+  - `"brief_has_section"`: The brief already contained a `## Skills to load before work` section; Jev was not called.
+  - `"no_skill_selected"`: Jev evaluated candidate skills, but none met the selection threshold (`probability >= 0.7`).
+- `error` (`string`, optional): Error message if the selector failed. Omitted on success.
+- `result` (`object`, optional): The full `skillselect.Result` with decisions and token usage (`model`, `threshold`, `decisions`, `usage`). Omitted if Jev was not called (e.g. `brief_has_section`) or if the selector failed.
+
+### Examples
+
+#### 1. Skills Selected and Injected
+
+Jev selected one or more skills with probability exceeding the threshold; the section was injected into the brief:
+
+```json
+{
+  "turn": 1,
+  "injected": true,
+  "result": {
+    "model": "jev-latest",
+    "threshold": 0.7,
+    "decisions": [
+      {
+        "name": "golang-testing",
+        "path": "/home/user/.gemini/config/skills/go-testing/SKILL.md",
+        "probability": 0.94,
+        "selected": true
+      },
+      {
+        "name": "golang-cli",
+        "path": "/home/user/git_root/lucind-ai/.agents/skills/golang-cli/SKILL.md",
+        "probability": 0.88,
+        "selected": true
+      },
+      {
+        "name": "branch-pr",
+        "path": "/home/user/.gemini/config/skills/branch-pr/SKILL.md",
+        "probability": 0.12,
+        "selected": false
+      }
+    ],
+    "usage": {
+      "input_tokens": 1420,
+      "output_tokens": 84
+    }
+  }
+}
+```
+
+#### 2. Brief Already Contains Skills Section (`brief_has_section`)
+
+The task brief already contains `## Skills to load before work`. Jev is skipped and the brief is preserved unchanged:
+
+```json
+{
+  "turn": 1,
+  "injected": false,
+  "skipped_reason": "brief_has_section"
+}
+```
+
+#### 3. No Skill Selected (`no_skill_selected`)
+
+Jev evaluated candidate skills, but none reached the threshold. No skills section is injected, and the full evaluation result is recorded:
+
+```json
+{
+  "turn": 1,
+  "injected": false,
+  "skipped_reason": "no_skill_selected",
+  "result": {
+    "model": "jev-latest",
+    "threshold": 0.7,
+    "decisions": [
+      {
+        "name": "golang-testing",
+        "path": "/home/user/.gemini/config/skills/go-testing/SKILL.md",
+        "probability": 0.35,
+        "selected": false
+      },
+      {
+        "name": "branch-pr",
+        "path": "/home/user/.gemini/config/skills/branch-pr/SKILL.md",
+        "probability": 0.08,
+        "selected": false
+      }
+    ],
+    "usage": {
+      "input_tokens": 1280,
+      "output_tokens": 62
+    }
+  }
+}
+```
+
+#### 4. Selector Error (Fail Open)
+
+An error occurred during selection (e.g. missing API key, network timeout, or invalid registry). `lucind-ai` warns on stderr, records the error, and dispatches the lane without the skills section:
+
+```json
+{
+  "turn": 1,
+  "injected": false,
+  "error": "call jev: Post \"https://api.typesafe.ai/v1/noul\": dial tcp: lookup api.typesafe.ai: no such host"
+}
+```
+

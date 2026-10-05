@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"path/filepath"
 	"strings"
 )
 
@@ -150,3 +151,19 @@ func stripBackticks(s string) string {
 	s = strings.Trim(s, "`")
 	return strings.TrimSpace(s)
 }
+
+// ResolvePaths resolves symlinks in each skill's Path using filepath.EvalSymlinks.
+// If symlink evaluation succeeds, Path is updated with the resolved path.
+// If it fails (e.g. nonexistent path), the original Path is preserved.
+func ResolvePaths(skills []Skill) []Skill {
+	resolved := make([]Skill, len(skills))
+	for i, s := range skills {
+		resolvedPath, err := filepath.EvalSymlinks(s.Path)
+		if err == nil {
+			s.Path = resolvedPath
+		}
+		resolved[i] = s
+	}
+	return resolved
+}
+

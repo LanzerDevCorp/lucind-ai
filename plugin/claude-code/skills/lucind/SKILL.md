@@ -33,7 +33,7 @@ Load the `herdr` skill too; this skill assumes its pane/agent commands.
 
 ```bash
 lucind-ai dispatch --cwd "$PWD" --allow '<glob>' [--allow ...] --brief <file|-> \
-  [--check '<cmd>']... [--model M] [--timeout 60m] [--detach] [--min-quota 0.1]
+  [--auto-skills] [--check '<cmd>']... [--model M] [--timeout 60m] [--detach] [--min-quota 0.1]
 lucind-ai wait <lane>            # only after --detach
 lucind-ai accept --lane <id>     # run from the lane's repo
 ```
@@ -119,9 +119,13 @@ what is described here (no explanatory prose), so put prose under a following he
   whitespace go in whole-entry backticks. List pre-existing untracked targets agy may write and
   the directories where new files are authorized. Nothing beyond the task: a surface wider than
   the task is the same defect as no surface at all.
-- `## Skills to load before work`: one exact `SKILL.md` path per line, absolute. Resolve them
-  yourself (skill registry or `~/.claude/skills`); agy reads those files before touching code and
-  does not rediscover skills. Omit when no skill applies.
+- `## Skills to load before work`: one exact `SKILL.md` path per line, absolute. With
+  `--auto-skills`, the orchestrator omits the section and does not read the skill registry:
+  lucind-ai asks Jev using `.atl/skill-registry.md` and `TYPESAFE_API_KEY`, records
+  `skills-<turn>.json`, and a hand-written section always wins. Without the flag, resolve them
+  yourself and pass the real file path (resolve symlinks; for example
+  `.agents/skills/<name>/SKILL.md`), since lane workers are not Claude; agy reads those files
+  before touching code and does not rediscover skills. Omit when no skill applies.
 - `## Hard stops`: one line per condition that must stop agy. The envelope requires one
   `hard_stops` entry per hard stop in the brief (`[]` when none), so list them here.
 - `## Verification`: the exact commands agy must run, each reported as

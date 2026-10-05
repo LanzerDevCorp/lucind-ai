@@ -22,7 +22,7 @@ import (
 	"github.com/LanzerDevCorp/lucind-ai/internal/dispatch"
 )
 
-const usage = "usage: lucind-ai dispatch --cwd <dir> --allow <glob>... --brief <file|-> [--check <cmd>]... [--model M] [--timeout D] [--detach] [--lane <id>] [--min-quota F]\n" +
+const usage = "usage: lucind-ai dispatch --cwd <dir> --allow <glob>... --brief <file|-> [--auto-skills] [--check <cmd>]... [--model M] [--timeout D] [--detach] [--lane <id>] [--min-quota F]\n" +
 	"       lucind-ai wait <lane> [--cwd <dir>] [--timeout D]\n" +
 	"       lucind-ai check [--out <path>]   (deprecated)\n" +
 	"       lucind-ai accept --lane <id>\n" +
@@ -35,7 +35,7 @@ const usage = "usage: lucind-ai dispatch --cwd <dir> --allow <glob>... --brief <
 	"       lucind-ai --version"
 
 const (
-	dispatchUsage = "usage: lucind-ai dispatch --cwd <dir> --allow <glob>... --brief <file|-> [--check <cmd>]... [--model M] [--timeout D] [--detach] [--lane <id>] [--min-quota F]"
+	dispatchUsage = "usage: lucind-ai dispatch --cwd <dir> --allow <glob>... --brief <file|-> [--auto-skills] [--check <cmd>]... [--model M] [--timeout D] [--detach] [--lane <id>] [--min-quota F]"
 	waitUsage     = "usage: lucind-ai wait <lane> [--cwd <dir>] [--timeout D]"
 )
 
@@ -301,6 +301,7 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 	detach := fs.Bool("detach", false, "detach and return immediately without waiting")
 	laneID := fs.String("lane", "", "lane identifier for continuation")
 	minQuota := fs.Float64("min-quota", 0, "minimum quota required")
+	autoSkills := fs.Bool("auto-skills", false, "automatically select and inject relevant skills using Jev")
 
 	if len(args) > 0 && (args[0] == "help" || args[0] == "-h" || args[0] == "--help" || args[0] == "-help") {
 		fs.Usage()
@@ -376,15 +377,17 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 	}
 
 	opts := dispatch.Options{
-		Cwd:      *cwd,
-		LaneID:   *laneID,
-		Allow:    allow,
-		Checks:   checks,
-		Model:    *model,
-		Brief:    briefContent,
-		MinQuota: *minQuota,
-		Detach:   *detach,
-		Timeout:  timeout,
+		Cwd:        *cwd,
+		LaneID:     *laneID,
+		Allow:      allow,
+		Checks:     checks,
+		Model:      *model,
+		Brief:      briefContent,
+		MinQuota:   *minQuota,
+		Detach:     *detach,
+		Timeout:    timeout,
+		AutoSkills: *autoSkills,
+		Stderr:     stderr,
 	}
 
 	out, exitCode, err := dispatchRun(ctx, opts, nil)

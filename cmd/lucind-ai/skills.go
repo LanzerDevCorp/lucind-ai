@@ -18,6 +18,8 @@ import (
 
 const skillsUsage = "usage: lucind-ai skills select --brief <file|-> [--allow <glob>]... [--cwd <dir>] [--registry <path>] [--threshold <float>]"
 
+var selectSkills = skillselect.Select
+
 func skillsDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
 		_, _ = fmt.Fprintln(stderr, skillsUsage)
@@ -116,6 +118,7 @@ func runSkillsSelect(ctx context.Context, args []string, stdout, stderr io.Write
 		_, _ = fmt.Fprintf(stderr, "lucind-ai: %v\n", err)
 		return 1
 	}
+	skills = skillselect.ResolvePaths(skills)
 
 	apiKey := skillselect.KeyFromEnv()
 	if apiKey == "" {
@@ -129,7 +132,7 @@ func runSkillsSelect(ctx context.Context, args []string, stdout, stderr io.Write
 		return 1
 	}
 
-	res, err := skillselect.Select(ctx, client, skills, skillselect.Input{Brief: string(briefData), Allow: []string(allow)}, *threshold)
+	res, err := selectSkills(ctx, client, skills, skillselect.Input{Brief: string(briefData), Allow: []string(allow)}, *threshold)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "lucind-ai: %v\n", err)
 		return 1

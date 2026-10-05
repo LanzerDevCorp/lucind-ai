@@ -193,3 +193,71 @@ func TestParseRegistry_BacktickStripping(t *testing.T) {
 		t.Errorf("Description should preserve inline backticks: %q", skills[0].Description)
 	}
 }
+
+func TestResolvePaths(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	realFile := filepath.Join(tmpDir, "real_skill.md")
+	if err := os.WriteFile(realFile, []byte("# Test Skill"), 0o644); err != nil {
+		t.Fatalf("failed to create real file: %v", err)
+	}
+
+	canonicalRealFile, err := filepath.EvalSymlinks(realFile)
+	if err != nil {
+		t.Fatalf("failed to eval symlinks on real file: %v", err)
+	}
+
+	symlinkFile := filepath.Join(tmpDir, "symlink_skill.md")
+	if err := os.Symlink(realFile, symlinkFile); err != nil {
+		t.Fatalf("failed to create symlink: %v", err)
+	}
+
+	nonexistentFile := filepath.Join(tmpDir, "does_not_exist.md")
+
+	input := []skillselect.Skill{
+		{
+			Name:        "symlinked-skill",
+			Description: "desc 1",
+			Scope:       "repo",
+			Path:        symlinkFile,
+		},
+		{
+			Name:        "nonexistent-skill",
+			Description: "desc 2",
+			Scope:       "user",
+			Path:        nonexistentFile,
+		},
+	}
+
+	got := skillselect.ResolvePaths(input)
+
+	if len(got) != 2 {
+		t.Fatalf("got %d skills, want 2", len(got))
+	}
+
+	// 1. Symlink resolved to real target path
+	if got[0].Path != canonicalRealFile {
+		t.Errorf("got[0].Path = %q, want canonical %q", got[0].Path, canonicalRealFile)
+	}
+	if got[0].Name != "symlinked-skill" || got[0].Description != "desc 1" || got[0].Scope != "repo" {
+		t.Errorf("got[0] fields altered: %+v", got[0])
+	}
+
+	// 2. Nonexistent path unchanged
+	if got[1].Path != nonexistentFile {
+		t.Errorf("got[1].Path = %q, want %q", got[1].Path, nonexistentFile)
+	}
+	if got[1].Name != "nonexistent-skill" || got[1].Description != "desc 2" || got[1].Scope != "user" {
+		t.Errorf("got[1] fields altered: %+v", got[1])
+	}
+
+	// 3. Empty skills slice returns empty slice
+	emptyResult := skillselect.ResolvePaths([]skillselect.Skill{})
+	if emptyResult == nil {
+		t.Errorf("ResolvePaths(empty) = nil, want non-nil empty slice")
+	}
+	if len(emptyResult) != 0 {
+		t.Errorf("len(ResolvePaths(empty)) = %d, want 0", len(emptyResult))
+	}
+}
+

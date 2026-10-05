@@ -93,6 +93,20 @@ func ResultFilePath(root string, l Lane) string {
 	return filepath.Join(LaneDir(root, l.ID), ResultFileName(l.Turn))
 }
 
+// SkillsFileName returns the skills filename for the given turn.
+// For turn <= 0 (legacy lanes), it returns "skills.json", otherwise "skills-<turn>.json".
+func SkillsFileName(turn int) string {
+	if turn <= 0 {
+		return "skills.json"
+	}
+	return fmt.Sprintf("skills-%d.json", turn)
+}
+
+// SkillsFilePath returns the skills file path for the current turn of the given lane under root.
+func SkillsFilePath(root string, l Lane) string {
+	return filepath.Join(LaneDir(root, l.ID), SkillsFileName(l.Turn))
+}
+
 // CheckCommand returns the canonical attested command string for a check.
 func CheckCommand(check string) string {
 	return "sh -c " + check
@@ -122,9 +136,9 @@ func ValidateID(id string) bool {
 	return err == nil
 }
 
-// atomicWriteJSON serializes v as formatted JSON and writes it atomically to destPath
+// AtomicWriteJSON serializes v as formatted JSON and writes it atomically to destPath
 // using a temporary file in the target directory followed by a rename.
-func atomicWriteJSON(destPath string, v any) error {
+func AtomicWriteJSON(destPath string, v any) error {
 	dir := filepath.Dir(destPath)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return fmt.Errorf("create directory %s: %w", dir, err)
@@ -259,7 +273,7 @@ func Save(root string, lane Lane) error {
 		lane.UpdatedAt = now
 	}
 	path := LanePath(root, lane.ID)
-	return atomicWriteJSON(path, lane)
+	return AtomicWriteJSON(path, lane)
 }
 
 // Save atomically writes the receiver Lane to root.
@@ -291,7 +305,7 @@ func WriteReceipt(root, id string, receipt Receipt) error {
 		receipt.CreatedAt = time.Now().UTC()
 	}
 	path := ReceiptPath(root, id)
-	return atomicWriteJSON(path, receipt)
+	return AtomicWriteJSON(path, receipt)
 }
 
 // LoadReceipt loads a Receipt from root/.lucind/lanes/<id>/receipt.json.
