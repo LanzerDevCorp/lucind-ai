@@ -62,10 +62,10 @@ lucind-ai accept --lane <id>     # run from the lane's repo
   `done_criteria` with the brief's scope items; if something is missing, send a follow-up turn to
   the same lane (`dispatch --lane <id> --brief ...`, including the full original brief) instead of
   accepting. Results use per-turn files (`result-<turn>.json`), and only the current turn's result
-  file counts (the Stop hook, `wait`, and `accept` ignore valid results from other turns). Note the
-  known limit: a Stop from a previous turn that is still finishing cannot be told apart from a
-  current one, and can spend a retry and inject the "write the envelope" nudge into the new turn
-  (the retry budget resets after 60 s without a counted stop).
+  file counts (the Stop hook, `wait`, and `accept` ignore valid results from other turns). Worker
+  Stops and Stops from previous conversations without the current turn's brief are ignored and cannot
+  steal retries or prematurely mark done; only the current turn's main conversation with `fullyIdle=true`
+  decides done or triggers retry nudges.
 - **After `accept`, decide what to do with the pane** (lucind-ai never closes it). Default: close
   it with `herdr pane close <pane_id>`. If reviewing the diff left a doubt about the
   implementation, leave it open and ask agy with `herdr agent prompt <pane_id> "..."`, reusing the

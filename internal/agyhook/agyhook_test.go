@@ -967,3 +967,320 @@ func TestStop_RawPayload(t *testing.T) {
 	})
 }
 
+func createFakeMainTranscript(t *testing.T, dir, laneID string) string {
+	t.Helper()
+	path := filepath.Join(dir, "main_transcript.jsonl")
+	step := fmt.Sprintf(
+		`{"source":"USER_EXPLICIT","type":"USER_INPUT","content":"Read and follow /repo/.lucind/lanes/%s/brief.md"}`+"\n",
+		laneID,
+	)
+	if err := os.WriteFile(path, []byte(step), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func createFakeWorkerTranscript(t *testing.T, dir, parentID string) string {
+	t.Helper()
+	path := filepath.Join(dir, "worker_transcript.jsonl")
+	step := fmt.Sprintf(
+		`{"source":"SYSTEM","type":"SYSTEM_MESSAGE","content":"The following is a <SYSTEM_MESSAGE> not actually sent by the user... sender=%s priority=MESSAGE_PRIORITY_HIGH"}`+"\n",
+		parentID,
+	)
+	if err := os.WriteFile(path, []byte(step), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func stopWithConv(t *testing.T, laneEnv, root, convID, transcriptPath string, fullyIdle *bool) map[string]any {
+	t.Helper()
+	payloadMap := map[string]any{
+		"workspacePaths": []string{root},
+		"executionNum":   1,
+	}
+	if fullyIdle != nil {
+		payloadMap["fullyIdle"] = *fullyIdle
+	}
+	if convID != "" {
+		payloadMap["conversationId"] = convID
+	}
+	if transcriptPath != "" {
+		payloadMap["transcriptPath"] = transcriptPath
+	}
+	payload, _ := json.Marshal(payloadMap)
+	return decode(t, Stop(context.Background(), laneEnv, payload))
+}
+
+func boolPtr(b bool) *bool { return &b }
+
+func readHookLog(t *testing.T, root, laneID string) string {
+	t.Helper()
+	logBytes, err := os.ReadFile(filepath.Join(lane.LaneDir(root, laneID), "hook.log"))
+	if err != nil {
+		t.Fatalf("reading hook.log: %v", err)
+	}
+	return string(logBytes)
+}
+
+func TestStop_MainConversation(t *testing.T) {
+	t.Run("worker stop fullyIdle true is ignored", func(t *testing.T) {
+		root := newLaneRepo(t)
+		transcript := createFakeWorkerTranscript(t, t.TempDir(), "parent-1")
+		got := stopWithConv(t, laneID, root, "worker-1", transcript, boolPtr(true))
+		if len(got) != 0 {
+			t.Fatalf("got %v, want {}", got)
+		}
+		l := loadLane(t, root)
+		if l.Status != lane.StatusRunning || l.Retries != 0 {
+			t.Fatalf("status=%s retries=%d, want running/0", l.Status, l.Retries)
+		}
+		logContent := readHookLog(t, root, laneID)
+		wantLog := "stop: ignored worker conversation worker-1"
+		if !strings.Contains(logContent, wantLog) {
+			t.Fatalf("hook.log missing %q; got:\n%s", wantLog, logContent)
+		}
+	})
+
+	t.Run("worker stop fullyIdle false is ignored", func(t *testing.T) {
+		root := newLaneRepo(t)
+		transcript := createFakeWorkerTranscript(t, t.TempDir(), "parent-1")
+		got := stopWithConv(t, laneID, root, "worker-2", transcript, boolPtr(false))
+		if len(got) != 0 {
+			t.Fatalf("got %v, want {}", got)
+		}
+		l := loadLane(t, root)
+		if l.Status != lane.StatusRunning || l.Retries != 0 {
+			t.Fatalf("status=%s retries=%d, want running/0", l.Status, l.Retries)
+		}
+		logContent := readHookLog(t, root, laneID)
+		wantLog := "stop: ignored worker conversation worker-2"
+		if !strings.Contains(logContent, wantLog) {
+			t.Fatalf("hook.log missing %q; got:\n%s", wantLog, logContent)
+		}
+	})
+
+	t.Run("main stop fullyIdle false is ignored", func(t *testing.T) {
+		root := newLaneRepo(t)
+		transcript := createFakeMainTranscript(t, t.TempDir(), laneID)
+		got := stopWithConv(t, laneID, root, "main-1", transcript, boolPtr(false))
+		if len(got) != 0 {
+			t.Fatalf("got %v, want {}", got)
+		}
+		l := loadLane(t, root)
+		if l.Status != lane.StatusRunning || l.Retries != 0 {
+			t.Fatalf("status=%s retries=%d, want running/0", l.Status, l.Retries)
+		}
+		logContent := readHookLog(t, root, laneID)
+		wantLog := "stop: main conversation not fully idle"
+		if !strings.Contains(logContent, wantLog) {
+			t.Fatalf("hook.log missing %q; got:\n%s", wantLog, logContent)
+		}
+	})
+
+	t.Run("main stop fullyIdle true marks done when result valid", func(t *testing.T) {
+		root := newLaneRepo(t)
+		writeResult(t, root, validResult)
+		transcript := createFakeMainTranscript(t, t.TempDir(), laneID)
+		got := stopWithConv(t, laneID, root, "main-1", transcript, boolPtr(true))
+		if len(got) != 0 {
+			t.Fatalf("got %v, want {}", got)
+		}
+		l := loadLane(t, root)
+		if l.Status != lane.StatusDone {
+			t.Fatalf("status=%s, want done", l.Status)
+		}
+		logContent := readHookLog(t, root, laneID)
+		wantLog := "stop: lane marked done"
+		if !strings.Contains(logContent, wantLog) {
+			t.Fatalf("hook.log missing %q; got:\n%s", wantLog, logContent)
+		}
+	})
+
+	t.Run("main stop fullyIdle true continues when result missing", func(t *testing.T) {
+		root := newLaneRepo(t)
+		transcript := createFakeMainTranscript(t, t.TempDir(), laneID)
+		got := stopWithConv(t, laneID, root, "main-1", transcript, boolPtr(true))
+		if got["decision"] != "continue" {
+			t.Fatalf("got %v, want continue", got)
+		}
+		l := loadLane(t, root)
+		if l.Status != lane.StatusRunning || l.Retries != 1 {
+			t.Fatalf("status=%s retries=%d, want running/1", l.Status, l.Retries)
+		}
+		logContent := readHookLog(t, root, laneID)
+		wantLog := "stop: retry 1/2:"
+		if !strings.Contains(logContent, wantLog) {
+			t.Fatalf("hook.log missing %q; got:\n%s", wantLog, logContent)
+		}
+	})
+
+	t.Run("continuation turn with different main conversation ID", func(t *testing.T) {
+		root := newLaneRepo(t)
+		l := loadLane(t, root)
+		l.Turn = 1
+		if err := l.Save(root); err != nil {
+			t.Fatal(err)
+		}
+		writeResult(t, root, validResult)
+
+		// Turn 1 completes with main-1
+		transcript1 := createFakeMainTranscript(t, t.TempDir(), laneID)
+		got := stopWithConv(t, laneID, root, "main-1", transcript1, boolPtr(true))
+		if len(got) != 0 {
+			t.Fatalf("turn 1 stop: got %v, want {}", got)
+		}
+		l = loadLane(t, root)
+		if l.Status != lane.StatusDone {
+			t.Fatalf("turn 1 status=%s, want done", l.Status)
+		}
+
+		// Continue lane to turn 2
+		l.Turn = 2
+		l.Status = lane.StatusRunning
+		l.Retries = 0
+		l.Continues = 0
+		if err := l.Save(root); err != nil {
+			t.Fatal(err)
+		}
+
+		// Worker stop from turn 1 is ignored
+		workerTranscript := createFakeWorkerTranscript(t, t.TempDir(), "main-1")
+		got = stopWithConv(t, laneID, root, "worker-turn1", workerTranscript, boolPtr(true))
+		if len(got) != 0 {
+			t.Fatalf("worker stop: got %v, want {}", got)
+		}
+		l = loadLane(t, root)
+		if l.Status != lane.StatusRunning || l.Retries != 0 {
+			t.Fatalf("after worker stop: status=%s retries=%d, want running/0", l.Status, l.Retries)
+		}
+
+		// Write turn 2 result
+		r2Path := filepath.Join(lane.LaneDir(root, laneID), "result-2.json")
+		if err := os.WriteFile(r2Path, []byte(validResult), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		// Turn 2 main conversation main-2 decides turn 2
+		transcript2 := createFakeMainTranscript(t, t.TempDir(), laneID)
+		got = stopWithConv(t, laneID, root, "main-2", transcript2, boolPtr(true))
+		if len(got) != 0 {
+			t.Fatalf("turn 2 stop: got %v, want {}", got)
+		}
+		l = loadLane(t, root)
+		if l.Status != lane.StatusDone {
+			t.Fatalf("turn 2 status=%s, want done", l.Status)
+		}
+	})
+
+	t.Run("fallback when transcript unreadable or marker unknown", func(t *testing.T) {
+		unknownTranscript := filepath.Join(t.TempDir(), "unknown.jsonl")
+		if err := os.WriteFile(unknownTranscript, []byte(`{"source":"OTHER","content":"something"}`+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		missingTranscript := filepath.Join(t.TempDir(), "nonexistent.jsonl")
+
+		cases := []struct {
+			name           string
+			transcriptPath string
+		}{
+			{"unknown marker", unknownTranscript},
+			{"missing transcript file", missingTranscript},
+		}
+
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				root := newLaneRepo(t)
+
+				// fullyIdle=false never decides
+				got := stopWithConv(t, laneID, root, "conv-unknown", tc.transcriptPath, boolPtr(false))
+				if len(got) != 0 {
+					t.Fatalf("fullyIdle=false: got %v, want {}", got)
+				}
+				l := loadLane(t, root)
+				if l.Status != lane.StatusRunning || l.Retries != 0 {
+					t.Fatalf("fullyIdle=false: status=%s retries=%d, want running/0", l.Status, l.Retries)
+				}
+				logContent := readHookLog(t, root, laneID)
+				wantFallbackLog := "stop: transcript unreadable or marker unknown"
+				if !strings.Contains(logContent, wantFallbackLog) {
+					t.Fatalf("hook.log missing %q; got:\n%s", wantFallbackLog, logContent)
+				}
+
+				// fullyIdle=true proceeds (in this case, missing result causes retry)
+				got = stopWithConv(t, laneID, root, "conv-unknown", tc.transcriptPath, boolPtr(true))
+				if got["decision"] != "continue" {
+					t.Fatalf("fullyIdle=true: got %v, want continue", got)
+				}
+				l = loadLane(t, root)
+				if l.Status != lane.StatusRunning || l.Retries != 1 {
+					t.Fatalf("fullyIdle=true: status=%s retries=%d, want running/1", l.Status, l.Retries)
+				}
+			})
+		}
+	})
+
+	t.Run("caching per conversation ID in conversations dir", func(t *testing.T) {
+		root := newLaneRepo(t)
+		tempDir := t.TempDir()
+		workerTranscript := createFakeWorkerTranscript(t, tempDir, "parent-x")
+		mainTranscript := createFakeMainTranscript(t, tempDir, laneID)
+
+		// 1. Worker classification and cache
+		got := stopWithConv(t, laneID, root, "worker-cached", workerTranscript, boolPtr(true))
+		if len(got) != 0 {
+			t.Fatalf("worker stop: got %v, want {}", got)
+		}
+		cacheFile := filepath.Join(lane.LaneDir(root, laneID), "conversations", "worker-cached")
+		data, err := os.ReadFile(cacheFile)
+		if err != nil {
+			t.Fatalf("reading cache file %s: %v", cacheFile, err)
+		}
+		if string(data) != "worker" {
+			t.Fatalf("cached role = %q, want worker", string(data))
+		}
+
+		// Delete worker transcript; subsequent stop must use cache
+		if err := os.Remove(workerTranscript); err != nil {
+			t.Fatal(err)
+		}
+		got = stopWithConv(t, laneID, root, "worker-cached", workerTranscript, boolPtr(true))
+		if len(got) != 0 {
+			t.Fatalf("worker stop after transcript delete: got %v, want {}", got)
+		}
+		l := loadLane(t, root)
+		if l.Status != lane.StatusRunning || l.Retries != 0 {
+			t.Fatalf("status=%s retries=%d, want running/0", l.Status, l.Retries)
+		}
+
+		// 2. Main classification and cache
+		got = stopWithConv(t, laneID, root, "main-cached", mainTranscript, boolPtr(false))
+		if len(got) != 0 {
+			t.Fatalf("main stop: got %v, want {}", got)
+		}
+		mainCacheFile := filepath.Join(lane.LaneDir(root, laneID), "conversations", "main-cached")
+		data, err = os.ReadFile(mainCacheFile)
+		if err != nil {
+			t.Fatalf("reading main cache file %s: %v", mainCacheFile, err)
+		}
+		if string(data) != "main" {
+			t.Fatalf("cached role = %q, want main", string(data))
+		}
+
+		// Delete main transcript, write valid result; subsequent stop must use cache and mark done
+		if err := os.Remove(mainTranscript); err != nil {
+			t.Fatal(err)
+		}
+		writeResult(t, root, validResult)
+		got = stopWithConv(t, laneID, root, "main-cached", mainTranscript, boolPtr(true))
+		if len(got) != 0 {
+			t.Fatalf("main stop after transcript delete: got %v, want {}", got)
+		}
+		l = loadLane(t, root)
+		if l.Status != lane.StatusDone {
+			t.Fatalf("status=%s, want done", l.Status)
+		}
+	})
+}
+
+

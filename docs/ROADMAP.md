@@ -48,15 +48,14 @@ What exists is in [`product.md`](product.md).
    orchestrator has to clean it. How often it matters is still unmeasured: agy only did it because
    the brief asked. Keep measuring on real tasks before adding anything.
 2. **Stale agy trust entries after a crash** in `~/.gemini/antigravity-cli/settings.json`.
-3. **Stops from other conversations.** Completion no longer depends on herdr idle (decided by the
-   current turn's result file plus the Stop hook). The raw Stop payload carries `conversationId` and
-   `transcriptPath`, but no turn id. Each lane runs several agy conversations: one reports
-   `fullyIdle=false` throughout and its first `fullyIdle=true` Stop arrives after the lane is already
-   marked done; the decisions come from the others. In single-turn probes the same conversation
-   triggered both the retry nudge and the `done`; after a continuation (P3) they were different
-   conversations, so `conversationId` alone does not identify a main conversation. Look at
-   `transcriptPath` before filtering. About 4 of 7 turns needed the retry nudge (agy ends a turn
-   before writing the envelope), never more than one, which leaves a margin of one retry.
+3. **Stops from other conversations** (fixed in `feature/lane-stop-main-conversation`). The Stop hook
+   now inspects `transcriptPath` step 0: main conversations contain `Read and follow .../.lucind/lanes/<id>/brief.md`
+   with source `USER_EXPLICIT` (or empty), while worker conversations contain `SYSTEM`/`SYSTEM_MESSAGE`
+   with `sender=`. Role classifications are cached in `<laneDir>/conversations/<id>`. Worker Stops
+   are ignored without nudging or consuming retries. Main conversation Stops with `fullyIdle=false` are
+   ignored while worker subagents run; only main Stops with `fullyIdle=true` decide done/retry/failed.
+   Continuation turns across differing main conversation IDs are resolved independently via the current
+   turn's brief marker.
 4. **RTK support.** Install RTK as part of the lucind-ai setup (today it is wired by hand in the
    global Claude config: `@RTK.md` include plus the `rtk hook claude` PreToolUse hook).
 5. **Research gentle-ai reviews in depth.** Understand how receipt-driven development (RDD) works
