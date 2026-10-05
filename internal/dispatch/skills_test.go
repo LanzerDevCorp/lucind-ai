@@ -451,71 +451,41 @@ func TestAutoSkills_SelectorError(t *testing.T) {
 	}
 
 	out, exitCode, err := dispatch.Dispatch(context.Background(), opts, runner)
-	if err != nil {
-		t.Fatalf("dispatch should succeed despite selector error, got err: %v", err)
+	if err == nil {
+		t.Fatalf("dispatch should fail on selector error, got err = nil")
 	}
-	if exitCode != 0 {
-		t.Fatalf("exitCode = %d, want 0", exitCode)
+	if exitCode != 5 {
+		t.Fatalf("exitCode = %d, want 5", exitCode)
 	}
-
-	// Verify warning on stderr: lucind-ai: auto-skills: <error>; dispatching without a skills section\n
-	stderrStr := stderrBuf.String()
-	if !strings.HasPrefix(stderrStr, "lucind-ai: auto-skills: ") {
-		t.Errorf("stderr does not have expected prefix; got: %q", stderrStr)
-	}
-	if !strings.Contains(stderrStr, "; dispatching without a skills section\n") {
-		t.Errorf("stderr does not have expected suffix; got: %q", stderrStr)
-	}
-	// Verify API key is redacted in warning
-	if strings.Contains(stderrStr, "secret-key-12345") {
-		t.Errorf("stderr contains unredacted API key: %q", stderrStr)
-	}
-	if !strings.Contains(stderrStr, "[REDACTED]") {
-		t.Errorf("stderr does not contain [REDACTED]: %q", stderrStr)
+	if out.Lane != "" {
+		t.Errorf("out.Lane = %q, want empty", out.Lane)
 	}
 
-	// Verify prompt.md has userPrompt unchanged before ## Lane Contract
-	promptPath := filepath.Join(lane.LaneDir(repoDir, out.Lane), "prompt.md")
-	contentBytes, err := os.ReadFile(promptPath)
-	if err != nil {
-		t.Fatalf("read prompt.md: %v", err)
+	if !errors.Is(err, dispatch.ErrAutoSkillsUnavailable) {
+		t.Errorf("err must wrap ErrAutoSkillsUnavailable: %v", err)
 	}
-	content := string(contentBytes)
-	if strings.Contains(content, "## Skills to load before work") {
-		t.Errorf("prompt.md should not contain skills section on error; got:\n%s", content)
+	var typedErr *dispatch.AutoSkillsUnavailableError
+	if !errors.As(err, &typedErr) {
+		t.Errorf("err must be of type *dispatch.AutoSkillsUnavailableError, got %T", err)
 	}
 
-	briefPath := filepath.Join(lane.LaneDir(repoDir, out.Lane), "brief.md")
-	if _, err := os.Stat(briefPath); !errors.Is(err, os.ErrNotExist) {
-		t.Errorf("brief.md should not exist, stat err = %v", err)
+	// Verify API key is redacted in error
+	if strings.Contains(err.Error(), "secret-key-12345") {
+		t.Errorf("err contains unredacted API key: %q", err.Error())
+	}
+	if !strings.Contains(err.Error(), "[REDACTED]") {
+		t.Errorf("err does not contain [REDACTED]: %q", err.Error())
 	}
 
-	// Verify skills-1.json records the error and redacts API key
-	skillsPath := filepath.Join(lane.LaneDir(repoDir, out.Lane), "skills-1.json")
-	data, err := os.ReadFile(skillsPath)
-	if err != nil {
-		t.Fatalf("read skills-1.json: %v", err)
+	// Verify nothing exists: no lane directory, no prompt.md, no skills-*.json
+	lanesDir := filepath.Join(repoDir, ".lucind", "lanes")
+	if entries, err := os.ReadDir(lanesDir); err == nil && len(entries) > 0 {
+		t.Errorf("lanes directory contains %d entries, want 0", len(entries))
 	}
 
-	var rec dispatch.SkillsRecord
-	if err := json.Unmarshal(data, &rec); err != nil {
-		t.Fatalf("unmarshal skills-1.json: %v", err)
-	}
-
-	if rec.Turn != 1 {
-		t.Errorf("rec.Turn = %d, want 1", rec.Turn)
-	}
-	if rec.Injected {
-		t.Errorf("rec.Injected = true, want false")
-	}
-	if strings.Contains(rec.Error, "secret-key-12345") {
-		t.Errorf("rec.Error contains unredacted API key: %q", rec.Error)
-	}
-	if !strings.Contains(rec.Error, "[REDACTED]") {
-		t.Errorf("rec.Error does not contain [REDACTED]: %q", rec.Error)
-	}
-	if rec.Result != nil {
-		t.Errorf("rec.Result = %+v, want nil", rec.Result)
+	// Verify zero herdr runner calls
+	if len(runner.calls) != 0 {
+		t.Errorf("runner had %d calls, want 0", len(runner.calls))
 	}
 }
 
@@ -631,6 +601,7 @@ func TestDefaultSkillSelector_MissingRegistry(t *testing.T) {
 	tempDir := t.TempDir()
 	initGitRepo(t, tempDir)
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("TYPESAFE_API_KEY", "")
 	// No .atl/skill-registry.md in tempDir
 	dispatch.ResetSkillSelectorForTesting()
 
@@ -644,27 +615,25 @@ func TestDefaultSkillSelector_MissingRegistry(t *testing.T) {
 
 	runner := setupFakeRunnerForNewLane(t, "w1:pLane1")
 	out, exitCode, err := dispatch.Dispatch(context.Background(), opts, runner)
-	if err != nil {
-		t.Fatalf("dispatch should succeed even if default selector fails, got: %v", err)
+	if err == nil {
+		t.Fatalf("dispatch should fail when missing registry, got err = nil")
 	}
-	if exitCode != 0 {
-		t.Errorf("exitCode = %d, want 0", exitCode)
+	if exitCode != 5 {
+		t.Errorf("exitCode = %d, want 5", exitCode)
+	}
+	if !errors.Is(err, dispatch.ErrAutoSkillsUnavailable) {
+		t.Errorf("err must wrap ErrAutoSkillsUnavailable: %v", err)
+	}
+	if out.Lane != "" {
+		t.Errorf("out.Lane = %q, want empty", out.Lane)
 	}
 
-	skillsPath := filepath.Join(lane.LaneDir(tempDir, out.Lane), "skills-1.json")
-	data, err := os.ReadFile(skillsPath)
-	if err != nil {
-		t.Fatalf("read skills-1.json: %v", err)
+	lanesDir := filepath.Join(tempDir, ".lucind", "lanes")
+	if entries, err := os.ReadDir(lanesDir); err == nil && len(entries) > 0 {
+		t.Errorf("lanes directory contains %d entries, want 0", len(entries))
 	}
-	var rec dispatch.SkillsRecord
-	if err := json.Unmarshal(data, &rec); err != nil {
-		t.Fatalf("unmarshal skills-1.json: %v", err)
-	}
-	if rec.Injected {
-		t.Errorf("rec.Injected = true, want false")
-	}
-	if !strings.Contains(rec.Error, "no such file or directory") {
-		t.Errorf("rec.Error expected missing file error, got: %q", rec.Error)
+	if len(runner.calls) != 0 {
+		t.Errorf("runner had %d calls, want 0", len(runner.calls))
 	}
 }
 
@@ -706,33 +675,35 @@ func TestDefaultSkillSelector_MissingAPIKey(t *testing.T) {
 
 	runner := setupFakeRunnerForNewLane(t, "w1:pLane1")
 	out, exitCode, err := dispatch.Dispatch(context.Background(), opts, runner)
-	if err != nil {
-		t.Fatalf("dispatch should succeed even if missing api key, got: %v", err)
+	if err == nil {
+		t.Fatalf("dispatch should fail when missing API key, got err = nil")
 	}
-	if exitCode != 0 {
-		t.Errorf("exitCode = %d, want 0", exitCode)
+	if exitCode != 5 {
+		t.Errorf("exitCode = %d, want 5", exitCode)
+	}
+	if !errors.Is(err, dispatch.ErrAutoSkillsUnavailable) {
+		t.Errorf("err must wrap ErrAutoSkillsUnavailable: %v", err)
+	}
+	var typedErr *dispatch.AutoSkillsUnavailableError
+	if !errors.As(err, &typedErr) {
+		t.Fatalf("err must be of type *dispatch.AutoSkillsUnavailableError, got %T", err)
+	}
+	if !typedErr.IsMissingKey() {
+		t.Errorf("typedErr.IsMissingKey() = false, want true")
+	}
+	if !errors.Is(err, skillselect.ErrMissingAPIKey) {
+		t.Errorf("err should match skillselect.ErrMissingAPIKey via errors.Is")
+	}
+	if out.Lane != "" {
+		t.Errorf("out.Lane = %q, want empty", out.Lane)
 	}
 
-	wantWarning := "lucind-ai: TYPESAFE_API_KEY is not set; export it or run lucind-ai install to store it in ~/.config/lucind/env; dispatching without a skills section\n"
-	if !strings.Contains(stderrBuf.String(), wantWarning) {
-		t.Errorf("stderr = %q, want it to contain %q", stderrBuf.String(), wantWarning)
+	lanesDir := filepath.Join(tempDir, ".lucind", "lanes")
+	if entries, err := os.ReadDir(lanesDir); err == nil && len(entries) > 0 {
+		t.Errorf("lanes directory contains %d entries, want 0", len(entries))
 	}
-
-	skillsPath := filepath.Join(lane.LaneDir(tempDir, out.Lane), "skills-1.json")
-	data, err := os.ReadFile(skillsPath)
-	if err != nil {
-		t.Fatalf("read skills-1.json: %v", err)
-	}
-	var rec dispatch.SkillsRecord
-	if err := json.Unmarshal(data, &rec); err != nil {
-		t.Fatalf("unmarshal skills-1.json: %v", err)
-	}
-	if rec.Injected {
-		t.Errorf("rec.Injected = true, want false")
-	}
-	wantErrorMsg := "TYPESAFE_API_KEY is not set; export it or run lucind-ai install to store it in ~/.config/lucind/env"
-	if !strings.Contains(rec.Error, wantErrorMsg) {
-		t.Errorf("rec.Error expected %q, got: %q", wantErrorMsg, rec.Error)
+	if len(runner.calls) != 0 {
+		t.Errorf("runner had %d calls, want 0", len(runner.calls))
 	}
 }
 
@@ -759,24 +730,202 @@ func TestAutoSkills_SelectorError_DefaultStderr(t *testing.T) {
 	}
 
 	out, exitCode, err := dispatch.Dispatch(context.Background(), opts, runner)
-	if err != nil {
-		t.Fatalf("dispatch should succeed with nil Stderr, got: %v", err)
+	if err == nil {
+		t.Fatalf("dispatch should fail on selector error with nil Stderr, got: %v", err)
 	}
-	if exitCode != 0 {
-		t.Fatalf("exitCode = %d, want 0", exitCode)
+	if exitCode != 5 {
+		t.Fatalf("exitCode = %d, want 5", exitCode)
+	}
+	if !errors.Is(err, dispatch.ErrAutoSkillsUnavailable) {
+		t.Errorf("err must wrap ErrAutoSkillsUnavailable: %v", err)
+	}
+	if out.Lane != "" {
+		t.Errorf("out.Lane = %q, want empty", out.Lane)
 	}
 
-	skillsPath := filepath.Join(lane.LaneDir(repoDir, out.Lane), "skills-1.json")
-	data, err := os.ReadFile(skillsPath)
+	lanesDir := filepath.Join(repoDir, ".lucind", "lanes")
+	if entries, err := os.ReadDir(lanesDir); err == nil && len(entries) > 0 {
+		t.Errorf("lanes directory contains %d entries, want 0", len(entries))
+	}
+	if len(runner.calls) != 0 {
+		t.Errorf("runner had %d calls, want 0", len(runner.calls))
+	}
+}
+
+func TestAutoSkills_Continuation_SelectorError_LeavesLaneByteIdentical(t *testing.T) {
+	t.Setenv("HERDR_ENV", "1")
+	repoDir := t.TempDir()
+	initGitRepo(t, repoDir)
+
+	createdLane, err := lane.Create(context.Background(), repoDir, []string{"internal/**"}, "gemini-3.8-flash-high")
 	if err != nil {
-		t.Fatalf("read skills-1.json: %v", err)
+		t.Fatalf("lane.Create failed: %v", err)
 	}
-	var rec dispatch.SkillsRecord
-	if err := json.Unmarshal(data, &rec); err != nil {
-		t.Fatalf("unmarshal skills-1.json: %v", err)
+	createdLane.PaneID = "w1:pCont1"
+	createdLane.Status = lane.StatusFailed
+	if err := createdLane.Save(repoDir); err != nil {
+		t.Fatalf("lane.Save failed: %v", err)
 	}
-	if rec.Error != "network failure" {
-		t.Errorf("rec.Error = %q, want \"network failure\"", rec.Error)
+
+	laneFilePath := filepath.Join(lane.LaneDir(repoDir, createdLane.ID), "lane.json")
+	origBytes, err := os.ReadFile(laneFilePath)
+	if err != nil {
+		t.Fatalf("read orig lane.json: %v", err)
+	}
+
+	runner := newFakeHerdrRunner()
+	dispatch.SetSkillSelectorForTesting(func(ctx context.Context, repoRoot string, in skillselect.Input) (skillselect.Result, error) {
+		return skillselect.Result{}, errors.New("network failure")
+	})
+	t.Cleanup(dispatch.ResetSkillSelectorForTesting)
+
+	opts := dispatch.Options{
+		Cwd:        repoDir,
+		LaneID:     createdLane.ID,
+		AutoSkills: true,
+		Prompt:     "# Continuation task",
+		Detach:     true,
+	}
+
+	_, exitCode, err := dispatch.Dispatch(context.Background(), opts, runner)
+	if err == nil {
+		t.Fatalf("expected dispatch error on selector error, got nil")
+	}
+	if exitCode != 5 {
+		t.Fatalf("exitCode = %d, want 5", exitCode)
+	}
+	if !errors.Is(err, dispatch.ErrAutoSkillsUnavailable) {
+		t.Errorf("err must wrap ErrAutoSkillsUnavailable: %v", err)
+	}
+
+	newBytes, err := os.ReadFile(laneFilePath)
+	if err != nil {
+		t.Fatalf("read reloaded lane.json: %v", err)
+	}
+	if !bytes.Equal(origBytes, newBytes) {
+		t.Errorf("lane.json changed across failed continuation:\norig:\n%s\nnew:\n%s", string(origBytes), string(newBytes))
+	}
+
+	skills2Path := filepath.Join(lane.LaneDir(repoDir, createdLane.ID), "skills-2.json")
+	if _, err := os.Stat(skills2Path); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("skills-2.json should not exist, stat err = %v", err)
+	}
+
+	if len(runner.calls) != 0 {
+		t.Errorf("expected 0 runner calls, got %d", len(runner.calls))
+	}
+}
+
+func TestAutoSkills_HTTP401_KeyNeverAppears(t *testing.T) {
+	t.Setenv("HERDR_ENV", "1")
+	t.Setenv("TYPESAFE_API_KEY", "super-secret-401-token")
+	repoDir := t.TempDir()
+	initGitRepo(t, repoDir)
+
+	runner := setupFakeRunnerForNewLane(t, "w1:pLane1")
+
+	dispatch.SetSkillSelectorForTesting(func(ctx context.Context, repoRoot string, in skillselect.Input) (skillselect.Result, error) {
+		return skillselect.Result{}, errors.New("HTTP 401 Unauthorized: token super-secret-401-token is rejected")
+	})
+	t.Cleanup(dispatch.ResetSkillSelectorForTesting)
+
+	var stderrBuf bytes.Buffer
+	opts := dispatch.Options{
+		Cwd:        repoDir,
+		AutoSkills: true,
+		Stderr:     &stderrBuf,
+		Model:      "gemini-3.8-flash-high",
+		Prompt:     "test brief",
+		Detach:     true,
+	}
+
+	_, exitCode, err := dispatch.Dispatch(context.Background(), opts, runner)
+	if err == nil {
+		t.Fatalf("expected error on 401, got nil")
+	}
+	if exitCode != 5 {
+		t.Fatalf("exitCode = %d, want 5", exitCode)
+	}
+
+	if strings.Contains(err.Error(), "super-secret-401-token") {
+		t.Errorf("error contains unredacted API key: %q", err.Error())
+	}
+	if !strings.Contains(err.Error(), "[REDACTED]") {
+		t.Errorf("error missing [REDACTED]: %q", err.Error())
+	}
+	if strings.Contains(stderrBuf.String(), "super-secret-401-token") {
+		t.Errorf("stderr contains unredacted API key: %q", stderrBuf.String())
+	}
+
+	lanesDir := filepath.Join(repoDir, ".lucind", "lanes")
+	if entries, err := os.ReadDir(lanesDir); err == nil && len(entries) > 0 {
+		t.Errorf("lanes directory contains %d entries, want 0", len(entries))
+	}
+	if len(runner.calls) != 0 {
+		t.Errorf("expected 0 runner calls, got %d", len(runner.calls))
+	}
+}
+
+func TestAutoSkills_HandWrittenSection_SelectorNeverCalled(t *testing.T) {
+	for _, autoSkillsFlag := range []bool{true, false} {
+		t.Run(fmt.Sprintf("AutoSkills_%v", autoSkillsFlag), func(t *testing.T) {
+			t.Setenv("HERDR_ENV", "1")
+			t.Setenv("TYPESAFE_API_KEY", "")
+			t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+			repoDir := t.TempDir()
+			initGitRepo(t, repoDir)
+
+			runner := setupFakeRunnerForNewLane(t, "w1:pLane1")
+
+			selectorCalled := false
+			dispatch.SetSkillSelectorForTesting(func(ctx context.Context, repoRoot string, in skillselect.Input) (skillselect.Result, error) {
+				selectorCalled = true
+				return skillselect.Result{}, errors.New("selector should not be called")
+			})
+			t.Cleanup(dispatch.ResetSkillSelectorForTesting)
+
+			prompt := "# Feature with hand-written skills\n\n## Skills to load before work\n/path/to/skill/SKILL.md\n\n## Goal\nDo work."
+			opts := dispatch.Options{
+				Cwd:        repoDir,
+				AutoSkills: autoSkillsFlag,
+				Model:      "gemini-3.8-flash-high",
+				Prompt:     prompt,
+				Detach:     true,
+			}
+
+			out, exitCode, err := dispatch.Dispatch(context.Background(), opts, runner)
+			if err != nil {
+				t.Fatalf("dispatch failed: %v", err)
+			}
+			if exitCode != 0 {
+				t.Fatalf("exitCode = %d, want 0", exitCode)
+			}
+			if selectorCalled {
+				t.Errorf("selector was called for prompt with hand-written section")
+			}
+
+			skillsPath := filepath.Join(lane.LaneDir(repoDir, out.Lane), "skills-1.json")
+			if autoSkillsFlag {
+				data, err := os.ReadFile(skillsPath)
+				if err != nil {
+					t.Fatalf("read skills-1.json: %v", err)
+				}
+				var rec dispatch.SkillsRecord
+				if err := json.Unmarshal(data, &rec); err != nil {
+					t.Fatalf("unmarshal skills-1.json: %v", err)
+				}
+				if rec.SkippedReason != "brief_has_section" {
+					t.Errorf("rec.SkippedReason = %q, want 'brief_has_section'", rec.SkippedReason)
+				}
+				if rec.Injected {
+					t.Errorf("rec.Injected = true, want false")
+				}
+			} else {
+				if _, err := os.Stat(skillsPath); !errors.Is(err, os.ErrNotExist) {
+					t.Errorf("skills-1.json should not exist when AutoSkills is false, stat err = %v", err)
+				}
+			}
+		})
 	}
 }
 

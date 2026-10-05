@@ -13,6 +13,66 @@ import (
 	"github.com/LanzerDevCorp/lucind-ai/internal/skillselect"
 )
 
+const (
+	ExitDone                  = 0
+	ExitError                 = 1
+	ExitFailed                = 3
+	ExitTimeout               = 4
+	ExitAutoSkillsUnavailable = 5
+)
+
+// ErrAutoSkillsUnavailable is the sentinel error returned when automatic skill selection fails.
+var ErrAutoSkillsUnavailable = errors.New("auto-skills unavailable")
+
+// AutoSkillsUnavailableError is the typed error returned when automatic skill selection fails.
+type AutoSkillsUnavailableError struct {
+	Cause error
+}
+
+func (e *AutoSkillsUnavailableError) Error() string {
+	if e.Cause != nil {
+		return fmt.Sprintf("auto-skills unavailable: %s", redactAPIKey(e.Cause.Error()))
+	}
+	return "auto-skills unavailable"
+}
+
+func (e *AutoSkillsUnavailableError) Unwrap() error {
+	return e.Cause
+}
+
+func (e *AutoSkillsUnavailableError) Is(target error) bool {
+	if target == ErrAutoSkillsUnavailable {
+		return true
+	}
+	if target == skillselect.ErrMissingAPIKey && e.IsMissingKey() {
+		return true
+	}
+	return false
+}
+
+func (e *AutoSkillsUnavailableError) IsMissingKey() bool {
+	return errors.Is(e.Cause, skillselect.ErrMissingAPIKey) ||
+		(e.Cause != nil && (e.Cause.Error() == skillselect.ErrMissingAPIKey.Error() ||
+			strings.Contains(e.Cause.Error(), "TYPESAFE_API_KEY is not set")))
+}
+
+func (e *AutoSkillsUnavailableError) RedactedReason() string {
+	if e.Cause != nil {
+		return redactAPIKey(e.Cause.Error())
+	}
+	return ""
+}
+
+func newAutoSkillsUnavailableError(err error) *AutoSkillsUnavailableError {
+	if err == nil {
+		return &AutoSkillsUnavailableError{}
+	}
+	if errors.Is(err, skillselect.ErrMissingAPIKey) {
+		return &AutoSkillsUnavailableError{Cause: skillselect.ErrMissingAPIKey}
+	}
+	return &AutoSkillsUnavailableError{Cause: errors.New(redactAPIKey(err.Error()))}
+}
+
 // SkillsRecord records the auto-skills selection decisions and outcome for a turn.
 type SkillsRecord struct {
 	Turn          int                 `json:"turn"`
@@ -105,24 +165,20 @@ func insertSkillsSection(brief, section string) string {
 	return title + "\n\n" + sec + "\n\n" + rest
 }
 
-func handleAutoSkills(ctx context.Context, repoRoot string, l lane.Lane, brief string, allow []string, stderr io.Writer) string {
-	w := stderr
-	if w == nil {
-		w = io.Discard
-	}
+type autoSkillsOutcome struct {
+	sectionToInsert string
+	skippedReason   string
+	injected        bool
+	result          *skillselect.Result
+}
 
-	skillsPath := lane.SkillsFilePath(repoRoot, l)
-
+// selectAutoSkills evaluates the prompt and allow globs without modifying any files.
+func selectAutoSkills(ctx context.Context, repoRoot string, brief string, allow []string) (autoSkillsOutcome, error) {
 	if hasSkillsSection(brief) {
-		record := SkillsRecord{
-			Turn:          l.Turn,
-			Injected:      false,
-			SkippedReason: "brief_has_section",
-		}
-		if err := lane.AtomicWriteJSON(skillsPath, record); err != nil {
-			_, _ = fmt.Fprintf(w, "lucind-ai: auto-skills: write skills record: %v\n", err)
-		}
-		return brief
+		return autoSkillsOutcome{
+			skippedReason: "brief_has_section",
+			injected:      false,
+		}, nil
 	}
 
 	in := skillselect.Input{
@@ -132,46 +188,40 @@ func handleAutoSkills(ctx context.Context, repoRoot string, l lane.Lane, brief s
 
 	result, err := selectSkills(ctx, repoRoot, in)
 	if err != nil {
-		errMsg := redactAPIKey(err.Error())
-		if errors.Is(err, skillselect.ErrMissingAPIKey) || errMsg == skillselect.ErrMissingAPIKey.Error() {
-			_, _ = fmt.Fprintf(w, "lucind-ai: %s; dispatching without a skills section\n", errMsg)
-		} else {
-			_, _ = fmt.Fprintf(w, "lucind-ai: auto-skills: %s; dispatching without a skills section\n", errMsg)
-		}
-
-		record := SkillsRecord{
-			Turn:     l.Turn,
-			Injected: false,
-			Error:    errMsg,
-		}
-		if writeErr := lane.AtomicWriteJSON(skillsPath, record); writeErr != nil {
-			_, _ = fmt.Fprintf(w, "lucind-ai: auto-skills: write skills record: %v\n", writeErr)
-		}
-		return brief
+		return autoSkillsOutcome{}, newAutoSkillsUnavailableError(err)
 	}
 
 	sec := skillselect.Section(result.Decisions)
 	if sec != "" {
-		newBrief := insertSkillsSection(brief, sec)
-		record := SkillsRecord{
-			Turn:     l.Turn,
-			Injected: true,
-			Result:   &result,
-		}
-		if err := lane.AtomicWriteJSON(skillsPath, record); err != nil {
-			_, _ = fmt.Fprintf(w, "lucind-ai: auto-skills: write skills record: %v\n", err)
-		}
-		return newBrief
+		return autoSkillsOutcome{
+			sectionToInsert: sec,
+			injected:        true,
+			result:          &result,
+		}, nil
 	}
 
+	return autoSkillsOutcome{
+		skippedReason: "no_skill_selected",
+		injected:      false,
+		result:        &result,
+	}, nil
+}
+
+// recordAutoSkills writes skills-<turn>.json once the lane exists on disk.
+func recordAutoSkills(repoRoot string, l lane.Lane, outcome autoSkillsOutcome, stderr io.Writer) {
+	w := stderr
+	if w == nil {
+		w = io.Discard
+	}
+
+	skillsPath := lane.SkillsFilePath(repoRoot, l)
 	record := SkillsRecord{
 		Turn:          l.Turn,
-		Injected:      false,
-		SkippedReason: "no_skill_selected",
-		Result:        &result,
+		Injected:      outcome.injected,
+		SkippedReason: outcome.skippedReason,
+		Result:        outcome.result,
 	}
 	if err := lane.AtomicWriteJSON(skillsPath, record); err != nil {
 		_, _ = fmt.Fprintf(w, "lucind-ai: auto-skills: write skills record: %v\n", err)
 	}
-	return brief
 }

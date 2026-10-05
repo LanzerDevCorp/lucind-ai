@@ -39,6 +39,14 @@ const (
 	waitUsage     = "usage: lucind-ai wait <lane> [--cwd <dir>] [--timeout D]"
 )
 
+const (
+	ExitDone                  = dispatch.ExitDone
+	ExitError                 = dispatch.ExitError
+	ExitFailed                = dispatch.ExitFailed
+	ExitTimeout               = dispatch.ExitTimeout
+	ExitAutoSkillsUnavailable = dispatch.ExitAutoSkillsUnavailable
+)
+
 var (
 	dispatchRun           = dispatch.Dispatch
 	waitRun               = dispatch.Wait
@@ -399,9 +407,26 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 
 	out, exitCode, err := dispatchRun(ctx, opts, nil)
 	if err != nil {
+		var autoSkillsErr *dispatch.AutoSkillsUnavailableError
+		if errors.As(err, &autoSkillsErr) || errors.Is(err, dispatch.ErrAutoSkillsUnavailable) {
+			reason := ""
+			isMissingKey := false
+			if autoSkillsErr != nil {
+				reason = autoSkillsErr.RedactedReason()
+				isMissingKey = autoSkillsErr.IsMissingKey()
+			} else {
+				reason = err.Error()
+			}
+			_, _ = fmt.Fprintf(stderr, "lucind-ai: auto-skills unavailable: %s\n", reason)
+			_, _ = fmt.Fprintln(stderr, "lucind-ai: no lane was created. Fallback: add a \"## Skills to load before work\" section with absolute SKILL.md paths to the prompt and dispatch again (a hand-written section skips Jev).")
+			if isMissingKey {
+				_, _ = fmt.Fprintln(stderr, "lucind-ai: to store the key run lucind-ai install, or put TYPESAFE_API_KEY=... in ~/.config/lucind/env")
+			}
+			return ExitAutoSkillsUnavailable
+		}
 		_, _ = fmt.Fprintf(stderr, "lucind-ai: dispatch: %v\n", err)
 		if exitCode == 0 {
-			return 1
+			return ExitError
 		}
 		return exitCode
 	}
