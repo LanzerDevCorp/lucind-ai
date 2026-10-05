@@ -56,6 +56,17 @@ What exists is in [`product.md`](product.md).
    ignored while worker subagents run; only main Stops with `fullyIdle=true` decide done/retry/failed.
    Continuation turns across differing main conversation IDs are resolved independently via the current
    turn's brief marker.
+   **Owner review: this is a poor solution, replace it.** Classifying conversations by parsing step 0
+   of agy's private transcript format couples lucind-ai to undocumented internals (`source`, `type`,
+   the exact dispatch prompt wording) and breaks silently if any of them change. Look for a
+   supported signal instead: a parent/child id in the Stop payload, an agy hook or API that marks
+   subagents, or lucind-ai owning the main conversation id at dispatch time.
+7. **Briefs do not make agy load skills first; evaluate sending the prompt directly.** Owner
+   observation: agy does not follow the brief literally. Dispatch sends `Read and follow <brief.md>`,
+   and agy does not read the `## Skills to load before work` files before starting, even with the
+   section right after the title. Evaluate sending the brief content itself as the prompt (instead
+   of a pointer to a file to read), and measure skill loading with the envelope's `skills_loaded`
+   (it came back `null` in the first `--auto-skills` lane, so the worker contract must require it).
 4. **RTK support.** Install RTK as part of the lucind-ai setup (today it is wired by hand in the
    global Claude config: `@RTK.md` include plus the `rtk hook claude` PreToolUse hook).
 5. **Research gentle-ai reviews in depth.** Understand how receipt-driven development (RDD) works
