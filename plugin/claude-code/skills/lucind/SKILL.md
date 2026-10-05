@@ -31,12 +31,22 @@ Load the `herdr` skill too; this skill assumes its pane/agent commands.
 
 ### Lane (code changes)
 
+<!-- lucind:variant auto -->
 ```bash
 lucind-ai dispatch --cwd "$PWD" [--allow '<glob>']... --prompt <file|-> \
-  [--auto-skills] [--check '<cmd>']... [--model M] [--timeout 60m] [--detach] [--min-quota 0.1]
+  --auto-skills [--check '<cmd>']... [--model M] [--timeout 60m] [--detach] [--min-quota 0.1]
 lucind-ai wait <lane>            # only after --detach
 lucind-ai accept --lane <id>     # run from the lane's repo
 ```
+<!-- /lucind:variant -->
+<!-- lucind:variant manual -->
+```bash
+lucind-ai dispatch --cwd "$PWD" [--allow '<glob>']... --prompt <file|-> \
+  [--check '<cmd>']... [--model M] [--timeout 60m] [--detach] [--min-quota 0.1]
+lucind-ai wait <lane>            # only after --detach
+lucind-ai accept --lane <id>     # run from the lane's repo
+```
+<!-- /lucind:variant -->
 
 - `dispatch` creates `.lucind/lanes/<id>/`, records the base tree, opens a new pane with
   `LUCIND_LANE=<id>`, starts agy and sends it the prompt directly plus a contract footer.
@@ -122,17 +132,22 @@ what is described here (no explanatory prose), so put prose under a following he
   whitespace go in whole-entry backticks. List pre-existing untracked targets agy may write and
   the directories where new files are authorized. Nothing beyond the task: a surface wider than
   the task is the same defect as no surface at all.
-- `## Skills to load before work`: one exact `SKILL.md` path per line, absolute. This section is
-  placed first in the prompt sent to agy so skills are loaded before work begins. With
-  `--auto-skills`, the orchestrator omits the section and does not read the skill registry:
-  lucind-ai asks Jev using `.atl/skill-registry.md` and `TYPESAFE_API_KEY`, records
-  `skills-<turn>.json`, and a hand-written section always wins. `lucind-ai` does not load `.env`:
-  export `TYPESAFE_API_KEY` in the environment of the dispatch command. With an empty key dispatch
-  only warns on stderr and continues without a skills section, so confirm that `skills-<turn>.json`
-  exists in the lane directory. Without the flag, resolve them
-  yourself and pass the real file path (resolve symlinks; for example
+<!-- lucind:variant auto -->
+- `## Skills to load before work`: optional; the orchestrator is NOT obliged to write this section.
+  With `--auto-skills`, lucind-ai selects relevant skills using Jev and `.atl/skill-registry.md`,
+  and inserts the skills section first in the prompt before the goal and scope so agy loads skills
+  before touching code. A hand-written section is only for forcing a specific skill or overriding
+  automatic selection.
+<!-- /lucind:variant -->
+<!-- lucind:variant manual -->
+- `## Skills to load before work`: one exact `SKILL.md` path per line, absolute. The orchestrator
+  resolves the exact `SKILL.md` paths itself and writes the section (resolve symlinks; for example
   `.agents/skills/<name>/SKILL.md`), since lane workers are not Claude; agy reads those files
-  before touching code and does not rediscover skills. Omit when no skill applies.
+  before touching code and does not rediscover skills. This section is placed first in the prompt
+  sent to agy so skills are loaded before work begins. Omit when no skill applies. Automatic
+  skill selection requires `TYPESAFE_API_KEY` (stored in `~/.config/lucind/env` or the environment);
+  once configured, re-run `lucind-ai install` to switch to the auto-skills skill variant.
+<!-- /lucind:variant -->
 - `## Hard stops`: one line per condition that must stop agy. The envelope requires one
   `hard_stops` entry per hard stop in the prompt (`[]` when none), so list them here.
 - `## Verification`: the exact commands agy must run, each reported as
@@ -167,6 +182,16 @@ what is described here (no explanatory prose), so put prose under a following he
   standalone factual sentence of at least 20 characters and at least 4 words, omitting the block
   when there is genuinely no reusable learning.
 
+<!-- lucind:variant auto -->
+When forcing a specific skill, write the section manually:
+
+```markdown
+## Skills to load before work
+/abs/path/to/skill-a/SKILL.md
+/abs/path/to/skill-b/SKILL.md
+```
+<!-- /lucind:variant -->
+<!-- lucind:variant manual -->
 Example of the skills section:
 
 ```markdown
@@ -174,6 +199,7 @@ Example of the skills section:
 /abs/path/to/skill-a/SKILL.md
 /abs/path/to/skill-b/SKILL.md
 ```
+<!-- /lucind:variant -->
 
 ## Parallelism and worktrees
 
@@ -197,4 +223,4 @@ fresh agy session; an open session does not pick up new credentials reliably.
 
 ## Setup
 
-`lucind-ai install` installs the Claude skill into `~/.claude/skills/lucind`, the `lucind` agy plugin, the `lucind-roles` agy plugin, and writes the lucind dispatch block into `~/.claude/CLAUDE.md` (`--no-claude-md` to skip). `make install` builds the binary and runs `lucind-ai install`. Check the build with `lucind-ai -v` before dispatching.
+`lucind-ai install` installs the Claude skill into `~/.claude/skills/lucind`, the `lucind` agy plugin, the `lucind-roles` agy plugin, and writes the lucind dispatch block into `~/.claude/CLAUDE.md` (`--no-claude-md` to skip). During installation, the skill variant (`auto` or `manual`) is chosen based on whether `TYPESAFE_API_KEY` is configured (in the environment or `~/.config/lucind/env`). Adding or updating the key later in `~/.config/lucind/env` requires running `lucind-ai install` again to switch the skill variant. `make install` builds the binary and runs `lucind-ai install`. Check the build with `lucind-ai -v` before dispatching.

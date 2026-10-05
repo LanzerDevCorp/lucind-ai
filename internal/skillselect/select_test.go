@@ -468,7 +468,7 @@ func TestSelect_Live(t *testing.T) {
 	if os.Getenv("TYPESAFE_LIVE_TEST") != "1" {
 		t.Skip("skipping live test; set TYPESAFE_LIVE_TEST=1 to run")
 	}
-	key := skillselect.KeyFromEnv()
+	key := skillselect.ResolveKey()
 	if key == "" {
 		t.Skip("skipping live test; TYPESAFE_API_KEY is not set")
 	}

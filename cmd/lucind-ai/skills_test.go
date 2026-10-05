@@ -124,13 +124,8 @@ func TestSkillsSelect_MissingAPIKey(t *testing.T) {
 		t.Fatalf("WriteFile failed: %v", err)
 	}
 
-	origKey := os.Getenv("TYPESAFE_API_KEY")
-	_ = os.Unsetenv("TYPESAFE_API_KEY")
-	defer func() {
-		if origKey != "" {
-			_ = os.Setenv("TYPESAFE_API_KEY", origKey)
-		}
-	}()
+	t.Setenv("TYPESAFE_API_KEY", "")
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 
 	var stdout, stderr bytes.Buffer
 	code := run(context.Background(), []string{
@@ -142,8 +137,9 @@ func TestSkillsSelect_MissingAPIKey(t *testing.T) {
 	if code != 1 {
 		t.Errorf("expected exit code 1 when TYPESAFE_API_KEY is missing, got %d", code)
 	}
-	if !strings.Contains(stderr.String(), "lucind-ai: TYPESAFE_API_KEY environment variable is required") {
-		t.Errorf("stderr = %q, want TYPESAFE_API_KEY missing error", stderr.String())
+	wantMsg := "lucind-ai: TYPESAFE_API_KEY is not set; export it or run lucind-ai install to store it in ~/.config/lucind/env"
+	if !strings.Contains(stderr.String(), wantMsg) {
+		t.Errorf("stderr = %q, want %q", stderr.String(), wantMsg)
 	}
 }
 
@@ -188,13 +184,8 @@ func TestSkillsSelect_StdinPrompt(t *testing.T) {
 		t.Fatalf("WriteFile failed: %v", err)
 	}
 
-	origKey := os.Getenv("TYPESAFE_API_KEY")
-	_ = os.Unsetenv("TYPESAFE_API_KEY")
-	defer func() {
-		if origKey != "" {
-			_ = os.Setenv("TYPESAFE_API_KEY", origKey)
-		}
-	}()
+	t.Setenv("TYPESAFE_API_KEY", "")
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 
 	origStdin := stdinReader
 	stdinReader = strings.NewReader("prompt content from stdin")
@@ -210,8 +201,9 @@ func TestSkillsSelect_StdinPrompt(t *testing.T) {
 	if code != 1 {
 		t.Errorf("expected exit code 1 when TYPESAFE_API_KEY is missing, got %d", code)
 	}
-	if !strings.Contains(stderr.String(), "lucind-ai: TYPESAFE_API_KEY environment variable is required") {
-		t.Errorf("stderr = %q, want TYPESAFE_API_KEY missing error (indicating prompt was read from stdin)", stderr.String())
+	wantMsg := "lucind-ai: TYPESAFE_API_KEY is not set; export it or run lucind-ai install to store it in ~/.config/lucind/env"
+	if !strings.Contains(stderr.String(), wantMsg) {
+		t.Errorf("stderr = %q, want %q", stderr.String(), wantMsg)
 	}
 }
 
@@ -309,6 +301,61 @@ func TestSkillsSelect_BriefFlagRejected(t *testing.T) {
 	}
 	if !strings.Contains(errOut, "--brief") || !strings.Contains(errOut, "--prompt") {
 		t.Errorf("expected error message pointing from --brief to --prompt, got: %q", errOut)
+	}
+}
+
+func TestSkillsSelect_KeyFromUserConfig(t *testing.T) {
+	repo := initRepo(t)
+	promptFile := filepath.Join(repo, "prompt.md")
+	if err := os.WriteFile(promptFile, []byte("Test prompt"), 0o644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+
+	regDir := filepath.Join(repo, ".atl")
+	if err := os.MkdirAll(regDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll failed: %v", err)
+	}
+	regFile := filepath.Join(regDir, "skill-registry.md")
+	regContent := "# Registry\n## Skills\n\n| Skill | Trigger / description | Scope | Path |\n| --- | --- | --- | --- |\n| `s1` | desc1 | repo | `/p1` |\n"
+	if err := os.WriteFile(regFile, []byte(regContent), 0o644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+
+	t.Setenv("TYPESAFE_API_KEY", "")
+	tempXDG := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tempXDG)
+	lucindConfigDir := filepath.Join(tempXDG, "lucind")
+	if err := os.MkdirAll(lucindConfigDir, 0700); err != nil {
+		t.Fatalf("mkdir failed: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(lucindConfigDir, "env"), []byte("TYPESAFE_API_KEY=cfg-key\n"), 0600); err != nil {
+		t.Fatalf("write env file failed: %v", err)
+	}
+
+	origSelect := selectSkills
+	defer func() { selectSkills = origSelect }()
+	selectCalled := false
+	selectSkills = func(ctx context.Context, client *skillselect.Client, skills []skillselect.Skill, in skillselect.Input, threshold float64) (skillselect.Result, error) {
+		selectCalled = true
+		return skillselect.Result{
+			Model:     "mock",
+			Threshold: threshold,
+			Decisions: []skillselect.Decision{},
+		}, nil
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := run(context.Background(), []string{
+		"skills", "select",
+		"--prompt", promptFile,
+		"--cwd", repo,
+	}, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("code = %d, want 0 (stderr: %s)", code, stderr.String())
+	}
+	if !selectCalled {
+		t.Errorf("expected selectSkills to be called using key from user config")
 	}
 }
 

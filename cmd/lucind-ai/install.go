@@ -14,7 +14,7 @@ import (
 )
 
 var (
-	claudeInstall   = claudeplugin.Install
+	claudeInstall   = claudeplugin.InstallVariant
 	claudemdInstall = claudemd.Install
 	userHomeDir     = os.UserHomeDir
 )
@@ -42,13 +42,24 @@ func runInstall(ctx context.Context, args []string, stdout, stderr io.Writer) in
 		return 1
 	}
 
+	// 0. API key and skill variant
+	variant, err := determineVariantAndSetupKey(stdout, stderr)
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "lucind-ai: %v\n", err)
+		return 1
+	}
+
 	// 1. Claude skill
-	skillDir, err := claudeInstall()
+	skillDir, err := claudeInstall(variant)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "lucind-ai: install claude skill: %v\n", err)
 		return 1
 	}
-	_, _ = fmt.Fprintf(stdout, "installed claude skill into %s\n", skillDir)
+	variantDesc := "manual variant"
+	if variant == claudeplugin.VariantAuto {
+		variantDesc = "auto-skills variant"
+	}
+	_, _ = fmt.Fprintf(stdout, "installed claude skill (%s) into %s\n", variantDesc, skillDir)
 
 	// 2. lucind agy plugin
 	root, err := agyplugin.StagingRoot()
