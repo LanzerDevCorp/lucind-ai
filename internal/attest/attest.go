@@ -138,7 +138,7 @@ func LoadOrCreateKey(path string) ([]byte, error) {
 		return nil, fmt.Errorf("create temp key file: %w", err)
 	}
 	tmpName := tmp.Name()
-	defer os.Remove(tmpName)
+	defer func() { _ = os.Remove(tmpName) }()
 	if err := tmp.Chmod(0600); err != nil {
 		_ = tmp.Close()
 		return nil, fmt.Errorf("chmod temp key file: %w", err)
@@ -286,7 +286,7 @@ func TreeHash(ctx context.Context, repoRoot string) (string, error) {
 	tmpIndexPath := tmpFile.Name()
 	_ = tmpFile.Close()
 	_ = os.Remove(tmpIndexPath)
-	defer os.Remove(tmpIndexPath)
+	defer func() { _ = os.Remove(tmpIndexPath) }()
 
 	env := append(os.Environ(), "GIT_INDEX_FILE="+tmpIndexPath)
 

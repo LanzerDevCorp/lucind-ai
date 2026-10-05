@@ -181,7 +181,11 @@ func TestCheckMissingScript(t *testing.T) {
 	if err := os.Chdir(repoDir); err != nil {
 		t.Fatal(err)
 	}
-	defer os.Chdir(cwd)
+	defer func() {
+		if err := os.Chdir(cwd); err != nil {
+			t.Errorf("chdir %s: %v", cwd, err)
+		}
+	}()
 
 	var stdout, stderr bytes.Buffer
 	code := run(context.Background(), []string{"check"}, &stdout, &stderr)
@@ -204,7 +208,11 @@ func TestCheckScriptPasses(t *testing.T) {
 	if err := os.Chdir(repoDir); err != nil {
 		t.Fatal(err)
 	}
-	defer os.Chdir(cwd)
+	defer func() {
+		if err := os.Chdir(cwd); err != nil {
+			t.Errorf("chdir %s: %v", cwd, err)
+		}
+	}()
 
 	var stdout, stderr bytes.Buffer
 	code := run(context.Background(), []string{"check"}, &stdout, &stderr)
@@ -237,7 +245,11 @@ func TestCheckScriptFails(t *testing.T) {
 	if err := os.Chdir(repoDir); err != nil {
 		t.Fatal(err)
 	}
-	defer os.Chdir(cwd)
+	defer func() {
+		if err := os.Chdir(cwd); err != nil {
+			t.Errorf("chdir %s: %v", cwd, err)
+		}
+	}()
 
 	var stdout, stderr bytes.Buffer
 	code := run(context.Background(), []string{"check"}, &stdout, &stderr)
@@ -262,7 +274,11 @@ func TestCheckOutFlag(t *testing.T) {
 	if err := os.Chdir(repoDir); err != nil {
 		t.Fatal(err)
 	}
-	defer os.Chdir(cwd)
+	defer func() {
+		if err := os.Chdir(cwd); err != nil {
+			t.Errorf("chdir %s: %v", cwd, err)
+		}
+	}()
 
 	var stdout, stderr bytes.Buffer
 	code := run(context.Background(), []string{"check", "--out", logPath}, &stdout, &stderr)

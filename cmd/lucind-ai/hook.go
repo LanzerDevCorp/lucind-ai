@@ -15,8 +15,8 @@ import (
 // 0, and the lane (LUCIND_LANE) decides whether it enforces anything.
 func hookDispatch(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "lucind-ai: hook: subcommand required (pre-tool-use|stop)")
-		fmt.Fprintln(stdout, "{}")
+		_, _ = fmt.Fprintln(stderr, "lucind-ai: hook: subcommand required (pre-tool-use|stop)")
+		_, _ = fmt.Fprintln(stdout, "{}")
 		return 0
 	}
 
@@ -27,16 +27,16 @@ func hookDispatch(ctx context.Context, args []string, stdin io.Reader, stdout, s
 	case "stop":
 		handler = agyhook.Stop
 	default:
-		fmt.Fprintf(stderr, "lucind-ai: hook: unknown subcommand %q\n", args[0])
-		fmt.Fprintln(stdout, "{}")
+		_, _ = fmt.Fprintf(stderr, "lucind-ai: hook: unknown subcommand %q\n", args[0])
+		_, _ = fmt.Fprintln(stdout, "{}")
 		return 0
 	}
 
 	data, err := io.ReadAll(stdin)
 	if err != nil {
-		fmt.Fprintf(stderr, "lucind-ai: hook %s: read stdin: %v\n", args[0], err)
+		_, _ = fmt.Fprintf(stderr, "lucind-ai: hook %s: read stdin: %v\n", args[0], err)
 		data = nil
 	}
-	fmt.Fprintln(stdout, string(handler(ctx, os.Getenv("LUCIND_LANE"), data)))
+	_, _ = fmt.Fprintln(stdout, string(handler(ctx, os.Getenv("LUCIND_LANE"), data)))
 	return 0
 }

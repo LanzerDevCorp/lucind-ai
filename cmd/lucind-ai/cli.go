@@ -46,16 +46,16 @@ var (
 
 func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, usage)
+		_, _ = fmt.Fprintln(stderr, usage)
 		return 1
 	}
 
 	switch args[0] {
 	case "--help", "-help", "-h", "help":
-		fmt.Fprintln(stdout, usage)
+		_, _ = fmt.Fprintln(stdout, usage)
 		return 0
 	case "--version", "-version", "-v", "version":
-		fmt.Fprintf(stdout, "lucind-ai %s (%s, %s/%s)\n", version, runtime.Version(), runtime.GOOS, runtime.GOARCH)
+		_, _ = fmt.Fprintf(stdout, "lucind-ai %s (%s, %s/%s)\n", version, runtime.Version(), runtime.GOOS, runtime.GOARCH)
 		return 0
 	case "dispatch":
 		return runDispatch(ctx, args[1:], stdout, stderr)
@@ -74,7 +74,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	case "install":
 		return runInstall(ctx, args[1:], stdout, stderr)
 	default:
-		fmt.Fprintf(stderr, "lucind-ai: unknown subcommand %q\n%s\n", args[0], usage)
+		_, _ = fmt.Fprintf(stderr, "lucind-ai: unknown subcommand %q\n%s\n", args[0], usage)
 		return 1
 	}
 }
@@ -83,7 +83,7 @@ func runCheck(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 	fs := flag.NewFlagSet("check", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
-		fmt.Fprintln(stderr, "usage: lucind-ai check [--out <path>] (deprecated)")
+		_, _ = fmt.Fprintln(stderr, "usage: lucind-ai check [--out <path>] (deprecated)")
 		fs.PrintDefaults()
 	}
 
@@ -93,7 +93,7 @@ func runCheck(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 	}
 
 	if len(fs.Args()) > 0 {
-		fmt.Fprintf(stderr, "lucind-ai: unexpected argument(s): %s\n", strings.Join(fs.Args(), " "))
+		_, _ = fmt.Fprintf(stderr, "lucind-ai: unexpected argument(s): %s\n", strings.Join(fs.Args(), " "))
 		fs.Usage()
 		return 1
 	}
@@ -103,16 +103,17 @@ func runCheck(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 		if wd, wdErr := os.Getwd(); wdErr == nil {
 			root = wd
 		} else {
-			fmt.Fprintf(stderr, "lucind-ai: %v\n", err)
+			_, _ = fmt.Fprintf(stderr, "lucind-ai: %v\n", err)
 			return 1
 		}
 	}
 
 	start := time.Now()
+	//nolint:staticcheck // legacy check command intentionally still uses deprecated check.Check
 	passed, checkOutput, checkErr := check.Check(ctx, root)
 	duration := time.Since(start)
 	if checkErr != nil {
-		fmt.Fprintf(stderr, "lucind-ai: check: %v\n", checkErr)
+		_, _ = fmt.Fprintf(stderr, "lucind-ai: check: %v\n", checkErr)
 		return 1
 	}
 
@@ -126,25 +127,25 @@ func runCheck(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 	if *outPath != "" {
 		content := formatMechanicalLog(commitSHA, exitCode, duration, checkOutput)
 		if err := os.MkdirAll(filepath.Dir(*outPath), 0o755); err != nil {
-			fmt.Fprintf(stderr, "lucind-ai: create log directory: %v\n", err)
+			_, _ = fmt.Fprintf(stderr, "lucind-ai: create log directory: %v\n", err)
 			return 1
 		}
 		if err := os.WriteFile(*outPath, []byte(content), 0o644); err != nil {
-			fmt.Fprintf(stderr, "lucind-ai: write log file: %v\n", err)
+			_, _ = fmt.Fprintf(stderr, "lucind-ai: write log file: %v\n", err)
 			return 1
 		}
 	}
 
 	if !passed {
-		fmt.Fprintln(stderr, strings.TrimRight(checkOutput, "\n"))
+		_, _ = fmt.Fprintln(stderr, strings.TrimRight(checkOutput, "\n"))
 		return 1
 	}
 
-	fmt.Fprint(stdout, checkOutput)
+	_, _ = fmt.Fprint(stdout, checkOutput)
 	if !strings.HasSuffix(checkOutput, "\n") {
-		fmt.Fprintln(stdout)
+		_, _ = fmt.Fprintln(stdout)
 	}
-	fmt.Fprintf(stdout, "status:        passed\nduration:      %v\ncommit:        %s\nresolved root: %s\n", duration, commitSHA, root)
+	_, _ = fmt.Fprintf(stdout, "status:        passed\nduration:      %v\ncommit:        %s\nresolved root: %s\n", duration, commitSHA, root)
 
 	return 0
 }
@@ -152,10 +153,10 @@ func runCheck(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 func formatMechanicalLog(commitSHA string, exitCode int, duration time.Duration, output string) string {
 	var sb strings.Builder
 	sb.WriteString("=== lucind-ai mechanical check ===\n")
-	sb.WriteString(fmt.Sprintf("Git Commit SHA: %s\n", commitSHA))
+	fmt.Fprintf(&sb, "Git Commit SHA: %s\n", commitSHA)
 	sb.WriteString("Command: lucind-checks.sh\n")
-	sb.WriteString(fmt.Sprintf("Duration: %v\n", duration))
-	sb.WriteString(fmt.Sprintf("Exit Code: %d\n", exitCode))
+	fmt.Fprintf(&sb, "Duration: %v\n", duration)
+	fmt.Fprintf(&sb, "Exit Code: %d\n", exitCode)
 	sb.WriteString("==================================\n")
 	sb.WriteString(output)
 	return sb.String()
@@ -191,7 +192,7 @@ func runAccept(ctx context.Context, args []string, stdout, stderr io.Writer) int
 	fs := flag.NewFlagSet("accept", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
-		fmt.Fprintln(stderr, "usage: lucind-ai accept --lane <id>")
+		_, _ = fmt.Fprintln(stderr, "usage: lucind-ai accept --lane <id>")
 		fs.PrintDefaults()
 	}
 
@@ -202,13 +203,13 @@ func runAccept(ctx context.Context, args []string, stdout, stderr io.Writer) int
 	}
 
 	if len(fs.Args()) > 0 {
-		fmt.Fprintf(stderr, "lucind-ai: unexpected argument(s): %s\n", strings.Join(fs.Args(), " "))
+		_, _ = fmt.Fprintf(stderr, "lucind-ai: unexpected argument(s): %s\n", strings.Join(fs.Args(), " "))
 		fs.Usage()
 		return 1
 	}
 
 	if strings.TrimSpace(*laneID) == "" {
-		fmt.Fprintln(stderr, "lucind-ai: --lane is required")
+		_, _ = fmt.Fprintln(stderr, "lucind-ai: --lane is required")
 		fs.Usage()
 		return 1
 	}
@@ -218,7 +219,7 @@ func runAccept(ctx context.Context, args []string, stdout, stderr io.Writer) int
 		if wd, wdErr := os.Getwd(); wdErr == nil {
 			root = wd
 		} else {
-			fmt.Fprintf(stderr, "lucind-ai: %v\n", err)
+			_, _ = fmt.Fprintf(stderr, "lucind-ai: %v\n", err)
 			return 1
 		}
 	}
@@ -300,57 +301,57 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 
 	if len(args) > 0 && (args[0] == "help" || args[0] == "-h" || args[0] == "--help" || args[0] == "-help") {
 		fs.Usage()
-		fmt.Fprint(stdout, usageBuf.String())
+		_, _ = fmt.Fprint(stdout, usageBuf.String())
 		return 0
 	}
 
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
-			fmt.Fprint(stdout, usageBuf.String())
+			_, _ = fmt.Fprint(stdout, usageBuf.String())
 			return 0
 		}
-		fmt.Fprint(stderr, usageBuf.String())
+		_, _ = fmt.Fprint(stderr, usageBuf.String())
 		return 1
 	}
 
 	if len(fs.Args()) > 0 {
-		fmt.Fprintf(stderr, "lucind-ai: dispatch: unexpected argument(s): %s\n", strings.Join(fs.Args(), " "))
+		_, _ = fmt.Fprintf(stderr, "lucind-ai: dispatch: unexpected argument(s): %s\n", strings.Join(fs.Args(), " "))
 		usageBuf.Reset()
 		fs.Usage()
-		fmt.Fprint(stderr, usageBuf.String())
+		_, _ = fmt.Fprint(stderr, usageBuf.String())
 		return 1
 	}
 
 	if strings.TrimSpace(*cwd) == "" {
-		fmt.Fprintln(stderr, "lucind-ai: dispatch: --cwd is required")
+		_, _ = fmt.Fprintln(stderr, "lucind-ai: dispatch: --cwd is required")
 		usageBuf.Reset()
 		fs.Usage()
-		fmt.Fprint(stderr, usageBuf.String())
+		_, _ = fmt.Fprint(stderr, usageBuf.String())
 		return 1
 	}
 
 	if len(allow) == 0 {
-		fmt.Fprintln(stderr, "lucind-ai: dispatch: --allow is required")
+		_, _ = fmt.Fprintln(stderr, "lucind-ai: dispatch: --allow is required")
 		usageBuf.Reset()
 		fs.Usage()
-		fmt.Fprint(stderr, usageBuf.String())
+		_, _ = fmt.Fprint(stderr, usageBuf.String())
 		return 1
 	}
 
 	if strings.TrimSpace(*briefPath) == "" {
-		fmt.Fprintln(stderr, "lucind-ai: dispatch: --brief is required")
+		_, _ = fmt.Fprintln(stderr, "lucind-ai: dispatch: --brief is required")
 		usageBuf.Reset()
 		fs.Usage()
-		fmt.Fprint(stderr, usageBuf.String())
+		_, _ = fmt.Fprint(stderr, usageBuf.String())
 		return 1
 	}
 
 	timeout, err := parseDuration(*timeoutStr)
 	if err != nil {
-		fmt.Fprintf(stderr, "lucind-ai: dispatch: invalid --timeout: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "lucind-ai: dispatch: invalid --timeout: %v\n", err)
 		usageBuf.Reset()
 		fs.Usage()
-		fmt.Fprint(stderr, usageBuf.String())
+		_, _ = fmt.Fprint(stderr, usageBuf.String())
 		return 1
 	}
 
@@ -358,14 +359,14 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 	if *briefPath == "-" {
 		data, err := io.ReadAll(stdinReader)
 		if err != nil {
-			fmt.Fprintf(stderr, "lucind-ai: dispatch: read stdin: %v\n", err)
+			_, _ = fmt.Fprintf(stderr, "lucind-ai: dispatch: read stdin: %v\n", err)
 			return 1
 		}
 		briefContent = string(data)
 	} else {
 		data, err := os.ReadFile(*briefPath)
 		if err != nil {
-			fmt.Fprintf(stderr, "lucind-ai: dispatch: read brief file %s: %v\n", *briefPath, err)
+			_, _ = fmt.Fprintf(stderr, "lucind-ai: dispatch: read brief file %s: %v\n", *briefPath, err)
 			return 1
 		}
 		briefContent = string(data)
@@ -385,7 +386,7 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 
 	out, exitCode, err := dispatchRun(ctx, opts, nil)
 	if err != nil {
-		fmt.Fprintf(stderr, "lucind-ai: dispatch: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "lucind-ai: dispatch: %v\n", err)
 		if exitCode == 0 {
 			return 1
 		}
@@ -394,10 +395,10 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 
 	data, jsonErr := json.MarshalIndent(out, "", "  ")
 	if jsonErr != nil {
-		fmt.Fprintf(stderr, "lucind-ai: dispatch: marshal output: %v\n", jsonErr)
+		_, _ = fmt.Fprintf(stderr, "lucind-ai: dispatch: marshal output: %v\n", jsonErr)
 		return 1
 	}
-	fmt.Fprintln(stdout, string(data))
+	_, _ = fmt.Fprintln(stdout, string(data))
 	return exitCode
 }
 
@@ -414,15 +415,15 @@ func runWait(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	timeoutStr := fs.String("timeout", "60m", "timeout duration")
 
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "lucind-ai: wait: lane is required")
+		_, _ = fmt.Fprintln(stderr, "lucind-ai: wait: lane is required")
 		fs.Usage()
-		fmt.Fprint(stderr, usageBuf.String())
+		_, _ = fmt.Fprint(stderr, usageBuf.String())
 		return 1
 	}
 
 	if args[0] == "help" || args[0] == "-h" || args[0] == "--help" || args[0] == "-help" {
 		fs.Usage()
-		fmt.Fprint(stdout, usageBuf.String())
+		_, _ = fmt.Fprint(stdout, usageBuf.String())
 		return 0
 	}
 
@@ -431,71 +432,71 @@ func runWait(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		laneID = args[0]
 		if err := fs.Parse(args[1:]); err != nil {
 			if errors.Is(err, flag.ErrHelp) {
-				fmt.Fprint(stdout, usageBuf.String())
+				_, _ = fmt.Fprint(stdout, usageBuf.String())
 				return 0
 			}
-			fmt.Fprint(stderr, usageBuf.String())
+			_, _ = fmt.Fprint(stderr, usageBuf.String())
 			return 1
 		}
 		if len(fs.Args()) > 0 {
-			fmt.Fprintf(stderr, "lucind-ai: wait: unexpected argument(s): %s\n", strings.Join(fs.Args(), " "))
+			_, _ = fmt.Fprintf(stderr, "lucind-ai: wait: unexpected argument(s): %s\n", strings.Join(fs.Args(), " "))
 			usageBuf.Reset()
 			fs.Usage()
-			fmt.Fprint(stderr, usageBuf.String())
+			_, _ = fmt.Fprint(stderr, usageBuf.String())
 			return 1
 		}
 	} else {
 		if err := fs.Parse(args); err != nil {
 			if errors.Is(err, flag.ErrHelp) {
-				fmt.Fprint(stdout, usageBuf.String())
+				_, _ = fmt.Fprint(stdout, usageBuf.String())
 				return 0
 			}
-			fmt.Fprint(stderr, usageBuf.String())
+			_, _ = fmt.Fprint(stderr, usageBuf.String())
 			return 1
 		}
 		if len(fs.Args()) == 0 {
-			fmt.Fprintln(stderr, "lucind-ai: wait: lane is required")
+			_, _ = fmt.Fprintln(stderr, "lucind-ai: wait: lane is required")
 			usageBuf.Reset()
 			fs.Usage()
-			fmt.Fprint(stderr, usageBuf.String())
+			_, _ = fmt.Fprint(stderr, usageBuf.String())
 			return 1
 		}
 		laneID = fs.Args()[0]
 		if len(fs.Args()) > 1 {
-			fmt.Fprintf(stderr, "lucind-ai: wait: unexpected argument(s): %s\n", strings.Join(fs.Args()[1:], " "))
+			_, _ = fmt.Fprintf(stderr, "lucind-ai: wait: unexpected argument(s): %s\n", strings.Join(fs.Args()[1:], " "))
 			usageBuf.Reset()
 			fs.Usage()
-			fmt.Fprint(stderr, usageBuf.String())
+			_, _ = fmt.Fprint(stderr, usageBuf.String())
 			return 1
 		}
 	}
 
 	if strings.TrimSpace(laneID) == "" {
-		fmt.Fprintln(stderr, "lucind-ai: wait: lane is required")
+		_, _ = fmt.Fprintln(stderr, "lucind-ai: wait: lane is required")
 		usageBuf.Reset()
 		fs.Usage()
-		fmt.Fprint(stderr, usageBuf.String())
+		_, _ = fmt.Fprint(stderr, usageBuf.String())
 		return 1
 	}
 
 	timeout, err := parseDuration(*timeoutStr)
 	if err != nil {
-		fmt.Fprintf(stderr, "lucind-ai: wait: invalid --timeout: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "lucind-ai: wait: invalid --timeout: %v\n", err)
 		usageBuf.Reset()
 		fs.Usage()
-		fmt.Fprint(stderr, usageBuf.String())
+		_, _ = fmt.Fprint(stderr, usageBuf.String())
 		return 1
 	}
 
 	repoRoot, err := attest.RepoToplevel(ctx, *cwd)
 	if err != nil {
-		fmt.Fprintf(stderr, "lucind-ai: wait: resolve repo root: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "lucind-ai: wait: resolve repo root: %v\n", err)
 		return 1
 	}
 
 	out, exitCode, err := waitRun(ctx, repoRoot, laneID, timeout, nil)
 	if err != nil {
-		fmt.Fprintf(stderr, "lucind-ai: wait: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "lucind-ai: wait: %v\n", err)
 		if exitCode == 0 {
 			return 1
 		}
@@ -504,9 +505,9 @@ func runWait(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 
 	data, jsonErr := json.MarshalIndent(out, "", "  ")
 	if jsonErr != nil {
-		fmt.Fprintf(stderr, "lucind-ai: wait: marshal output: %v\n", jsonErr)
+		_, _ = fmt.Fprintf(stderr, "lucind-ai: wait: marshal output: %v\n", jsonErr)
 		return 1
 	}
-	fmt.Fprintln(stdout, string(data))
+	_, _ = fmt.Fprintln(stdout, string(data))
 	return exitCode
 }

@@ -58,19 +58,19 @@ func constructBrief(userBrief, laneID string, allow []string, absResultPath stri
 	var sb strings.Builder
 	sb.WriteString(strings.TrimRight(userBrief, "\n"))
 	sb.WriteString("\n\n---\n## Lane Contract\n")
-	sb.WriteString(fmt.Sprintf("- Lane ID: %s\n", laneID))
+	fmt.Fprintf(&sb, "- Lane ID: %s\n", laneID)
 	sb.WriteString("- Allowed globs:\n")
 	for _, g := range allow {
-		sb.WriteString(fmt.Sprintf("  - %s\n", g))
+		fmt.Fprintf(&sb, "  - %s\n", g)
 	}
-	sb.WriteString(fmt.Sprintf("- Write your result envelope to `%s` following the result schema.\n", absResultPath))
+	fmt.Fprintf(&sb, "- Write your result envelope to `%s` following the result schema.\n", absResultPath)
 	if len(checks) == 0 {
 		sb.WriteString("- This lane requires no verification command.\n")
 	} else {
 		sb.WriteString("- As the final verification, after your last edit, run these commands exactly as listed and do not edit files afterwards:\n")
 		for _, c := range checks {
 			quoted := "'" + strings.ReplaceAll(c, "'", `'\''`) + "'"
-			sb.WriteString(fmt.Sprintf("  - `lucind-ai attest run -- sh -c %s`\n", quoted))
+			fmt.Fprintf(&sb, "  - `lucind-ai attest run -- sh -c %s`\n", quoted)
 		}
 	}
 	sb.WriteString("- Do not edit outside the allowed globs.\n")
@@ -145,6 +145,9 @@ func Dispatch(ctx context.Context, opts Options, runner HerdrRunner) (Output, in
 		if len(opts.Checks) > 0 {
 			loadedLane.Checks = opts.Checks
 		}
+		if len(opts.Allow) > 0 {
+			loadedLane.Allow = opts.Allow
+		}
 		if err := loadedLane.Save(repoRoot); err != nil {
 			return Output{}, 1, fmt.Errorf("save lane %s: %w", opts.LaneID, err)
 		}
@@ -170,11 +173,7 @@ func Dispatch(ctx context.Context, opts Options, runner HerdrRunner) (Output, in
 		return Output{}, 1, fmt.Errorf("resolve abs result path: %w", err)
 	}
 
-	allow := l.Allow
-	if isContinuation && len(opts.Allow) > 0 {
-		allow = opts.Allow
-	}
-	briefText := constructBrief(opts.Brief, l.ID, allow, absResultPath, l.Checks)
+	briefText := constructBrief(opts.Brief, l.ID, l.Allow, absResultPath, l.Checks)
 	briefPath := filepath.Join(lane.LaneDir(repoRoot, l.ID), "brief.md")
 	if err := os.WriteFile(briefPath, []byte(briefText), 0644); err != nil {
 		return Output{}, 1, fmt.Errorf("write brief.md: %w", err)

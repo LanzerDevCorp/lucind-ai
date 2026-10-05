@@ -64,11 +64,10 @@ func patternToRegex(pattern string) (*regexp.Regexp, error) {
 				i++
 			} else {
 				class := pattern[i : j+1]
-				if class[1] == '!' {
+				switch class[1] {
+				case '!', '^':
 					class = "[^/" + class[2:]
-				} else if class[1] == '^' {
-					class = "[^/" + class[2:]
-				} else {
+				default:
 					class = "[" + class[1:]
 				}
 				b.WriteString(class)

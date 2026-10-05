@@ -18,6 +18,12 @@ What exists is in [`product.md`](product.md).
 - **Stop-hook retries** (`feature/lane-stop-retries`): hook payload logging, `wait` revalidates
   the result before reporting `failed`, the retry budget resets after a quiet window and is
   capped, and the stop counters reset on lane continuation. Verified with real probe lanes.
+- **golangci-lint** (`chore/golangci-lint`): minimal profile (`errcheck`, `govet`, `ineffassign`,
+  `staticcheck`, `unused`) with the reporting caps lifted, repo clean (the capped default hid most of
+  the real count), and `golangci-lint run` added to `lucind-checks.sh`. Pass it as
+  `--check 'golangci-lint run'` for lanes.
+- **`--allow` on lane continuations** (`fix(dispatch)`): a continuation now persists the new globs in
+  `lane.json`, which the agy hook and `accept` enforce, instead of only rewriting the brief footer.
 - **Superseded:** the multi-provider herdr work (`herdr-agent-factory`, `herdr-interactive-agents`)
   predates the agy-only contract; its interactive-pane and Stop-hook ideas survive in it.
 
@@ -39,11 +45,13 @@ What exists is in [`product.md`](product.md).
 7. **Inject the `lucind:dispatch` block into the global `~/.claude/CLAUDE.md`.** `lucind-ai install`
    should write it (idempotent, between its own markers, outside the gentle-ai ones) so the
    dispatch precedence rules stop being hand-maintained.
-8. **Adopt golangci-lint with a minimal profile.** Enable only `errcheck`, `staticcheck`, `govet`,
-   `unused` and `ineffassign` in `.golangci.yml`. Run it once first to see how many findings it
-   reports (today `go vet` and `gofmt` are clean); if the first run is clean or small, add it as
-   `--check 'golangci-lint run'` for lanes and to `lucind-checks.sh`. If it is noisy, trim the
-   linter list before requiring it.
+8. **Premature `done` on lane continuations.** The Stop hook can mark a continued lane `done` while
+   agy is still working, reusing the previous `result.json`; seen twice while fixing lint. Verify
+   what the hook sees (`hook.log`: `lane marked done` right after a `fullyIdle=true` from the old
+   turn) and require a result newer than `brief.md`.
+9. **Flaky `TestLaneIDFormat`.** Lane IDs carry only 16 random bits per second, so the uniqueness
+   check can collide (one failure in a full `-race` run, 20/20 passes on repeat). Widen the suffix
+   or make the test deterministic.
 
 ## Only if needed
 

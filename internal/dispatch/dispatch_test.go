@@ -866,6 +866,67 @@ func TestDispatchChecks(t *testing.T) {
 	})
 }
 
+func TestDispatch_ContinuationAllow(t *testing.T) {
+	continueLane := func(t *testing.T, originalAllow, continuationAllow []string) lane.Lane {
+		t.Helper()
+		t.Setenv("HERDR_ENV", "1")
+		repoDir := t.TempDir()
+		initGitRepo(t, repoDir)
+
+		createdLane, err := lane.Create(context.Background(), repoDir, originalAllow, "gemini-3.8-flash-high")
+		if err != nil {
+			t.Fatalf("lane.Create failed: %v", err)
+		}
+		createdLane.PaneID = "w1:pCont3"
+		createdLane.Status = lane.StatusFailed
+		if err := createdLane.Save(repoDir); err != nil {
+			t.Fatalf("lane.Save failed: %v", err)
+		}
+
+		runner := newFakeHerdrRunner()
+		runner.handlers["agent prompt"] = func(args []string) ([]byte, error) {
+			return []byte(`{"result": {"submitted": true}}`), nil
+		}
+
+		opts := dispatch.Options{
+			Cwd:    repoDir,
+			LaneID: createdLane.ID,
+			Brief:  "Resume",
+			Allow:  continuationAllow,
+			Detach: true,
+		}
+		out, exitCode, err := dispatch.Dispatch(context.Background(), opts, runner)
+		if err != nil {
+			t.Fatalf("unexpected dispatch error: %v", err)
+		}
+		if exitCode != 0 {
+			t.Fatalf("exitCode = %d, want 0", exitCode)
+		}
+
+		reloaded, err := lane.Load(repoDir, out.Lane)
+		if err != nil {
+			t.Fatalf("lane.Load failed: %v", err)
+		}
+		return reloaded
+	}
+
+	t.Run("ReplacesAllowAndPersistsIt", func(t *testing.T) {
+		want := []string{"pkg/**", "cmd/hook.go"}
+		reloaded := continueLane(t, []string{"pkg/**"}, want)
+		if !reflect.DeepEqual(reloaded.Allow, want) {
+			t.Errorf("reloaded.Allow = %v, want %v (the hook and accept read lane.json)", reloaded.Allow, want)
+		}
+	})
+
+	t.Run("KeepsAllowWhenOmitted", func(t *testing.T) {
+		want := []string{"pkg/**"}
+		reloaded := continueLane(t, want, nil)
+		if !reflect.DeepEqual(reloaded.Allow, want) {
+			t.Errorf("reloaded.Allow = %v, want unchanged %v", reloaded.Allow, want)
+		}
+	})
+}
+
 func TestDispatch_Behavior1_RelativeCwd_ReachesSplitPaneAsAbs(t *testing.T) {
 	t.Setenv("HERDR_ENV", "1")
 	repoDir := t.TempDir()
