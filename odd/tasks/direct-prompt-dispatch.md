@@ -37,13 +37,13 @@ transcript-based measurement (plan step 3).
 
 ## Tasks
 
-- [ ] T1 dispatch: send the full prompt (skills section first, marker line first of all),
+- [x] T1 dispatch: send the full prompt (skills section first, marker line first of all),
       persist `prompt.md`, drop `Read and follow`. Route: delegated (lane).
-- [ ] T2 CLI: rename `--brief` to `--prompt` in `dispatch` and `skills select`; `--brief`
+- [x] T2 CLI: rename `--brief` to `--prompt` in `dispatch` and `skills select`; `--brief`
       must fail with a clear error; update usage strings. Route: delegated (lane).
-- [ ] T3 hook: classify the main conversation by the marker line; keep worker detection.
+- [x] T3 hook: classify the main conversation by the marker line; keep worker detection.
       Route: delegated (lane).
-- [ ] T4 docs and assets: README, product, skill-selection, ROADMAP, Claude skill,
+- [x] T4 docs and assets: README, product, skill-selection, ROADMAP, Claude skill,
       agy rule and skill, dispatch block in the CLAUDE.md asset. Route: delegated (lane).
 
 ## Acceptance criteria
@@ -62,9 +62,15 @@ transcript-based measurement (plan step 3).
 
 ## Progress
 
-Branch created. No task started.
+T1-T4 done in lane `20261005-171421-9331` (single writer, one tree). Route: delegated (lane).
+Evidence: `golangci-lint run` clean, `CGO_ENABLED=0 go build ./...` OK, `go test ./... -race
+-count=1` 576 passed, final `rg` leaves only the `--brief` rejection code and its tests.
+The lane hit an agy 429 right after dispatch and the Stop hook marked it `failed` (retries spent
+in 6 s); agy kept working, delivered a valid envelope, and `accept` succeeded.
+Commits: `3925c93` (code and tests: T1-T3), `5549c6b` (docs and assets: T4).
+RDD: off for this clone (clone-local), so no native review.
 
 ## Next step
 
-Dispatch one lane for T1-T4 (single writer, one tree), review the diff against this document,
-then `accept`.
+Run `make install`, dispatch the first real lane with the new flow, and measure skill loading
+in the main and worker transcripts (ROADMAP item 4 plan steps 2 and 3).
