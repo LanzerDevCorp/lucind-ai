@@ -145,6 +145,9 @@ func Dispatch(ctx context.Context, opts Options, runner HerdrRunner) (Output, in
 		if len(opts.Checks) > 0 {
 			loadedLane.Checks = opts.Checks
 		}
+		if len(opts.Allow) > 0 {
+			loadedLane.Allow = opts.Allow
+		}
 		if err := loadedLane.Save(repoRoot); err != nil {
 			return Output{}, 1, fmt.Errorf("save lane %s: %w", opts.LaneID, err)
 		}
@@ -170,11 +173,7 @@ func Dispatch(ctx context.Context, opts Options, runner HerdrRunner) (Output, in
 		return Output{}, 1, fmt.Errorf("resolve abs result path: %w", err)
 	}
 
-	allow := l.Allow
-	if isContinuation && len(opts.Allow) > 0 {
-		allow = opts.Allow
-	}
-	briefText := constructBrief(opts.Brief, l.ID, allow, absResultPath, l.Checks)
+	briefText := constructBrief(opts.Brief, l.ID, l.Allow, absResultPath, l.Checks)
 	briefPath := filepath.Join(lane.LaneDir(repoRoot, l.ID), "brief.md")
 	if err := os.WriteFile(briefPath, []byte(briefText), 0644); err != nil {
 		return Output{}, 1, fmt.Errorf("write brief.md: %w", err)
