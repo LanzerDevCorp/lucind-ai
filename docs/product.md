@@ -31,7 +31,7 @@ Claude --accept--> receipt.json (accepted | rejected)
 
 | Command | What it does |
 |---|---|
-| `dispatch --cwd <dir> --allow <glob>... --prompt <file\|-> [--check <cmd>]... [--model M] [--timeout D] [--detach] [--lane <id>] [--min-quota F]` | Create a lane, record the base tree, open an agy pane, send the prompt directly. Blocks until the lane is `done`/`failed`/`timeout`, or returns immediately with `--detach`. `--lane <id>` continues a lane in the same pane. |
+| `dispatch --cwd <dir> --allow <glob>... --prompt <file\|-> [--auto-skills] [--check <cmd>]... [--model M] [--timeout D] [--detach] [--lane <id>] [--min-quota F]` | Create a lane, record the base tree, open an agy pane, send the prompt directly. Blocks until the lane is `done`/`failed`/`timeout`, or returns immediately with `--detach`. `--lane <id>` continues a lane in the same pane. |
 | `wait <lane> [--cwd <dir>] [--timeout D]` | Block on a detached lane and validate its result. |
 | `accept --lane <id>` | Write `receipt.json`. Accepts only if the result is valid, every file changed since base tree matches `--allow`, and valid attestations match the final tree for all lane checks (otherwise running any missing checks); requires no attestation when zero checks were specified. |
 | `attest run -- <cmd>` / `attest verify --command <cmd>` | Run a command and sign `{command, exit code, tree hash}`; verify a matching passing attestation. See [`attestation.md`](attestation.md). |
@@ -41,7 +41,7 @@ Claude --accept--> receipt.json (accepted | rejected)
 | `install` | Flagless installer for Claude skill (auto/manual variant matching key setup), `lucind` agy plugin, and `lucind-roles` agy plugin. |
 | `--version` | Exact build (`git describe`). |
 
-`dispatch`/`wait` print one JSON object. Exit codes: 0 done, 1 error, 3 failed, 4 timeout.
+`dispatch`/`wait` print one JSON object. Exit codes: 0 done, 1 error, 3 failed, 4 timeout, 5 auto-skills unavailable.
 The pane is never closed or killed by lucind-ai. Requires `HERDR_ENV=1`.
 Model precedence: `--model` > `LUCIND_AGY_MODEL` > agy default.
 
