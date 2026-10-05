@@ -78,11 +78,13 @@ the herdr idle wait on continuation.
       turn file and revalidates it before reporting done, including the failed to done recovery.
       Files: `internal/dispatch/dispatch.go`, `wait.go`, their tests, `cmd/lucind-ai/cli_test.go` if
       fixtures need it. Route: delegated lane.
-- [ ] T4 Hook and accept: the Stop hook and `accept` read the current turn file; log the raw Stop
+- [x] T4 (commit `497987c`, lane `20261005-010459-1a98`, agy; lint clean, 178 tests in 3 packages pass, fallback and `ResultPath` removed) Hook and accept: the Stop hook and `accept` read the current turn file; log the raw Stop
       payload (truncated) in `hook.log`; remove deprecated `lane.ResultPath`.
       Files: `internal/agyhook/agyhook.go`, `internal/accept/accept.go`, their tests,
       `internal/lane/lane.go`. Route: delegated lane.
-- [ ] T5 Docs and skills: `CONTEXT.md`, `docs/attestation.md`, `docs/product.md`, `README.md`,
+- [ ] T5a (inline, commit `1e1baf7`) The agy-facing rule `lucind-lane.md` and skill `lucind-result` told agy to write
+      `result.json`, contradicting the footer and the new hook: fixed first and reinstalled.
+- [ ] T5b Docs and skills (lane): `CONTEXT.md`, `docs/attestation.md`, `docs/product.md`, `README.md`,
       `plugin/claude-code/skills/lucind/SKILL.md`, `internal/agyplugin/assets/rules/lucind-lane.md`,
       `internal/agyplugin/assets/skills/lucind-result/SKILL.md`, `docs/ROADMAP.md`; then `make install`.
       Route: delegated lane (passive docs, no RED).
@@ -108,8 +110,9 @@ T3 verified: 77 dispatch tests pass with `-race`, lint clean, lane accepted. T3 
 the PreToolUse hook only allows writing `result.json` under `.lucind/` (`agyhook.go:190`), so T4
 restricts it to the current turn file.
 
+T4 verified (see above); `make install` run after T4 (binary `497987c`) and again after T5a (`1e1baf7`).
+
 ## Next step
 
-T4 lane (hook, accept, payload log, remove the fallback and `ResultPath`), then T5.
-Do NOT run `make install` between T3 and T4: the installed hook still reads `result.json` while the
-new `dispatch` tells agy to write `result-<turn>.json`. Install once after T4.
+T5b lane (remaining docs, skill and roadmap), `make install`, then check the evidence of that lane:
+`result-1.json` in its lane directory and `stop: raw payload` lines in its `hook.log`.
