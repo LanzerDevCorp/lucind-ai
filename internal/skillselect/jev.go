@@ -13,6 +13,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/LanzerDevCorp/lucind-ai/internal/userconfig"
 )
 
 const (
@@ -27,8 +29,8 @@ const (
 )
 
 var (
-	// ErrMissingAPIKey is returned when the API key is empty.
-	ErrMissingAPIKey = errors.New("typesafe api key is required")
+	// ErrMissingAPIKey is returned when the API key is not set.
+	ErrMissingAPIKey = errors.New("TYPESAFE_API_KEY is not set; export it or run lucind-ai install to store it in ~/.config/lucind/env")
 	// ErrMalformedResponse is returned when the response cannot be understood.
 	ErrMalformedResponse = errors.New("malformed response from typesafe api")
 	// ErrMalformedJSON is returned when the response is not valid JSON.
@@ -277,7 +279,15 @@ func readExcerpt(r io.Reader, max int64) string {
 	return strings.TrimSpace(string(b))
 }
 
-// KeyFromEnv reads TYPESAFE_API_KEY from the environment.
-func KeyFromEnv() string {
-	return os.Getenv("TYPESAFE_API_KEY")
+// ResolveKey returns TYPESAFE_API_KEY from the environment if non-empty,
+// or from the user config env file (~/.config/lucind/env).
+func ResolveKey() string {
+	if env := os.Getenv("TYPESAFE_API_KEY"); strings.TrimSpace(env) != "" {
+		return strings.TrimSpace(env)
+	}
+	key, err := userconfig.ReadKey("TYPESAFE_API_KEY")
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(key)
 }

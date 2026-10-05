@@ -127,9 +127,9 @@ func runSkillsSelect(ctx context.Context, args []string, stdout, stderr io.Write
 	}
 	skills = skillselect.ResolvePaths(skills)
 
-	apiKey := skillselect.KeyFromEnv()
+	apiKey := skillselect.ResolveKey()
 	if apiKey == "" {
-		_, _ = fmt.Fprintf(stderr, "lucind-ai: TYPESAFE_API_KEY environment variable is required\n")
+		_, _ = fmt.Fprintln(stderr, "lucind-ai: TYPESAFE_API_KEY is not set; export it or run lucind-ai install to store it in ~/.config/lucind/env")
 		return 1
 	}
 

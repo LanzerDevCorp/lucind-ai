@@ -2,6 +2,7 @@ package dispatch
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -38,7 +39,7 @@ var defaultSkillSelector skillSelector = func(ctx context.Context, repoRoot stri
 
 	skills = skillselect.ResolvePaths(skills)
 
-	key := skillselect.KeyFromEnv()
+	key := skillselect.ResolveKey()
 	if key == "" {
 		return skillselect.Result{}, skillselect.ErrMissingAPIKey
 	}
@@ -73,7 +74,7 @@ func hasSkillsSection(brief string) bool {
 }
 
 func redactAPIKey(msg string) string {
-	key := skillselect.KeyFromEnv()
+	key := skillselect.ResolveKey()
 	if trimmed := strings.TrimSpace(key); trimmed != "" {
 		msg = strings.ReplaceAll(msg, trimmed, "[REDACTED]")
 	}
@@ -132,7 +133,11 @@ func handleAutoSkills(ctx context.Context, repoRoot string, l lane.Lane, brief s
 	result, err := selectSkills(ctx, repoRoot, in)
 	if err != nil {
 		errMsg := redactAPIKey(err.Error())
-		_, _ = fmt.Fprintf(w, "lucind-ai: auto-skills: %s; dispatching without a skills section\n", errMsg)
+		if errors.Is(err, skillselect.ErrMissingAPIKey) || errMsg == skillselect.ErrMissingAPIKey.Error() {
+			_, _ = fmt.Fprintf(w, "lucind-ai: %s; dispatching without a skills section\n", errMsg)
+		} else {
+			_, _ = fmt.Fprintf(w, "lucind-ai: auto-skills: %s; dispatching without a skills section\n", errMsg)
+		}
 
 		record := SkillsRecord{
 			Turn:     l.Turn,

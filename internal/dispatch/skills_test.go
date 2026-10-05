@@ -627,8 +627,10 @@ func TestAutoSkills_ContinuationTurn(t *testing.T) {
 }
 
 func TestDefaultSkillSelector_MissingRegistry(t *testing.T) {
+	t.Setenv("HERDR_ENV", "1")
 	tempDir := t.TempDir()
 	initGitRepo(t, tempDir)
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	// No .atl/skill-registry.md in tempDir
 	dispatch.ResetSkillSelectorForTesting()
 
@@ -667,6 +669,7 @@ func TestDefaultSkillSelector_MissingRegistry(t *testing.T) {
 }
 
 func TestDefaultSkillSelector_MissingAPIKey(t *testing.T) {
+	t.Setenv("HERDR_ENV", "1")
 	tempDir := t.TempDir()
 	initGitRepo(t, tempDir)
 
@@ -688,11 +691,14 @@ func TestDefaultSkillSelector_MissingAPIKey(t *testing.T) {
 	}
 
 	t.Setenv("TYPESAFE_API_KEY", "")
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	dispatch.ResetSkillSelectorForTesting()
 
+	var stderrBuf bytes.Buffer
 	opts := dispatch.Options{
 		Cwd:        tempDir,
 		AutoSkills: true,
+		Stderr:     &stderrBuf,
 		Model:      "gemini-3.8-flash-high",
 		Prompt:     "test brief",
 		Detach:     true,
@@ -707,6 +713,11 @@ func TestDefaultSkillSelector_MissingAPIKey(t *testing.T) {
 		t.Errorf("exitCode = %d, want 0", exitCode)
 	}
 
+	wantWarning := "lucind-ai: TYPESAFE_API_KEY is not set; export it or run lucind-ai install to store it in ~/.config/lucind/env; dispatching without a skills section\n"
+	if !strings.Contains(stderrBuf.String(), wantWarning) {
+		t.Errorf("stderr = %q, want it to contain %q", stderrBuf.String(), wantWarning)
+	}
+
 	skillsPath := filepath.Join(lane.LaneDir(tempDir, out.Lane), "skills-1.json")
 	data, err := os.ReadFile(skillsPath)
 	if err != nil {
@@ -719,8 +730,9 @@ func TestDefaultSkillSelector_MissingAPIKey(t *testing.T) {
 	if rec.Injected {
 		t.Errorf("rec.Injected = true, want false")
 	}
-	if !strings.Contains(rec.Error, "typesafe api key is required") {
-		t.Errorf("rec.Error expected typesafe api key is required, got: %q", rec.Error)
+	wantErrorMsg := "TYPESAFE_API_KEY is not set; export it or run lucind-ai install to store it in ~/.config/lucind/env"
+	if !strings.Contains(rec.Error, wantErrorMsg) {
+		t.Errorf("rec.Error expected %q, got: %q", wantErrorMsg, rec.Error)
 	}
 }
 
@@ -1013,5 +1025,162 @@ func TestDefaultSkillSelector_ResolvesSymlinks(t *testing.T) {
 	}
 	if rec.Result.Decisions[0].Path != canonicalPath {
 		t.Errorf("decision path = %q, want canonical path %q", rec.Result.Decisions[0].Path, canonicalPath)
+	}
+}
+
+func TestDefaultSkillSelector_KeyFromUserConfig(t *testing.T) {
+	t.Setenv("HERDR_ENV", "1")
+	repoDir := t.TempDir()
+	initGitRepo(t, repoDir)
+
+	// Set up skill registry
+	atlDir := filepath.Join(repoDir, ".atl")
+	if err := os.MkdirAll(atlDir, 0755); err != nil {
+		t.Fatalf("mkdir .atl: %v", err)
+	}
+	skillPath := filepath.Join(repoDir, "skills", "test-skill", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(skillPath), 0755); err != nil {
+		t.Fatalf("mkdir skill dir: %v", err)
+	}
+	if err := os.WriteFile(skillPath, []byte("# Test Skill"), 0644); err != nil {
+		t.Fatalf("write skill file: %v", err)
+	}
+
+	regContent := fmt.Sprintf("# Registry\n\n## Skills\n\n| Skill | Trigger / description | Scope | Path |\n| --- | --- | --- | --- |\n| `test-skill` | desc | repo | `%s` |\n", skillPath)
+	if err := os.WriteFile(filepath.Join(atlDir, "skill-registry.md"), []byte(regContent), 0644); err != nil {
+		t.Fatalf("write skill-registry.md: %v", err)
+	}
+
+	// Ensure TYPESAFE_API_KEY is unset in env
+	t.Setenv("TYPESAFE_API_KEY", "")
+
+	// Set up XDG_CONFIG_HOME with userconfig env file
+	tempXDG := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tempXDG)
+	lucindConfigDir := filepath.Join(tempXDG, "lucind")
+	if err := os.MkdirAll(lucindConfigDir, 0700); err != nil {
+		t.Fatalf("mkdir lucind config: %v", err)
+	}
+	const configKey = "config-secret-key-456"
+	if err := os.WriteFile(filepath.Join(lucindConfigDir, "env"), []byte("TYPESAFE_API_KEY="+configKey+"\n"), 0600); err != nil {
+		t.Fatalf("write env file: %v", err)
+	}
+
+	var capturedAuthHeader string
+	origTransport := http.DefaultTransport
+	t.Cleanup(func() { http.DefaultTransport = origTransport })
+	http.DefaultTransport = roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+		capturedAuthHeader = r.Header.Get("Authorization")
+		respBody := `{"model":"jev-latest","answers":{"skill_000":{"type":"noul","noul":0.90}},"usage":{"input_tokens":10,"output_tokens":5}}`
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader(respBody)),
+		}, nil
+	})
+
+	dispatch.ResetSkillSelectorForTesting()
+	t.Cleanup(dispatch.ResetSkillSelectorForTesting)
+
+	runner := setupFakeRunnerForNewLane(t, "w1:pLane1")
+	opts := dispatch.Options{
+		Cwd:        repoDir,
+		AutoSkills: true,
+		Model:      "gemini-3.8-flash-high",
+		Prompt:     "test prompt",
+		Detach:     true,
+	}
+
+	out, exitCode, err := dispatch.Dispatch(context.Background(), opts, runner)
+	if err != nil || exitCode != 0 {
+		t.Fatalf("Dispatch() = exit %d, err %v; want 0, nil", exitCode, err)
+	}
+
+	if capturedAuthHeader != "Bearer "+configKey {
+		t.Errorf("Authorization header = %q, want 'Bearer %s'", capturedAuthHeader, configKey)
+	}
+
+	skillsPath := filepath.Join(lane.LaneDir(repoDir, out.Lane), "skills-1.json")
+	data, err := os.ReadFile(skillsPath)
+	if err != nil {
+		t.Fatalf("read skills-1.json: %v", err)
+	}
+	var rec dispatch.SkillsRecord
+	if err := json.Unmarshal(data, &rec); err != nil {
+		t.Fatalf("unmarshal skills-1.json: %v", err)
+	}
+	if !rec.Injected {
+		t.Errorf("rec.Injected = false, want true")
+	}
+}
+
+func TestDefaultSkillSelector_EnvOverridesUserConfig(t *testing.T) {
+	t.Setenv("HERDR_ENV", "1")
+	repoDir := t.TempDir()
+	initGitRepo(t, repoDir)
+
+	atlDir := filepath.Join(repoDir, ".atl")
+	if err := os.MkdirAll(atlDir, 0755); err != nil {
+		t.Fatalf("mkdir .atl: %v", err)
+	}
+	skillPath := filepath.Join(repoDir, "skills", "test-skill", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(skillPath), 0755); err != nil {
+		t.Fatalf("mkdir skill dir: %v", err)
+	}
+	if err := os.WriteFile(skillPath, []byte("# Test Skill"), 0644); err != nil {
+		t.Fatalf("write skill file: %v", err)
+	}
+
+	regContent := fmt.Sprintf("# Registry\n\n## Skills\n\n| Skill | Trigger / description | Scope | Path |\n| --- | --- | --- | --- |\n| `test-skill` | desc | repo | `%s` |\n", skillPath)
+	if err := os.WriteFile(filepath.Join(atlDir, "skill-registry.md"), []byte(regContent), 0644); err != nil {
+		t.Fatalf("write skill-registry.md: %v", err)
+	}
+
+	const envKey = "env-secret-key-789"
+	t.Setenv("TYPESAFE_API_KEY", envKey)
+
+	// Set up config file with different key
+	tempXDG := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tempXDG)
+	lucindConfigDir := filepath.Join(tempXDG, "lucind")
+	if err := os.MkdirAll(lucindConfigDir, 0700); err != nil {
+		t.Fatalf("mkdir lucind config: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(lucindConfigDir, "env"), []byte("TYPESAFE_API_KEY=file-key-ignored\n"), 0600); err != nil {
+		t.Fatalf("write env file: %v", err)
+	}
+
+	var capturedAuthHeader string
+	origTransport := http.DefaultTransport
+	t.Cleanup(func() { http.DefaultTransport = origTransport })
+	http.DefaultTransport = roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+		capturedAuthHeader = r.Header.Get("Authorization")
+		respBody := `{"model":"jev-latest","answers":{"skill_000":{"type":"noul","noul":0.90}},"usage":{"input_tokens":10,"output_tokens":5}}`
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader(respBody)),
+		}, nil
+	})
+
+	dispatch.ResetSkillSelectorForTesting()
+	t.Cleanup(dispatch.ResetSkillSelectorForTesting)
+
+	runner := setupFakeRunnerForNewLane(t, "w1:pLane1")
+	opts := dispatch.Options{
+		Cwd:        repoDir,
+		AutoSkills: true,
+		Model:      "gemini-3.8-flash-high",
+		Prompt:     "test prompt",
+		Detach:     true,
+	}
+
+	_, exitCode, err := dispatch.Dispatch(context.Background(), opts, runner)
+	if err != nil || exitCode != 0 {
+		t.Fatalf("Dispatch() = exit %d, err %v; want 0, nil", exitCode, err)
+	}
+
+	if capturedAuthHeader != "Bearer "+envKey {
+		t.Errorf("Authorization header = %q, want 'Bearer %s' (env overrides config file)", capturedAuthHeader, envKey)
 	}
 }
