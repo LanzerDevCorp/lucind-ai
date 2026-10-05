@@ -38,6 +38,7 @@ make install
 Installs the binary and runs `lucind-ai install`, which:
 - Checks for `TYPESAFE_API_KEY`: lookup checks the `TYPESAFE_API_KEY` environment variable first, then `$XDG_CONFIG_HOME/lucind/env` (defaults to `~/.config/lucind/env`).
 - If no key is configured and standard input is a terminal, prompts for `TYPESAFE_API_KEY` (hidden without echo via `stty -echo`) and saves it to `~/.config/lucind/env` (mode 0600 in a mode 0700 directory). If input is empty or non-interactive (e.g. CI), prompting is skipped.
+- Never replaces a key that already resolves, even an invalid one. `lucind-ai install --reset-key` (terminal only) asks for a new key and replaces the stored one; an empty answer keeps the current key, and a warning appears when the `TYPESAFE_API_KEY` environment variable is set because it overrides the file.
 - Installs the Claude skill into `~/.claude/skills/lucind` rendered to match your setup:
   - **`auto` variant** (key configured): the orchestrator dispatches with `--auto-skills` and does not need to write `## Skills to load before work` manually.
   - **`manual` variant** (no key): the orchestrator manually resolves skill paths and writes the section.

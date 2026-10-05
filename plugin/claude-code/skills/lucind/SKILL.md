@@ -58,7 +58,9 @@ lucind-ai accept --lane <id>     # run from the lane's repo
 - When dispatch exits 5, no lane exists. Resolve the skills by hand with the procedure below, put
   the `## Skills to load before work` section in the prompt and dispatch again (keeping or dropping
   `--auto-skills` both work because a hand-written section wins). Tell the user the reason when it
-  is a key problem (missing or invalid key), pointing to `lucind-ai install`.
+  is a key problem. A missing key points to `lucind-ai install`. A key the server rejected (HTTP
+  401) must be corrected in `~/.config/lucind/env` or replaced with `lucind-ai install --reset-key`,
+  because plain `lucind-ai install` never replaces an existing key.
 <!-- /lucind:variant -->
 - The pane is **never** closed or killed by lucind-ai. Talk to agy freely with
   `herdr agent prompt <pane_id> ...`; the contract is checked once, at `accept`, on the final tree.
@@ -221,4 +223,4 @@ fresh agy session; an open session does not pick up new credentials reliably.
 
 ## Setup
 
-`lucind-ai install` installs the Claude skill into `~/.claude/skills/lucind`, the `lucind` agy plugin, the `lucind-roles` agy plugin, and writes the lucind dispatch block into `~/.claude/CLAUDE.md` (`--no-claude-md` to skip). During installation, the skill variant (`auto` or `manual`) is chosen based on whether `TYPESAFE_API_KEY` is configured (in the environment or `~/.config/lucind/env`). Adding or updating the key later in `~/.config/lucind/env` requires running `lucind-ai install` again to switch the skill variant. `make install` builds the binary and runs `lucind-ai install`. Check the build with `lucind-ai -v` before dispatching.
+`lucind-ai install` installs the Claude skill into `~/.claude/skills/lucind`, the `lucind` agy plugin, the `lucind-roles` agy plugin, and writes the lucind dispatch block into `~/.claude/CLAUDE.md` (`--no-claude-md` to skip). During installation, the skill variant (`auto` or `manual`) is chosen based on whether `TYPESAFE_API_KEY` is configured (in the environment or `~/.config/lucind/env`). Adding or updating the key later in `~/.config/lucind/env` requires running `lucind-ai install` again to switch the skill variant. Plain `lucind-ai install` never replaces a key that already resolves; to replace an invalid one run `lucind-ai install --reset-key` in a terminal (it asks for the new key and fails without a terminal). `make install` builds the binary and runs `lucind-ai install`. Check the build with `lucind-ai -v` before dispatching.

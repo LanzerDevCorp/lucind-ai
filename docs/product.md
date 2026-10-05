@@ -80,6 +80,8 @@ Without `LUCIND_LANE` every hook is a no-op, so free/manual agy sessions are una
    `~/.config/lucind/env` (`$XDG_CONFIG_HOME/lucind/env`).
 2. Prompts on an interactive terminal when no key is set (hidden input via `stty -echo`), storing it
    in `~/.config/lucind/env` with mode 0600. When non-interactive, skips prompt without blocking.
+   A key that already resolves is never replaced; `lucind-ai install --reset-key` (terminal only)
+   asks for a new one and replaces the stored key.
 3. Renders and installs the Claude skill into `~/.claude/skills/lucind` in one of two variants:
    - **`auto` variant** (key configured): orchestrator dispatches with `--auto-skills` and does not
      need to construct `## Skills to load before work`.
