@@ -4,6 +4,10 @@ What exists is in [`product.md`](product.md).
 
 ## Done
 
+- **Fail closed on auto-skills selection error** (`feature/auto-skills-fail-closed`): dispatch with
+  `--auto-skills` fails closed (exit code 5) without creating or mutating any lane state when skills
+  cannot be selected; orchestrator has clean fallback to hand-written skills section; API keys stay
+  redacted; updated auto skill variant with exit 5 guidance.
 - **agy-only contract** (`feature/agy-only-contract`): single provider, `dispatch`/`wait`,
   per-lane JSON state, embedded agy plugin (PreToolUse/Stop hooks), `accept` with allowed-path and
   attestation checks, Claude skill `lucind`. Orchestration, ledger and other providers removed.

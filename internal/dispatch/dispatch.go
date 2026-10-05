@@ -190,17 +190,46 @@ func Dispatch(ctx context.Context, opts Options, runner HerdrRunner) (Output, in
 		return Output{}, 1, fmt.Errorf("resolve model: %w", err)
 	}
 
-	// 4. Lane creation or continuation
-	var l lane.Lane
+	// 4. Continuation pre-validation and allow globs resolution
+	var loadedLane lane.Lane
 	isContinuation := opts.LaneID != ""
 	if isContinuation {
-		loadedLane, err := lane.Load(repoRoot, opts.LaneID)
+		var err error
+		loadedLane, err = lane.Load(repoRoot, opts.LaneID)
 		if err != nil {
 			return Output{}, 1, fmt.Errorf("load lane %s: %w", opts.LaneID, err)
 		}
 		if loadedLane.Status == lane.StatusAccepted || loadedLane.Status == lane.StatusRejected {
 			return Output{}, 1, fmt.Errorf("cannot continue lane %s with status %s", opts.LaneID, loadedLane.Status)
 		}
+	}
+
+	allowGlobs := opts.Allow
+	if isContinuation && len(allowGlobs) == 0 {
+		allowGlobs = loadedLane.Allow
+	}
+
+	userPrompt := opts.Prompt
+	if userPrompt == "" {
+		userPrompt = opts.Brief
+	}
+
+	// 5. Auto-skills selection BEFORE lane creation or mutation
+	var autoSkills autoSkillsOutcome
+	if opts.AutoSkills {
+		var err error
+		autoSkills, err = selectAutoSkills(ctx, repoRoot, userPrompt, allowGlobs)
+		if err != nil {
+			return Output{}, ExitAutoSkillsUnavailable, err
+		}
+		if autoSkills.sectionToInsert != "" {
+			userPrompt = insertSkillsSection(userPrompt, autoSkills.sectionToInsert)
+		}
+	}
+
+	// 6. Lane creation or continuation
+	var l lane.Lane
+	if isContinuation {
 		if loadedLane.Turn == 0 {
 			laneDir := lane.LaneDir(repoRoot, opts.LaneID)
 			resultFile := filepath.Join(laneDir, "result.json")
@@ -234,19 +263,16 @@ func Dispatch(ctx context.Context, opts Options, runner HerdrRunner) (Output, in
 		l = createdLane
 	}
 
-	// 5. Full prompt construction
+	// 7. Record auto-skills if enabled
+	if opts.AutoSkills {
+		recordAutoSkills(repoRoot, l, autoSkills, opts.Stderr)
+	}
+
+	// 8. Full prompt construction
 	resultRelPath := lane.ResultFilePath(repoRoot, l)
 	absResultPath, err := filepath.Abs(resultRelPath)
 	if err != nil {
 		return Output{}, 1, fmt.Errorf("resolve abs result path: %w", err)
-	}
-
-	userPrompt := opts.Prompt
-	if userPrompt == "" {
-		userPrompt = opts.Brief
-	}
-	if opts.AutoSkills {
-		userPrompt = handleAutoSkills(ctx, repoRoot, l, userPrompt, l.Allow, opts.Stderr)
 	}
 
 	promptText := constructPrompt(userPrompt, l.ID, l.Turn, l.Allow, absResultPath, l.Checks)

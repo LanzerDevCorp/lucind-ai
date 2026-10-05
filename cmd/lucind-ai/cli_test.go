@@ -14,6 +14,7 @@ import (
 
 	"github.com/LanzerDevCorp/lucind-ai/internal/dispatch"
 	"github.com/LanzerDevCorp/lucind-ai/internal/lane"
+	"github.com/LanzerDevCorp/lucind-ai/internal/skillselect"
 )
 
 func initRepo(t *testing.T) string {
@@ -1036,5 +1037,148 @@ func TestDispatchLaneAllow(t *testing.T) {
 		if capturedOpts.LaneID != "lane-456" {
 			t.Errorf("capturedOpts.LaneID = %q, want 'lane-456'", capturedOpts.LaneID)
 		}
+	}
+}
+
+func TestDispatch_AutoSkillsUnavailable_ErrorOutput(t *testing.T) {
+	ctx := context.Background()
+	repoDir := initRepo(t)
+
+	promptFile := filepath.Join(repoDir, "task_prompt.md")
+	if err := os.WriteFile(promptFile, []byte("Implement feature X"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	origDispatchRun := dispatchRun
+	defer func() { dispatchRun = origDispatchRun }()
+
+	dispatchRun = func(c context.Context, opts dispatch.Options, runner dispatch.HerdrRunner) (dispatch.Output, int, error) {
+		return dispatch.Output{}, 5, &dispatch.AutoSkillsUnavailableError{
+			Cause: fmt.Errorf("call jev: 500 Internal Server Error"),
+		}
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := run(ctx, []string{
+		"dispatch",
+		"--cwd", repoDir,
+		"--allow", "src/**",
+		"--prompt", promptFile,
+		"--auto-skills",
+	}, &stdout, &stderr)
+
+	if code != 5 {
+		t.Fatalf("exit code = %d, want 5", code)
+	}
+	if stdout.Len() != 0 {
+		t.Errorf("stdout must be empty, got: %q", stdout.String())
+	}
+
+	stderrLines := strings.Split(strings.TrimRight(stderr.String(), "\n"), "\n")
+	wantLine1 := "lucind-ai: auto-skills unavailable: call jev: 500 Internal Server Error"
+	wantLine2 := `lucind-ai: no lane was created. Fallback: add a "## Skills to load before work" section with absolute SKILL.md paths to the prompt and dispatch again (a hand-written section skips Jev).`
+	if len(stderrLines) != 2 {
+		t.Fatalf("stderr lines count = %d, want 2; got:\n%s", len(stderrLines), stderr.String())
+	}
+	if stderrLines[0] != wantLine1 {
+		t.Errorf("stderr line 1 = %q, want %q", stderrLines[0], wantLine1)
+	}
+	if stderrLines[1] != wantLine2 {
+		t.Errorf("stderr line 2 = %q, want %q", stderrLines[1], wantLine2)
+	}
+}
+
+func TestDispatch_AutoSkillsUnavailable_MissingKey_ErrorOutput(t *testing.T) {
+	ctx := context.Background()
+	repoDir := initRepo(t)
+
+	promptFile := filepath.Join(repoDir, "task_prompt.md")
+	if err := os.WriteFile(promptFile, []byte("Implement feature X"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	origDispatchRun := dispatchRun
+	defer func() { dispatchRun = origDispatchRun }()
+
+	dispatchRun = func(c context.Context, opts dispatch.Options, runner dispatch.HerdrRunner) (dispatch.Output, int, error) {
+		return dispatch.Output{}, 5, &dispatch.AutoSkillsUnavailableError{
+			Cause: skillselect.ErrMissingAPIKey,
+		}
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := run(ctx, []string{
+		"dispatch",
+		"--cwd", repoDir,
+		"--allow", "src/**",
+		"--prompt", promptFile,
+		"--auto-skills",
+	}, &stdout, &stderr)
+
+	if code != 5 {
+		t.Fatalf("exit code = %d, want 5", code)
+	}
+	if stdout.Len() != 0 {
+		t.Errorf("stdout must be empty, got: %q", stdout.String())
+	}
+
+	stderrLines := strings.Split(strings.TrimRight(stderr.String(), "\n"), "\n")
+	wantLine1 := "lucind-ai: auto-skills unavailable: " + skillselect.ErrMissingAPIKey.Error()
+	wantLine2 := `lucind-ai: no lane was created. Fallback: add a "## Skills to load before work" section with absolute SKILL.md paths to the prompt and dispatch again (a hand-written section skips Jev).`
+	wantLine3 := "lucind-ai: to store the key run lucind-ai install, or put TYPESAFE_API_KEY=... in ~/.config/lucind/env"
+	if len(stderrLines) != 3 {
+		t.Fatalf("stderr lines count = %d, want 3; got:\n%s", len(stderrLines), stderr.String())
+	}
+	if stderrLines[0] != wantLine1 {
+		t.Errorf("stderr line 1 = %q, want %q", stderrLines[0], wantLine1)
+	}
+	if stderrLines[1] != wantLine2 {
+		t.Errorf("stderr line 2 = %q, want %q", stderrLines[1], wantLine2)
+	}
+	if stderrLines[2] != wantLine3 {
+		t.Errorf("stderr line 3 = %q, want %q", stderrLines[2], wantLine3)
+	}
+}
+
+func TestDispatch_AutoSkillsUnavailable_HTTP401_KeyNeverAppears(t *testing.T) {
+	ctx := context.Background()
+	repoDir := initRepo(t)
+
+	promptFile := filepath.Join(repoDir, "task_prompt.md")
+	if err := os.WriteFile(promptFile, []byte("Implement feature X"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	origDispatchRun := dispatchRun
+	defer func() { dispatchRun = origDispatchRun }()
+
+	dispatchRun = func(c context.Context, opts dispatch.Options, runner dispatch.HerdrRunner) (dispatch.Output, int, error) {
+		return dispatch.Output{}, 5, &dispatch.AutoSkillsUnavailableError{
+			Cause: fmt.Errorf("HTTP 401: bad token [REDACTED]"),
+		}
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := run(ctx, []string{
+		"dispatch",
+		"--cwd", repoDir,
+		"--allow", "src/**",
+		"--prompt", promptFile,
+		"--auto-skills",
+	}, &stdout, &stderr)
+
+	if code != 5 {
+		t.Fatalf("exit code = %d, want 5", code)
+	}
+	if stdout.Len() != 0 {
+		t.Errorf("stdout must be empty, got: %q", stdout.String())
+	}
+
+	stderrStr := stderr.String()
+	if strings.Contains(stderrStr, "secret-token") {
+		t.Errorf("stderr contains secret-token: %s", stderrStr)
+	}
+	if !strings.Contains(stderrStr, "lucind-ai: auto-skills unavailable: HTTP 401: bad token [REDACTED]") {
+		t.Errorf("stderr missing redacted reason, got: %s", stderrStr)
 	}
 }

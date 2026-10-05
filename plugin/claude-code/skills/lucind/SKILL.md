@@ -53,7 +53,13 @@ lucind-ai accept --lane <id>     # run from the lane's repo
 - Blocks until agy's Stop hook marks the lane `done`/`failed`; prints one JSON object
   `{lane, pane_id, cwd, status, result_path}` (`result_path` printed by `dispatch` and `wait` is
   the current turn's result file, `.lucind/lanes/<id>/result-<turn>.json`). Exit codes: 0 done,
-  1 error, 3 failed, 4 timeout.
+  1 error, 3 failed, 4 timeout, 5 auto-skills unavailable.
+<!-- lucind:variant auto -->
+- When dispatch exits 5, no lane exists. Resolve the skills by hand with the procedure below, put
+  the `## Skills to load before work` section in the prompt and dispatch again (keeping or dropping
+  `--auto-skills` both work because a hand-written section wins). Tell the user the reason when it
+  is a key problem (missing or invalid key), pointing to `lucind-ai install`.
+<!-- /lucind:variant -->
 - The pane is **never** closed or killed by lucind-ai. Talk to agy freely with
   `herdr agent prompt <pane_id> ...`; the contract is checked once, at `accept`, on the final tree.
   For a formal follow-up turn with wait + validation: `dispatch --lane <id> --prompt ...`. For
@@ -136,15 +142,11 @@ what is described here (no explanatory prose), so put prose under a following he
 - `## Skills to load before work`: optional; the orchestrator is NOT obliged to write this section.
   With `--auto-skills`, lucind-ai selects relevant skills using Jev and `.atl/skill-registry.md`,
   and inserts the skills section first in the prompt before the goal and scope so agy loads skills
-  before touching code. A hand-written section is only for forcing a specific skill or overriding
-  automatic selection.
+  before touching code. A hand-written section is for forcing a specific skill, overriding
+  automatic selection, or falling back when dispatch exits 5.
 <!-- /lucind:variant -->
 <!-- lucind:variant manual -->
-- `## Skills to load before work`: one exact `SKILL.md` path per line, absolute. The orchestrator
-  resolves the exact `SKILL.md` paths itself and writes the section (resolve symlinks; for example
-  `.agents/skills/<name>/SKILL.md`), since lane workers are not Claude; agy reads those files
-  before touching code and does not rediscover skills. This section is placed first in the prompt
-  sent to agy so skills are loaded before work begins. Omit when no skill applies. Automatic
+- `## Skills to load before work`: write this section following the procedure below. Automatic
   skill selection requires `TYPESAFE_API_KEY` (stored in `~/.config/lucind/env` or the environment);
   once configured, re-run `lucind-ai install` to switch to the auto-skills skill variant.
 <!-- /lucind:variant -->
@@ -182,16 +184,13 @@ what is described here (no explanatory prose), so put prose under a following he
   standalone factual sentence of at least 20 characters and at least 4 words, omitting the block
   when there is genuinely no reusable learning.
 
-<!-- lucind:variant auto -->
-When forcing a specific skill, write the section manually:
+### Resolving skills by hand
 
-```markdown
-## Skills to load before work
-/abs/path/to/skill-a/SKILL.md
-/abs/path/to/skill-b/SKILL.md
-```
-<!-- /lucind:variant -->
-<!-- lucind:variant manual -->
+Procedure for resolving skills by hand (primary path in `manual`, fallback in `auto` when dispatch exits 5 or when forcing a specific skill):
+- One exact `SKILL.md` path per line, absolute.
+- The orchestrator resolves the exact `SKILL.md` paths itself (resolve symlinks; for example `.agents/skills/<name>/SKILL.md` or from `.atl/skill-registry.md`), since lane workers are not Claude; agy reads those files before touching code and does not rediscover skills.
+- This section is placed first in the prompt sent to agy so skills are loaded before work begins. Omit when no skill applies.
+
 Example of the skills section:
 
 ```markdown
@@ -199,7 +198,6 @@ Example of the skills section:
 /abs/path/to/skill-a/SKILL.md
 /abs/path/to/skill-b/SKILL.md
 ```
-<!-- /lucind:variant -->
 
 ## Parallelism and worktrees
 

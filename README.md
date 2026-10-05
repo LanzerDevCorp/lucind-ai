@@ -16,7 +16,7 @@ dispatch (lane + agy pane) -> agy edits within --allow -> attest run -> result-<
 
 | Command | Purpose |
 |---|---|
-| `dispatch --cwd <dir> --allow <glob>... --prompt <file\|-> [--check <cmd>]... [--detach] [--lane <id>]` | Open an agy lane and send the prompt. |
+| `dispatch --cwd <dir> --allow <glob>... --prompt <file\|-> [--auto-skills] [--check <cmd>]... [--detach] [--lane <id>]` | Open an agy lane and send the prompt. |
 | `wait <lane>` | Block on a detached lane and validate its result. |
 | `accept --lane <id>` | Write a receipt if result, allowed paths and lane check attestations all hold. |
 | `attest run -- <cmd>` / `attest verify --command <cmd>` | HMAC tree-hash attestation of a test run. |

@@ -172,22 +172,23 @@ lucind-ai dispatch \
 - **Registry and Jev evaluation**: Reads candidate skills from `<repo-root>/.atl/skill-registry.md` and calls Jev using `TYPESAFE_API_KEY` (resolved from environment or `~/.config/lucind/env`).
 - **Prompt injection**: When skills are selected (passing threshold 0.7), `lucind-ai` moves the `## Skills to load before work` section right after the lane marker at the top of the prompt sent to agy, so the worker loads skills before reading the goal and scope.
 - **Manual override takes precedence**: If the prompt already contains `## Skills to load before work`, Jev is not called and the prompt is kept unchanged.
-- **Fail open**: On any error (such as a missing registry, unset `TYPESAFE_API_KEY`, network failure, or API error), `lucind-ai` warns on `stderr` and dispatches without the section. Dispatch never fails due to selector errors.
-- **Always writes lane record**: Always writes `.lucind/lanes/<id>/skills-<turn>.json` recording selection decisions and telemetry for each turn.
+- **Fail closed**: When `--auto-skills` is requested and skills cannot be selected (missing key, invalid key, HTTP errors including 401, network failure, or missing/unreadable registry), `lucind-ai dispatch` fails closed with exit code 5 without creating or mutating any lane state. Nothing is written to disk (no lane directory, no `lane.json`, no `prompt.md`, no `skills-<turn>.json`), no pane is opened, and herdr is not called. Stderr prints the redacted reason and guidance for the fallback.
+- **Manual fallback**: The orchestrator can fall back cleanly by adding a `## Skills to load before work` section with absolute `SKILL.md` paths to the prompt and dispatching again. A hand-written section skips Jev, working with or without `--auto-skills` and without requiring an API key.
+- **Writes lane record on dispatch**: Once the lane exists, `lucind-ai dispatch` writes `.lucind/lanes/<id>/skills-<turn>.json` recording selection decisions and telemetry for each turn.
 
 ## Lane Record Format (`skills-<turn>.json`)
 
-When `--auto-skills` is enabled, `lucind-ai dispatch` always records `.lucind/lanes/<id>/skills-<turn>.json` (for example, `skills-1.json`) for the lane turn.
+When `--auto-skills` is enabled and dispatch creates or continues a lane, `lucind-ai dispatch` records `.lucind/lanes/<id>/skills-<turn>.json` (for example, `skills-1.json`) for the lane turn.
 
 ### Schema Fields
 
 - `turn` (`int`): Turn number of the lane.
 - `injected` (`bool`): Whether the `## Skills to load before work` section was injected into the prompt.
-- `skipped_reason` (`string`, optional): Reason why skill injection was skipped. Omitted when skills are injected or when an error occurs. Known values:
+- `skipped_reason` (`string`, optional): Reason why skill injection was skipped. Known values:
   - `"brief_has_section"`: The prompt already contained a `## Skills to load before work` section; Jev was not called.
   - `"no_skill_selected"`: Jev evaluated candidate skills, but none met the selection threshold (`probability >= 0.7`).
-- `error` (`string`, optional): Error message if the selector failed. Omitted on success.
-- `result` (`object`, optional): The full `skillselect.Result` with decisions and token usage (`model`, `threshold`, `decisions`, `usage`). Omitted if Jev was not called (e.g. `brief_has_section`) or if the selector failed.
+- `error` (`string`, optional): Error message if recording failed. Omitted on success.
+- `result` (`object`, optional): The full `skillselect.Result` with decisions and token usage (`model`, `threshold`, `decisions`, `usage`). Omitted if Jev was not called (e.g. `brief_has_section`).
 
 ### Examples
 
@@ -276,15 +277,18 @@ Jev evaluated candidate skills, but none reached the threshold. No skills sectio
 }
 ```
 
-#### 4. Selector Error (Fail Open)
+#### 4. Selector Error (Fail Closed, Exit 5)
 
-An error occurred during selection (e.g. missing API key, network timeout, or invalid registry). `lucind-ai` warns on stderr, records the error, and dispatches the lane without the skills section:
+When automatic skill selection fails (e.g. missing API key, invalid key, HTTP error, network timeout, or missing registry), `dispatch` fails closed with exit code 5 and nothing is created or modified. Stderr prints:
 
-```json
-{
-  "turn": 1,
-  "injected": false,
-  "error": "call jev: Post \"https://api.typesafe.ai/v1/noul\": dial tcp: lookup api.typesafe.ai: no such host"
-}
+```text
+lucind-ai: auto-skills unavailable: <redacted reason>
+lucind-ai: no lane was created. Fallback: add a "## Skills to load before work" section with absolute SKILL.md paths to the prompt and dispatch again (a hand-written section skips Jev).
+```
+
+And when the cause is a missing API key, stderr includes the third line:
+
+```text
+lucind-ai: to store the key run lucind-ai install, or put TYPESAFE_API_KEY=... in ~/.config/lucind/env
 ```
 
