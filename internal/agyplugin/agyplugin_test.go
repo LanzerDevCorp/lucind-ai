@@ -154,6 +154,18 @@ func TestSetup_RegistersViaAgyPluginInstall(t *testing.T) {
 	}
 }
 
+func TestSetup_NoImportedPluginsPlainText(t *testing.T) {
+	agy := &fakeAgy{list: "No imported plugins.\n", install: goodInstall}
+	dir, err := Setup(context.Background(), Options{StagingRoot: t.TempDir(), Bin: "/a/lucind-ai", Agy: agy})
+	if err != nil {
+		t.Fatalf("Setup: %v", err)
+	}
+	want := [][]string{{"plugin", "list"}, {"plugin", "install", dir}}
+	if !reflect.DeepEqual(agy.calls, want) {
+		t.Errorf("agy calls = %v, want %v", agy.calls, want)
+	}
+}
+
 func TestSetup_UninstallsExistingImportFirst(t *testing.T) {
 	agy := &fakeAgy{list: `{"imports":[{"name":"lucind"},{"name":"x"}]}`, install: goodInstall}
 	dir, err := Setup(context.Background(), Options{StagingRoot: t.TempDir(), Bin: "/a/lucind-ai", Agy: agy})

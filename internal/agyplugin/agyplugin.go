@@ -227,8 +227,12 @@ func setupPlugin(ctx context.Context, agy Agy, name, dir string, checkOutput fun
 			Name string `json:"name"`
 		} `json:"imports"`
 	}
-	if err := json.Unmarshal([]byte(ansi.ReplaceAllString(string(out), "")), &listed); err != nil {
-		return fmt.Errorf("parse agy plugin list output: %w\n%s", err, out)
+	clean := strings.TrimSpace(ansi.ReplaceAllString(string(out), ""))
+	// agy prints plain text instead of JSON when nothing is imported.
+	if !strings.HasPrefix(clean, "No imported plugins") {
+		if err := json.Unmarshal([]byte(clean), &listed); err != nil {
+			return fmt.Errorf("parse agy plugin list output: %w\n%s", err, out)
+		}
 	}
 	for _, imp := range listed.Imports {
 		if imp.Name == name {
