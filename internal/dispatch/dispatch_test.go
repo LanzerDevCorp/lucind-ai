@@ -148,6 +148,9 @@ func TestDispatch_NewLane_HappyPath(t *testing.T) {
 	if out.Lane == "" {
 		t.Fatal("out.Lane ID should not be empty")
 	}
+	if !strings.HasSuffix(out.ResultPath, "result-1.json") {
+		t.Errorf("out.ResultPath = %q, want ending with result-1.json", out.ResultPath)
+	}
 
 	// 1. Verify lane saved with pane ID
 	savedLane, err := lane.Load(repoDir, out.Lane)
@@ -177,10 +180,16 @@ func TestDispatch_NewLane_HappyPath(t *testing.T) {
 	if !strings.Contains(briefContent, "- Allowed globs:\n  - internal/**\n  - cmd/**") {
 		t.Errorf("brief.md missing Allowed globs: %s", briefContent)
 	}
-	resultPath := lane.ResultPath(repoDir, out.Lane)
+	resultPath := lane.ResultFilePath(repoDir, savedLane)
 	absResultPath, _ := filepath.Abs(resultPath)
+	if !strings.HasSuffix(absResultPath, "result-1.json") {
+		t.Errorf("absResultPath = %q, want ending with result-1.json", absResultPath)
+	}
 	if !strings.Contains(briefContent, fmt.Sprintf("Write your result envelope to `%s` following the result schema.", absResultPath)) {
 		t.Errorf("brief.md missing result path: %s", briefContent)
+	}
+	if out.ResultPath != absResultPath {
+		t.Errorf("out.ResultPath = %q, want %q", out.ResultPath, absResultPath)
 	}
 	if !strings.Contains(briefContent, "- This lane requires no verification command.") {
 		t.Errorf("brief.md missing no verification command line: %s", briefContent)
@@ -398,6 +407,9 @@ func TestDispatch_Continuation(t *testing.T) {
 	if out.PaneID != "w1:pExisting" {
 		t.Errorf("out.PaneID = %q, want \"w1:pExisting\"", out.PaneID)
 	}
+	if !strings.HasSuffix(out.ResultPath, "result-2.json") {
+		t.Errorf("out.ResultPath = %q, want ending with result-2.json", out.ResultPath)
+	}
 
 	// Verify only agent prompt called (no split, no start)
 	calls := runner.Calls()
@@ -419,6 +431,9 @@ func TestDispatch_Continuation(t *testing.T) {
 	if reloaded.Status != lane.StatusRunning || reloaded.Retries != 0 {
 		t.Errorf("continued lane status=%s retries=%d, want running/0", reloaded.Status, reloaded.Retries)
 	}
+	if reloaded.Turn != 2 {
+		t.Errorf("continued lane turn=%d, want 2", reloaded.Turn)
+	}
 
 	// Verify brief.md updated
 	briefPath := filepath.Join(lane.LaneDir(repoDir, createdLane.ID), "brief.md")
@@ -428,6 +443,10 @@ func TestDispatch_Continuation(t *testing.T) {
 	}
 	if !strings.Contains(string(briefBytes), "Continue fixing issue 42") {
 		t.Errorf("brief.md did not contain continuation brief: %s", string(briefBytes))
+	}
+	wantResultPath, _ := filepath.Abs(lane.ResultFilePath(repoDir, reloaded))
+	if !strings.Contains(string(briefBytes), wantResultPath) {
+		t.Errorf("brief.md did not contain turn 2 result path %s: %s", wantResultPath, string(briefBytes))
 	}
 }
 
@@ -1189,6 +1208,7 @@ func TestDispatch_Continuation_RenamesResultToPrevResult(t *testing.T) {
 	}
 	createdLane.PaneID = "w1:pContRename"
 	createdLane.Status = lane.StatusFailed
+	createdLane.Turn = 0
 	if err := createdLane.Save(repoDir); err != nil {
 		t.Fatalf("lane.Save failed: %v", err)
 	}
@@ -1212,12 +1232,33 @@ func TestDispatch_Continuation_RenamesResultToPrevResult(t *testing.T) {
 		Detach: true,
 	}
 
-	_, exitCode, err := dispatch.Dispatch(context.Background(), opts, runner)
+	out, exitCode, err := dispatch.Dispatch(context.Background(), opts, runner)
 	if err != nil {
 		t.Fatalf("unexpected dispatch error: %v", err)
 	}
 	if exitCode != 0 {
 		t.Errorf("exitCode = %d, want 0", exitCode)
+	}
+
+	reloaded, err := lane.Load(repoDir, createdLane.ID)
+	if err != nil {
+		t.Fatalf("lane.Load failed: %v", err)
+	}
+	if reloaded.Turn != 1 {
+		t.Errorf("reloaded.Turn = %d, want 1", reloaded.Turn)
+	}
+	if !strings.HasSuffix(out.ResultPath, "result-1.json") {
+		t.Errorf("out.ResultPath = %q, want ending with result-1.json", out.ResultPath)
+	}
+
+	briefPath := filepath.Join(laneDir, "brief.md")
+	briefBytes, err := os.ReadFile(briefPath)
+	if err != nil {
+		t.Fatalf("read brief.md failed: %v", err)
+	}
+	wantResultPath, _ := filepath.Abs(lane.ResultFilePath(repoDir, reloaded))
+	if !strings.Contains(string(briefBytes), wantResultPath) {
+		t.Errorf("brief.md did not contain result path %s: %s", wantResultPath, string(briefBytes))
 	}
 
 	if _, err := os.Stat(resultPath); !errors.Is(err, os.ErrNotExist) {
@@ -1243,6 +1284,7 @@ func TestDispatch_Continuation_ReplacesOlderPrevResult(t *testing.T) {
 	}
 	createdLane.PaneID = "w1:pContReplace"
 	createdLane.Status = lane.StatusFailed
+	createdLane.Turn = 0
 	if err := createdLane.Save(repoDir); err != nil {
 		t.Fatalf("lane.Save failed: %v", err)
 	}
@@ -1300,6 +1342,7 @@ func TestDispatch_Continuation_ToleratesMissingResult(t *testing.T) {
 	}
 	createdLane.PaneID = "w1:pContMissing"
 	createdLane.Status = lane.StatusFailed
+	createdLane.Turn = 0
 	if err := createdLane.Save(repoDir); err != nil {
 		t.Fatalf("lane.Save failed: %v", err)
 	}
@@ -1376,6 +1419,7 @@ func TestDispatch_Continuation_RenameErrorReturned(t *testing.T) {
 	}
 	createdLane.PaneID = "w1:pContErr"
 	createdLane.Status = lane.StatusFailed
+	createdLane.Turn = 0
 	if err := createdLane.Save(repoDir); err != nil {
 		t.Fatalf("lane.Save failed: %v", err)
 	}
@@ -1407,5 +1451,152 @@ func TestDispatch_Continuation_RenameErrorReturned(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "rename previous result:") {
 		t.Errorf("expected error to contain 'rename previous result:', got: %v", err)
+	}
+}
+
+func TestDispatch_Continuation_Turn1Lane_KeepsHistoryAndIncrementsTurn(t *testing.T) {
+	t.Setenv("HERDR_ENV", "1")
+	repoDir := t.TempDir()
+	initGitRepo(t, repoDir)
+
+	createdLane, err := lane.Create(context.Background(), repoDir, []string{"pkg/**"}, "gemini-3.8-flash-high")
+	if err != nil {
+		t.Fatalf("lane.Create failed: %v", err)
+	}
+	createdLane.PaneID = "w1:pContTurn1"
+	createdLane.Status = lane.StatusFailed
+	if err := createdLane.Save(repoDir); err != nil {
+		t.Fatalf("lane.Save failed: %v", err)
+	}
+
+	laneDir := lane.LaneDir(repoDir, createdLane.ID)
+	result1Path := filepath.Join(laneDir, "result-1.json")
+	prevPath := filepath.Join(laneDir, "result.prev.json")
+	if err := os.WriteFile(result1Path, []byte(`{"status": "done", "turn": 1}`), 0644); err != nil {
+		t.Fatalf("write result-1.json failed: %v", err)
+	}
+
+	runner := newFakeHerdrRunner()
+	runner.handlers["agent prompt"] = func(args []string) ([]byte, error) {
+		return []byte(`{"result": {"submitted": true}}`), nil
+	}
+
+	opts := dispatch.Options{
+		Cwd:    repoDir,
+		LaneID: createdLane.ID,
+		Brief:  "Continue with turn 2",
+		Detach: true,
+	}
+
+	out, exitCode, err := dispatch.Dispatch(context.Background(), opts, runner)
+	if err != nil {
+		t.Fatalf("unexpected dispatch error: %v", err)
+	}
+	if exitCode != 0 {
+		t.Errorf("exitCode = %d, want 0", exitCode)
+	}
+
+	// Turn becomes 2 in lane.json
+	reloaded, err := lane.Load(repoDir, createdLane.ID)
+	if err != nil {
+		t.Fatalf("lane.Load failed: %v", err)
+	}
+	if reloaded.Turn != 2 {
+		t.Errorf("reloaded.Turn = %d, want 2", reloaded.Turn)
+	}
+
+	// Output.ResultPath ends with result-2.json
+	if !strings.HasSuffix(out.ResultPath, "result-2.json") {
+		t.Errorf("out.ResultPath = %q, want ending with result-2.json", out.ResultPath)
+	}
+
+	// brief footer points to result-2.json
+	briefPath := filepath.Join(laneDir, "brief.md")
+	briefBytes, err := os.ReadFile(briefPath)
+	if err != nil {
+		t.Fatalf("read brief.md failed: %v", err)
+	}
+	wantResultPath, _ := filepath.Abs(filepath.Join(laneDir, "result-2.json"))
+	wantBriefLine := fmt.Sprintf("Write your result envelope to `%s` following the result schema.", wantResultPath)
+	if !strings.Contains(string(briefBytes), wantBriefLine) {
+		t.Errorf("brief.md did not contain %q, got: %s", wantBriefLine, string(briefBytes))
+	}
+
+	// result-1.json is untouched
+	r1Bytes, err := os.ReadFile(result1Path)
+	if err != nil {
+		t.Fatalf("result-1.json missing: %v", err)
+	}
+	if string(r1Bytes) != `{"status": "done", "turn": 1}` {
+		t.Errorf("result-1.json content changed: %s", string(r1Bytes))
+	}
+
+	// no result.prev.json is created
+	if _, err := os.Stat(prevPath); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("result.prev.json should not exist, err=%v", err)
+	}
+}
+
+func TestDispatch_Continuation_Turn2Lane_IncrementsToTurn3(t *testing.T) {
+	t.Setenv("HERDR_ENV", "1")
+	repoDir := t.TempDir()
+	initGitRepo(t, repoDir)
+
+	createdLane, err := lane.Create(context.Background(), repoDir, []string{"pkg/**"}, "gemini-3.8-flash-high")
+	if err != nil {
+		t.Fatalf("lane.Create failed: %v", err)
+	}
+	createdLane.PaneID = "w1:pContTurn2"
+	createdLane.Status = lane.StatusFailed
+	createdLane.Turn = 2
+	if err := createdLane.Save(repoDir); err != nil {
+		t.Fatalf("lane.Save failed: %v", err)
+	}
+
+	laneDir := lane.LaneDir(repoDir, createdLane.ID)
+	result1Path := filepath.Join(laneDir, "result-1.json")
+	result2Path := filepath.Join(laneDir, "result-2.json")
+	prevPath := filepath.Join(laneDir, "result.prev.json")
+	_ = os.WriteFile(result1Path, []byte(`{"turn": 1}`), 0644)
+	_ = os.WriteFile(result2Path, []byte(`{"turn": 2}`), 0644)
+
+	runner := newFakeHerdrRunner()
+	runner.handlers["agent prompt"] = func(args []string) ([]byte, error) {
+		return []byte(`{"result": {"submitted": true}}`), nil
+	}
+
+	opts := dispatch.Options{
+		Cwd:    repoDir,
+		LaneID: createdLane.ID,
+		Brief:  "Continue with turn 3",
+		Detach: true,
+	}
+
+	out, exitCode, err := dispatch.Dispatch(context.Background(), opts, runner)
+	if err != nil {
+		t.Fatalf("unexpected dispatch error: %v", err)
+	}
+	if exitCode != 0 {
+		t.Errorf("exitCode = %d, want 0", exitCode)
+	}
+
+	reloaded, err := lane.Load(repoDir, createdLane.ID)
+	if err != nil {
+		t.Fatalf("lane.Load failed: %v", err)
+	}
+	if reloaded.Turn != 3 {
+		t.Errorf("reloaded.Turn = %d, want 3", reloaded.Turn)
+	}
+	if !strings.HasSuffix(out.ResultPath, "result-3.json") {
+		t.Errorf("out.ResultPath = %q, want ending with result-3.json", out.ResultPath)
+	}
+	if _, err := os.Stat(prevPath); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("result.prev.json should not exist, err=%v", err)
+	}
+	if _, err := os.Stat(result1Path); err != nil {
+		t.Errorf("result-1.json should still exist: %v", err)
+	}
+	if _, err := os.Stat(result2Path); err != nil {
+		t.Errorf("result-2.json should still exist: %v", err)
 	}
 }

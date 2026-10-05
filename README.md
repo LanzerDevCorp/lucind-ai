@@ -9,7 +9,7 @@ contract, allowed paths, and test attestation.
 ## Flow
 
 ```text
-dispatch (lane + agy pane) -> agy edits within --allow -> attest run -> result.json -> accept (receipt)
+dispatch (lane + agy pane) -> agy edits within --allow -> attest run -> result-<turn>.json -> accept (receipt)
 ```
 
 ## CLI

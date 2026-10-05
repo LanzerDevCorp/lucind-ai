@@ -37,14 +37,15 @@ func Accept(ctx context.Context, repoRoot, laneID string) (string, lane.Receipt,
 
 	var reasons []string
 
-	// 2. Validate result.json at lane.ResultPath against schema using result.Read
-	resultRelPath := filepath.ToSlash(filepath.Join(".lucind", "lanes", laneID, "result.json"))
+	// 2. Validate the current turn's result file against schema using result.Read
+	resultFileName := lane.ResultFileName(l.Turn)
+	resultRelPath := filepath.ToSlash(filepath.Join(".lucind", "lanes", laneID, resultFileName))
 	env, err := result.Read(os.DirFS(repoRoot), resultRelPath)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) || errors.Is(err, os.ErrNotExist) {
-			reasons = append(reasons, fmt.Sprintf("result.json missing: %v", err))
+			reasons = append(reasons, fmt.Sprintf("%s missing: %v", resultFileName, err))
 		} else {
-			reasons = append(reasons, fmt.Sprintf("result.json schema-invalid: %v", err))
+			reasons = append(reasons, fmt.Sprintf("%s schema-invalid: %v", resultFileName, err))
 		}
 	} else if env.Status != "done" {
 		reasons = append(reasons, fmt.Sprintf("result status is %q, expected \"done\"", env.Status))

@@ -138,6 +138,17 @@ func Dispatch(ctx context.Context, opts Options, runner HerdrRunner) (Output, in
 		if loadedLane.Status == lane.StatusAccepted || loadedLane.Status == lane.StatusRejected {
 			return Output{}, 1, fmt.Errorf("cannot continue lane %s with status %s", opts.LaneID, loadedLane.Status)
 		}
+		if loadedLane.Turn == 0 {
+			laneDir := lane.LaneDir(repoRoot, opts.LaneID)
+			resultFile := filepath.Join(laneDir, "result.json")
+			prevFile := filepath.Join(laneDir, "result.prev.json")
+			if err := os.Rename(resultFile, prevFile); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return Output{}, 1, fmt.Errorf("rename previous result: %w", err)
+			}
+			loadedLane.Turn = 1
+		} else {
+			loadedLane.Turn++
+		}
 		loadedLane.Status = lane.StatusRunning
 		loadedLane.Retries = 0
 		loadedLane.Continues = 0
@@ -151,12 +162,6 @@ func Dispatch(ctx context.Context, opts Options, runner HerdrRunner) (Output, in
 		if err := loadedLane.Save(repoRoot); err != nil {
 			return Output{}, 1, fmt.Errorf("save lane %s: %w", opts.LaneID, err)
 		}
-		laneDir := lane.LaneDir(repoRoot, opts.LaneID)
-		resultFile := filepath.Join(laneDir, "result.json")
-		prevFile := filepath.Join(laneDir, "result.prev.json")
-		if err := os.Rename(resultFile, prevFile); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return Output{}, 1, fmt.Errorf("rename previous result: %w", err)
-		}
 		l = loadedLane
 	} else {
 		createdLane, err := lane.Create(ctx, cwd, opts.Allow, model, opts.Checks...)
@@ -167,7 +172,7 @@ func Dispatch(ctx context.Context, opts Options, runner HerdrRunner) (Output, in
 	}
 
 	// 5. Full prompt construction
-	resultRelPath := lane.ResultPath(repoRoot, l.ID)
+	resultRelPath := lane.ResultFilePath(repoRoot, l)
 	absResultPath, err := filepath.Abs(resultRelPath)
 	if err != nil {
 		return Output{}, 1, fmt.Errorf("resolve abs result path: %w", err)

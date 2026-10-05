@@ -24,36 +24,50 @@ What exists is in [`product.md`](product.md).
   `--check 'golangci-lint run'` for lanes.
 - **`--allow` on lane continuations** (`fix(dispatch)`): a continuation now persists the new globs in
   `lane.json`, which the agy hook and `accept` enforce, instead of only rewriting the brief footer.
+- **Per-turn result files** (`feature/turn-bound-results`): a lane is done only when the current
+  turn delivered its own result file (`result-<turn>.json`); earlier turns stay as history;
+  Stop hook payload logging in `hook.log`; deterministic `TestLaneIDFormat` uniqueness test using
+  distinct seconds.
+- **Real-lane stability trials, first round** (throwaway repo `lucind-probes`, one worktree per
+  probe, agy `Gemini 3.8 Flash (High)`): 6 probes, 7 completed turns, plus the implementation lanes of
+  `turn-bound-results`. Worked as designed: a single turn (`result-1.json`); a continuation after
+  `done` (turn 2, widened `--allow`, `result-1.json` kept); a continuation sent while turn 1 was
+  still running (closed only by `result-2.json`, no stale file); a write outside `--allow` with a file
+  tool (denied by PreToolUse, hard stop reported, `accept` rejects the `blocked` envelope); a shell
+  write outside `--allow` (missed by the hook, rejected by `accept`); ending a turn without the
+  envelope (the Stop retry nudged agy, which then wrote it). No timeouts and no crashes. Limits: one
+  model, trivial tasks, and agy was told to probe the limits.
 - **Superseded:** the multi-provider herdr work (`herdr-agent-factory`, `herdr-interactive-agents`)
   predates the agy-only contract; its interactive-pane and Stop-hook ideas survive in it.
 
 ## Next
 
-1. **Real-lane stability trials.** Run several real lanes end to end (Claude, dispatch, agy, attest,
-   accept) across tasks and models; record failures of the Stop-retry loop, timeouts and
-   allowed-path denials.
-2. **Shell-write escape.** PreToolUse sees file-write tools; shell writes are caught only at
-   `accept`. Measure how often it matters before adding anything.
-3. **Stale agy trust entries after a crash** in `~/.gemini/antigravity-cli/settings.json`.
-4. **Idle detection.** herdr `agent` idle detection is unreliable with agy; the Stop hook is the
-   completion signal today.
-5. **RTK support.** Install RTK as part of the lucind-ai setup (today it is wired by hand in the
+1. **Shell-write escape.** PreToolUse sees file-write tools, not shell writes. Probe P5 confirmed
+   it: agy created `sneaky.txt` with `echo`, the hook did not object, and `accept` rejected the lane
+   (`changed file sneaky.txt not in allowlist`), but the file stays in the working tree, so the
+   orchestrator has to clean it. How often it matters is still unmeasured: agy only did it because
+   the brief asked. Keep measuring on real tasks before adding anything.
+2. **Stale agy trust entries after a crash** in `~/.gemini/antigravity-cli/settings.json`.
+3. **Stops from other conversations.** Completion no longer depends on herdr idle (decided by the
+   current turn's result file plus the Stop hook). The raw Stop payload carries `conversationId` and
+   `transcriptPath`, but no turn id. Each lane runs several agy conversations: one reports
+   `fullyIdle=false` throughout and its first `fullyIdle=true` Stop arrives after the lane is already
+   marked done; the decisions come from the others. In single-turn probes the same conversation
+   triggered both the retry nudge and the `done`; after a continuation (P3) they were different
+   conversations, so `conversationId` alone does not identify a main conversation. Look at
+   `transcriptPath` before filtering. About 4 of 7 turns needed the retry nudge (agy ends a turn
+   before writing the envelope), never more than one, which leaves a margin of one retry.
+4. **RTK support.** Install RTK as part of the lucind-ai setup (today it is wired by hand in the
    global Claude config: `@RTK.md` include plus the `rtk hook claude` PreToolUse hook).
-6. **Research gentle-ai reviews in depth.** Understand how receipt-driven development (RDD) works
+5. **Research gentle-ai reviews in depth.** Understand how receipt-driven development (RDD) works
    end to end: review lifecycle, receipts and lineage, consent, correction, and how it interacts
    with lucind-ai lanes and `accept`.
-7. **Inject the `lucind:dispatch` block into the global `~/.claude/CLAUDE.md`.** `lucind-ai install`
+6. **Inject the `lucind:dispatch` block into the global `~/.claude/CLAUDE.md`.** `lucind-ai install`
    should write it (idempotent, between its own markers, outside the gentle-ai ones) so the
    dispatch precedence rules stop being hand-maintained.
-8. **Premature `done` on lane continuations.** The Stop hook can mark a continued lane `done` while
-   agy is still working, reusing the previous `result.json`; seen twice while fixing lint. Verify
-   what the hook sees (`hook.log`: `lane marked done` right after a `fullyIdle=true` from the old
-   turn) and require a result newer than `brief.md`.
-9. **Flaky `TestLaneIDFormat`.** Lane IDs carry only 16 random bits per second, so the uniqueness
-   check can collide (one failure in a full `-race` run, 20/20 passes on repeat). Widen the suffix
-   or make the test deterministic.
 
 ## Only if needed
 
 - Cross-machine attestations (today the HMAC key and attestations are local).
 - A second provider, only when a real need and a verified hook surface exist.
+- More stability trials with other models or accounts and with larger real tasks.

@@ -8,6 +8,7 @@
 package agyhook
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -187,7 +188,7 @@ func PreToolUse(ctx context.Context, laneID string, stdin []byte) []byte {
 	}
 	target = resolve(target)
 
-	if target == lane.ResultPath(root, laneID) {
+	if target == lane.ResultFilePath(root, l) {
 		return allow()
 	}
 	rel, err := filepath.Rel(root, target)
@@ -216,6 +217,20 @@ func Stop(ctx context.Context, laneID string, stdin []byte) []byte {
 	if err != nil {
 		return end()
 	}
+	var compactBuf bytes.Buffer
+	raw := stdin
+	if err := json.Compact(&compactBuf, stdin); err == nil {
+		raw = compactBuf.Bytes()
+	}
+	const maxPayloadLog = 4096
+	var rawPayload string
+	if len(raw) > maxPayloadLog {
+		rawPayload = strings.ToValidUTF8(string(raw[:maxPayloadLog]), "") + "[truncated]"
+	} else {
+		rawPayload = string(raw)
+	}
+	logf(root, laneID, "stop: raw payload %s", rawPayload)
+
 	idle := "unset"
 	if p.FullyIdle != nil {
 		if *p.FullyIdle {
@@ -237,8 +252,8 @@ func Stop(ctx context.Context, laneID string, stdin []byte) []byte {
 		return end()
 	}
 
-	resultPath := lane.ResultPath(root, laneID)
-	_, readErr := result.Read(os.DirFS(lane.LaneDir(root, laneID)), "result.json")
+	resultPath := lane.ResultFilePath(root, l)
+	_, readErr := result.Read(os.DirFS(lane.LaneDir(root, laneID)), lane.ResultFileName(l.Turn))
 	invalid := readErr != nil
 
 	if invalid {
