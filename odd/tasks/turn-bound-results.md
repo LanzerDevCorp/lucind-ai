@@ -120,9 +120,21 @@ T5b verified: lint clean, lane accepted, docs diff reviewed. **Real-lane evidenc
 conversations, two with `fullyIdle=true`, and both retries were spent before the result existed.
 Recorded in roadmap item 4.
 
-Not covered by real-lane evidence: a continuation (turn 2). It is covered by unit tests only;
-exercise it in the real-lane stability trials (roadmap item 1).
+Real-lane trials (throwaway repo `lucind-probes`, binary `3c06349`, agy Gemini 3.8 Flash High),
+all as designed:
+- P1 single turn: done through `result-1.json`, accepted.
+- P2 continuation after done: turn 2, `--allow` widened and persisted, `result-1.json` kept,
+  `result-2.json` closes the lane, accepted.
+- P3 continuation sent while turn 1 was still in a `sleep 70`: `wait` returned only after
+  `result-2.json` existed; no `result-1.json` was ever written; accepted.
+- P4 file-tool write outside `--allow`: denied by PreToolUse, hard stop reported, `accept` rejects
+  the `blocked` envelope.
+- P5 shell write outside `--allow`: not caught by the hook; `accept` rejects it
+  (`changed file sneaky.txt not in allowlist`); the file stays in the tree.
+- P6 turn ended without an envelope: one Stop retry, agy then wrote it, accepted.
+4 of 7 turns used one retry; none used two. Details in `docs/ROADMAP.md`.
 
 ## Next step
 
-Decide the merge of `feature/turn-bound-results` into `dev` (user).
+Decide the merge of `feature/turn-bound-results` into `dev` (user). Delete the probe repos
+`~/git_root/lucind-probes` and `~/git_root/lucind-probes-worktrees` when no longer needed.
