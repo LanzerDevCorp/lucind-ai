@@ -32,7 +32,7 @@ Load the `herdr` skill too; this skill assumes its pane/agent commands.
 ### Lane (code changes)
 
 ```bash
-lucind-ai dispatch --cwd "$PWD" --allow '<glob>' [--allow ...] --brief <file|-> \
+lucind-ai dispatch --cwd "$PWD" [--allow '<glob>']... --brief <file|-> \
   [--auto-skills] [--check '<cmd>']... [--model M] [--timeout 60m] [--detach] [--min-quota 0.1]
 lucind-ai wait <lane>            # only after --detach
 lucind-ai accept --lane <id>     # run from the lane's repo
@@ -46,7 +46,9 @@ lucind-ai accept --lane <id>     # run from the lane's repo
   1 error, 3 failed, 4 timeout.
 - The pane is **never** closed or killed by lucind-ai. Talk to agy freely with
   `herdr agent prompt <pane_id> ...`; the contract is checked once, at `accept`, on the final tree.
-  For a formal follow-up turn with wait + validation: `dispatch --lane <id> --brief ...`.
+  For a formal follow-up turn with wait + validation: `dispatch --lane <id> --brief ...`. For
+  follow-up turns `dispatch --lane <id> --brief ...`, `--allow` is optional: when omitted, the
+  lane's stored globs apply; when given, they replace the stored globs.
 - On `timeout`: inspect the pane, nudge, or close it yourself. lucind-ai does nothing more.
 - `accept` writes `receipt.json` and accepts only when: the result envelope is valid; every file
   changed since the base tree matches an `--allow` glob; and each check is verified.

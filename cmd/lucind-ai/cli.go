@@ -22,7 +22,7 @@ import (
 	"github.com/LanzerDevCorp/lucind-ai/internal/dispatch"
 )
 
-const usage = "usage: lucind-ai dispatch --cwd <dir> --allow <glob>... --brief <file|-> [--auto-skills] [--check <cmd>]... [--model M] [--timeout D] [--detach] [--lane <id>] [--min-quota F]\n" +
+const usage = "usage: lucind-ai dispatch --cwd <dir> [--allow <glob>]... --brief <file|-> [--auto-skills] [--check <cmd>]... [--model M] [--timeout D] [--detach] [--lane <id>] [--min-quota F]\n" +
 	"       lucind-ai wait <lane> [--cwd <dir>] [--timeout D]\n" +
 	"       lucind-ai check [--out <path>]   (deprecated)\n" +
 	"       lucind-ai accept --lane <id>\n" +
@@ -35,7 +35,7 @@ const usage = "usage: lucind-ai dispatch --cwd <dir> --allow <glob>... --brief <
 	"       lucind-ai --version"
 
 const (
-	dispatchUsage = "usage: lucind-ai dispatch --cwd <dir> --allow <glob>... --brief <file|-> [--auto-skills] [--check <cmd>]... [--model M] [--timeout D] [--detach] [--lane <id>] [--min-quota F]"
+	dispatchUsage = "usage: lucind-ai dispatch --cwd <dir> [--allow <glob>]... --brief <file|-> [--auto-skills] [--check <cmd>]... [--model M] [--timeout D] [--detach] [--lane <id>] [--min-quota F]"
 	waitUsage     = "usage: lucind-ai wait <lane> [--cwd <dir>] [--timeout D]"
 )
 
@@ -292,7 +292,7 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 
 	cwd := fs.String("cwd", "", "working directory (required)")
 	var allow stringSliceFlag
-	fs.Var(&allow, "allow", "allowed glob pattern (repeatable or comma-separated, required)")
+	fs.Var(&allow, "allow", "allowed glob pattern (repeatable or comma-separated, required for new lane)")
 	var checks checkSliceFlag
 	fs.Var(&checks, "check", "verification command to run and attest (repeatable)")
 	briefPath := fs.String("brief", "", "path to brief file or '-' for stdin (required)")
@@ -334,7 +334,7 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 		return 1
 	}
 
-	if len(allow) == 0 {
+	if len(allow) == 0 && strings.TrimSpace(*laneID) == "" {
 		_, _ = fmt.Fprintln(stderr, "lucind-ai: dispatch: --allow is required")
 		usageBuf.Reset()
 		fs.Usage()
