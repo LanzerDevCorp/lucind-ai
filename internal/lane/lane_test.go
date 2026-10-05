@@ -82,12 +82,14 @@ func TestLaneIDFormat(t *testing.T) {
 		}
 	}
 
-	// Uniqueness
+	// Uniqueness. The suffix has only 16 random bits, so IDs generated within
+	// the same second can collide (birthday problem); use a distinct second per
+	// ID to keep the test deterministic.
 	seen := make(map[string]bool)
 	for i := 0; i < 50; i++ {
-		id, err := lane.GenerateID()
+		id, err := lane.GenerateIDAt(fixedTime.Add(time.Duration(i) * time.Second))
 		if err != nil {
-			t.Fatalf("GenerateID failed on iteration %d: %v", i, err)
+			t.Fatalf("GenerateIDAt failed on iteration %d: %v", i, err)
 		}
 		if seen[id] {
 			t.Fatalf("duplicate lane ID generated: %q", id)
