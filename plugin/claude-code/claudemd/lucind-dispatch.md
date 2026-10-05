@@ -18,16 +18,16 @@
 | Code-changing work | A lane: `lucind-ai dispatch`, `wait`, `accept`. |
 | Target outside the repository | Native bounded writer (lanes cannot target it). |
 
-- Lane brief mapping: `## Allowed edit surfaces` becomes the lane's `--allow` globs.
+- Lane prompt mapping: `## Allowed edit surfaces` becomes the lane's `--allow` globs.
 - `## Verification` commands become optional `--check` flags. Pass only the checks that fit the change.
-- `## Skills to load before work`, `## Key Learnings` and the other brief sections follow the `lucind` skill.
+- `## Skills to load before work`, `## Key Learnings` and the other prompt sections follow the `lucind` skill.
 - `--allow` globs are repository-relative, so work outside the repository cannot be a lane. Use a native bounded writer with the same prompt contract: exact allowed edit surfaces, skills, verification, Key Learnings.
 
 ### Verification replaces the separate verifier agent
 - There is no native verifier agent by default.
 - The writer's own verification is the lane's `--check` attestations. That is the proof of record. Do not re-run those tests after an accepted receipt.
-- If a writer returns partial, blocked or an incomplete delivery, send a follow-up turn to the same lane (`dispatch --lane <id>` with the full original brief) instead of spawning a new agent.
-- Always compare the diff and the envelope's `done_criteria` with the brief before `accept`.
+- If a writer returns partial, blocked or an incomplete delivery, send a follow-up turn to the same lane (`dispatch --lane <id>` with the full original prompt) instead of spawning a new agent.
+- Always compare the diff and the envelope's `done_criteria` with the prompt before `accept`.
 - Expensive or external checks: run `lucind-ai attest run -- sh -c '<cmd>'` yourself in the background with bounded output. `accept` reuses a valid attestation for the same tree.
 - When a check needs an agent's visual or end-to-end judgment, use a verification lane: no edits, cheaper `--model`, only `--check`.
 - The parent spot check stays: re-run one reported command before delivery.

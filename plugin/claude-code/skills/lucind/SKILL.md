@@ -126,7 +126,10 @@ what is described here (no explanatory prose), so put prose under a following he
   placed first in the prompt sent to agy so skills are loaded before work begins. With
   `--auto-skills`, the orchestrator omits the section and does not read the skill registry:
   lucind-ai asks Jev using `.atl/skill-registry.md` and `TYPESAFE_API_KEY`, records
-  `skills-<turn>.json`, and a hand-written section always wins. Without the flag, resolve them
+  `skills-<turn>.json`, and a hand-written section always wins. `lucind-ai` does not load `.env`:
+  export `TYPESAFE_API_KEY` in the environment of the dispatch command. With an empty key dispatch
+  only warns on stderr and continues without a skills section, so confirm that `skills-<turn>.json`
+  exists in the lane directory. Without the flag, resolve them
   yourself and pass the real file path (resolve symlinks; for example
   `.agents/skills/<name>/SKILL.md`), since lane workers are not Claude; agy reads those files
   before touching code and does not rediscover skills. Omit when no skill applies.
