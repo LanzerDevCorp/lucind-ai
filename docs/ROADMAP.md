@@ -47,6 +47,11 @@ What exists is in [`product.md`](product.md).
   `Read and follow <brief.md>` pointer and removed `--brief` in favor of `--prompt` across `dispatch` and
   `skills select`. The exact prompt is persisted to `prompt.md` for records, and the Stop hook classifies
   the main conversation using the `lucind-lane: <laneID>` marker line.
+- **Global API key lookup, install-time key setup, and two skill variants** (`feature/global-api-key-and-skill-variants`):
+  `TYPESAFE_API_KEY` lookup order checks the environment variable then `~/.config/lucind/env` (`$XDG_CONFIG_HOME/lucind/env`).
+  `lucind-ai install` prompts for the key when missing (without echo using `stty -echo`) and stores it with mode 0600 in
+  a 0700 dir, or skips when non-interactive. Renders the Claude skill as `auto` (orchestrator passes `--auto-skills`, no
+  manual skills section needed) or `manual` (fallback where orchestrator writes the section; re-running install switches variants).
 - **Superseded:** the multi-provider herdr work (`herdr-agent-factory`, `herdr-interactive-agents`)
   predates the agy-only contract; its interactive-pane and Stop-hook ideas survive in it.
 
@@ -99,7 +104,6 @@ What exists is in [`product.md`](product.md).
    - If worker propagation fails when a lane does launch workers, force it with a hook (for example
      a PreToolUse that blocks writes until every listed `SKILL.md` was read in that conversation).
    - Measure the main and worker conversations from the transcripts on a lane that launches workers.
-   - `lucind-ai` could load the repo `.env` itself so `--auto-skills` works without exporting the key.
 5. **RTK support.** Install RTK as part of the lucind-ai setup (today it is wired by hand in the
    global Claude config: `@RTK.md` include plus the `rtk hook claude` PreToolUse hook).
 6. **Research gentle-ai reviews in depth.** Understand how receipt-driven development (RDD) works

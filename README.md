@@ -24,7 +24,7 @@ dispatch (lane + agy pane) -> agy edits within --allow -> attest run -> result-<
 | `hook pre-tool-use\|stop` | agy plugin handlers. |
 | `skills select --prompt <file\|-> [--allow <glob>]... [--cwd <dir>] [--registry <path>] [--threshold <float>]` | Ask Jev which skills to load for a prompt. |
 | `plugin install` | Install the embedded agy plugin. |
-| `install` | Install the Claude skill, the `lucind` agy plugin, the `lucind-roles` agy plugin, and write the lucind dispatch block into `~/.claude/CLAUDE.md` (`--no-claude-md` to skip). |
+| `install` | Install the Claude skill (auto or manual variant), the `lucind` agy plugin, the `lucind-roles` agy plugin, and write the lucind dispatch block into `~/.claude/CLAUDE.md` (`--no-claude-md` to skip). |
 | `--version` | Exact build. |
 
 Lane state is plain JSON in `.lucind/lanes/<id>/`. Requires `HERDR_ENV=1` and `agy`.
@@ -35,7 +35,17 @@ Lane state is plain JSON in `.lucind/lanes/<id>/`. Requires `HERDR_ENV=1` and `a
 make install
 ```
 
-Installs the binary and runs `lucind-ai install`, which installs the Claude skill into `~/.claude/skills/lucind`, the `lucind` agy plugin, the `lucind-roles` agy plugin, and writes the lucind dispatch block into `~/.claude/CLAUDE.md` (idempotently, skipped with `--no-claude-md`). Verify with `lucind-ai -v`.
+Installs the binary and runs `lucind-ai install`, which:
+- Checks for `TYPESAFE_API_KEY`: lookup checks the `TYPESAFE_API_KEY` environment variable first, then `$XDG_CONFIG_HOME/lucind/env` (defaults to `~/.config/lucind/env`).
+- If no key is configured and standard input is a terminal, prompts for `TYPESAFE_API_KEY` (hidden without echo via `stty -echo`) and saves it to `~/.config/lucind/env` (mode 0600 in a mode 0700 directory). If input is empty or non-interactive (e.g. CI), prompting is skipped.
+- Installs the Claude skill into `~/.claude/skills/lucind` rendered to match your setup:
+  - **`auto` variant** (key configured): the orchestrator dispatches with `--auto-skills` and does not need to write `## Skills to load before work` manually.
+  - **`manual` variant** (no key): the orchestrator manually resolves skill paths and writes the section.
+  Re-running `lucind-ai install` switches variants when a key is configured later.
+- Installs the `lucind` agy plugin and the `lucind-roles` agy plugin.
+- Writes the lucind dispatch block into `~/.claude/CLAUDE.md` (idempotently, skipped with `--no-claude-md`).
+
+Verify with `lucind-ai -v`.
 
 ## Docs
 

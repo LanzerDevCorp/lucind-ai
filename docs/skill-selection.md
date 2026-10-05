@@ -21,11 +21,15 @@ lucind-ai skills select --prompt <file|-> [--allow <glob>]... [--cwd <dir>] [--r
 - `--registry <path>`: Path to the skill registry markdown file (defaults to `<repo-root>/.atl/skill-registry.md`).
 - `--threshold <float>`: Minimum probability threshold for a skill to be marked selected (defaults to `0.7`, valid range is `(0, 1]`).
 
-### Environment
+### Environment & Configuration
 
-The API key must be supplied via the environment:
+`TYPESAFE_API_KEY` provides the API key for the TypeSafe SystemOne Jev API (sent as a Bearer token in the `Authorization` HTTP header).
 
-- `TYPESAFE_API_KEY`: API key for the TypeSafe SystemOne Jev API. Sent as a Bearer token in the `Authorization` HTTP header. Required when invoking `lucind-ai skills select`.
+`lucind-ai` resolves the key in the following order:
+1. The `TYPESAFE_API_KEY` environment variable (if non-empty).
+2. The user config file `$XDG_CONFIG_HOME/lucind/env` (or `~/.config/lucind/env` when `XDG_CONFIG_HOME` is unset).
+
+Running `lucind-ai install` interactively prompts for `TYPESAFE_API_KEY` and stores it with mode 0600 in `~/.config/lucind/env` (directory mode 0700). The install step automatically selects the Claude skill variant (`auto` vs `manual`) based on whether a key is configured; re-running install switches the variant when a key is configured or changed.
 
 ## Registry Source
 
@@ -165,7 +169,7 @@ lucind-ai dispatch \
 ### How It Works
 
 - **Opt-in**: Automated selection is active only when `--auto-skills` is explicitly supplied.
-- **Registry and Jev evaluation**: Reads candidate skills from `<repo-root>/.atl/skill-registry.md` and calls Jev using `TYPESAFE_API_KEY`.
+- **Registry and Jev evaluation**: Reads candidate skills from `<repo-root>/.atl/skill-registry.md` and calls Jev using `TYPESAFE_API_KEY` (resolved from environment or `~/.config/lucind/env`).
 - **Prompt injection**: When skills are selected (passing threshold 0.7), `lucind-ai` moves the `## Skills to load before work` section right after the lane marker at the top of the prompt sent to agy, so the worker loads skills before reading the goal and scope.
 - **Manual override takes precedence**: If the prompt already contains `## Skills to load before work`, Jev is not called and the prompt is kept unchanged.
 - **Fail open**: On any error (such as a missing registry, unset `TYPESAFE_API_KEY`, network failure, or API error), `lucind-ai` warns on `stderr` and dispatches without the section. Dispatch never fails due to selector errors.
