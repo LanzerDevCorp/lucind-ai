@@ -22,20 +22,20 @@ import (
 	"github.com/LanzerDevCorp/lucind-ai/internal/dispatch"
 )
 
-const usage = "usage: lucind-ai dispatch --cwd <dir> [--allow <glob>]... --brief <file|-> [--auto-skills] [--check <cmd>]... [--model M] [--timeout D] [--detach] [--lane <id>] [--min-quota F]\n" +
+const usage = "usage: lucind-ai dispatch --cwd <dir> [--allow <glob>]... --prompt <file|-> [--auto-skills] [--check <cmd>]... [--model M] [--timeout D] [--detach] [--lane <id>] [--min-quota F]\n" +
 	"       lucind-ai wait <lane> [--cwd <dir>] [--timeout D]\n" +
 	"       lucind-ai check [--out <path>]   (deprecated)\n" +
 	"       lucind-ai accept --lane <id>\n" +
 	"       lucind-ai attest run -- <command> [args...]\n" +
 	"       lucind-ai attest verify --command \"<exact command string>\"\n" +
 	"       lucind-ai hook pre-tool-use|stop   (agy plugin handlers; stdin JSON)\n" +
-	"       lucind-ai skills select --brief <file|-> [--allow <glob>]... [--cwd <dir>] [--registry <path>] [--threshold <float>]\n" +
+	"       lucind-ai skills select --prompt <file|-> [--allow <glob>]... [--cwd <dir>] [--registry <path>] [--threshold <float>]\n" +
 	"       lucind-ai plugin install [--dir <staging root>]   (registers via agy plugin install)\n" +
 	"       lucind-ai install\n" +
 	"       lucind-ai --version"
 
 const (
-	dispatchUsage = "usage: lucind-ai dispatch --cwd <dir> [--allow <glob>]... --brief <file|-> [--auto-skills] [--check <cmd>]... [--model M] [--timeout D] [--detach] [--lane <id>] [--min-quota F]"
+	dispatchUsage = "usage: lucind-ai dispatch --cwd <dir> [--allow <glob>]... --prompt <file|-> [--auto-skills] [--check <cmd>]... [--model M] [--timeout D] [--detach] [--lane <id>] [--min-quota F]"
 	waitUsage     = "usage: lucind-ai wait <lane> [--cwd <dir>] [--timeout D]"
 )
 
@@ -295,13 +295,20 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 	fs.Var(&allow, "allow", "allowed glob pattern (repeatable or comma-separated, required for new lane)")
 	var checks checkSliceFlag
 	fs.Var(&checks, "check", "verification command to run and attest (repeatable)")
-	briefPath := fs.String("brief", "", "path to brief file or '-' for stdin (required)")
+	promptPath := fs.String("prompt", "", "path to prompt file or '-' for stdin (required)")
 	model := fs.String("model", "", "model override")
 	timeoutStr := fs.String("timeout", "60m", "timeout duration")
 	detach := fs.Bool("detach", false, "detach and return immediately without waiting")
 	laneID := fs.String("lane", "", "lane identifier for continuation")
 	minQuota := fs.Float64("min-quota", 0, "minimum quota required")
 	autoSkills := fs.Bool("auto-skills", false, "automatically select and inject relevant skills using Jev")
+
+	for _, arg := range args {
+		if arg == "--brief" || strings.HasPrefix(arg, "--brief=") || arg == "-brief" || strings.HasPrefix(arg, "-brief=") {
+			_, _ = fmt.Fprintln(stderr, "lucind-ai: --brief was removed; use --prompt instead")
+			return 1
+		}
+	}
 
 	if len(args) > 0 && (args[0] == "help" || args[0] == "-h" || args[0] == "--help" || args[0] == "-help") {
 		fs.Usage()
@@ -342,8 +349,8 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 		return 1
 	}
 
-	if strings.TrimSpace(*briefPath) == "" {
-		_, _ = fmt.Fprintln(stderr, "lucind-ai: dispatch: --brief is required")
+	if strings.TrimSpace(*promptPath) == "" {
+		_, _ = fmt.Fprintln(stderr, "lucind-ai: dispatch: --prompt is required")
 		usageBuf.Reset()
 		fs.Usage()
 		_, _ = fmt.Fprint(stderr, usageBuf.String())
@@ -359,21 +366,21 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 		return 1
 	}
 
-	var briefContent string
-	if *briefPath == "-" {
+	var promptContent string
+	if *promptPath == "-" {
 		data, err := io.ReadAll(stdinReader)
 		if err != nil {
 			_, _ = fmt.Fprintf(stderr, "lucind-ai: dispatch: read stdin: %v\n", err)
 			return 1
 		}
-		briefContent = string(data)
+		promptContent = string(data)
 	} else {
-		data, err := os.ReadFile(*briefPath)
+		data, err := os.ReadFile(*promptPath)
 		if err != nil {
-			_, _ = fmt.Fprintf(stderr, "lucind-ai: dispatch: read brief file %s: %v\n", *briefPath, err)
+			_, _ = fmt.Fprintf(stderr, "lucind-ai: dispatch: read prompt file %s: %v\n", *promptPath, err)
 			return 1
 		}
-		briefContent = string(data)
+		promptContent = string(data)
 	}
 
 	opts := dispatch.Options{
@@ -382,7 +389,7 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 		Allow:      allow,
 		Checks:     checks,
 		Model:      *model,
-		Brief:      briefContent,
+		Prompt:     promptContent,
 		MinQuota:   *minQuota,
 		Detach:     *detach,
 		Timeout:    timeout,

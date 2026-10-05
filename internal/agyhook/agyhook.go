@@ -247,11 +247,8 @@ func classifyConversation(laneID, transcriptPath string) (role, error) {
 		return roleUnknown, fmt.Errorf("decode transcript step: %w", err)
 	}
 
-	briefTarget := ".lucind/lanes/" + laneID + "/brief.md"
 	isMainSource := step.Source == "" || step.Source == "USER_EXPLICIT"
-	isMain := isMainSource &&
-		strings.Contains(step.Content, "Read and follow") &&
-		strings.Contains(filepath.ToSlash(step.Content), briefTarget)
+	isMain := isMainSource && strings.Contains(step.Content, "lucind-lane: "+laneID)
 	if isMain {
 		return roleMain, nil
 	}

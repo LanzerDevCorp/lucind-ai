@@ -16,13 +16,13 @@ dispatch (lane + agy pane) -> agy edits within --allow -> attest run -> result-<
 
 | Command | Purpose |
 |---|---|
-| `dispatch --cwd <dir> --allow <glob>... --brief <file\|-> [--check <cmd>]... [--detach] [--lane <id>]` | Open an agy lane and send the brief. |
+| `dispatch --cwd <dir> --allow <glob>... --prompt <file\|-> [--check <cmd>]... [--detach] [--lane <id>]` | Open an agy lane and send the prompt. |
 | `wait <lane>` | Block on a detached lane and validate its result. |
 | `accept --lane <id>` | Write a receipt if result, allowed paths and lane check attestations all hold. |
 | `attest run -- <cmd>` / `attest verify --command <cmd>` | HMAC tree-hash attestation of a test run. |
 | `check` | Run `lucind-checks.sh` (deprecated). |
 | `hook pre-tool-use\|stop` | agy plugin handlers. |
-| `skills select --brief <file\|-> [--allow <glob>]... [--cwd <dir>] [--registry <path>] [--threshold <float>]` | Ask Jev which skills to load for a brief. |
+| `skills select --prompt <file\|-> [--allow <glob>]... [--cwd <dir>] [--registry <path>] [--threshold <float>]` | Ask Jev which skills to load for a prompt. |
 | `plugin install` | Install the embedded agy plugin. |
 | `install` | Install the Claude skill, the `lucind` agy plugin, the `lucind-roles` agy plugin, and write the lucind dispatch block into `~/.claude/CLAUDE.md` (`--no-claude-md` to skip). |
 | `--version` | Exact build. |

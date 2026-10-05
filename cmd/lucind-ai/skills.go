@@ -16,7 +16,7 @@ import (
 	"github.com/LanzerDevCorp/lucind-ai/internal/skillselect"
 )
 
-const skillsUsage = "usage: lucind-ai skills select --brief <file|-> [--allow <glob>]... [--cwd <dir>] [--registry <path>] [--threshold <float>]"
+const skillsUsage = "usage: lucind-ai skills select --prompt <file|-> [--allow <glob>]... [--cwd <dir>] [--registry <path>] [--threshold <float>]"
 
 var selectSkills = skillselect.Select
 
@@ -42,12 +42,19 @@ func runSkillsSelect(ctx context.Context, args []string, stdout, stderr io.Write
 	fs := flag.NewFlagSet("skills select", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 
-	brief := fs.String("brief", "", "task brief file path or '-' for stdin")
+	prompt := fs.String("prompt", "", "task prompt file path or '-' for stdin")
 	var allow stringSliceFlag
 	fs.Var(&allow, "allow", "allowed glob pattern (repeatable or comma-separated)")
 	cwd := fs.String("cwd", ".", "working directory")
 	registry := fs.String("registry", "", "path to skill registry markdown")
 	threshold := fs.Float64("threshold", skillselect.DefaultThreshold, "selection probability threshold (0, 1]")
+
+	for _, arg := range args {
+		if arg == "--brief" || strings.HasPrefix(arg, "--brief=") || arg == "-brief" || strings.HasPrefix(arg, "-brief=") {
+			_, _ = fmt.Fprintln(stderr, "lucind-ai: --brief was removed; use --prompt instead")
+			return 1
+		}
+	}
 
 	if len(args) > 0 && (args[0] == "help" || args[0] == "-h" || args[0] == "--help" || args[0] == "-help") {
 		_, _ = fmt.Fprintln(stdout, skillsUsage)
@@ -73,17 +80,17 @@ func runSkillsSelect(ctx context.Context, args []string, stdout, stderr io.Write
 		return 1
 	}
 
-	if *brief == "" {
-		_, _ = fmt.Fprintf(stderr, "lucind-ai: --brief is required\n")
+	if *prompt == "" {
+		_, _ = fmt.Fprintf(stderr, "lucind-ai: --prompt is required\n")
 		return 1
 	}
 
-	var briefData []byte
+	var promptData []byte
 	var err error
-	if *brief == "-" {
-		briefData, err = io.ReadAll(stdinReader)
+	if *prompt == "-" {
+		promptData, err = io.ReadAll(stdinReader)
 	} else {
-		briefData, err = os.ReadFile(*brief)
+		promptData, err = os.ReadFile(*prompt)
 	}
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "lucind-ai: %v\n", err)
@@ -132,7 +139,7 @@ func runSkillsSelect(ctx context.Context, args []string, stdout, stderr io.Write
 		return 1
 	}
 
-	res, err := selectSkills(ctx, client, skills, skillselect.Input{Brief: string(briefData), Allow: []string(allow)}, *threshold)
+	res, err := selectSkills(ctx, client, skills, skillselect.Input{Brief: string(promptData), Allow: []string(allow)}, *threshold)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "lucind-ai: %v\n", err)
 		return 1

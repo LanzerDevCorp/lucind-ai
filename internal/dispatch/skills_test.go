@@ -36,7 +36,7 @@ func TestAutoSkills_FlagOff(t *testing.T) {
 		Cwd:        repoDir,
 		AutoSkills: false,
 		Model:      "gemini-3.8-flash-high",
-		Brief:      "# Implement Feature A\nTask description",
+		Prompt:     "# Implement Feature A\nTask description",
 		Detach:     true,
 	}
 
@@ -72,12 +72,12 @@ func TestAutoSkills_BriefAlreadyHasSection(t *testing.T) {
 	})
 	t.Cleanup(dispatch.ResetSkillSelectorForTesting)
 
-	userBrief := "# Implement Feature B\n\n## Skills to load before work\n/path/to/skill/SKILL.md\n"
+	userPrompt := "# Implement Feature B\n\n## Skills to load before work\n/path/to/skill/SKILL.md\n"
 	opts := dispatch.Options{
 		Cwd:        repoDir,
 		AutoSkills: true,
 		Model:      "gemini-3.8-flash-high",
-		Brief:      userBrief,
+		Prompt:     userPrompt,
 		Detach:     true,
 	}
 
@@ -93,15 +93,21 @@ func TestAutoSkills_BriefAlreadyHasSection(t *testing.T) {
 		t.Errorf("selector should not be called when brief already has skills section")
 	}
 
-	// Verify brief.md contains original brief unchanged
-	briefPath := filepath.Join(lane.LaneDir(repoDir, out.Lane), "brief.md")
-	contentBytes, err := os.ReadFile(briefPath)
+	// Verify prompt.md contains marker first, then skills section, then title
+	promptPath := filepath.Join(lane.LaneDir(repoDir, out.Lane), "prompt.md")
+	contentBytes, err := os.ReadFile(promptPath)
 	if err != nil {
-		t.Fatalf("read brief.md: %v", err)
+		t.Fatalf("read prompt.md: %v", err)
 	}
 	content := string(contentBytes)
-	if !strings.HasPrefix(content, strings.TrimRight(userBrief, "\n")) {
-		t.Errorf("brief.md does not start with original brief; got:\n%s", content)
+	wantPrefix := fmt.Sprintf("lucind-lane: %s turn: 1\n\n## Skills to load before work\n/path/to/skill/SKILL.md\n\n# Implement Feature B", out.Lane)
+	if !strings.HasPrefix(content, wantPrefix) {
+		t.Errorf("prompt.md does not start with expected prefix; got:\n%s\nwant prefix:\n%s", content, wantPrefix)
+	}
+
+	briefPath := filepath.Join(lane.LaneDir(repoDir, out.Lane), "brief.md")
+	if _, err := os.Stat(briefPath); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("brief.md should not exist, stat err = %v", err)
 	}
 
 	// Verify skills-1.json records brief_has_section
@@ -137,23 +143,29 @@ func TestAutoSkills_SectionPlacement(t *testing.T) {
 	section := "## Skills to load before work\n/skills/golang-cli/SKILL.md"
 	tests := []struct {
 		name       string
-		brief      string
-		wantPrefix string
+		prompt     string
+		wantPrefix func(laneID string) string
 	}{
 		{
-			name:       "no title puts the section first",
-			brief:      "## Goal\nDo X.\n",
-			wantPrefix: section + "\n\n## Goal\nDo X.",
+			name:   "no title puts the section first",
+			prompt: "## Goal\nDo X.\n",
+			wantPrefix: func(laneID string) string {
+				return fmt.Sprintf("lucind-lane: %s turn: 1\n\n%s\n\n## Goal\nDo X.", laneID, section)
+			},
 		},
 		{
-			name:       "leading blank lines before the title",
-			brief:      "\n\n# Task\n\n## Goal\nDo X.\n",
-			wantPrefix: "# Task\n\n" + section + "\n\n## Goal\nDo X.",
+			name:   "leading blank lines before the title",
+			prompt: "\n\n# Task\n\n## Goal\nDo X.\n",
+			wantPrefix: func(laneID string) string {
+				return fmt.Sprintf("lucind-lane: %s turn: 1\n\n%s\n\n# Task\n\n## Goal\nDo X.", laneID, section)
+			},
 		},
 		{
-			name:       "title only",
-			brief:      "# Task\n",
-			wantPrefix: "# Task\n\n" + section + "\n\n---\n## Lane Contract",
+			name:   "title only",
+			prompt: "# Task\n",
+			wantPrefix: func(laneID string) string {
+				return fmt.Sprintf("lucind-lane: %s turn: 1\n\n%s\n\n# Task\n\n---\n## Lane Contract", laneID, section)
+			},
 		},
 	}
 
@@ -176,7 +188,7 @@ func TestAutoSkills_SectionPlacement(t *testing.T) {
 				AutoSkills: true,
 				Model:      "gemini-3.8-flash-high",
 				Allow:      []string{"internal/**"},
-				Brief:      tt.brief,
+				Prompt:     tt.prompt,
 				Detach:     true,
 			}
 			out, exitCode, err := dispatch.Dispatch(context.Background(), opts, runner)
@@ -184,12 +196,18 @@ func TestAutoSkills_SectionPlacement(t *testing.T) {
 				t.Fatalf("Dispatch() = exit %d, err %v; want 0, nil", exitCode, err)
 			}
 
-			content, err := os.ReadFile(filepath.Join(lane.LaneDir(repoDir, out.Lane), "brief.md"))
+			content, err := os.ReadFile(filepath.Join(lane.LaneDir(repoDir, out.Lane), "prompt.md"))
 			if err != nil {
-				t.Fatalf("read brief.md: %v", err)
+				t.Fatalf("read prompt.md: %v", err)
 			}
-			if !strings.HasPrefix(string(content), tt.wantPrefix) {
-				t.Errorf("brief.md prefix mismatch:\ngot:\n%s\nwant prefix:\n%s", content, tt.wantPrefix)
+			want := tt.wantPrefix(out.Lane)
+			if !strings.HasPrefix(string(content), want) {
+				t.Errorf("prompt.md prefix mismatch:\ngot:\n%s\nwant prefix:\n%s", content, want)
+			}
+
+			briefPath := filepath.Join(lane.LaneDir(repoDir, out.Lane), "brief.md")
+			if _, err := os.Stat(briefPath); !errors.Is(err, os.ErrNotExist) {
+				t.Errorf("brief.md should not exist, stat err = %v", err)
 			}
 		})
 	}
@@ -228,13 +246,13 @@ func TestAutoSkills_SelectorSuccess_WithSelectedSkills(t *testing.T) {
 	})
 	t.Cleanup(dispatch.ResetSkillSelectorForTesting)
 
-	userBrief := "# Implement Feature C\nPlease do it well."
+	userPrompt := "# Implement Feature C\nPlease do it well."
 	opts := dispatch.Options{
 		Cwd:        repoDir,
 		AutoSkills: true,
 		Model:      "gemini-3.8-flash-high",
 		Allow:      []string{"internal/**", "cmd/**"},
-		Brief:      userBrief,
+		Prompt:     userPrompt,
 		Detach:     true,
 	}
 
@@ -246,32 +264,37 @@ func TestAutoSkills_SelectorSuccess_WithSelectedSkills(t *testing.T) {
 		t.Fatalf("exitCode = %d, want 0", exitCode)
 	}
 
-	if capturedInput.Brief != userBrief {
-		t.Errorf("capturedInput.Brief = %q, want %q", capturedInput.Brief, userBrief)
+	if capturedInput.Brief != userPrompt {
+		t.Errorf("capturedInput.Brief = %q, want %q", capturedInput.Brief, userPrompt)
 	}
 
-	// Verify brief.md contains section before ## Lane Contract footer
-	briefPath := filepath.Join(lane.LaneDir(repoDir, out.Lane), "brief.md")
-	contentBytes, err := os.ReadFile(briefPath)
+	// Verify prompt.md contains marker first, then skills section, then title, then footer
+	promptPath := filepath.Join(lane.LaneDir(repoDir, out.Lane), "prompt.md")
+	contentBytes, err := os.ReadFile(promptPath)
 	if err != nil {
-		t.Fatalf("read brief.md: %v", err)
+		t.Fatalf("read prompt.md: %v", err)
 	}
 	content := string(contentBytes)
 
 	sectionIdx := strings.Index(content, "## Skills to load before work\n/skills/golang-cli/SKILL.md")
 	footerIdx := strings.Index(content, "## Lane Contract")
 	if sectionIdx == -1 {
-		t.Errorf("brief.md does not contain skills section:\n%s", content)
+		t.Errorf("prompt.md does not contain skills section:\n%s", content)
 	}
 	if footerIdx == -1 {
-		t.Errorf("brief.md does not contain ## Lane Contract footer:\n%s", content)
+		t.Errorf("prompt.md does not contain ## Lane Contract footer:\n%s", content)
 	}
 	if sectionIdx > footerIdx {
 		t.Errorf("skills section appears after Lane Contract footer: section at %d, footer at %d", sectionIdx, footerIdx)
 	}
-	wantPrefix := "# Implement Feature C\n\n## Skills to load before work\n/skills/golang-cli/SKILL.md\n\nPlease do it well."
+	wantPrefix := fmt.Sprintf("lucind-lane: %s turn: 1\n\n## Skills to load before work\n/skills/golang-cli/SKILL.md\n\n# Implement Feature C\n\nPlease do it well.", out.Lane)
 	if !strings.HasPrefix(content, wantPrefix) {
-		t.Errorf("skills section is not right after the title:\ngot:\n%s\nwant prefix:\n%s", content, wantPrefix)
+		t.Errorf("skills section is not right after the marker line:\ngot:\n%s\nwant prefix:\n%s", content, wantPrefix)
+	}
+
+	briefPath := filepath.Join(lane.LaneDir(repoDir, out.Lane), "brief.md")
+	if _, err := os.Stat(briefPath); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("brief.md should not exist, stat err = %v", err)
 	}
 
 	// Verify skills-1.json records injected: true and the decisions
@@ -334,12 +357,12 @@ func TestAutoSkills_SelectorSuccess_NoSelectedSkill(t *testing.T) {
 	})
 	t.Cleanup(dispatch.ResetSkillSelectorForTesting)
 
-	userBrief := "# Implement Feature D\nDo something simple."
+	userPrompt := "# Implement Feature D\nDo something simple."
 	opts := dispatch.Options{
 		Cwd:        repoDir,
 		AutoSkills: true,
 		Model:      "gemini-3.8-flash-high",
-		Brief:      userBrief,
+		Prompt:     userPrompt,
 		Detach:     true,
 	}
 
@@ -351,19 +374,24 @@ func TestAutoSkills_SelectorSuccess_NoSelectedSkill(t *testing.T) {
 		t.Fatalf("exitCode = %d, want 0", exitCode)
 	}
 
-	// Verify brief.md has userBrief unchanged before ## Lane Contract
-	briefPath := filepath.Join(lane.LaneDir(repoDir, out.Lane), "brief.md")
-	contentBytes, err := os.ReadFile(briefPath)
+	// Verify prompt.md has userPrompt unchanged before ## Lane Contract
+	promptPath := filepath.Join(lane.LaneDir(repoDir, out.Lane), "prompt.md")
+	contentBytes, err := os.ReadFile(promptPath)
 	if err != nil {
-		t.Fatalf("read brief.md: %v", err)
+		t.Fatalf("read prompt.md: %v", err)
 	}
 	content := string(contentBytes)
 	if strings.Contains(content, "## Skills to load before work") {
-		t.Errorf("brief.md should not contain skills section when none selected; got:\n%s", content)
+		t.Errorf("prompt.md should not contain skills section when none selected; got:\n%s", content)
 	}
-	expectedPrefix := strings.TrimRight(userBrief, "\n") + "\n\n---\n## Lane Contract"
+	expectedPrefix := fmt.Sprintf("lucind-lane: %s turn: 1\n\n%s\n\n---\n## Lane Contract", out.Lane, strings.TrimRight(userPrompt, "\n"))
 	if !strings.HasPrefix(content, expectedPrefix) {
-		t.Errorf("brief.md does not match expected prefix; got:\n%s", content)
+		t.Errorf("prompt.md does not match expected prefix; got:\n%s", content)
+	}
+
+	briefPath := filepath.Join(lane.LaneDir(repoDir, out.Lane), "brief.md")
+	if _, err := os.Stat(briefPath); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("brief.md should not exist, stat err = %v", err)
 	}
 
 	// Verify skills-1.json records no_skill_selected and result
@@ -412,13 +440,13 @@ func TestAutoSkills_SelectorError(t *testing.T) {
 	t.Cleanup(dispatch.ResetSkillSelectorForTesting)
 
 	var stderrBuf bytes.Buffer
-	userBrief := "# Implement Feature E\nFix issue."
+	userPrompt := "# Implement Feature E\nFix issue."
 	opts := dispatch.Options{
 		Cwd:        repoDir,
 		AutoSkills: true,
 		Stderr:     &stderrBuf,
 		Model:      "gemini-3.8-flash-high",
-		Brief:      userBrief,
+		Prompt:     userPrompt,
 		Detach:     true,
 	}
 
@@ -446,15 +474,20 @@ func TestAutoSkills_SelectorError(t *testing.T) {
 		t.Errorf("stderr does not contain [REDACTED]: %q", stderrStr)
 	}
 
-	// Verify brief.md has userBrief unchanged before ## Lane Contract
-	briefPath := filepath.Join(lane.LaneDir(repoDir, out.Lane), "brief.md")
-	contentBytes, err := os.ReadFile(briefPath)
+	// Verify prompt.md has userPrompt unchanged before ## Lane Contract
+	promptPath := filepath.Join(lane.LaneDir(repoDir, out.Lane), "prompt.md")
+	contentBytes, err := os.ReadFile(promptPath)
 	if err != nil {
-		t.Fatalf("read brief.md: %v", err)
+		t.Fatalf("read prompt.md: %v", err)
 	}
 	content := string(contentBytes)
 	if strings.Contains(content, "## Skills to load before work") {
-		t.Errorf("brief.md should not contain skills section on error; got:\n%s", content)
+		t.Errorf("prompt.md should not contain skills section on error; got:\n%s", content)
+	}
+
+	briefPath := filepath.Join(lane.LaneDir(repoDir, out.Lane), "brief.md")
+	if _, err := os.Stat(briefPath); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("brief.md should not exist, stat err = %v", err)
 	}
 
 	// Verify skills-1.json records the error and redacts API key
@@ -523,7 +556,7 @@ func TestAutoSkills_ContinuationTurn(t *testing.T) {
 		Cwd:        repoDir,
 		AutoSkills: true,
 		Model:      "gemini-3.8-flash-high",
-		Brief:      "# Turn 1 brief",
+		Prompt:     "# Turn 1 brief",
 		Detach:     true,
 	}
 
@@ -561,7 +594,7 @@ func TestAutoSkills_ContinuationTurn(t *testing.T) {
 		Cwd:        repoDir,
 		LaneID:     out1.Lane,
 		AutoSkills: true,
-		Brief:      "# Turn 2 brief",
+		Prompt:     "# Turn 2 brief",
 		Detach:     true,
 	}
 
@@ -603,7 +636,7 @@ func TestDefaultSkillSelector_MissingRegistry(t *testing.T) {
 		Cwd:        tempDir,
 		AutoSkills: true,
 		Model:      "gemini-3.8-flash-high",
-		Brief:      "test brief",
+		Prompt:     "test brief",
 		Detach:     true,
 	}
 
@@ -661,7 +694,7 @@ func TestDefaultSkillSelector_MissingAPIKey(t *testing.T) {
 		Cwd:        tempDir,
 		AutoSkills: true,
 		Model:      "gemini-3.8-flash-high",
-		Brief:      "test brief",
+		Prompt:     "test brief",
 		Detach:     true,
 	}
 
@@ -709,7 +742,7 @@ func TestAutoSkills_SelectorError_DefaultStderr(t *testing.T) {
 		AutoSkills: true,
 		Stderr:     nil,
 		Model:      "gemini-3.8-flash-high",
-		Brief:      "test brief",
+		Prompt:     "test brief",
 		Detach:     true,
 	}
 
@@ -764,7 +797,7 @@ func TestAutoSkills_EmptyBrief_WithSelectedSkills(t *testing.T) {
 		Cwd:        repoDir,
 		AutoSkills: true,
 		Model:      "gemini-3.8-flash-high",
-		Brief:      "",
+		Prompt:     "",
 		Detach:     true,
 	}
 
@@ -776,17 +809,22 @@ func TestAutoSkills_EmptyBrief_WithSelectedSkills(t *testing.T) {
 		t.Fatalf("exitCode = %d, want 0", exitCode)
 	}
 
-	briefPath := filepath.Join(lane.LaneDir(repoDir, out.Lane), "brief.md")
-	contentBytes, err := os.ReadFile(briefPath)
+	promptPath := filepath.Join(lane.LaneDir(repoDir, out.Lane), "prompt.md")
+	contentBytes, err := os.ReadFile(promptPath)
 	if err != nil {
-		t.Fatalf("read brief.md: %v", err)
+		t.Fatalf("read prompt.md: %v", err)
 	}
 	content := string(contentBytes)
 
-	// Should start directly with skills section
-	expectedPrefix := "## Skills to load before work\n/skills/golang-cli/SKILL.md\n\n---\n## Lane Contract"
+	// Should start with lane marker, then skills section
+	expectedPrefix := fmt.Sprintf("lucind-lane: %s turn: 1\n\n## Skills to load before work\n/skills/golang-cli/SKILL.md\n\n---\n## Lane Contract", out.Lane)
 	if !strings.HasPrefix(content, expectedPrefix) {
-		t.Errorf("brief.md content with empty brief does not match expected prefix; got:\n%s", content)
+		t.Errorf("prompt.md content with empty brief does not match expected prefix; got:\n%s", content)
+	}
+
+	briefPath := filepath.Join(lane.LaneDir(repoDir, out.Lane), "brief.md")
+	if _, err := os.Stat(briefPath); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("brief.md should not exist, stat err = %v", err)
 	}
 }
 
@@ -829,12 +867,12 @@ func TestAutoSkills_WriteFailure_FailOpen(t *testing.T) {
 	t.Cleanup(dispatch.ResetSkillSelectorForTesting)
 
 	var stderrBuf bytes.Buffer
-	userBrief := "# Continuation task\nWork on feature."
+	userPrompt := "# Continuation task\nWork on feature."
 	opts := dispatch.Options{
 		Cwd:        repoDir,
 		LaneID:     createdLane.ID,
 		AutoSkills: true,
-		Brief:      userBrief,
+		Prompt:     userPrompt,
 		Stderr:     &stderrBuf,
 		Detach:     true,
 	}
@@ -855,14 +893,19 @@ func TestAutoSkills_WriteFailure_FailOpen(t *testing.T) {
 		t.Errorf("stderr does not contain expected warning; got: %q", stderrStr)
 	}
 
-	briefPath := filepath.Join(lane.LaneDir(repoDir, createdLane.ID), "brief.md")
-	contentBytes, err := os.ReadFile(briefPath)
+	promptPath := filepath.Join(lane.LaneDir(repoDir, createdLane.ID), "prompt.md")
+	contentBytes, err := os.ReadFile(promptPath)
 	if err != nil {
-		t.Fatalf("read brief.md failed: %v", err)
+		t.Fatalf("read prompt.md failed: %v", err)
 	}
 	content := string(contentBytes)
 	if !strings.Contains(content, "## Skills to load before work\n/skills/golang-cli/SKILL.md") {
-		t.Errorf("brief.md missing computed skills section; got:\n%s", content)
+		t.Errorf("prompt.md missing computed skills section; got:\n%s", content)
+	}
+
+	briefPath := filepath.Join(lane.LaneDir(repoDir, createdLane.ID), "brief.md")
+	if _, err := os.Stat(briefPath); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("brief.md should not exist, stat err = %v", err)
 	}
 }
 
@@ -924,7 +967,7 @@ func TestDefaultSkillSelector_ResolvesSymlinks(t *testing.T) {
 		Cwd:        repoDir,
 		AutoSkills: true,
 		Model:      "gemini-3.8-flash-high",
-		Brief:      "test brief",
+		Prompt:     "test brief",
 		Detach:     true,
 	}
 
@@ -936,18 +979,23 @@ func TestDefaultSkillSelector_ResolvesSymlinks(t *testing.T) {
 		t.Fatalf("exitCode = %d, want 0", exitCode)
 	}
 
-	// Verify brief.md contains canonicalPath and not symlinkSkillFile
-	briefPath := filepath.Join(lane.LaneDir(repoDir, out.Lane), "brief.md")
-	contentBytes, err := os.ReadFile(briefPath)
+	// Verify prompt.md contains canonicalPath and not symlinkSkillFile
+	promptPath := filepath.Join(lane.LaneDir(repoDir, out.Lane), "prompt.md")
+	contentBytes, err := os.ReadFile(promptPath)
 	if err != nil {
-		t.Fatalf("read brief.md: %v", err)
+		t.Fatalf("read prompt.md: %v", err)
 	}
 	content := string(contentBytes)
 	if !strings.Contains(content, canonicalPath) {
-		t.Errorf("brief.md should contain canonical skill path %q; got:\n%s", canonicalPath, content)
+		t.Errorf("prompt.md should contain canonical skill path %q; got:\n%s", canonicalPath, content)
 	}
 	if strings.Contains(content, symlinkSkillFile) {
-		t.Errorf("brief.md should not contain unresolved symlink path %q; got:\n%s", symlinkSkillFile, content)
+		t.Errorf("prompt.md should not contain unresolved symlink path %q; got:\n%s", symlinkSkillFile, content)
+	}
+
+	briefPath := filepath.Join(lane.LaneDir(repoDir, out.Lane), "brief.md")
+	if _, err := os.Stat(briefPath); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("brief.md should not exist, stat err = %v", err)
 	}
 
 	// Verify skills-1.json has canonicalPath in decisions

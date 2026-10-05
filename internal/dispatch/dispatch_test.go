@@ -128,7 +128,7 @@ func TestDispatch_NewLane_HappyPath(t *testing.T) {
 		Cwd:    repoDir,
 		Allow:  []string{"internal/**", "cmd/**"},
 		Model:  "gemini-3.8-flash-high",
-		Brief:  "# Implement Feature A\nPlease implement feature A carefully.",
+		Prompt: "# Implement Feature A\nPlease implement feature A carefully.",
 		Detach: true,
 	}
 
@@ -164,41 +164,49 @@ func TestDispatch_NewLane_HappyPath(t *testing.T) {
 		t.Errorf("savedLane.Model = %q, want \"gemini-3.8-flash-high\"", savedLane.Model)
 	}
 
-	// 2. Verify brief.md content
-	briefPath := filepath.Join(lane.LaneDir(repoDir, out.Lane), "brief.md")
-	briefBytes, err := os.ReadFile(briefPath)
+	// 2. Verify prompt.md content and absence of brief.md
+	promptPath := filepath.Join(lane.LaneDir(repoDir, out.Lane), "prompt.md")
+	promptBytes, err := os.ReadFile(promptPath)
 	if err != nil {
-		t.Fatalf("read brief.md failed: %v", err)
+		t.Fatalf("read prompt.md failed: %v", err)
 	}
-	briefContent := string(briefBytes)
-	if !strings.Contains(briefContent, "# Implement Feature A") {
-		t.Errorf("brief.md missing user brief content: %s", briefContent)
+	promptContent := string(promptBytes)
+	wantMarker := fmt.Sprintf("lucind-lane: %s turn: 1", out.Lane)
+	if !strings.HasPrefix(promptContent, wantMarker) {
+		t.Errorf("prompt.md missing marker at start: %s", promptContent)
 	}
-	if !strings.Contains(briefContent, fmt.Sprintf("- Lane ID: %s", out.Lane)) {
-		t.Errorf("brief.md missing Lane ID: %s", briefContent)
+	if !strings.Contains(promptContent, "# Implement Feature A") {
+		t.Errorf("prompt.md missing user prompt content: %s", promptContent)
 	}
-	if !strings.Contains(briefContent, "- Allowed globs:\n  - internal/**\n  - cmd/**") {
-		t.Errorf("brief.md missing Allowed globs: %s", briefContent)
+	if !strings.Contains(promptContent, fmt.Sprintf("- Lane ID: %s", out.Lane)) {
+		t.Errorf("prompt.md missing Lane ID: %s", promptContent)
+	}
+	if !strings.Contains(promptContent, "- Allowed globs:\n  - internal/**\n  - cmd/**") {
+		t.Errorf("prompt.md missing Allowed globs: %s", promptContent)
 	}
 	resultPath := lane.ResultFilePath(repoDir, savedLane)
 	absResultPath, _ := filepath.Abs(resultPath)
 	if !strings.HasSuffix(absResultPath, "result-1.json") {
 		t.Errorf("absResultPath = %q, want ending with result-1.json", absResultPath)
 	}
-	if !strings.Contains(briefContent, fmt.Sprintf("Write your result envelope to `%s` following the result schema.", absResultPath)) {
-		t.Errorf("brief.md missing result path: %s", briefContent)
+	if !strings.Contains(promptContent, fmt.Sprintf("Write your result envelope to `%s` following the result schema.", absResultPath)) {
+		t.Errorf("prompt.md missing result path: %s", promptContent)
 	}
 	if out.ResultPath != absResultPath {
 		t.Errorf("out.ResultPath = %q, want %q", out.ResultPath, absResultPath)
 	}
-	if !strings.Contains(briefContent, "- This lane requires no verification command.") {
-		t.Errorf("brief.md missing no verification command line: %s", briefContent)
+	if !strings.Contains(promptContent, "- This lane requires no verification command.") {
+		t.Errorf("prompt.md missing no verification command line: %s", promptContent)
 	}
-	if strings.Contains(briefContent, "attest run") {
-		t.Errorf("brief.md should not contain attest run: %s", briefContent)
+	if strings.Contains(promptContent, "attest run") {
+		t.Errorf("prompt.md should not contain attest run: %s", promptContent)
 	}
-	if !strings.Contains(briefContent, "Do not edit outside the allowed globs.") {
-		t.Errorf("brief.md missing edit constraint: %s", briefContent)
+	if !strings.Contains(promptContent, "Do not edit outside the allowed globs.") {
+		t.Errorf("prompt.md missing edit constraint: %s", promptContent)
+	}
+	briefPath := filepath.Join(lane.LaneDir(repoDir, out.Lane), "brief.md")
+	if _, err := os.Stat(briefPath); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("brief.md should not exist, stat err = %v", err)
 	}
 
 	// 3. Verify herdr runner command sequence:
@@ -248,15 +256,13 @@ func TestDispatch_NewLane_HappyPath(t *testing.T) {
 		t.Errorf("call 4 = %v, want agent wait until idle", calls[4])
 	}
 
-	// agent prompt <pane_id> "Read and follow <abs brief.md>" --wait --until working --until blocked
+	// agent prompt <pane_id> <promptContent> --wait --until working --until blocked
 	promptArgs := calls[5]
 	if promptArgs[0] != "agent" || promptArgs[1] != "prompt" || promptArgs[2] != "w1:pLane1" {
 		t.Errorf("call 5 = %v, want agent prompt w1:pLane1", promptArgs)
 	}
-	absBriefPath, _ := filepath.Abs(briefPath)
-	wantPrompt := fmt.Sprintf("Read and follow %s", absBriefPath)
-	if promptArgs[3] != wantPrompt {
-		t.Errorf("call 5 prompt text = %q, want %q", promptArgs[3], wantPrompt)
+	if promptArgs[3] != promptContent {
+		t.Errorf("call 5 prompt text = %q, want %q", promptArgs[3], promptContent)
 	}
 	if !reflect.DeepEqual(promptArgs[4:], wantPromptTail()) {
 		t.Errorf("prompt flags = %v, want %v", promptArgs[4:], wantPromptTail())
@@ -289,7 +295,7 @@ func dispatchNew(t *testing.T, runner *fakeHerdrRunner) error {
 	repoDir := t.TempDir()
 	initGitRepo(t, repoDir)
 	_, _, err := dispatch.Dispatch(context.Background(), dispatch.Options{
-		Cwd: repoDir, Allow: []string{"x/**"}, Model: "gemini-3.8-flash-high", Brief: "b", Detach: true,
+		Cwd: repoDir, Allow: []string{"x/**"}, Model: "gemini-3.8-flash-high", Prompt: "b", Detach: true,
 	}, runner)
 	return err
 }
@@ -302,7 +308,7 @@ func TestDispatch_NewLane_PromptStall_PromptAbsent_ResendsOnce(t *testing.T) {
 			return []byte(`agent_prompt_stalled`), errors.New("exit 1")
 		}
 		return []byte(`{"result": {"submitted": true}}`), nil
-	}, "idle agy screen without the brief")
+	}, "idle agy screen without the prompt marker")
 	if err := dispatchNew(t, runner); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -325,12 +331,17 @@ func TestDispatch_NewLane_PromptStall_PromptAbsent_ResendsOnce(t *testing.T) {
 func TestDispatch_NewLane_PromptStall_PromptPresent_NoResend(t *testing.T) {
 	runner := newLaneRunnerWithPrompt(t, func(args []string) ([]byte, error) {
 		return []byte(`agent_prompt_stalled`), errors.New("exit 1")
-	}, "> Read and follow /x/.lucind/lanes/L/brief.md\nworking")
-	// the pane must contain the brief path as dispatched; compute via the fake
+	}, "idle")
+	// The pane contains only the lane marker line, not brief.md.
 	runner.handlers["pane read"] = func(args []string) ([]byte, error) {
 		for _, c := range runner.Calls() {
-			if len(c) >= 4 && c[0] == "agent" && c[1] == "prompt" {
-				return []byte("> " + c[3] + "\nworking"), nil
+			if len(c) >= 2 && c[0] == "pane" && c[1] == "split" {
+				for _, arg := range c {
+					if strings.HasPrefix(arg, "LUCIND_LANE=") {
+						id := strings.TrimPrefix(arg, "LUCIND_LANE=")
+						return []byte(fmt.Sprintf("> lucind-lane: %s turn: 1\nworking", id)), nil
+					}
+				}
 			}
 		}
 		return nil, nil
@@ -393,7 +404,7 @@ func TestDispatch_Continuation(t *testing.T) {
 	opts := dispatch.Options{
 		Cwd:    repoDir,
 		LaneID: createdLane.ID,
-		Brief:  "Continue fixing issue 42",
+		Prompt: "Continue fixing issue 42",
 		Detach: true,
 	}
 
@@ -435,18 +446,26 @@ func TestDispatch_Continuation(t *testing.T) {
 		t.Errorf("continued lane turn=%d, want 2", reloaded.Turn)
 	}
 
-	// Verify brief.md updated
-	briefPath := filepath.Join(lane.LaneDir(repoDir, createdLane.ID), "brief.md")
-	briefBytes, err := os.ReadFile(briefPath)
+	// Verify prompt.md updated
+	promptPath := filepath.Join(lane.LaneDir(repoDir, createdLane.ID), "prompt.md")
+	promptBytes, err := os.ReadFile(promptPath)
 	if err != nil {
-		t.Fatalf("read brief.md failed: %v", err)
+		t.Fatalf("read prompt.md failed: %v", err)
 	}
-	if !strings.Contains(string(briefBytes), "Continue fixing issue 42") {
-		t.Errorf("brief.md did not contain continuation brief: %s", string(briefBytes))
+	promptContent := string(promptBytes)
+	if !strings.Contains(promptContent, "Continue fixing issue 42") {
+		t.Errorf("prompt.md did not contain continuation prompt: %s", promptContent)
 	}
 	wantResultPath, _ := filepath.Abs(lane.ResultFilePath(repoDir, reloaded))
-	if !strings.Contains(string(briefBytes), wantResultPath) {
-		t.Errorf("brief.md did not contain turn 2 result path %s: %s", wantResultPath, string(briefBytes))
+	if !strings.Contains(promptContent, wantResultPath) {
+		t.Errorf("prompt.md did not contain turn 2 result path %s: %s", wantResultPath, promptContent)
+	}
+	if calls[0][3] != promptContent {
+		t.Errorf("continuation prompt text = %q, want %q", calls[0][3], promptContent)
+	}
+	briefPath := filepath.Join(lane.LaneDir(repoDir, createdLane.ID), "brief.md")
+	if _, err := os.Stat(briefPath); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("brief.md should not exist, stat err = %v", err)
 	}
 }
 
@@ -469,7 +488,7 @@ func TestDispatch_Continuation_AcceptedOrRejectedErrors(t *testing.T) {
 			_, _, err = dispatch.Dispatch(context.Background(), dispatch.Options{
 				Cwd:    repoDir,
 				LaneID: l.ID,
-				Brief:  "Do more work",
+				Prompt: "Do more work",
 			}, nil)
 			if err == nil {
 				t.Fatalf("expected error when resuming %s lane, got nil", status)
@@ -497,116 +516,311 @@ func containsSlice(haystack []string, needle []string) bool {
 	return false
 }
 
-func TestConstructBrief(t *testing.T) {
+func TestConstructPrompt(t *testing.T) {
 	laneID := "20261004-120000-abcd"
+	turn := 1
 	allow := []string{"internal/**", "cmd/**"}
-	absResultPath := "/workspace/.lucind/lanes/20261004-120000-abcd/result.json"
+	absResultPath := "/workspace/.lucind/lanes/20261004-120000-abcd/result-1.json"
+
+	t.Run("marker line first, skills section moved up, footer last", func(t *testing.T) {
+		userPrompt := "# Feature Title\n\n## Skills to load before work\n/path/to/skill1/SKILL.md\n/path/to/skill2/SKILL.md\n\n## Goal\nImplement feature."
+		got := dispatch.ConstructPrompt(userPrompt, laneID, turn, allow, absResultPath, nil)
+
+		wantMarker := fmt.Sprintf("lucind-lane: %s turn: %d", laneID, turn)
+		wantSkills := "## Skills to load before work\n/path/to/skill1/SKILL.md\n/path/to/skill2/SKILL.md"
+		wantRest := "# Feature Title\n\n## Goal\nImplement feature."
+
+		if !strings.HasPrefix(got, wantMarker) {
+			t.Fatalf("prompt must start with lane marker %q; got:\n%s", wantMarker, got)
+		}
+
+		lines := strings.Split(got, "\n")
+		if lines[0] != wantMarker {
+			t.Errorf("line 0 = %q, want %q", lines[0], wantMarker)
+		}
+
+		idxMarker := strings.Index(got, wantMarker)
+		idxSkills := strings.Index(got, wantSkills)
+		idxRest := strings.Index(got, wantRest)
+		idxFooter := strings.Index(got, "## Lane Contract")
+
+		if idxSkills == -1 || idxRest == -1 || idxFooter == -1 {
+			t.Fatalf("missing required sections in prompt:\n%s", got)
+		}
+		if idxMarker >= idxSkills || idxSkills >= idxRest || idxRest >= idxFooter {
+			t.Errorf("expected order: marker < skills < rest < footer; got idxMarker=%d idxSkills=%d idxRest=%d idxFooter=%d",
+				idxMarker, idxSkills, idxRest, idxFooter)
+		}
+	})
+
+	t.Run("no skills section keeps marker first and prompt before footer", func(t *testing.T) {
+		userPrompt := "# Feature Title\n\n## Goal\nImplement feature."
+		got := dispatch.ConstructPrompt(userPrompt, laneID, turn, allow, absResultPath, nil)
+
+		wantMarker := fmt.Sprintf("lucind-lane: %s turn: %d", laneID, turn)
+		if !strings.HasPrefix(got, wantMarker) {
+			t.Fatalf("prompt must start with lane marker %q; got:\n%s", wantMarker, got)
+		}
+		if strings.Contains(got, "## Skills to load before work") {
+			t.Errorf("prompt should not have skills section when none provided; got:\n%s", got)
+		}
+		if !strings.Contains(got, userPrompt) {
+			t.Errorf("prompt missing user prompt content; got:\n%s", got)
+		}
+		if !strings.Contains(got, "## Lane Contract") {
+			t.Errorf("prompt missing footer; got:\n%s", got)
+		}
+	})
 
 	t.Run("zero checks", func(t *testing.T) {
-		brief := dispatch.ConstructBrief("Brief description", laneID, allow, absResultPath, nil)
-		if !strings.Contains(brief, "Brief description") {
-			t.Errorf("expected brief to contain user description, got: %s", brief)
+		prompt := dispatch.ConstructPrompt("Prompt description", laneID, turn, allow, absResultPath, nil)
+		if !strings.Contains(prompt, "Prompt description") {
+			t.Errorf("expected prompt to contain user description, got: %s", prompt)
 		}
-		if !strings.Contains(brief, fmt.Sprintf("- Lane ID: %s", laneID)) {
-			t.Errorf("expected brief to contain lane ID, got: %s", brief)
+		if !strings.Contains(prompt, fmt.Sprintf("- Lane ID: %s", laneID)) {
+			t.Errorf("expected prompt to contain lane ID, got: %s", prompt)
 		}
-		if !strings.Contains(brief, "- Allowed globs:\n  - internal/**\n  - cmd/**") {
-			t.Errorf("expected brief to contain allowed globs, got: %s", brief)
+		if !strings.Contains(prompt, "- Allowed globs:\n  - internal/**\n  - cmd/**") {
+			t.Errorf("expected prompt to contain allowed globs, got: %s", prompt)
 		}
-		if !strings.Contains(brief, fmt.Sprintf("- Write your result envelope to `%s` following the result schema.", absResultPath)) {
-			t.Errorf("expected brief to contain result envelope path, got: %s", brief)
+		if !strings.Contains(prompt, fmt.Sprintf("- Write your result envelope to `%s` following the result schema.", absResultPath)) {
+			t.Errorf("expected prompt to contain result envelope path, got: %s", prompt)
 		}
-		if !strings.Contains(brief, "- This lane requires no verification command.") {
-			t.Errorf("expected brief to indicate no verification command, got: %s", brief)
+		if !strings.Contains(prompt, "- This lane requires no verification command.") {
+			t.Errorf("expected prompt to indicate no verification command, got: %s", prompt)
 		}
-		if strings.Contains(brief, "attest run") {
-			t.Errorf("brief should not contain attest run, got: %s", brief)
+		if strings.Contains(prompt, "attest run") {
+			t.Errorf("prompt should not contain attest run, got: %s", prompt)
 		}
-		if strings.Contains(brief, "As the final verification") {
-			t.Errorf("brief should not contain verification intro line, got: %s", brief)
+		if strings.Contains(prompt, "As the final verification") {
+			t.Errorf("prompt should not contain verification intro line, got: %s", prompt)
 		}
-		if !strings.HasSuffix(strings.TrimSpace(brief), "- Do not edit outside the allowed globs.") {
-			t.Errorf("brief should end with edit constraint bullet, got: %s", brief)
+		if !strings.HasSuffix(strings.TrimSpace(prompt), "- Do not edit outside the allowed globs.") {
+			t.Errorf("prompt should end with edit constraint bullet, got: %s", prompt)
 		}
 	})
 
 	t.Run("one check", func(t *testing.T) {
 		checks := []string{"go test ./..."}
-		brief := dispatch.ConstructBrief("Brief description", laneID, allow, absResultPath, checks)
+		prompt := dispatch.ConstructPrompt("Prompt description", laneID, turn, allow, absResultPath, checks)
 		wantIntro := "- As the final verification, after your last edit, run these commands exactly as listed and do not edit files afterwards:\n"
 		wantAttest := "  - `lucind-ai attest run -- sh -c 'go test ./...'`\n"
-		if !strings.Contains(brief, wantIntro) {
-			t.Errorf("brief missing expected intro line: %q in: %s", wantIntro, brief)
+		if !strings.Contains(prompt, wantIntro) {
+			t.Errorf("prompt missing expected intro line: %q in: %s", wantIntro, prompt)
 		}
-		if strings.Count(brief, wantIntro) != 1 {
-			t.Errorf("brief should contain intro line exactly once, got %d", strings.Count(brief, wantIntro))
+		if strings.Count(prompt, wantIntro) != 1 {
+			t.Errorf("prompt should contain intro line exactly once, got %d", strings.Count(prompt, wantIntro))
 		}
-		if !strings.Contains(brief, wantAttest) {
-			t.Errorf("brief missing expected attest line: %q in: %s", wantAttest, brief)
+		if !strings.Contains(prompt, wantAttest) {
+			t.Errorf("prompt missing expected attest line: %q in: %s", wantAttest, prompt)
 		}
-		if strings.Contains(brief, "- This lane requires no verification command.") {
-			t.Errorf("brief should not contain no verification command note: %s", brief)
+		if strings.Contains(prompt, "- This lane requires no verification command.") {
+			t.Errorf("prompt should not contain no verification command note: %s", prompt)
 		}
-		if !strings.HasSuffix(strings.TrimSpace(brief), "- Do not edit outside the allowed globs.") {
-			t.Errorf("brief should end with edit constraint bullet, got: %s", brief)
+		if !strings.HasSuffix(strings.TrimSpace(prompt), "- Do not edit outside the allowed globs.") {
+			t.Errorf("prompt should end with edit constraint bullet, got: %s", prompt)
 		}
 	})
 
 	t.Run("multiple checks", func(t *testing.T) {
 		checks := []string{"go test ./...", "golangci-lint run"}
-		brief := dispatch.ConstructBrief("Brief description", laneID, allow, absResultPath, checks)
+		prompt := dispatch.ConstructPrompt("Prompt description", laneID, turn, allow, absResultPath, checks)
 		wantIntro := "- As the final verification, after your last edit, run these commands exactly as listed and do not edit files afterwards:\n"
 		wantAttest1 := "  - `lucind-ai attest run -- sh -c 'go test ./...'`\n"
 		wantAttest2 := "  - `lucind-ai attest run -- sh -c 'golangci-lint run'`\n"
-		if !strings.Contains(brief, wantIntro) {
-			t.Errorf("brief missing expected intro line: %q in: %s", wantIntro, brief)
+		if !strings.Contains(prompt, wantIntro) {
+			t.Errorf("prompt missing expected intro line: %q in: %s", wantIntro, prompt)
 		}
-		if strings.Count(brief, wantIntro) != 1 {
-			t.Errorf("brief should contain intro line exactly once, got %d", strings.Count(brief, wantIntro))
+		if strings.Count(prompt, wantIntro) != 1 {
+			t.Errorf("prompt should contain intro line exactly once, got %d", strings.Count(prompt, wantIntro))
 		}
-		if !strings.Contains(brief, wantAttest1) {
-			t.Errorf("brief missing expected attest line 1: %q in: %s", wantAttest1, brief)
+		if !strings.Contains(prompt, wantAttest1) {
+			t.Errorf("prompt missing expected attest line 1: %q in: %s", wantAttest1, prompt)
 		}
-		if !strings.Contains(brief, wantAttest2) {
-			t.Errorf("brief missing expected attest line 2: %q in: %s", wantAttest2, brief)
+		if !strings.Contains(prompt, wantAttest2) {
+			t.Errorf("prompt missing expected attest line 2: %q in: %s", wantAttest2, prompt)
 		}
-		idxIntro := strings.Index(brief, wantIntro)
-		idx1 := strings.Index(brief, wantAttest1)
-		idx2 := strings.Index(brief, wantAttest2)
+		idxIntro := strings.Index(prompt, wantIntro)
+		idx1 := strings.Index(prompt, wantAttest1)
+		idx2 := strings.Index(prompt, wantAttest2)
 		if idxIntro >= idx1 || idx1 >= idx2 {
 			t.Errorf("expected intro before attest1 before attest2, got idxIntro=%d idx1=%d idx2=%d", idxIntro, idx1, idx2)
 		}
-		if strings.Contains(brief, "- This lane requires no verification command.") {
-			t.Errorf("brief should not contain no verification command note: %s", brief)
+		if strings.Contains(prompt, "- This lane requires no verification command.") {
+			t.Errorf("prompt should not contain no verification command note: %s", prompt)
 		}
-		if !strings.HasSuffix(strings.TrimSpace(brief), "- Do not edit outside the allowed globs.") {
-			t.Errorf("brief should end with edit constraint bullet, got: %s", brief)
+		if !strings.HasSuffix(strings.TrimSpace(prompt), "- Do not edit outside the allowed globs.") {
+			t.Errorf("prompt should end with edit constraint bullet, got: %s", prompt)
 		}
 	})
 
 	t.Run("quoting with single quotes and and-operator", func(t *testing.T) {
 		check := `echo 'hello' && test`
-		brief := dispatch.ConstructBrief("Brief description", laneID, allow, absResultPath, []string{check})
+		prompt := dispatch.ConstructPrompt("Prompt description", laneID, turn, allow, absResultPath, []string{check})
 		wantAttest := "  - `lucind-ai attest run -- sh -c 'echo '\\''hello'\\'' && test'`\n"
-		if !strings.Contains(brief, wantAttest) {
-			t.Errorf("brief missing properly quoted attest line: %q in: %s", wantAttest, brief)
+		if !strings.Contains(prompt, wantAttest) {
+			t.Errorf("prompt missing properly quoted attest line: %q in: %s", wantAttest, prompt)
 		}
 	})
 
 	t.Run("three checks", func(t *testing.T) {
 		checks := []string{"cmd1", "cmd2", "cmd3"}
-		brief := dispatch.ConstructBrief("Brief description", laneID, allow, absResultPath, checks)
+		prompt := dispatch.ConstructPrompt("Prompt description", laneID, turn, allow, absResultPath, checks)
 		wantIntro := "- As the final verification, after your last edit, run these commands exactly as listed and do not edit files afterwards:\n"
-		if strings.Count(brief, wantIntro) != 1 {
-			t.Errorf("brief should contain intro line exactly once, got %d", strings.Count(brief, wantIntro))
+		if strings.Count(prompt, wantIntro) != 1 {
+			t.Errorf("prompt should contain intro line exactly once, got %d", strings.Count(prompt, wantIntro))
 		}
 		for _, c := range checks {
 			wantItem := fmt.Sprintf("  - `lucind-ai attest run -- sh -c '%s'`\n", c)
-			if !strings.Contains(brief, wantItem) {
-				t.Errorf("brief missing item %q: %s", wantItem, brief)
+			if !strings.Contains(prompt, wantItem) {
+				t.Errorf("prompt missing item %q: %s", wantItem, prompt)
 			}
 		}
 	})
+}
+
+func TestConstructPrompt_LayoutEdgeCases(t *testing.T) {
+	laneID := "20261004-120000-abcd"
+	turn := 1
+	allow := []string{"internal/**", "cmd/**"}
+	absResultPath := "/workspace/.lucind/lanes/20261004-120000-abcd/result-1.json"
+	wantMarker := fmt.Sprintf("lucind-lane: %s turn: %d", laneID, turn)
+	wantFooterHeader := "---\n## Lane Contract"
+	wantFooterSuffix := "- Do not edit outside the allowed globs."
+
+	tests := []struct {
+		name       string
+		userPrompt string
+		assert     func(t *testing.T, got string)
+	}{
+		{
+			name: "skills section at the very end of the prompt",
+			userPrompt: "# Feature Title\n\nFeature description.\n\n" +
+				"## Skills to load before work\n/path/to/skill1/SKILL.md\n/path/to/skill2/SKILL.md",
+			assert: func(t *testing.T, got string) {
+				wantSkills := "## Skills to load before work\n/path/to/skill1/SKILL.md\n/path/to/skill2/SKILL.md"
+				wantRest := "# Feature Title\n\nFeature description."
+
+				idxMarker := strings.Index(got, wantMarker)
+				idxSkills := strings.Index(got, wantSkills)
+				idxRest := strings.Index(got, wantRest)
+				idxFooter := strings.Index(got, wantFooterHeader)
+
+				if idxSkills == -1 || idxRest == -1 || idxFooter == -1 {
+					t.Fatalf("missing required sections in prompt:\n%s", got)
+				}
+				if idxMarker >= idxSkills || idxSkills >= idxRest || idxRest >= idxFooter {
+					t.Errorf("expected order: marker < skills < rest < footer; got idxMarker=%d idxSkills=%d idxRest=%d idxFooter=%d",
+						idxMarker, idxSkills, idxRest, idxFooter)
+				}
+			},
+		},
+		{
+			name: "a blank line inside the section ends it",
+			userPrompt: "# Feature Title\n\n" +
+				"## Skills to load before work\n/path/to/skill1/SKILL.md\n\n/path/to/skill2/SKILL.md\n\n" +
+				"## Goal\nImplement feature.",
+			assert: func(t *testing.T, got string) {
+				// The blank line inside the skills section causes extractSkillsSection to end
+				// the skills section after skill1. Skill2 remains in the rest of the prompt.
+				wantSkills := "## Skills to load before work\n/path/to/skill1/SKILL.md"
+				wantRest := "# Feature Title\n\n/path/to/skill2/SKILL.md\n\n## Goal\nImplement feature."
+
+				idxMarker := strings.Index(got, wantMarker)
+				idxSkills := strings.Index(got, wantSkills)
+				idxRest := strings.Index(got, wantRest)
+				idxFooter := strings.Index(got, wantFooterHeader)
+
+				if idxSkills == -1 || idxRest == -1 || idxFooter == -1 {
+					t.Fatalf("missing required sections in prompt:\n%s", got)
+				}
+				if idxMarker >= idxSkills || idxSkills >= idxRest || idxRest >= idxFooter {
+					t.Errorf("expected order: marker < skills < rest < footer; got idxMarker=%d idxSkills=%d idxRest=%d idxFooter=%d",
+						idxMarker, idxSkills, idxRest, idxFooter)
+				}
+			},
+		},
+		{
+			name: "CRLF line endings and trailing spaces on the heading line",
+			userPrompt: "# Feature Title\r\n\r\n" +
+				"## Skills to load before work   \r\n/path/to/skill1/SKILL.md\r\n\r\n" +
+				"## Goal\r\nImplement feature.",
+			assert: func(t *testing.T, got string) {
+				wantSkillPath := "/path/to/skill1/SKILL.md"
+				wantTitle := "# Feature Title"
+				wantGoal := "## Goal"
+
+				idxMarker := strings.Index(got, wantMarker)
+				idxSkillsHeading := strings.Index(got, "## Skills to load before work")
+				idxSkillPath := strings.Index(got, wantSkillPath)
+				idxTitle := strings.Index(got, wantTitle)
+				idxGoal := strings.Index(got, wantGoal)
+				idxFooter := strings.Index(got, wantFooterHeader)
+
+				if idxSkillsHeading == -1 || idxSkillPath == -1 || idxTitle == -1 || idxGoal == -1 || idxFooter == -1 {
+					t.Fatalf("missing required sections in prompt:\n%s", got)
+				}
+				if idxMarker >= idxSkillsHeading || idxSkillsHeading >= idxTitle || idxTitle >= idxGoal || idxGoal >= idxFooter {
+					t.Errorf("expected order: marker < skills < title < goal < footer; got idxMarker=%d idxSkills=%d idxTitle=%d idxGoal=%d idxFooter=%d",
+						idxMarker, idxSkillsHeading, idxTitle, idxGoal, idxFooter)
+				}
+			},
+		},
+		{
+			name: "similar heading is not treated as skills section",
+			userPrompt: "# Feature Title\n\n" +
+				"## Skills to load\n/path/to/skill1/SKILL.md\n\n" +
+				"## Goal\nImplement feature.",
+			assert: func(t *testing.T, got string) {
+				// "## Skills to load" must not be extracted or moved to the top.
+				// The user prompt remains in its original order under rest.
+				wantSimilar := "## Skills to load\n/path/to/skill1/SKILL.md"
+				wantTitle := "# Feature Title"
+				wantGoal := "## Goal\nImplement feature."
+
+				if strings.Contains(got, "## Skills to load before work") {
+					t.Errorf("prompt should not contain canonical skills heading; got:\n%s", got)
+				}
+
+				idxMarker := strings.Index(got, wantMarker)
+				idxTitle := strings.Index(got, wantTitle)
+				idxSimilar := strings.Index(got, wantSimilar)
+				idxGoal := strings.Index(got, wantGoal)
+				idxFooter := strings.Index(got, wantFooterHeader)
+
+				if idxTitle == -1 || idxSimilar == -1 || idxGoal == -1 || idxFooter == -1 {
+					t.Fatalf("missing required sections in prompt:\n%s", got)
+				}
+				if idxMarker >= idxTitle || idxTitle >= idxSimilar || idxSimilar >= idxGoal || idxGoal >= idxFooter {
+					t.Errorf("expected order: marker < title < similar < goal < footer; got idxMarker=%d idxTitle=%d idxSimilar=%d idxGoal=%d idxFooter=%d",
+						idxMarker, idxTitle, idxSimilar, idxGoal, idxFooter)
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := dispatch.ConstructPrompt(tt.userPrompt, laneID, turn, allow, absResultPath, nil)
+
+			// In every case the marker line is line 1.
+			lines := strings.Split(got, "\n")
+			if len(lines) == 0 || lines[0] != wantMarker {
+				t.Fatalf("line 0 = %q, want marker %q", lines[0], wantMarker)
+			}
+
+			// In every case the footer is last.
+			trimmedGot := strings.TrimSpace(got)
+			if !strings.HasSuffix(trimmedGot, wantFooterSuffix) {
+				t.Errorf("prompt should end with %q; got suffix:\n%s", wantFooterSuffix, trimmedGot)
+			}
+			if !strings.Contains(got, wantFooterHeader) {
+				t.Fatalf("prompt missing footer header %q in:\n%s", wantFooterHeader, got)
+			}
+
+			tt.assert(t, got)
+		})
+	}
 }
 
 func TestDispatchChecks(t *testing.T) {
@@ -621,7 +835,7 @@ func TestDispatchChecks(t *testing.T) {
 			Cwd:    repoDir,
 			Allow:  []string{"internal/**"},
 			Model:  "gemini-3.8-flash-high",
-			Brief:  "New lane with checks",
+			Prompt: "New lane with checks",
 			Checks: []string{"go test ./...", "golangci-lint run"},
 			Detach: true,
 		}
@@ -642,29 +856,29 @@ func TestDispatchChecks(t *testing.T) {
 			t.Errorf("savedLane.Checks = %v, want %v", savedLane.Checks, opts.Checks)
 		}
 
-		briefPath := filepath.Join(lane.LaneDir(repoDir, out.Lane), "brief.md")
-		briefBytes, err := os.ReadFile(briefPath)
+		promptPath := filepath.Join(lane.LaneDir(repoDir, out.Lane), "prompt.md")
+		promptBytes, err := os.ReadFile(promptPath)
 		if err != nil {
-			t.Fatalf("read brief.md failed: %v", err)
+			t.Fatalf("read prompt.md failed: %v", err)
 		}
-		briefContent := string(briefBytes)
+		promptContent := string(promptBytes)
 		wantIntro := "- As the final verification, after your last edit, run these commands exactly as listed and do not edit files afterwards:\n"
 		wantAttest1 := "  - `lucind-ai attest run -- sh -c 'go test ./...'`\n"
 		wantAttest2 := "  - `lucind-ai attest run -- sh -c 'golangci-lint run'`\n"
-		if !strings.Contains(briefContent, wantIntro) {
-			t.Errorf("brief.md missing intro line: %s", briefContent)
+		if !strings.Contains(promptContent, wantIntro) {
+			t.Errorf("prompt.md missing intro line: %s", promptContent)
 		}
-		if strings.Count(briefContent, wantIntro) != 1 {
-			t.Errorf("brief.md should have intro line exactly once, got %d", strings.Count(briefContent, wantIntro))
+		if strings.Count(promptContent, wantIntro) != 1 {
+			t.Errorf("prompt.md should have intro line exactly once, got %d", strings.Count(promptContent, wantIntro))
 		}
-		if !strings.Contains(briefContent, wantAttest1) {
-			t.Errorf("brief.md missing attest line 1: %s", briefContent)
+		if !strings.Contains(promptContent, wantAttest1) {
+			t.Errorf("prompt.md missing attest line 1: %s", promptContent)
 		}
-		if !strings.Contains(briefContent, wantAttest2) {
-			t.Errorf("brief.md missing attest line 2: %s", briefContent)
+		if !strings.Contains(promptContent, wantAttest2) {
+			t.Errorf("prompt.md missing attest line 2: %s", promptContent)
 		}
-		if strings.Contains(briefContent, "- This lane requires no verification command.") {
-			t.Errorf("brief.md should not contain no verification command note: %s", briefContent)
+		if strings.Contains(promptContent, "- This lane requires no verification command.") {
+			t.Errorf("prompt.md should not contain no verification command note: %s", promptContent)
 		}
 	})
 
@@ -692,7 +906,7 @@ func TestDispatchChecks(t *testing.T) {
 		opts := dispatch.Options{
 			Cwd:    repoDir,
 			LaneID: createdLane.ID,
-			Brief:  "Resume without overriding checks",
+			Prompt: "Resume without overriding checks",
 			Checks: nil,
 			Detach: true,
 		}
@@ -713,18 +927,18 @@ func TestDispatchChecks(t *testing.T) {
 			t.Errorf("reloaded.Checks = %v, want original %v", reloaded.Checks, originalChecks)
 		}
 
-		briefPath := filepath.Join(lane.LaneDir(repoDir, out.Lane), "brief.md")
-		briefBytes, err := os.ReadFile(briefPath)
+		promptPath := filepath.Join(lane.LaneDir(repoDir, out.Lane), "prompt.md")
+		promptBytes, err := os.ReadFile(promptPath)
 		if err != nil {
-			t.Fatalf("read brief.md failed: %v", err)
+			t.Fatalf("read prompt.md failed: %v", err)
 		}
 		wantIntro := "- As the final verification, after your last edit, run these commands exactly as listed and do not edit files afterwards:\n"
 		wantAttest := "  - `lucind-ai attest run -- sh -c 'go test ./...'`\n"
-		if !strings.Contains(string(briefBytes), wantIntro) {
-			t.Errorf("brief.md did not contain intro line: %s", string(briefBytes))
+		if !strings.Contains(string(promptBytes), wantIntro) {
+			t.Errorf("prompt.md did not contain intro line: %s", string(promptBytes))
 		}
-		if !strings.Contains(string(briefBytes), wantAttest) {
-			t.Errorf("brief.md did not contain preserved check: %s", string(briefBytes))
+		if !strings.Contains(string(promptBytes), wantAttest) {
+			t.Errorf("prompt.md did not contain preserved check: %s", string(promptBytes))
 		}
 	})
 
@@ -757,7 +971,7 @@ func TestDispatchChecks(t *testing.T) {
 		out, exitCode, err := dispatch.Dispatch(context.Background(), dispatch.Options{
 			Cwd:    repoDir,
 			LaneID: createdLane.ID,
-			Brief:  "Follow-up turn",
+			Prompt: "Follow-up turn",
 			Detach: true,
 		}, runner)
 		if err != nil {
@@ -810,7 +1024,7 @@ func TestDispatchChecks(t *testing.T) {
 		opts := dispatch.Options{
 			Cwd:    repoDir,
 			LaneID: createdLane.ID,
-			Brief:  "Resume with replacement checks",
+			Prompt: "Resume with replacement checks",
 			Checks: replacementChecks,
 			Detach: true,
 		}
@@ -831,26 +1045,26 @@ func TestDispatchChecks(t *testing.T) {
 			t.Errorf("reloaded.Checks = %v, want replacement %v", reloaded.Checks, replacementChecks)
 		}
 
-		briefPath := filepath.Join(lane.LaneDir(repoDir, out.Lane), "brief.md")
-		briefBytes, err := os.ReadFile(briefPath)
+		promptPath := filepath.Join(lane.LaneDir(repoDir, out.Lane), "prompt.md")
+		promptBytes, err := os.ReadFile(promptPath)
 		if err != nil {
-			t.Fatalf("read brief.md failed: %v", err)
+			t.Fatalf("read prompt.md failed: %v", err)
 		}
-		briefContent := string(briefBytes)
+		promptContent := string(promptBytes)
 		wantIntro := "- As the final verification, after your last edit, run these commands exactly as listed and do not edit files afterwards:\n"
 		wantAttest1 := "  - `lucind-ai attest run -- sh -c 'golangci-lint run'`\n"
 		wantAttest2 := "  - `lucind-ai attest run -- sh -c 'go test -race ./...'`\n"
-		if !strings.Contains(briefContent, wantIntro) {
-			t.Errorf("brief.md missing intro line: %s", briefContent)
+		if !strings.Contains(promptContent, wantIntro) {
+			t.Errorf("prompt.md missing intro line: %s", promptContent)
 		}
-		if !strings.Contains(briefContent, wantAttest1) {
-			t.Errorf("brief.md missing replacement attest 1: %s", briefContent)
+		if !strings.Contains(promptContent, wantAttest1) {
+			t.Errorf("prompt.md missing replacement attest 1: %s", promptContent)
 		}
-		if !strings.Contains(briefContent, wantAttest2) {
-			t.Errorf("brief.md missing replacement attest 2: %s", briefContent)
+		if !strings.Contains(promptContent, wantAttest2) {
+			t.Errorf("prompt.md missing replacement attest 2: %s", promptContent)
 		}
-		if strings.Contains(briefContent, "go test ./...") {
-			t.Errorf("brief.md should not contain old check: %s", briefContent)
+		if strings.Contains(promptContent, "go test ./...") {
+			t.Errorf("prompt.md should not contain old check: %s", promptContent)
 		}
 	})
 
@@ -870,7 +1084,7 @@ func TestDispatchChecks(t *testing.T) {
 			opts := dispatch.Options{
 				Cwd:    repoDir,
 				Allow:  []string{"pkg/**"},
-				Brief:  "Should fail",
+				Prompt: "Should fail",
 				Checks: badChecks,
 				Detach: true,
 			}
@@ -910,7 +1124,7 @@ func TestDispatch_ContinuationAllow(t *testing.T) {
 		opts := dispatch.Options{
 			Cwd:    repoDir,
 			LaneID: createdLane.ID,
-			Brief:  "Resume",
+			Prompt: "Resume",
 			Allow:  continuationAllow,
 			Detach: true,
 		}
@@ -957,7 +1171,7 @@ func TestDispatch_Behavior1_RelativeCwd_ReachesSplitPaneAsAbs(t *testing.T) {
 	opts := dispatch.Options{
 		Cwd:    ".",
 		Allow:  []string{"*"},
-		Brief:  "test relative cwd reaches split pane as abs",
+		Prompt: "test relative cwd reaches split pane as abs",
 		Detach: true,
 	}
 
@@ -1003,7 +1217,7 @@ func TestDispatch_Behavior2_OutputCwd_IsAbsolute(t *testing.T) {
 	opts := dispatch.Options{
 		Cwd:    ".",
 		Allow:  []string{"*"},
-		Brief:  "test output cwd absolute",
+		Prompt: "test output cwd absolute",
 		Detach: true,
 	}
 
@@ -1037,7 +1251,7 @@ func TestDispatch_Behavior3_CwdMismatch_ClosesPaneAndErrors(t *testing.T) {
 	opts := dispatch.Options{
 		Cwd:    repoDir,
 		Allow:  []string{"*"},
-		Brief:  "test cwd mismatch",
+		Prompt: "test cwd mismatch",
 		Detach: true,
 	}
 
@@ -1086,7 +1300,7 @@ func TestDispatch_Behavior4_PaneGetFailure_ClosesPaneAndErrors(t *testing.T) {
 	opts := dispatch.Options{
 		Cwd:    repoDir,
 		Allow:  []string{"*"},
-		Brief:  "test pane get failure",
+		Prompt: "test pane get failure",
 		Detach: true,
 	}
 
@@ -1128,7 +1342,7 @@ func TestDispatch_Behavior5_MatchingCwd_Proceeds(t *testing.T) {
 	opts := dispatch.Options{
 		Cwd:    repoDir,
 		Allow:  []string{"*"},
-		Brief:  "test matching cwd proceeds",
+		Prompt: "test matching cwd proceeds",
 		Detach: true,
 	}
 
@@ -1181,7 +1395,7 @@ func TestDispatch_Behavior5_MatchingCwd_Symlink_Proceeds(t *testing.T) {
 	opts := dispatch.Options{
 		Cwd:    symlinkDir,
 		Allow:  []string{"*"},
-		Brief:  "test symlink matching",
+		Prompt: "test symlink matching",
 		Detach: true,
 	}
 
@@ -1228,7 +1442,7 @@ func TestDispatch_Continuation_RenamesResultToPrevResult(t *testing.T) {
 	opts := dispatch.Options{
 		Cwd:    repoDir,
 		LaneID: createdLane.ID,
-		Brief:  "Resume and rename result",
+		Prompt: "Resume and rename result",
 		Detach: true,
 	}
 
@@ -1251,14 +1465,18 @@ func TestDispatch_Continuation_RenamesResultToPrevResult(t *testing.T) {
 		t.Errorf("out.ResultPath = %q, want ending with result-1.json", out.ResultPath)
 	}
 
-	briefPath := filepath.Join(laneDir, "brief.md")
-	briefBytes, err := os.ReadFile(briefPath)
+	promptPath := filepath.Join(laneDir, "prompt.md")
+	promptBytes, err := os.ReadFile(promptPath)
 	if err != nil {
-		t.Fatalf("read brief.md failed: %v", err)
+		t.Fatalf("read prompt.md failed: %v", err)
 	}
 	wantResultPath, _ := filepath.Abs(lane.ResultFilePath(repoDir, reloaded))
-	if !strings.Contains(string(briefBytes), wantResultPath) {
-		t.Errorf("brief.md did not contain result path %s: %s", wantResultPath, string(briefBytes))
+	if !strings.Contains(string(promptBytes), wantResultPath) {
+		t.Errorf("prompt.md did not contain result path %s: %s", wantResultPath, string(promptBytes))
+	}
+	briefPath := filepath.Join(laneDir, "brief.md")
+	if _, err := os.Stat(briefPath); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("brief.md should not exist, stat err = %v", err)
 	}
 
 	if _, err := os.Stat(resultPath); !errors.Is(err, os.ErrNotExist) {
@@ -1307,7 +1525,7 @@ func TestDispatch_Continuation_ReplacesOlderPrevResult(t *testing.T) {
 	opts := dispatch.Options{
 		Cwd:    repoDir,
 		LaneID: createdLane.ID,
-		Brief:  "Resume and replace older prev result",
+		Prompt: "Resume and replace older prev result",
 		Detach: true,
 	}
 
@@ -1359,7 +1577,7 @@ func TestDispatch_Continuation_ToleratesMissingResult(t *testing.T) {
 	opts := dispatch.Options{
 		Cwd:    repoDir,
 		LaneID: createdLane.ID,
-		Brief:  "Resume with no result.json",
+		Prompt: "Resume with no result.json",
 		Detach: true,
 	}
 
@@ -1389,7 +1607,7 @@ func TestDispatch_NewLane_DoesNotTouchOrCreatePrevResult(t *testing.T) {
 	opts := dispatch.Options{
 		Cwd:    repoDir,
 		Allow:  []string{"*"},
-		Brief:  "New lane should not have prev result",
+		Prompt: "New lane should not have prev result",
 		Detach: true,
 	}
 
@@ -1438,7 +1656,7 @@ func TestDispatch_Continuation_RenameErrorReturned(t *testing.T) {
 	opts := dispatch.Options{
 		Cwd:    repoDir,
 		LaneID: createdLane.ID,
-		Brief:  "Resume with rename error",
+		Prompt: "Resume with rename error",
 		Detach: true,
 	}
 
@@ -1484,7 +1702,7 @@ func TestDispatch_Continuation_Turn1Lane_KeepsHistoryAndIncrementsTurn(t *testin
 	opts := dispatch.Options{
 		Cwd:    repoDir,
 		LaneID: createdLane.ID,
-		Brief:  "Continue with turn 2",
+		Prompt: "Continue with turn 2",
 		Detach: true,
 	}
 
@@ -1510,16 +1728,20 @@ func TestDispatch_Continuation_Turn1Lane_KeepsHistoryAndIncrementsTurn(t *testin
 		t.Errorf("out.ResultPath = %q, want ending with result-2.json", out.ResultPath)
 	}
 
-	// brief footer points to result-2.json
-	briefPath := filepath.Join(laneDir, "brief.md")
-	briefBytes, err := os.ReadFile(briefPath)
+	// prompt footer points to result-2.json
+	promptPath := filepath.Join(laneDir, "prompt.md")
+	promptBytes, err := os.ReadFile(promptPath)
 	if err != nil {
-		t.Fatalf("read brief.md failed: %v", err)
+		t.Fatalf("read prompt.md failed: %v", err)
 	}
 	wantResultPath, _ := filepath.Abs(filepath.Join(laneDir, "result-2.json"))
-	wantBriefLine := fmt.Sprintf("Write your result envelope to `%s` following the result schema.", wantResultPath)
-	if !strings.Contains(string(briefBytes), wantBriefLine) {
-		t.Errorf("brief.md did not contain %q, got: %s", wantBriefLine, string(briefBytes))
+	wantPromptLine := fmt.Sprintf("Write your result envelope to `%s` following the result schema.", wantResultPath)
+	if !strings.Contains(string(promptBytes), wantPromptLine) {
+		t.Errorf("prompt.md did not contain %q, got: %s", wantPromptLine, string(promptBytes))
+	}
+	briefPath := filepath.Join(laneDir, "brief.md")
+	if _, err := os.Stat(briefPath); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("brief.md should not exist, stat err = %v", err)
 	}
 
 	// result-1.json is untouched
@@ -1568,7 +1790,7 @@ func TestDispatch_Continuation_Turn2Lane_IncrementsToTurn3(t *testing.T) {
 	opts := dispatch.Options{
 		Cwd:    repoDir,
 		LaneID: createdLane.ID,
-		Brief:  "Continue with turn 3",
+		Prompt: "Continue with turn 3",
 		Detach: true,
 	}
 

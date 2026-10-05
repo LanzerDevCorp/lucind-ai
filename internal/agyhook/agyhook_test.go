@@ -971,7 +971,7 @@ func createFakeMainTranscript(t *testing.T, dir, laneID string) string {
 	t.Helper()
 	path := filepath.Join(dir, "main_transcript.jsonl")
 	step := fmt.Sprintf(
-		`{"source":"USER_EXPLICIT","type":"USER_INPUT","content":"Read and follow /repo/.lucind/lanes/%s/brief.md"}`+"\n",
+		`{"source":"USER_EXPLICIT","type":"USER_INPUT","content":"lucind-lane: %s turn: 1\nTask content..."}`+"\n",
 		laneID,
 	)
 	if err := os.WriteFile(path, []byte(step), 0o644); err != nil {
@@ -1282,5 +1282,74 @@ func TestStop_MainConversation(t *testing.T) {
 		}
 	})
 }
+
+func TestClassifyConversation(t *testing.T) {
+	tests := []struct {
+		name     string
+		source   string
+		content  string
+		wantRole role
+		wantErr  bool
+	}{
+		{
+			name:     "main conversation with USER_EXPLICIT and marker",
+			source:   "USER_EXPLICIT",
+			content:  "lucind-lane: " + laneID + " turn: 1\nTask description",
+			wantRole: roleMain,
+		},
+		{
+			name:     "main conversation with empty source and marker",
+			source:   "",
+			content:  "lucind-lane: " + laneID,
+			wantRole: roleMain,
+		},
+		{
+			name:     "old read and follow pointer is not main",
+			source:   "USER_EXPLICIT",
+			content:  "Read and follow /repo/.lucind/lanes/" + laneID + "/brief.md",
+			wantRole: roleUnknown,
+			wantErr:  true,
+		},
+		{
+			name:     "worker with SYSTEM source",
+			source:   "SYSTEM",
+			content:  "The following is a <SYSTEM_MESSAGE> not actually sent by the user... sender=parent-1 priority=MESSAGE_PRIORITY_HIGH",
+			wantRole: roleWorker,
+		},
+		{
+			name:     "other source with marker is not main",
+			source:   "OTHER",
+			content:  "lucind-lane: " + laneID,
+			wantRole: roleUnknown,
+			wantErr:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "transcript.jsonl")
+			step := map[string]any{
+				"source":  tt.source,
+				"content": tt.content,
+			}
+			data, err := json.Marshal(step)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, append(data, '\n'), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			role, err := classifyConversation(laneID, path)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("classifyConversation() err = %v, wantErr %v", err, tt.wantErr)
+			}
+			if role != tt.wantRole {
+				t.Fatalf("classifyConversation() role = %v, want %v", role, tt.wantRole)
+			}
+		})
+	}
+}
+
 
 
