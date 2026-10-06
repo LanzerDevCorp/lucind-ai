@@ -1,11 +1,12 @@
 // Package result reads and validates the envelope a dispatched agent leaves
-// at ".lucind/result.json" in its worktree once it finishes. The envelope
-// is the only signal the binary trusts about what happened in that
-// worktree, so it is validated against the authoritative JSON Schema
-// (embedded from result.schema.json) before anything downstream reads a
-// single field from it. A schema-invalid envelope is never silently
-// accepted with zero values: that would let a violated hard stop slip
-// through as if nothing had fired.
+// at ".lucind/lanes/<id>/result-<turn>.json" (or legacy
+// ".lucind/lanes/<id>/result.json" for turn 0) in its worktree once it finishes. The envelope is the only
+// signal the binary trusts about what happened in that worktree, so it is
+// validated against the authoritative JSON Schema (embedded from
+// result.schema.json) before anything downstream reads a single field from
+// it. A schema-invalid envelope is never silently accepted with zero
+// values: that would let a violated hard stop slip through as if nothing
+// had fired.
 package result
 
 import (

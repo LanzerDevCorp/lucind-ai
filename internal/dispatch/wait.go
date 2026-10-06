@@ -10,7 +10,6 @@ import (
 
 	"github.com/LanzerDevCorp/lucind-ai/internal/attest"
 	"github.com/LanzerDevCorp/lucind-ai/internal/lane"
-	"github.com/LanzerDevCorp/lucind-ai/internal/result"
 )
 
 var pollInterval = 1 * time.Second
@@ -70,19 +69,19 @@ func waitLoop(ctx context.Context, repoRoot, laneID, cwd string, timeout time.Du
 		}
 
 		if l.Status == lane.StatusDone {
-			env, err := result.Read(os.DirFS(lane.LaneDir(repoRoot, laneID)), lane.ResultFileName(l.Turn))
-			if err == nil && env.Status == "done" {
+			_, outcome, _ := l.CurrentResult(repoRoot)
+			if outcome == lane.ResultOutcomeDone {
 				return makeOut(string(lane.StatusDone)), 0, nil
 			}
 			return makeOut(string(lane.StatusFailed)), 3, nil
 		}
 		if l.Status == lane.StatusFailed {
-			env, err := result.Read(os.DirFS(lane.LaneDir(repoRoot, laneID)), lane.ResultFileName(l.Turn))
-			if err == nil {
-				if env.Status == "done" {
-					_, _ = lane.MarkStopped(repoRoot, laneID)
-					return makeOut(string(lane.StatusDone)), 0, nil
-				}
+			_, outcome, _ := l.CurrentResult(repoRoot)
+			if outcome == lane.ResultOutcomeDone {
+				_, _ = lane.MarkStopped(repoRoot, laneID)
+				return makeOut(string(lane.StatusDone)), 0, nil
+			}
+			if outcome == lane.ResultOutcomeNotDone {
 				return makeOut(string(lane.StatusFailed)), 3, nil
 			}
 

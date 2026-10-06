@@ -202,7 +202,7 @@ func PreToolUse(ctx context.Context, laneID string, stdin []byte) []byte {
 	rel, err := filepath.Rel(root, target)
 	outside := err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator))
 	rel = filepath.ToSlash(rel)
-	if outside || rel == ".lucind" || strings.HasPrefix(rel, ".lucind/") || !lane.MatchAny(l.Allow, rel) {
+	if outside || !lane.InScope(l, rel) {
 		return deny(fmt.Sprintf("lucind-ai: %s is outside the lane's allowed paths %v", target, l.Allow))
 	}
 	return allow()

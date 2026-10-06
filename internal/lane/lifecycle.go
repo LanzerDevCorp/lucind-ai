@@ -8,8 +8,6 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
-
-	"github.com/LanzerDevCorp/lucind-ai/internal/result"
 )
 
 const (
@@ -101,8 +99,7 @@ func (l *Lane) RecordStop(root string, at time.Time) (StopDecision, error) {
 		at = at.UTC()
 	}
 
-	laneDir := LaneDir(root, l.ID)
-	env, readErr := result.Read(os.DirFS(laneDir), ResultFileName(l.Turn))
+	_, outcome, readErr := l.CurrentResult(root)
 
 	if readErr != nil {
 		var quietWindowReset bool
@@ -165,7 +162,7 @@ func (l *Lane) RecordStop(root string, at time.Time) (StopDecision, error) {
 	}
 
 	finalStatus := StatusDone
-	if env.Status != "done" {
+	if outcome != ResultOutcomeDone {
 		finalStatus = StatusFailed
 	}
 	l.Status = finalStatus
@@ -220,11 +217,9 @@ func (l *Lane) MarkStopped(root string) (Status, error) {
 		return Status(""), fmt.Errorf("cannot mark stopped on lane %s with status %s", l.ID, l.Status)
 	}
 
-	laneDir := LaneDir(root, l.ID)
-	env, err := result.Read(os.DirFS(laneDir), ResultFileName(l.Turn))
-
+	_, outcome, _ := l.CurrentResult(root)
 	finalStatus := StatusDone
-	if err != nil || env.Status != "done" {
+	if outcome != ResultOutcomeDone {
 		finalStatus = StatusFailed
 	}
 

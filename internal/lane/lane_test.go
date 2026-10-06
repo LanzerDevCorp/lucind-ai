@@ -3,6 +3,8 @@ package lane_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1409,4 +1411,210 @@ func TestAtomicWriteJSON(t *testing.T) {
 	if readBack["key"] != "value" {
 		t.Errorf("readBack[key] = %q, want value", readBack["key"])
 	}
+}
+
+func TestCurrentResult(t *testing.T) {
+	validDoneJSON := `{
+		"lane_id": "test-lane",
+		"status": "done",
+		"summary": "Completed successfully",
+		"hard_stops": []
+	}`
+	validFailedJSON := `{
+		"lane_id": "test-lane",
+		"status": "failed",
+		"summary": "Execution failed",
+		"hard_stops": []
+	}`
+	validDeviatedJSON := `{
+		"lane_id": "test-lane",
+		"status": "deviated",
+		"summary": "Execution deviated",
+		"hard_stops": []
+	}`
+	schemaInvalidJSON := `{
+		"lane_id": "test-lane",
+		"status": "done"
+	}`
+
+	tests := []struct {
+		name               string
+		turn               int
+		filename           string
+		content            string
+		wantOutcome        lane.ResultOutcome
+		wantStatus         string
+		wantErrIsNotExist  bool
+		wantErrNotNotExist bool
+	}{
+		{
+			name:        "turn 0 legacy done",
+			turn:        0,
+			filename:    "result.json",
+			content:     validDoneJSON,
+			wantOutcome: lane.ResultOutcomeDone,
+			wantStatus:  "done",
+		},
+		{
+			name:        "turn 0 legacy not done",
+			turn:        0,
+			filename:    "result.json",
+			content:     validFailedJSON,
+			wantOutcome: lane.ResultOutcomeNotDone,
+			wantStatus:  "failed",
+		},
+		{
+			name:        "turn 2 done",
+			turn:        2,
+			filename:    "result-2.json",
+			content:     validDoneJSON,
+			wantOutcome: lane.ResultOutcomeDone,
+			wantStatus:  "done",
+		},
+		{
+			name:        "turn 2 not done",
+			turn:        2,
+			filename:    "result-2.json",
+			content:     validDeviatedJSON,
+			wantOutcome: lane.ResultOutcomeNotDone,
+			wantStatus:  "deviated",
+		},
+		{
+			name:              "missing result file",
+			turn:              1,
+			wantOutcome:       lane.ResultOutcomeMissing,
+			wantErrIsNotExist: true,
+		},
+		{
+			name:               "schema-invalid result file",
+			turn:               1,
+			filename:           "result-1.json",
+			content:            schemaInvalidJSON,
+			wantOutcome:        lane.ResultOutcomeInvalid,
+			wantErrNotNotExist: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			l := lane.Lane{ID: "test-lane", Turn: tt.turn}
+			laneDir := lane.LaneDir(root, l.ID)
+
+			if tt.content != "" {
+				if err := os.MkdirAll(laneDir, 0755); err != nil {
+					t.Fatalf("MkdirAll failed: %v", err)
+				}
+				if err := os.WriteFile(filepath.Join(laneDir, tt.filename), []byte(tt.content), 0644); err != nil {
+					t.Fatalf("WriteFile failed: %v", err)
+				}
+			}
+
+			env, outcome, err := l.CurrentResult(root)
+			if outcome != tt.wantOutcome {
+				t.Errorf("outcome = %v, want %v", outcome, tt.wantOutcome)
+			}
+
+			if tt.wantErrIsNotExist {
+				if err == nil {
+					t.Fatal("expected error satisfying fs.ErrNotExist, got nil")
+				}
+				if !errors.Is(err, fs.ErrNotExist) {
+					t.Errorf("expected error satisfying fs.ErrNotExist, got %v", err)
+				}
+				return
+			}
+
+			if tt.wantErrNotNotExist {
+				if err == nil {
+					t.Fatal("expected error not satisfying fs.ErrNotExist, got nil")
+				}
+				if errors.Is(err, fs.ErrNotExist) {
+					t.Errorf("expected error NOT satisfying fs.ErrNotExist, got %v", err)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if env.Status != tt.wantStatus {
+				t.Errorf("env.Status = %q, want %q", env.Status, tt.wantStatus)
+			}
+		})
+	}
+}
+
+func TestIsStatePath(t *testing.T) {
+	tests := []struct {
+		path string
+		want bool
+	}{
+		{".lucind", true},
+		{".lucind/x", true},
+		{".lucind/lanes/id/lane.json", true},
+		{".lucindx/y", false},
+		{".lucind_other", false},
+		{"src/main.go", false},
+		{"", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			got := lane.IsStatePath(tt.path)
+			if got != tt.want {
+				t.Errorf("IsStatePath(%q) = %v, want %v", tt.path, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestInScope(t *testing.T) {
+	t.Run("specific allow patterns", func(t *testing.T) {
+		l := lane.Lane{Allow: []string{"src/**", "pkg/foo.go"}}
+		tests := []struct {
+			path string
+			want bool
+		}{
+			{".lucind", false},
+			{".lucind/x", false},
+			{".lucindx/y", false},
+			{"src/main.go", true},
+			{"src/sub/app.go", true},
+			{"pkg/foo.go", true},
+			{"pkg/bar.go", false},
+			{"other.txt", false},
+		}
+		for _, tt := range tests {
+			t.Run(tt.path, func(t *testing.T) {
+				if got := lane.InScope(l, tt.path); got != tt.want {
+					t.Errorf("InScope(l, %q) = %v, want %v", tt.path, got, tt.want)
+				}
+				if got := l.InScope(tt.path); got != tt.want {
+					t.Errorf("l.InScope(%q) = %v, want %v", tt.path, got, tt.want)
+				}
+			})
+		}
+	})
+
+	t.Run("wildcard allow pattern", func(t *testing.T) {
+		l := lane.Lane{Allow: []string{"**"}}
+		tests := []struct {
+			path string
+			want bool
+		}{
+			{".lucind/lane.json", false},
+			{".lucindx/y", true},
+		}
+		for _, tt := range tests {
+			t.Run(tt.path, func(t *testing.T) {
+				if got := lane.InScope(l, tt.path); got != tt.want {
+					t.Errorf("InScope(l, %q) = %v, want %v", tt.path, got, tt.want)
+				}
+				if got := l.InScope(tt.path); got != tt.want {
+					t.Errorf("l.InScope(%q) = %v, want %v", tt.path, got, tt.want)
+				}
+			})
+		}
+	})
 }
