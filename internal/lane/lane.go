@@ -6,12 +6,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/LanzerDevCorp/lucind-ai/internal/attest"
+	"github.com/LanzerDevCorp/lucind-ai/internal/result"
 )
 
 // Lane represents a managed execution lane.
@@ -90,6 +93,54 @@ func ResultFileName(turn int) string {
 // ResultFilePath returns the result file path for the current turn of the given lane under root.
 func ResultFilePath(root string, l Lane) string {
 	return filepath.Join(LaneDir(root, l.ID), ResultFileName(l.Turn))
+}
+
+// ResultOutcome classifies the current turn's Result envelope.
+type ResultOutcome string
+
+const (
+	ResultOutcomeMissing ResultOutcome = "missing"
+	ResultOutcomeInvalid ResultOutcome = "invalid"
+	ResultOutcomeNotDone ResultOutcome = "not_done"
+	ResultOutcomeDone    ResultOutcome = "done"
+)
+
+// CurrentResult reads and validates the Result envelope of the lane's current
+// turn. The error is the read or schema error for missing and invalid outcomes.
+func (l Lane) CurrentResult(root string) (result.Envelope, ResultOutcome, error) {
+	laneDir := LaneDir(root, l.ID)
+	fileName := ResultFileName(l.Turn)
+	env, err := result.Read(os.DirFS(laneDir), fileName)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) || errors.Is(err, os.ErrNotExist) {
+			return env, ResultOutcomeMissing, err
+		}
+		return env, ResultOutcomeInvalid, err
+	}
+	if env.Status != "done" {
+		return env, ResultOutcomeNotDone, nil
+	}
+	return env, ResultOutcomeDone, nil
+}
+
+// IsStatePath reports whether the slash-separated, repo-relative path is lane
+// state: .lucind or anything under it.
+func IsStatePath(rel string) bool {
+	return rel == ".lucind" || strings.HasPrefix(rel, ".lucind/")
+}
+
+// InScope reports whether the slash-separated, repo-relative path is inside the
+// lane's code scope: not lane state and matching one of its Allowed globs.
+func InScope(l Lane, rel string) bool {
+	if IsStatePath(rel) {
+		return false
+	}
+	return MatchAny(l.Allow, rel)
+}
+
+// InScope is the method form of InScope.
+func (l Lane) InScope(rel string) bool {
+	return InScope(l, rel)
 }
 
 // SkillsFileName returns the skills filename for the given turn.

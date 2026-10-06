@@ -2,10 +2,8 @@ package accept
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,7 +12,6 @@ import (
 
 	"github.com/LanzerDevCorp/lucind-ai/internal/attest"
 	"github.com/LanzerDevCorp/lucind-ai/internal/lane"
-	"github.com/LanzerDevCorp/lucind-ai/internal/result"
 )
 
 // Accept verifies a lane and writes the acceptance receipt.
@@ -39,15 +36,13 @@ func Accept(ctx context.Context, repoRoot, laneID string) (string, lane.Receipt,
 
 	// 2. Validate the current turn's result file against schema using result.Read
 	resultFileName := lane.ResultFileName(l.Turn)
-	resultRelPath := filepath.ToSlash(filepath.Join(".lucind", "lanes", laneID, resultFileName))
-	env, err := result.Read(os.DirFS(repoRoot), resultRelPath)
-	if err != nil {
-		if errors.Is(err, fs.ErrNotExist) || errors.Is(err, os.ErrNotExist) {
-			reasons = append(reasons, fmt.Sprintf("%s missing: %v", resultFileName, err))
-		} else {
-			reasons = append(reasons, fmt.Sprintf("%s schema-invalid: %v", resultFileName, err))
-		}
-	} else if env.Status != "done" {
+	env, outcome, err := l.CurrentResult(repoRoot)
+	switch outcome {
+	case lane.ResultOutcomeMissing:
+		reasons = append(reasons, fmt.Sprintf("%s missing: %v", resultFileName, err))
+	case lane.ResultOutcomeInvalid:
+		reasons = append(reasons, fmt.Sprintf("%s schema-invalid: %v", resultFileName, err))
+	case lane.ResultOutcomeNotDone:
 		reasons = append(reasons, fmt.Sprintf("result status is %q, expected \"done\"", env.Status))
 	}
 
@@ -76,10 +71,10 @@ func Accept(ctx context.Context, repoRoot, laneID string) (string, lane.Receipt,
 	// 4. Every changed file must match >= 1 allow glob in lane.Allow, EXCEPT paths under .lucind/ (or .lucind)
 	for _, file := range changedFiles {
 		slashPath := filepath.ToSlash(file)
-		if slashPath == ".lucind" || strings.HasPrefix(slashPath, ".lucind/") {
+		if lane.IsStatePath(slashPath) {
 			continue
 		}
-		if !lane.MatchAny(l.Allow, slashPath) {
+		if !lane.InScope(l, slashPath) {
 			reasons = append(reasons, fmt.Sprintf("changed file %s not in allowlist", slashPath))
 		}
 	}

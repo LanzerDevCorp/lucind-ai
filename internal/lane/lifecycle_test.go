@@ -258,11 +258,11 @@ func TestLane_BeginTurn(t *testing.T) {
 
 	t.Run("allow and checks updating", func(t *testing.T) {
 		tests := []struct {
-			name        string
-			newAllow    []string
-			newChecks   []string
-			wantAllow   []string
-			wantChecks  []string
+			name       string
+			newAllow   []string
+			newChecks  []string
+			wantAllow  []string
+			wantChecks []string
 		}{
 			{
 				name:       "updates when provided",
