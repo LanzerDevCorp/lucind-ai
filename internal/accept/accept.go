@@ -129,10 +129,8 @@ func Accept(ctx context.Context, repoRoot, laneID string) (string, lane.Receipt,
 	var verdict string
 	if len(reasons) == 0 {
 		verdict = lane.VerdictAccepted
-		l.Status = lane.StatusAccepted
 	} else {
 		verdict = lane.VerdictRejected
-		l.Status = lane.StatusRejected
 	}
 
 	now := time.Now().UTC()
@@ -152,9 +150,8 @@ func Accept(ctx context.Context, repoRoot, laneID string) (string, lane.Receipt,
 		return verdict, receipt, reasons, fmt.Errorf("write receipt: %w", err)
 	}
 
-	l.UpdatedAt = now
-	if err := lane.Save(repoRoot, l); err != nil {
-		return verdict, receipt, reasons, fmt.Errorf("save lane: %w", err)
+	if err := l.RecordVerdict(repoRoot, verdict); err != nil {
+		return verdict, receipt, reasons, fmt.Errorf("record verdict: %w", err)
 	}
 
 	return verdict, receipt, reasons, nil

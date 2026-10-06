@@ -93,15 +93,13 @@ func waitLoop(ctx context.Context, repoRoot, laneID, cwd string, timeout time.Du
 
 			select {
 			case <-ctx.Done():
-				l.Status = lane.StatusTimeout
-				_ = l.Save(repoRoot)
+				_ = l.MarkTimeout(repoRoot)
 				return makeOut(string(lane.StatusTimeout)), 4, nil
 			default:
 			}
 
 			if time.Now().After(deadline) && !graceDeadline.Before(deadline) {
-				l.Status = lane.StatusTimeout
-				_ = l.Save(repoRoot)
+				_ = l.MarkTimeout(repoRoot)
 				return makeOut(string(lane.StatusTimeout)), 4, nil
 			}
 
@@ -115,15 +113,13 @@ func waitLoop(ctx context.Context, repoRoot, laneID, cwd string, timeout time.Du
 
 		select {
 		case <-ctx.Done():
-			l.Status = lane.StatusTimeout
-			_ = l.Save(repoRoot)
+			_ = l.MarkTimeout(repoRoot)
 			return makeOut(string(lane.StatusTimeout)), 4, nil
 		default:
 		}
 
 		if time.Now().After(deadline) {
-			l.Status = lane.StatusTimeout
-			_ = l.Save(repoRoot)
+			_ = l.MarkTimeout(repoRoot)
 			return makeOut(string(lane.StatusTimeout)), 4, nil
 		}
 

@@ -10,14 +10,6 @@ const (
 	StatusTimeout  Status = "timeout"
 	StatusAccepted Status = "accepted"
 	StatusRejected Status = "rejected"
-
-	// Deprecated aliases kept for compatibility during migration.
-	Running         = StatusRunning
-	Done            = StatusDone
-	Failed          = StatusFailed
-	Pending  Status = "pending"
-	Blocked  Status = "blocked"
-	Deviated Status = "deviated"
 )
 
 // Terminal reports whether s is a terminal state.
