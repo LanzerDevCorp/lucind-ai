@@ -23,7 +23,6 @@ type Options struct {
 	Checks     []string
 	Model      string
 	Prompt     string
-	Brief      string
 	MinQuota   float64
 	Detach     bool
 	Timeout    time.Duration
@@ -185,7 +184,7 @@ func Dispatch(ctx context.Context, opts Options, runner HerdrRunner) (Output, in
 	}
 
 	// 3. Model resolution
-	model, err := ResolveModel(opts.Model)
+	model, err := executor.ResolveModel(opts.Model)
 	if err != nil {
 		return Output{}, 1, fmt.Errorf("resolve model: %w", err)
 	}
@@ -210,9 +209,6 @@ func Dispatch(ctx context.Context, opts Options, runner HerdrRunner) (Output, in
 	}
 
 	userPrompt := opts.Prompt
-	if userPrompt == "" {
-		userPrompt = opts.Brief
-	}
 
 	// 5. Auto-skills selection BEFORE lane creation or mutation
 	var autoSkills autoSkillsOutcome

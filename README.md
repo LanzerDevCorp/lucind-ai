@@ -20,7 +20,6 @@ dispatch (lane + agy pane) -> agy edits within --allow -> attest run -> result-<
 | `wait <lane>` | Block on a detached lane and validate its result. |
 | `accept --lane <id>` | Write a receipt if result, allowed paths and lane check attestations all hold. |
 | `attest run -- <cmd>` / `attest verify --command <cmd>` | HMAC tree-hash attestation of a test run. |
-| `check` | Run `lucind-checks.sh` (deprecated). |
 | `hook pre-tool-use\|stop` | agy plugin handlers. |
 | `skills select --prompt <file\|-> [--allow <glob>]... [--cwd <dir>] [--registry <path>] [--threshold <float>]` | Ask Jev which skills to load for a prompt. |
 | `plugin install` | Install the embedded agy plugin. |

@@ -81,7 +81,6 @@ func TestUsageAndHelp(t *testing.T) {
 
 	wantUsage := `usage: lucind-ai dispatch --cwd <dir> [--allow <glob>]... --prompt <file|-> [--auto-skills] [--check <cmd>]... [--model M] [--timeout D] [--detach] [--lane <id>] [--min-quota F]
        lucind-ai wait <lane> [--cwd <dir>] [--timeout D]
-       lucind-ai check [--out <path>]   (deprecated)
        lucind-ai accept --lane <id>
        lucind-ai attest run -- <command> [args...]
        lucind-ai attest verify --command "<exact command string>"
@@ -176,150 +175,6 @@ func TestVersion(t *testing.T) {
 				t.Errorf("stdout = %q, want it to contain version %q", out, version)
 			}
 		})
-	}
-}
-
-func TestCheckMissingScript(t *testing.T) {
-	repoDir := initRepo(t)
-	cwd, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chdir(repoDir); err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
-		if err := os.Chdir(cwd); err != nil {
-			t.Errorf("chdir %s: %v", cwd, err)
-		}
-	}()
-
-	var stdout, stderr bytes.Buffer
-	code := run(context.Background(), []string{"check"}, &stdout, &stderr)
-	if code != 1 {
-		t.Fatalf("run(check) exit code = %d, want 1; stderr = %q", code, stderr.String())
-	}
-	if !strings.Contains(stderr.String(), "no lucind-checks.sh found at the project root") {
-		t.Fatalf("stderr = %q, want it to contain missing script message", stderr.String())
-	}
-}
-
-func TestCheckScriptPasses(t *testing.T) {
-	repoDir := initRepo(t)
-	writeChecksScript(t, repoDir, 0, "PASS: all checks passed")
-
-	cwd, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chdir(repoDir); err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
-		if err := os.Chdir(cwd); err != nil {
-			t.Errorf("chdir %s: %v", cwd, err)
-		}
-	}()
-
-	var stdout, stderr bytes.Buffer
-	code := run(context.Background(), []string{"check"}, &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("run(check) exit code = %d, want 0; stderr = %q, stdout = %q", code, stderr.String(), stdout.String())
-	}
-	out := stdout.String()
-	if !strings.Contains(out, "PASS: all checks passed") {
-		t.Errorf("stdout = %q, want it to contain script output", out)
-	}
-	if !strings.Contains(out, "status:        passed") {
-		t.Errorf("stdout = %q, want status: passed", out)
-	}
-	if !strings.Contains(out, "duration:") {
-		t.Errorf("stdout = %q, want duration:", out)
-	}
-	if !strings.Contains(out, "resolved root:") {
-		t.Errorf("stdout = %q, want resolved root:", out)
-	}
-}
-
-func TestCheckScriptFails(t *testing.T) {
-	repoDir := initRepo(t)
-	writeChecksScript(t, repoDir, 1, "FAIL: tests failed")
-
-	cwd, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chdir(repoDir); err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
-		if err := os.Chdir(cwd); err != nil {
-			t.Errorf("chdir %s: %v", cwd, err)
-		}
-	}()
-
-	var stdout, stderr bytes.Buffer
-	code := run(context.Background(), []string{"check"}, &stdout, &stderr)
-	if code != 1 {
-		t.Fatalf("run(check) exit code = %d, want 1; stderr = %q, stdout = %q", code, stderr.String(), stdout.String())
-	}
-	if !strings.Contains(stderr.String(), "FAIL: tests failed") {
-		t.Fatalf("stderr = %q, want script output in stderr", stderr.String())
-	}
-}
-
-func TestCheckOutFlag(t *testing.T) {
-	repoDir := initRepo(t)
-	writeChecksScript(t, repoDir, 0, "PASS: check ran")
-
-	logPath := filepath.Join(repoDir, "logs", "verify-mechanical.log")
-
-	cwd, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chdir(repoDir); err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
-		if err := os.Chdir(cwd); err != nil {
-			t.Errorf("chdir %s: %v", cwd, err)
-		}
-	}()
-
-	var stdout, stderr bytes.Buffer
-	code := run(context.Background(), []string{"check", "--out", logPath}, &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("run(check --out) exit code = %d, want 0; stderr = %q, stdout = %q", code, stderr.String(), stdout.String())
-	}
-
-	data, err := os.ReadFile(logPath)
-	if err != nil {
-		t.Fatalf("read log file %s: %v", logPath, err)
-	}
-	logContent := string(data)
-	if !strings.Contains(logContent, "=== lucind-ai mechanical check ===") {
-		t.Errorf("logContent missing banner: %s", logContent)
-	}
-	if !strings.Contains(logContent, "Command: lucind-checks.sh") {
-		t.Errorf("logContent missing Command line: %s", logContent)
-	}
-	if !strings.Contains(logContent, "Exit Code: 0") {
-		t.Errorf("logContent missing Exit Code line: %s", logContent)
-	}
-	if !strings.Contains(logContent, "PASS: check ran") {
-		t.Errorf("logContent missing transcript: %s", logContent)
-	}
-}
-
-func TestCheckUnexpectedArgs(t *testing.T) {
-	var stdout, stderr bytes.Buffer
-	code := run(context.Background(), []string{"check", "extra-arg"}, &stdout, &stderr)
-	if code != 1 {
-		t.Fatalf("run(check extra-arg) exit code = %d, want 1", code)
-	}
-	if !strings.Contains(stderr.String(), "usage: lucind-ai check [--out <path>] (deprecated)") {
-		t.Errorf("stderr = %q, want check usage", stderr.String())
 	}
 }
 
@@ -794,7 +649,7 @@ func TestWaitExecution(t *testing.T) {
 		ResultPath: filepath.Join(repoDir, ".lucind/lanes/20261003-120000-abcd/result.json"),
 	}
 
-	waitRun = func(c context.Context, repoRoot, laneID string, timeout time.Duration, runner dispatch.HerdrRunner) (dispatch.Output, int, error) {
+	waitRun = func(c context.Context, repoRoot, laneID string, timeout time.Duration) (dispatch.Output, int, error) {
 		capturedRepoRoot = repoRoot
 		capturedLaneID = laneID
 		capturedTimeout = timeout
@@ -847,7 +702,7 @@ func TestWaitExecution(t *testing.T) {
 	}
 
 	// 3. Exit code 3 (failed lane)
-	waitRun = func(c context.Context, repoRoot, laneID string, timeout time.Duration, runner dispatch.HerdrRunner) (dispatch.Output, int, error) {
+	waitRun = func(c context.Context, repoRoot, laneID string, timeout time.Duration) (dispatch.Output, int, error) {
 		out := mockOutput
 		out.Status = "failed"
 		return out, 3, nil
@@ -863,7 +718,7 @@ func TestWaitExecution(t *testing.T) {
 	}
 
 	// 4. Exit code 4 (timeout)
-	waitRun = func(c context.Context, repoRoot, laneID string, timeout time.Duration, runner dispatch.HerdrRunner) (dispatch.Output, int, error) {
+	waitRun = func(c context.Context, repoRoot, laneID string, timeout time.Duration) (dispatch.Output, int, error) {
 		out := mockOutput
 		out.Status = "timeout"
 		return out, 4, nil
