@@ -14,6 +14,7 @@ import (
 
 	"github.com/LanzerDevCorp/lucind-ai/internal/dispatch"
 	"github.com/LanzerDevCorp/lucind-ai/internal/lane"
+	"github.com/LanzerDevCorp/lucind-ai/internal/skillselect"
 )
 
 func initRepo(t *testing.T) string {
@@ -78,14 +79,14 @@ func writeChecksScript(t *testing.T, repoDir string, exitCode int, output string
 func TestUsageAndHelp(t *testing.T) {
 	ctx := context.Background()
 
-	wantUsage := `usage: lucind-ai dispatch --cwd <dir> [--allow <glob>]... --brief <file|-> [--auto-skills] [--check <cmd>]... [--model M] [--timeout D] [--detach] [--lane <id>] [--min-quota F]
+	wantUsage := `usage: lucind-ai dispatch --cwd <dir> [--allow <glob>]... --prompt <file|-> [--auto-skills] [--check <cmd>]... [--model M] [--timeout D] [--detach] [--lane <id>] [--min-quota F]
        lucind-ai wait <lane> [--cwd <dir>] [--timeout D]
        lucind-ai check [--out <path>]   (deprecated)
        lucind-ai accept --lane <id>
        lucind-ai attest run -- <command> [args...]
        lucind-ai attest verify --command "<exact command string>"
        lucind-ai hook pre-tool-use|stop   (agy plugin handlers; stdin JSON)
-       lucind-ai skills select --brief <file|-> [--allow <glob>]... [--cwd <dir>] [--registry <path>] [--threshold <float>]
+       lucind-ai skills select --prompt <file|-> [--allow <glob>]... [--cwd <dir>] [--registry <path>] [--threshold <float>]
        lucind-ai plugin install [--dir <staging root>]   (registers via agy plugin install)
        lucind-ai install
        lucind-ai --version`
@@ -444,7 +445,7 @@ func TestAcceptSubcommand(t *testing.T) {
 
 func TestDispatchHelp(t *testing.T) {
 	ctx := context.Background()
-	wantUsageLine := "usage: lucind-ai dispatch --cwd <dir> [--allow <glob>]... --brief <file|-> [--auto-skills] [--check <cmd>]... [--model M] [--timeout D] [--detach] [--lane <id>] [--min-quota F]"
+	wantUsageLine := "usage: lucind-ai dispatch --cwd <dir> [--allow <glob>]... --prompt <file|-> [--auto-skills] [--check <cmd>]... [--model M] [--timeout D] [--detach] [--lane <id>] [--min-quota F]"
 	for _, flag := range []string{"--help", "-help", "-h", "help"} {
 		t.Run("flag_"+flag, func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
@@ -456,7 +457,7 @@ func TestDispatchHelp(t *testing.T) {
 			if !strings.Contains(out, wantUsageLine) {
 				t.Errorf("stdout missing usage line; got %q", out)
 			}
-			for _, expectedFlag := range []string{"-cwd", "-allow", "-check", "-brief", "-model", "-timeout", "-detach", "-lane", "-min-quota", "-auto-skills"} {
+			for _, expectedFlag := range []string{"-cwd", "-allow", "-check", "-prompt", "-model", "-timeout", "-detach", "-lane", "-min-quota", "-auto-skills"} {
 				if !strings.Contains(out, expectedFlag) {
 					t.Errorf("stdout missing flag %q; got %q", expectedFlag, out)
 				}
@@ -490,7 +491,7 @@ func TestWaitHelp(t *testing.T) {
 
 func TestDispatchMissingRequiredFlags(t *testing.T) {
 	ctx := context.Background()
-	wantUsageLine := "usage: lucind-ai dispatch --cwd <dir> [--allow <glob>]... --brief <file|-> [--auto-skills] [--check <cmd>]... [--model M] [--timeout D] [--detach] [--lane <id>] [--min-quota F]"
+	wantUsageLine := "usage: lucind-ai dispatch --cwd <dir> [--allow <glob>]... --prompt <file|-> [--auto-skills] [--check <cmd>]... [--model M] [--timeout D] [--detach] [--lane <id>] [--min-quota F]"
 
 	tests := []struct {
 		name    string
@@ -503,33 +504,33 @@ func TestDispatchMissingRequiredFlags(t *testing.T) {
 			wantErr: "--cwd is required",
 		},
 		{
-			name:    "missing allow and brief",
+			name:    "missing allow and prompt",
 			args:    []string{"dispatch", "--cwd", "/tmp"},
 			wantErr: "--allow is required",
 		},
 		{
-			name:    "missing brief",
+			name:    "missing prompt",
 			args:    []string{"dispatch", "--cwd", "/tmp", "--allow", "src/**"},
-			wantErr: "--brief is required",
+			wantErr: "--prompt is required",
 		},
 		{
 			name:    "unexpected positional arg",
-			args:    []string{"dispatch", "--cwd", "/tmp", "--allow", "src/**", "--brief", "b.md", "unexpected"},
+			args:    []string{"dispatch", "--cwd", "/tmp", "--allow", "src/**", "--prompt", "p.md", "unexpected"},
 			wantErr: "unexpected argument(s)",
 		},
 		{
 			name:    "invalid timeout",
-			args:    []string{"dispatch", "--cwd", "/tmp", "--allow", "src/**", "--brief", "b.md", "--timeout", "xyz"},
+			args:    []string{"dispatch", "--cwd", "/tmp", "--allow", "src/**", "--prompt", "p.md", "--timeout", "xyz"},
 			wantErr: "invalid --timeout",
 		},
 		{
 			name:    "empty check flag",
-			args:    []string{"dispatch", "--cwd", "/tmp", "--allow", "src/**", "--brief", "b.md", "--check", ""},
+			args:    []string{"dispatch", "--cwd", "/tmp", "--allow", "src/**", "--prompt", "p.md", "--check", ""},
 			wantErr: "check command cannot be empty",
 		},
 		{
 			name:    "whitespace check flag",
-			args:    []string{"dispatch", "--cwd", "/tmp", "--allow", "src/**", "--brief", "b.md", "--check", "   "},
+			args:    []string{"dispatch", "--cwd", "/tmp", "--allow", "src/**", "--prompt", "p.md", "--check", "   "},
 			wantErr: "check command cannot be empty",
 		},
 	}
@@ -549,6 +550,22 @@ func TestDispatchMissingRequiredFlags(t *testing.T) {
 				t.Errorf("stderr missing usage line; got %q", errOut)
 			}
 		})
+	}
+}
+
+func TestDispatch_BriefFlagRejected(t *testing.T) {
+	ctx := context.Background()
+	var stdout, stderr bytes.Buffer
+	code := run(ctx, []string{"dispatch", "--cwd", "/tmp", "--brief", "task.md"}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("run(dispatch --brief) exit code = %d, want 1", code)
+	}
+	errOut := stderr.String()
+	if strings.Contains(errOut, "flag provided but not defined") {
+		t.Errorf("expected clean custom rejection, got Go generic flag error: %q", errOut)
+	}
+	if !strings.Contains(errOut, "--brief") || !strings.Contains(errOut, "--prompt") {
+		t.Errorf("expected error message pointing from --brief to --prompt, got: %q", errOut)
 	}
 }
 
@@ -605,8 +622,8 @@ func TestDispatchExecution(t *testing.T) {
 	ctx := context.Background()
 	repoDir := initRepo(t)
 
-	briefFile := filepath.Join(repoDir, "task_brief.md")
-	if err := os.WriteFile(briefFile, []byte("Implement feature X"), 0644); err != nil {
+	promptFile := filepath.Join(repoDir, "task_prompt.md")
+	if err := os.WriteFile(promptFile, []byte("Implement feature X"), 0644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -622,7 +639,7 @@ func TestDispatchExecution(t *testing.T) {
 		ResultPath: filepath.Join(repoDir, ".lucind/lanes/20261003-120000-abcd/result.json"),
 	}
 
-	// 1. Success with file brief and multiple allows
+	// 1. Success with file prompt and multiple allows
 	dispatchRun = func(c context.Context, opts dispatch.Options, runner dispatch.HerdrRunner) (dispatch.Output, int, error) {
 		capturedOpts = opts
 		return mockOutput, 0, nil
@@ -636,7 +653,7 @@ func TestDispatchExecution(t *testing.T) {
 		"--allow", "cmd/**",
 		"--check", "go test ./...",
 		"--check", "echo 'a,b'",
-		"--brief", briefFile,
+		"--prompt", promptFile,
 		"--model", "gemini-3.8-flash-high",
 		"--timeout", "30m",
 		"--detach",
@@ -665,8 +682,8 @@ func TestDispatchExecution(t *testing.T) {
 			}
 		}
 	}
-	if capturedOpts.Brief != "Implement feature X" {
-		t.Errorf("captured Brief = %q, want 'Implement feature X'", capturedOpts.Brief)
+	if capturedOpts.Prompt != "Implement feature X" {
+		t.Errorf("captured Prompt = %q, want 'Implement feature X'", capturedOpts.Prompt)
 	}
 	if capturedOpts.Model != "gemini-3.8-flash-high" {
 		t.Errorf("captured Model = %q, want 'gemini-3.8-flash-high'", capturedOpts.Model)
@@ -692,10 +709,10 @@ func TestDispatchExecution(t *testing.T) {
 		t.Errorf("outJSON.Lane = %q, want %q", outJSON.Lane, mockOutput.Lane)
 	}
 
-	// 2. Brief from stdin
+	// 2. Prompt from stdin
 	origStdin := stdinReader
 	defer func() { stdinReader = origStdin }()
-	stdinReader = strings.NewReader("stdin brief content")
+	stdinReader = strings.NewReader("stdin prompt content")
 
 	stdout.Reset()
 	stderr.Reset()
@@ -703,14 +720,14 @@ func TestDispatchExecution(t *testing.T) {
 		"dispatch",
 		"--cwd", repoDir,
 		"--allow", "src/**",
-		"--brief", "-",
+		"--prompt", "-",
 	}, &stdout, &stderr)
 
 	if code != 0 {
-		t.Fatalf("run(dispatch --brief -) exit code = %d, want 0; stderr = %q", code, stderr.String())
+		t.Fatalf("run(dispatch --prompt -) exit code = %d, want 0; stderr = %q", code, stderr.String())
 	}
-	if capturedOpts.Brief != "stdin brief content" {
-		t.Errorf("captured Brief = %q, want 'stdin brief content'", capturedOpts.Brief)
+	if capturedOpts.Prompt != "stdin prompt content" {
+		t.Errorf("captured Prompt = %q, want 'stdin prompt content'", capturedOpts.Prompt)
 	}
 
 	// 3. Exit code 3 (failed lane)
@@ -725,7 +742,7 @@ func TestDispatchExecution(t *testing.T) {
 		"dispatch",
 		"--cwd", repoDir,
 		"--allow", "src/**",
-		"--brief", briefFile,
+		"--prompt", promptFile,
 	}, &stdout, &stderr)
 	if code != 3 {
 		t.Fatalf("exit code = %d, want 3", code)
@@ -746,10 +763,13 @@ func TestDispatchExecution(t *testing.T) {
 		"dispatch",
 		"--cwd", repoDir,
 		"--allow", "src/**",
-		"--brief", briefFile,
+		"--prompt", promptFile,
 	}, &stdout, &stderr)
 	if code != 4 {
 		t.Fatalf("exit code = %d, want 4", code)
+	}
+	if !strings.Contains(stdout.String(), `"status": "timeout"`) {
+		t.Errorf("stdout should contain timeout status JSON; got %q", stdout.String())
 	}
 	if !strings.Contains(stdout.String(), `"status": "timeout"`) {
 		t.Errorf("stdout should contain timeout status JSON; got %q", stdout.String())
@@ -863,8 +883,8 @@ func TestDispatch_AutoSkillsFlag(t *testing.T) {
 	ctx := context.Background()
 	repoDir := initRepo(t)
 
-	briefFile := filepath.Join(repoDir, "task_brief.md")
-	if err := os.WriteFile(briefFile, []byte("Implement feature X"), 0o644); err != nil {
+	promptFile := filepath.Join(repoDir, "task_prompt.md")
+	if err := os.WriteFile(promptFile, []byte("Implement feature X"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -890,7 +910,7 @@ func TestDispatch_AutoSkillsFlag(t *testing.T) {
 		"dispatch",
 		"--cwd", repoDir,
 		"--allow", "src/**",
-		"--brief", briefFile,
+		"--prompt", promptFile,
 		"--auto-skills",
 	}, &stdout, &stderr)
 
@@ -912,7 +932,7 @@ func TestDispatch_AutoSkillsFlag(t *testing.T) {
 		"dispatch",
 		"--cwd", repoDir,
 		"--allow", "src/**",
-		"--brief", briefFile,
+		"--prompt", promptFile,
 	}, &stdout, &stderr)
 
 	if code != 0 {
@@ -930,8 +950,8 @@ func TestDispatchLaneAllow(t *testing.T) {
 	ctx := context.Background()
 	repoDir := initRepo(t)
 
-	briefFile := filepath.Join(repoDir, "task_brief.md")
-	if err := os.WriteFile(briefFile, []byte("brief content"), 0o644); err != nil {
+	promptFile := filepath.Join(repoDir, "task_prompt.md")
+	if err := os.WriteFile(promptFile, []byte("prompt content"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -957,7 +977,7 @@ func TestDispatchLaneAllow(t *testing.T) {
 		code := run(ctx, []string{
 			"dispatch",
 			"--cwd", repoDir,
-			"--brief", briefFile,
+			"--prompt", promptFile,
 		}, &stdout, &stderr)
 
 		if code != 1 {
@@ -975,7 +995,7 @@ func TestDispatchLaneAllow(t *testing.T) {
 		code := run(ctx, []string{
 			"dispatch",
 			"--cwd", repoDir,
-			"--brief", briefFile,
+			"--prompt", promptFile,
 			"--lane", "lane-456",
 		}, &stdout, &stderr)
 
@@ -997,7 +1017,7 @@ func TestDispatchLaneAllow(t *testing.T) {
 		code := run(ctx, []string{
 			"dispatch",
 			"--cwd", repoDir,
-			"--brief", briefFile,
+			"--prompt", promptFile,
 			"--lane", "lane-456",
 			"--allow", "cmd/**,pkg/**",
 		}, &stdout, &stderr)
@@ -1020,4 +1040,145 @@ func TestDispatchLaneAllow(t *testing.T) {
 	}
 }
 
+func TestDispatch_AutoSkillsUnavailable_ErrorOutput(t *testing.T) {
+	ctx := context.Background()
+	repoDir := initRepo(t)
 
+	promptFile := filepath.Join(repoDir, "task_prompt.md")
+	if err := os.WriteFile(promptFile, []byte("Implement feature X"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	origDispatchRun := dispatchRun
+	defer func() { dispatchRun = origDispatchRun }()
+
+	dispatchRun = func(c context.Context, opts dispatch.Options, runner dispatch.HerdrRunner) (dispatch.Output, int, error) {
+		return dispatch.Output{}, 5, &dispatch.AutoSkillsUnavailableError{
+			Cause: fmt.Errorf("call jev: 500 Internal Server Error"),
+		}
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := run(ctx, []string{
+		"dispatch",
+		"--cwd", repoDir,
+		"--allow", "src/**",
+		"--prompt", promptFile,
+		"--auto-skills",
+	}, &stdout, &stderr)
+
+	if code != 5 {
+		t.Fatalf("exit code = %d, want 5", code)
+	}
+	if stdout.Len() != 0 {
+		t.Errorf("stdout must be empty, got: %q", stdout.String())
+	}
+
+	stderrLines := strings.Split(strings.TrimRight(stderr.String(), "\n"), "\n")
+	wantLine1 := "lucind-ai: auto-skills unavailable: call jev: 500 Internal Server Error"
+	wantLine2 := `lucind-ai: no lane was created. Fallback: add a "## Skills to load before work" section with absolute SKILL.md paths to the prompt and dispatch again (a hand-written section skips Jev).`
+	if len(stderrLines) != 2 {
+		t.Fatalf("stderr lines count = %d, want 2; got:\n%s", len(stderrLines), stderr.String())
+	}
+	if stderrLines[0] != wantLine1 {
+		t.Errorf("stderr line 1 = %q, want %q", stderrLines[0], wantLine1)
+	}
+	if stderrLines[1] != wantLine2 {
+		t.Errorf("stderr line 2 = %q, want %q", stderrLines[1], wantLine2)
+	}
+}
+
+func TestDispatch_AutoSkillsUnavailable_MissingKey_ErrorOutput(t *testing.T) {
+	ctx := context.Background()
+	repoDir := initRepo(t)
+
+	promptFile := filepath.Join(repoDir, "task_prompt.md")
+	if err := os.WriteFile(promptFile, []byte("Implement feature X"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	origDispatchRun := dispatchRun
+	defer func() { dispatchRun = origDispatchRun }()
+
+	dispatchRun = func(c context.Context, opts dispatch.Options, runner dispatch.HerdrRunner) (dispatch.Output, int, error) {
+		return dispatch.Output{}, 5, &dispatch.AutoSkillsUnavailableError{
+			Cause: skillselect.ErrMissingAPIKey,
+		}
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := run(ctx, []string{
+		"dispatch",
+		"--cwd", repoDir,
+		"--allow", "src/**",
+		"--prompt", promptFile,
+		"--auto-skills",
+	}, &stdout, &stderr)
+
+	if code != 5 {
+		t.Fatalf("exit code = %d, want 5", code)
+	}
+	if stdout.Len() != 0 {
+		t.Errorf("stdout must be empty, got: %q", stdout.String())
+	}
+
+	stderrLines := strings.Split(strings.TrimRight(stderr.String(), "\n"), "\n")
+	wantLine1 := "lucind-ai: auto-skills unavailable: " + skillselect.ErrMissingAPIKey.Error()
+	wantLine2 := `lucind-ai: no lane was created. Fallback: add a "## Skills to load before work" section with absolute SKILL.md paths to the prompt and dispatch again (a hand-written section skips Jev).`
+	wantLine3 := "lucind-ai: to store the key run lucind-ai install, or put TYPESAFE_API_KEY=... in ~/.config/lucind/env"
+	if len(stderrLines) != 3 {
+		t.Fatalf("stderr lines count = %d, want 3; got:\n%s", len(stderrLines), stderr.String())
+	}
+	if stderrLines[0] != wantLine1 {
+		t.Errorf("stderr line 1 = %q, want %q", stderrLines[0], wantLine1)
+	}
+	if stderrLines[1] != wantLine2 {
+		t.Errorf("stderr line 2 = %q, want %q", stderrLines[1], wantLine2)
+	}
+	if stderrLines[2] != wantLine3 {
+		t.Errorf("stderr line 3 = %q, want %q", stderrLines[2], wantLine3)
+	}
+}
+
+func TestDispatch_AutoSkillsUnavailable_HTTP401_KeyNeverAppears(t *testing.T) {
+	ctx := context.Background()
+	repoDir := initRepo(t)
+
+	promptFile := filepath.Join(repoDir, "task_prompt.md")
+	if err := os.WriteFile(promptFile, []byte("Implement feature X"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	origDispatchRun := dispatchRun
+	defer func() { dispatchRun = origDispatchRun }()
+
+	dispatchRun = func(c context.Context, opts dispatch.Options, runner dispatch.HerdrRunner) (dispatch.Output, int, error) {
+		return dispatch.Output{}, 5, &dispatch.AutoSkillsUnavailableError{
+			Cause: fmt.Errorf("HTTP 401: bad token [REDACTED]"),
+		}
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := run(ctx, []string{
+		"dispatch",
+		"--cwd", repoDir,
+		"--allow", "src/**",
+		"--prompt", promptFile,
+		"--auto-skills",
+	}, &stdout, &stderr)
+
+	if code != 5 {
+		t.Fatalf("exit code = %d, want 5", code)
+	}
+	if stdout.Len() != 0 {
+		t.Errorf("stdout must be empty, got: %q", stdout.String())
+	}
+
+	stderrStr := stderr.String()
+	if strings.Contains(stderrStr, "secret-token") {
+		t.Errorf("stderr contains secret-token: %s", stderrStr)
+	}
+	if !strings.Contains(stderrStr, "lucind-ai: auto-skills unavailable: HTTP 401: bad token [REDACTED]") {
+		t.Errorf("stderr missing redacted reason, got: %s", stderrStr)
+	}
+}

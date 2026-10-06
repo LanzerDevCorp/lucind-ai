@@ -14,8 +14,8 @@ import (
 func TestSkillsSelect_FlagValidation(t *testing.T) {
 	repo := initRepo(t)
 
-	briefFile := filepath.Join(repo, "brief.md")
-	if err := os.WriteFile(briefFile, []byte("Test brief"), 0o644); err != nil {
+	promptFile := filepath.Join(repo, "prompt.md")
+	if err := os.WriteFile(promptFile, []byte("Test prompt"), 0o644); err != nil {
 		t.Fatalf("WriteFile failed: %v", err)
 	}
 
@@ -29,7 +29,7 @@ func TestSkillsSelect_FlagValidation(t *testing.T) {
 			name:       "missing subcommand",
 			args:       []string{"skills"},
 			wantExit:   1,
-			wantErrSub: "usage: lucind-ai skills select --brief <file|-> [--allow <glob>]... [--cwd <dir>] [--registry <path>] [--threshold <float>]",
+			wantErrSub: "usage: lucind-ai skills select --prompt <file|-> [--allow <glob>]... [--cwd <dir>] [--registry <path>] [--threshold <float>]",
 		},
 		{
 			name:       "unknown subcommand",
@@ -38,50 +38,50 @@ func TestSkillsSelect_FlagValidation(t *testing.T) {
 			wantErrSub: `lucind-ai: unknown subcommand "unknown"`,
 		},
 		{
-			name:       "missing brief flag",
+			name:       "missing prompt flag",
 			args:       []string{"skills", "select", "--cwd", repo},
 			wantExit:   1,
-			wantErrSub: "lucind-ai: --brief is required",
+			wantErrSub: "lucind-ai: --prompt is required",
 		},
 		{
 			name:       "threshold below zero",
-			args:       []string{"skills", "select", "--brief", briefFile, "--threshold", "0", "--cwd", repo},
+			args:       []string{"skills", "select", "--prompt", promptFile, "--threshold", "0", "--cwd", repo},
 			wantExit:   1,
 			wantErrSub: "lucind-ai: threshold must be in (0, 1], got 0",
 		},
 		{
 			name:       "threshold negative",
-			args:       []string{"skills", "select", "--brief", briefFile, "--threshold", "-0.5", "--cwd", repo},
+			args:       []string{"skills", "select", "--prompt", promptFile, "--threshold", "-0.5", "--cwd", repo},
 			wantExit:   1,
 			wantErrSub: "lucind-ai: threshold must be in (0, 1], got -0.5",
 		},
 		{
 			name:       "threshold above one",
-			args:       []string{"skills", "select", "--brief", briefFile, "--threshold", "1.5", "--cwd", repo},
+			args:       []string{"skills", "select", "--prompt", promptFile, "--threshold", "1.5", "--cwd", repo},
 			wantExit:   1,
 			wantErrSub: "lucind-ai: threshold must be in (0, 1], got 1.5",
 		},
 		{
 			name:       "threshold not a number",
-			args:       []string{"skills", "select", "--brief", briefFile, "--threshold", "NaN", "--cwd", repo},
+			args:       []string{"skills", "select", "--prompt", promptFile, "--threshold", "NaN", "--cwd", repo},
 			wantExit:   1,
 			wantErrSub: "lucind-ai: threshold must be in (0, 1], got NaN",
 		},
 		{
 			name:       "unexpected extra args",
-			args:       []string{"skills", "select", "--brief", briefFile, "extra-arg", "--cwd", repo},
+			args:       []string{"skills", "select", "--prompt", promptFile, "extra-arg", "--cwd", repo},
 			wantExit:   1,
 			wantErrSub: "lucind-ai: unexpected argument(s): extra-arg",
 		},
 		{
-			name:       "missing brief file",
-			args:       []string{"skills", "select", "--brief", filepath.Join(repo, "nonexistent-brief.md"), "--cwd", repo},
+			name:       "missing prompt file",
+			args:       []string{"skills", "select", "--prompt", filepath.Join(repo, "nonexistent-prompt.md"), "--cwd", repo},
 			wantExit:   1,
-			wantErrSub: "nonexistent-brief.md",
+			wantErrSub: "nonexistent-prompt.md",
 		},
 		{
 			name:       "missing registry file",
-			args:       []string{"skills", "select", "--brief", briefFile, "--registry", filepath.Join(repo, "nonexistent-registry.md"), "--cwd", repo},
+			args:       []string{"skills", "select", "--prompt", promptFile, "--registry", filepath.Join(repo, "nonexistent-registry.md"), "--cwd", repo},
 			wantExit:   1,
 			wantErrSub: "nonexistent-registry.md",
 		},
@@ -103,8 +103,8 @@ func TestSkillsSelect_FlagValidation(t *testing.T) {
 
 func TestSkillsSelect_MissingAPIKey(t *testing.T) {
 	repo := initRepo(t)
-	briefFile := filepath.Join(repo, "brief.md")
-	if err := os.WriteFile(briefFile, []byte("Test brief"), 0o644); err != nil {
+	promptFile := filepath.Join(repo, "prompt.md")
+	if err := os.WriteFile(promptFile, []byte("Test prompt"), 0o644); err != nil {
 		t.Fatalf("WriteFile failed: %v", err)
 	}
 
@@ -124,31 +124,27 @@ func TestSkillsSelect_MissingAPIKey(t *testing.T) {
 		t.Fatalf("WriteFile failed: %v", err)
 	}
 
-	origKey := os.Getenv("TYPESAFE_API_KEY")
-	_ = os.Unsetenv("TYPESAFE_API_KEY")
-	defer func() {
-		if origKey != "" {
-			_ = os.Setenv("TYPESAFE_API_KEY", origKey)
-		}
-	}()
+	t.Setenv("TYPESAFE_API_KEY", "")
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 
 	var stdout, stderr bytes.Buffer
 	code := run(context.Background(), []string{
 		"skills", "select",
-		"--brief", briefFile,
+		"--prompt", promptFile,
 		"--cwd", repo,
 	}, &stdout, &stderr)
 
 	if code != 1 {
 		t.Errorf("expected exit code 1 when TYPESAFE_API_KEY is missing, got %d", code)
 	}
-	if !strings.Contains(stderr.String(), "lucind-ai: TYPESAFE_API_KEY environment variable is required") {
-		t.Errorf("stderr = %q, want TYPESAFE_API_KEY missing error", stderr.String())
+	wantMsg := "lucind-ai: TYPESAFE_API_KEY is not set; export it or run lucind-ai install to store it in ~/.config/lucind/env"
+	if !strings.Contains(stderr.String(), wantMsg) {
+		t.Errorf("stderr = %q, want %q", stderr.String(), wantMsg)
 	}
 }
 
 func TestSkillsSelect_Help(t *testing.T) {
-	wantUsage := "usage: lucind-ai skills select --brief <file|-> [--allow <glob>]... [--cwd <dir>] [--registry <path>] [--threshold <float>]"
+	wantUsage := "usage: lucind-ai skills select --prompt <file|-> [--allow <glob>]... [--cwd <dir>] [--registry <path>] [--threshold <float>]"
 
 	t.Run("skills_help", func(t *testing.T) {
 		var stdout, stderr bytes.Buffer
@@ -170,7 +166,7 @@ func TestSkillsSelect_Help(t *testing.T) {
 	})
 }
 
-func TestSkillsSelect_StdinBrief(t *testing.T) {
+func TestSkillsSelect_StdinPrompt(t *testing.T) {
 	repo := initRepo(t)
 	regDir := filepath.Join(repo, ".atl")
 	if err := os.MkdirAll(regDir, 0o755); err != nil {
@@ -188,30 +184,26 @@ func TestSkillsSelect_StdinBrief(t *testing.T) {
 		t.Fatalf("WriteFile failed: %v", err)
 	}
 
-	origKey := os.Getenv("TYPESAFE_API_KEY")
-	_ = os.Unsetenv("TYPESAFE_API_KEY")
-	defer func() {
-		if origKey != "" {
-			_ = os.Setenv("TYPESAFE_API_KEY", origKey)
-		}
-	}()
+	t.Setenv("TYPESAFE_API_KEY", "")
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 
 	origStdin := stdinReader
-	stdinReader = strings.NewReader("brief content from stdin")
+	stdinReader = strings.NewReader("prompt content from stdin")
 	defer func() { stdinReader = origStdin }()
 
 	var stdout, stderr bytes.Buffer
 	code := run(context.Background(), []string{
 		"skills", "select",
-		"--brief", "-",
+		"--prompt", "-",
 		"--cwd", repo,
 	}, &stdout, &stderr)
 
 	if code != 1 {
 		t.Errorf("expected exit code 1 when TYPESAFE_API_KEY is missing, got %d", code)
 	}
-	if !strings.Contains(stderr.String(), "lucind-ai: TYPESAFE_API_KEY environment variable is required") {
-		t.Errorf("stderr = %q, want TYPESAFE_API_KEY missing error (indicating brief was read from stdin)", stderr.String())
+	wantMsg := "lucind-ai: TYPESAFE_API_KEY is not set; export it or run lucind-ai install to store it in ~/.config/lucind/env"
+	if !strings.Contains(stderr.String(), wantMsg) {
+		t.Errorf("stderr = %q, want %q", stderr.String(), wantMsg)
 	}
 }
 
@@ -229,8 +221,8 @@ func TestSkillsDispatch_Direct(t *testing.T) {
 func TestSkillsSelect_SymlinkResolution(t *testing.T) {
 	repo := initRepo(t)
 
-	briefFile := filepath.Join(repo, "brief.md")
-	if err := os.WriteFile(briefFile, []byte("Implement feature"), 0o644); err != nil {
+	promptFile := filepath.Join(repo, "prompt.md")
+	if err := os.WriteFile(promptFile, []byte("Implement feature"), 0o644); err != nil {
 		t.Fatalf("WriteFile failed: %v", err)
 	}
 
@@ -279,7 +271,7 @@ func TestSkillsSelect_SymlinkResolution(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := run(context.Background(), []string{
 		"skills", "select",
-		"--brief", briefFile,
+		"--prompt", promptFile,
 		"--cwd", repo,
 	}, &stdout, &stderr)
 
@@ -296,3 +288,73 @@ func TestSkillsSelect_SymlinkResolution(t *testing.T) {
 	}
 }
 
+func TestSkillsSelect_BriefFlagRejected(t *testing.T) {
+	ctx := context.Background()
+	var stdout, stderr bytes.Buffer
+	code := run(ctx, []string{"skills", "select", "--brief", "task.md"}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("run(skills select --brief) exit code = %d, want 1", code)
+	}
+	errOut := stderr.String()
+	if strings.Contains(errOut, "flag provided but not defined") {
+		t.Errorf("expected clean custom rejection, got Go generic flag error: %q", errOut)
+	}
+	if !strings.Contains(errOut, "--brief") || !strings.Contains(errOut, "--prompt") {
+		t.Errorf("expected error message pointing from --brief to --prompt, got: %q", errOut)
+	}
+}
+
+func TestSkillsSelect_KeyFromUserConfig(t *testing.T) {
+	repo := initRepo(t)
+	promptFile := filepath.Join(repo, "prompt.md")
+	if err := os.WriteFile(promptFile, []byte("Test prompt"), 0o644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+
+	regDir := filepath.Join(repo, ".atl")
+	if err := os.MkdirAll(regDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll failed: %v", err)
+	}
+	regFile := filepath.Join(regDir, "skill-registry.md")
+	regContent := "# Registry\n## Skills\n\n| Skill | Trigger / description | Scope | Path |\n| --- | --- | --- | --- |\n| `s1` | desc1 | repo | `/p1` |\n"
+	if err := os.WriteFile(regFile, []byte(regContent), 0o644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+
+	t.Setenv("TYPESAFE_API_KEY", "")
+	tempXDG := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tempXDG)
+	lucindConfigDir := filepath.Join(tempXDG, "lucind")
+	if err := os.MkdirAll(lucindConfigDir, 0700); err != nil {
+		t.Fatalf("mkdir failed: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(lucindConfigDir, "env"), []byte("TYPESAFE_API_KEY=cfg-key\n"), 0600); err != nil {
+		t.Fatalf("write env file failed: %v", err)
+	}
+
+	origSelect := selectSkills
+	defer func() { selectSkills = origSelect }()
+	selectCalled := false
+	selectSkills = func(ctx context.Context, client *skillselect.Client, skills []skillselect.Skill, in skillselect.Input, threshold float64) (skillselect.Result, error) {
+		selectCalled = true
+		return skillselect.Result{
+			Model:     "mock",
+			Threshold: threshold,
+			Decisions: []skillselect.Decision{},
+		}, nil
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := run(context.Background(), []string{
+		"skills", "select",
+		"--prompt", promptFile,
+		"--cwd", repo,
+	}, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("code = %d, want 0 (stderr: %s)", code, stderr.String())
+	}
+	if !selectCalled {
+		t.Errorf("expected selectSkills to be called using key from user config")
+	}
+}

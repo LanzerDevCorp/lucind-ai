@@ -1,5 +1,5 @@
 // Package agyhook implements the handlers behind the agy plugin hooks
-// (`lucind-ai hook pre-tool-use` and `lucind-ai hook stop`).
+// (`lucind-ai hook pre-tool-use`, `pre-invocation` and `stop`).
 //
 // Every handler is pass-through when no lane id is supplied (LUCIND_LANE is
 // unset), so free or manual agy sessions are never affected. Inside a lane,
@@ -8,13 +8,11 @@
 package agyhook
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -50,7 +48,6 @@ type payload struct {
 	FullyIdle         *bool     `json:"fullyIdle"`
 	Error             string    `json:"error"`
 	ConversationID    string    `json:"conversationId"`
-	TranscriptPath    string    `json:"transcriptPath"`
 }
 
 type role string
@@ -60,12 +57,6 @@ const (
 	roleMain    role = "main"
 	roleWorker  role = "worker"
 )
-
-type transcriptStep struct {
-	Source  string `json:"source"`
-	Type    string `json:"type"`
-	Content string `json:"content"`
-}
 
 // fileWriteTool matches agy tools that modify a file. Observed names:
 // write_to_file, replace_file_content, multi_replace_file_content. The
@@ -218,96 +209,67 @@ func PreToolUse(ctx context.Context, laneID string, stdin []byte) []byte {
 	return allow()
 }
 
-func classifyConversation(laneID, transcriptPath string) (role, error) {
-	if transcriptPath == "" {
-		return roleUnknown, errors.New("transcript path is empty")
+// markerName returns the file name of the main-conversation marker of a turn.
+func markerName(turn int) string { return fmt.Sprintf("main-turn-%d", turn) }
+
+// PreInvocation binds the main conversation of the lane's current turn: the
+// first conversation id seen here after a turn starts wins. The binding is a
+// write-once file created with O_EXCL, so concurrent first calls cannot race
+// and lane.json is never mutated. It always returns {} and never fails the
+// agent: any invalid input or I/O error is swallowed.
+func PreInvocation(ctx context.Context, laneID string, stdin []byte) []byte {
+	if laneID == "" || !lane.ValidateID(laneID) {
+		return end()
 	}
-	if strings.HasPrefix(transcriptPath, "~/") {
-		if home, err := os.UserHomeDir(); err == nil {
-			transcriptPath = filepath.Join(home, transcriptPath[2:])
-		}
+	var p payload
+	if err := json.Unmarshal(stdin, &p); err != nil || p.ConversationID == "" {
+		return end()
 	}
-	f, err := os.Open(transcriptPath)
+	root, err := laneRoot(ctx, p)
 	if err != nil {
-		return roleUnknown, fmt.Errorf("open transcript: %w", err)
+		return end()
 	}
-	defer func() { _ = f.Close() }()
-
-	reader := bufio.NewReader(f)
-	line, err := reader.ReadBytes('\n')
-	if err != nil && !errors.Is(err, io.EOF) {
-		return roleUnknown, fmt.Errorf("read transcript: %w", err)
+	l, err := lane.Load(root, laneID)
+	if err != nil {
+		logf(root, laneID, "pre-invocation: %v", err)
+		return end()
 	}
-	if len(bytes.TrimSpace(line)) == 0 {
-		return roleUnknown, errors.New("transcript is empty")
+	path := filepath.Join(lane.LaneDir(root, laneID), markerName(l.Turn))
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if err != nil {
+		if !errors.Is(err, fs.ErrExist) {
+			logf(root, laneID, "pre-invocation: create marker: %v", err)
+		}
+		return end()
 	}
-
-	var step transcriptStep
-	if err := json.Unmarshal(line, &step); err != nil {
-		return roleUnknown, fmt.Errorf("decode transcript step: %w", err)
+	_, werr := f.WriteString(p.ConversationID)
+	if cerr := f.Close(); werr == nil {
+		werr = cerr
 	}
-
-	briefTarget := ".lucind/lanes/" + laneID + "/brief.md"
-	isMainSource := step.Source == "" || step.Source == "USER_EXPLICIT"
-	isMain := isMainSource &&
-		strings.Contains(step.Content, "Read and follow") &&
-		strings.Contains(filepath.ToSlash(step.Content), briefTarget)
-	if isMain {
-		return roleMain, nil
+	if werr != nil {
+		logf(root, laneID, "pre-invocation: write marker: %v", werr)
+		return end()
 	}
-
-	isWorker := step.Source == "SYSTEM" ||
-		step.Type == "SYSTEM_MESSAGE" ||
-		strings.Contains(step.Content, "<SYSTEM_MESSAGE>") ||
-		strings.Contains(step.Content, "sender=") ||
-		strings.Contains(strings.ToLower(step.Content), "worker")
-	if isWorker {
-		return roleWorker, nil
-	}
-
-	return roleUnknown, errors.New("transcript marker not recognized")
+	logf(root, laneID, "pre-invocation: bound main conversation %s for turn %d", p.ConversationID, l.Turn)
+	return end()
 }
 
-func sanitizeConvID(id string) string {
-	if id == "" {
-		return ""
-	}
-	var b strings.Builder
-	for _, r := range id {
-		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
-			b.WriteRune(r)
-		} else {
-			b.WriteRune('_')
-		}
-	}
-	return b.String()
-}
-
-func getOrClassifyRole(root, laneID string, p payload) (role, error) {
-	convDir := filepath.Join(lane.LaneDir(root, laneID), "conversations")
-	convID := sanitizeConvID(p.ConversationID)
-	if convID != "" {
-		cachePath := filepath.Join(convDir, convID)
-		if data, err := os.ReadFile(cachePath); err == nil {
-			cached := role(strings.TrimSpace(string(data)))
-			if cached == roleMain || cached == roleWorker {
-				return cached, nil
-			}
-		}
-	}
-
-	r, err := classifyConversation(laneID, p.TranscriptPath)
+// classify compares the stopping conversation with the turn's bound main
+// conversation. A missing or empty marker yields roleUnknown.
+func classify(root string, l lane.Lane, conversationID string) role {
+	data, err := os.ReadFile(filepath.Join(lane.LaneDir(root, l.ID), markerName(l.Turn)))
 	if err != nil {
-		return roleUnknown, err
+		return roleUnknown
 	}
-
-	if convID != "" && (r == roleMain || r == roleWorker) {
-		if err := os.MkdirAll(convDir, 0o755); err == nil {
-			cachePath := filepath.Join(convDir, convID)
-			_ = os.WriteFile(cachePath, []byte(r), 0o644)
-		}
+	bound := strings.TrimSpace(string(data))
+	switch {
+	case bound == "" || conversationID == "":
+		return roleUnknown
+	case bound == conversationID:
+		return roleMain
+	default:
+		return roleWorker
 	}
-	return r, nil
 }
 
 // Stop evaluates the lane result when agy stops and either ends the session
@@ -351,8 +313,13 @@ func Stop(ctx context.Context, laneID string, stdin []byte) []byte {
 	}
 	logf(root, laneID, "stop: payload executionNum=%d terminationReason=%s fullyIdle=%s error=%q", p.ExecutionNum, p.TerminationReason, idle, p.Error)
 
-	r, err := getOrClassifyRole(root, laneID, p)
-	switch r {
+	l, err := lane.Load(root, laneID)
+	if err != nil {
+		logf(root, laneID, "stop: %v", err)
+		return end()
+	}
+
+	switch classify(root, l, p.ConversationID) {
 	case roleWorker:
 		logf(root, laneID, "stop: ignored worker conversation %s", p.ConversationID)
 		return end()
@@ -362,16 +329,10 @@ func Stop(ctx context.Context, laneID string, stdin []byte) []byte {
 			return end()
 		}
 	case roleUnknown:
-		logf(root, laneID, "stop: transcript unreadable or marker unknown (%v), falling back to fullyIdle alone", err)
+		logf(root, laneID, "stop: no main conversation bound for turn %d, falling back to fullyIdle alone", l.Turn)
 		if p.FullyIdle != nil && !*p.FullyIdle {
 			return end()
 		}
-	}
-
-	l, err := lane.Load(root, laneID)
-	if err != nil {
-		logf(root, laneID, "stop: %v", err)
-		return end()
 	}
 	if l.Status != lane.StatusRunning {
 		return end()

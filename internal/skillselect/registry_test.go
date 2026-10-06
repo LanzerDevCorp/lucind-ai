@@ -260,4 +260,3 @@ func TestResolvePaths(t *testing.T) {
 		t.Errorf("len(ResolvePaths(empty)) = %d, want 0", len(emptyResult))
 	}
 }
-

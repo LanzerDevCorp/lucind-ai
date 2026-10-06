@@ -4,6 +4,10 @@ What exists is in [`product.md`](product.md).
 
 ## Done
 
+- **Fail closed on auto-skills selection error** (`feature/auto-skills-fail-closed`): dispatch with
+  `--auto-skills` fails closed (exit code 5) without creating or mutating any lane state when skills
+  cannot be selected; orchestrator has clean fallback to hand-written skills section; API keys stay
+  redacted; updated auto skill variant with exit 5 guidance.
 - **agy-only contract** (`feature/agy-only-contract`): single provider, `dispatch`/`wait`,
   per-lane JSON state, embedded agy plugin (PreToolUse/Stop hooks), `accept` with allowed-path and
   attestation checks, Claude skill `lucind`. Orchestration, ledger and other providers removed.
@@ -42,6 +46,34 @@ What exists is in [`product.md`](product.md).
   directories if needed, preserves surrounding content byte-for-byte, writes through symlinks, keeps
   one backup `<target>.lucind-ai.bak`, fails safely on malformed markers, and can be skipped with
   `--no-claude-md`.
+- **Direct prompt dispatch** (`feature/direct-prompt-dispatch`): dispatch sends the task content itself
+  directly to agy as the prompt (with the skills section placed first after the lane marker), dropped the
+  `Read and follow <brief.md>` pointer and removed `--brief` in favor of `--prompt` across `dispatch` and
+  `skills select`. The exact prompt is persisted to `prompt.md` for records, and the Stop hook classifies
+  the main conversation using the `lucind-lane: <laneID>` marker line.
+- **Global API key lookup, install-time key setup, and two skill variants** (`feature/global-api-key-and-skill-variants`):
+  `TYPESAFE_API_KEY` lookup order checks the environment variable then `~/.config/lucind/env` (`$XDG_CONFIG_HOME/lucind/env`).
+  `lucind-ai install` prompts for the key when missing (without echo using `stty -echo`) and stores it with mode 0600 in
+  a 0700 dir, or skips when non-interactive. Renders the Claude skill as `auto` (orchestrator passes `--auto-skills`, no
+  manual skills section needed) or `manual` (fallback where orchestrator writes the section; re-running install switches variants).
+- **Invalid-key guidance and `install --reset-key`** (`fix/invalid-key-guidance`): a headless orchestrator test
+  showed that for a stored but rejected key (HTTP 401) the skill and the exit 5 message pointed to
+  `lucind-ai install`, which never replaces a key that resolves. Exit 5 now prints a different hint when the server
+  answers 401 or 403, the skill says to correct `~/.config/lucind/env` or use the new
+  `lucind-ai install --reset-key` (terminal only, empty answer keeps the current key, warns when the environment
+  variable overrides the file).
+- **Main conversation binding** (`feature/main-conversation-binding`): replaces the Stop hook's
+  transcript parsing (`feature/lane-stop-main-conversation`) with a binding lucind-ai owns. A new
+  `PreInvocation` hook (`lucind-ai hook pre-invocation`) writes the first conversation id of each
+  turn once to `<laneDir>/main-turn-<turn>` (`O_CREATE|O_EXCL`, race-free, `lane.json` untouched).
+  Stop compares its conversation id with that marker: equal is main, different is a worker (ignored
+  without nudging or consuming retries), no marker falls back to `fullyIdle` alone. The
+  `conversations/` cache and all transcript reads are gone. Measured on two real lanes (100 hook
+  events): `PreInvocation` fires for workers too, the payload has no parent id or prompt text, the
+  first event after dispatch is the main conversation, `ANTIGRAVITY_CONVERSATION_ID` equals the
+  hook's own id, and herdr exposes nothing per conversation. Accepted risk: a worker of the
+  previous turn still emitting `PreInvocation` before the new main conversation would be bound by
+  mistake; not measured.
 - **Superseded:** the multi-provider herdr work (`herdr-agent-factory`, `herdr-interactive-agents`)
   predates the agy-only contract; its interactive-pane and Stop-hook ideas survive in it.
 
@@ -53,20 +85,9 @@ What exists is in [`product.md`](product.md).
    orchestrator has to clean it. How often it matters is still unmeasured: agy only did it because
    the brief asked. Keep measuring on real tasks before adding anything.
 2. **Stale agy trust entries after a crash** in `~/.gemini/antigravity-cli/settings.json`.
-3. **Stops from other conversations** (fixed in `feature/lane-stop-main-conversation`). The Stop hook
-   now inspects `transcriptPath` step 0: main conversations contain `Read and follow .../.lucind/lanes/<id>/brief.md`
-   with source `USER_EXPLICIT` (or empty), while worker conversations contain `SYSTEM`/`SYSTEM_MESSAGE`
-   with `sender=`. Role classifications are cached in `<laneDir>/conversations/<id>`. Worker Stops
-   are ignored without nudging or consuming retries. Main conversation Stops with `fullyIdle=false` are
-   ignored while worker subagents run; only main Stops with `fullyIdle=true` decide done/retry/failed.
-   Continuation turns across differing main conversation IDs are resolved independently via the current
-   turn's brief marker.
-   **Owner review: this is a poor solution, replace it.** Classifying conversations by parsing step 0
-   of agy's private transcript format couples lucind-ai to undocumented internals (`source`, `type`,
-   the exact dispatch prompt wording) and breaks silently if any of them change. Look for a
-   supported signal instead: a parent/child id in the Stop payload, an agy hook or API that marks
-   subagents, or lucind-ai owning the main conversation id at dispatch time.
-4. **Briefs do not make agy load skills first; evaluate sending the prompt directly.** Owner
+3. **Make agy load skills first and pass them to workers.** Step 1 (send the prompt directly) is
+   done and measured, see the result below. Worker propagation was measured too, and the
+   `skills_loaded` field is obsolete (see the end of this item). History of the problem, owner
    observation: agy does not follow the brief literally. Dispatch sends `Read and follow <brief.md>`,
    and agy does not read the `## Skills to load before work` files before starting, even with the
    section right after the title. Evaluate sending the brief content itself as the prompt (instead
@@ -78,15 +99,29 @@ What exists is in [`product.md`](product.md).
    **not pass the skill paths to its two worker subagents**, so the brief fails twice: the main
    conversation does not load skills first, and it does not propagate them to workers (although
    `roles/agents/worker.md` step 1 tells workers to read them). The envelope still listed every
-   skill in `skills_loaded`, so that field alone is not trustworthy evidence. Plan, in order:
-   1. Send the prompt directly, without `brief.md`, with the skills section first.
-   2. If that is not enough, force it with a hook (for example a PreToolUse that blocks writes until
-      every listed `SKILL.md` was read in that conversation).
-   3. Measure in both the main and the worker conversations from the transcripts, not only from
-      `skills_loaded`.
-5. **RTK support.** Install RTK as part of the lucind-ai setup (today it is wired by hand in the
+   skill in `skills_loaded`, so that field alone is not trustworthy evidence.
+   **Result of step 1** (lanes `20261005-174913-ea48` with a hand-written section and
+   `20261005-175854-e2e0` with `--auto-skills`, measured from the agy transcript, not from the
+   envelope): the main conversation opened the lane rule and `lucind-result`, then every listed
+   `SKILL.md` (5 of 5 with Jev) with `view_file` before reading any source file and before its first
+   edit. Jev ran with `TYPESAFE_API_KEY` taken from `.env` by the caller: the binary only reads the
+   environment and does not load `.env` itself. Later findings:
+   - **Worker propagation, measured** (three lanes that launched two workers each, models
+     `gemini-3.8-flash-medium`, `claude-sonnet-5-5-low` and `gemini-3.8-flash-low`, a one-line canary
+     skill, read from the agy transcripts): the main conversation read the `SKILL.md` in 3 of 3 lanes,
+     no worker opened it (0 of 6), but the main wrote the rule text into each worker's
+     `invoke_subagent` prompt and 6 of 6 worker files followed it. So skills reach workers as copied
+     content, not as paths. Open: the canary is one line, and a long skill may be summarized or lose
+     rules when copied; repeat with a real long skill before trusting it.
+   - **`skills_loaded` is obsolete.** It came back `null` in every lane although the skills were really
+     read, so it is not evidence. lucind-ai never reads it; the schema still accepts it so older
+     envelopes validate. Measure skill loading from the transcripts, not from the envelope.
+   - Only if long skills lose rules in workers: force it with a hook (for example a PreToolUse that
+     blocks writes until every listed `SKILL.md` was read in that conversation). agy has no per-agent
+     hook scoping, so such a hook would also apply to the main conversation.
+4. **RTK support.** Install RTK as part of the lucind-ai setup (today it is wired by hand in the
    global Claude config: `@RTK.md` include plus the `rtk hook claude` PreToolUse hook).
-6. **Research gentle-ai reviews in depth.** Understand how receipt-driven development (RDD) works
+5. **Research gentle-ai reviews in depth.** Understand how receipt-driven development (RDD) works
    end to end: review lifecycle, receipts and lineage, consent, correction, and how it interacts
    with lucind-ai lanes and `accept`.
 

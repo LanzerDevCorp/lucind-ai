@@ -160,7 +160,7 @@
     "skills_loaded": {
       "type": "array",
       "items": { "type": "string" },
-      "description": "Skills loaded by the executor during lane execution."
+      "description": "Obsolete and ignored by lucind-ai. Kept so older envelopes validate. Agents report it unreliably, so do not use it as evidence."
     },
     "session_id": {
       "type": "string",

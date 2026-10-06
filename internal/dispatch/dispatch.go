@@ -22,6 +22,7 @@ type Options struct {
 	Allow      []string
 	Checks     []string
 	Model      string
+	Prompt     string
 	Brief      string
 	MinQuota   float64
 	Detach     bool
@@ -57,9 +58,68 @@ func ResetEnsureAgyQuotaForTesting() {
 	ensureAgyQuota = defaultQuotaEnsurer
 }
 
-func constructBrief(userBrief, laneID string, allow []string, absResultPath string, checks []string) string {
+func extractSkillsSection(prompt string) (string, string) {
+	lines := strings.Split(prompt, "\n")
+	skillsStart := -1
+	for i, line := range lines {
+		if strings.TrimRight(line, " \t\r") == "## Skills to load before work" {
+			skillsStart = i
+			break
+		}
+	}
+	if skillsStart == -1 {
+		return "", strings.TrimSpace(prompt)
+	}
+
+	skillsEnd := len(lines)
+	seenContent := false
+	for j := skillsStart + 1; j < len(lines); j++ {
+		trimmed := strings.TrimSpace(lines[j])
+		if strings.HasPrefix(trimmed, "#") || strings.HasPrefix(trimmed, "---") {
+			skillsEnd = j
+			break
+		}
+		if trimmed == "" {
+			if seenContent {
+				skillsEnd = j
+				break
+			}
+		} else {
+			seenContent = true
+		}
+	}
+
+	skillsSection := strings.TrimSpace(strings.Join(lines[skillsStart:skillsEnd], "\n"))
+	before := strings.TrimSpace(strings.Join(lines[:skillsStart], "\n"))
+	after := strings.TrimSpace(strings.Join(lines[skillsEnd:], "\n"))
+
+	var rest string
+	switch {
+	case before != "" && after != "":
+		rest = before + "\n\n" + after
+	case before != "":
+		rest = before
+	default:
+		rest = after
+	}
+
+	return skillsSection, rest
+}
+
+func constructPrompt(userPrompt, laneID string, turn int, allow []string, absResultPath string, checks []string) string {
 	var sb strings.Builder
-	sb.WriteString(strings.TrimRight(userBrief, "\n"))
+	fmt.Fprintf(&sb, "lucind-lane: %s turn: %d", laneID, turn)
+
+	skillsSec, rest := extractSkillsSection(userPrompt)
+	if skillsSec != "" {
+		sb.WriteString("\n\n")
+		sb.WriteString(skillsSec)
+	}
+	if rest != "" {
+		sb.WriteString("\n\n")
+		sb.WriteString(rest)
+	}
+
 	sb.WriteString("\n\n---\n## Lane Contract\n")
 	fmt.Fprintf(&sb, "- Lane ID: %s\n", laneID)
 	sb.WriteString("- Allowed globs:\n")
@@ -80,9 +140,9 @@ func constructBrief(userBrief, laneID string, allow []string, absResultPath stri
 	return sb.String()
 }
 
-// ConstructBrief formats the lane contract brief markdown.
-func ConstructBrief(userBrief, laneID string, allow []string, absResultPath string, checks []string) string {
-	return constructBrief(userBrief, laneID, allow, absResultPath, checks)
+// ConstructPrompt formats the lane contract prompt markdown.
+func ConstructPrompt(userPrompt, laneID string, turn int, allow []string, absResultPath string, checks []string) string {
+	return constructPrompt(userPrompt, laneID, turn, allow, absResultPath, checks)
 }
 
 // Dispatch executes the agy lane dispatch workflow in a herdr pane.
@@ -130,17 +190,46 @@ func Dispatch(ctx context.Context, opts Options, runner HerdrRunner) (Output, in
 		return Output{}, 1, fmt.Errorf("resolve model: %w", err)
 	}
 
-	// 4. Lane creation or continuation
-	var l lane.Lane
+	// 4. Continuation pre-validation and allow globs resolution
+	var loadedLane lane.Lane
 	isContinuation := opts.LaneID != ""
 	if isContinuation {
-		loadedLane, err := lane.Load(repoRoot, opts.LaneID)
+		var err error
+		loadedLane, err = lane.Load(repoRoot, opts.LaneID)
 		if err != nil {
 			return Output{}, 1, fmt.Errorf("load lane %s: %w", opts.LaneID, err)
 		}
 		if loadedLane.Status == lane.StatusAccepted || loadedLane.Status == lane.StatusRejected {
 			return Output{}, 1, fmt.Errorf("cannot continue lane %s with status %s", opts.LaneID, loadedLane.Status)
 		}
+	}
+
+	allowGlobs := opts.Allow
+	if isContinuation && len(allowGlobs) == 0 {
+		allowGlobs = loadedLane.Allow
+	}
+
+	userPrompt := opts.Prompt
+	if userPrompt == "" {
+		userPrompt = opts.Brief
+	}
+
+	// 5. Auto-skills selection BEFORE lane creation or mutation
+	var autoSkills autoSkillsOutcome
+	if opts.AutoSkills {
+		var err error
+		autoSkills, err = selectAutoSkills(ctx, repoRoot, userPrompt, allowGlobs)
+		if err != nil {
+			return Output{}, ExitAutoSkillsUnavailable, err
+		}
+		if autoSkills.sectionToInsert != "" {
+			userPrompt = insertSkillsSection(userPrompt, autoSkills.sectionToInsert)
+		}
+	}
+
+	// 6. Lane creation or continuation
+	var l lane.Lane
+	if isContinuation {
 		if loadedLane.Turn == 0 {
 			laneDir := lane.LaneDir(repoRoot, opts.LaneID)
 			resultFile := filepath.Join(laneDir, "result.json")
@@ -174,26 +263,22 @@ func Dispatch(ctx context.Context, opts Options, runner HerdrRunner) (Output, in
 		l = createdLane
 	}
 
-	// 5. Full prompt construction
+	// 7. Record auto-skills if enabled
+	if opts.AutoSkills {
+		recordAutoSkills(repoRoot, l, autoSkills, opts.Stderr)
+	}
+
+	// 8. Full prompt construction
 	resultRelPath := lane.ResultFilePath(repoRoot, l)
 	absResultPath, err := filepath.Abs(resultRelPath)
 	if err != nil {
 		return Output{}, 1, fmt.Errorf("resolve abs result path: %w", err)
 	}
 
-	userBrief := opts.Brief
-	if opts.AutoSkills {
-		userBrief = handleAutoSkills(ctx, repoRoot, l, userBrief, l.Allow, opts.Stderr)
-	}
-
-	briefText := constructBrief(userBrief, l.ID, l.Allow, absResultPath, l.Checks)
-	briefPath := filepath.Join(lane.LaneDir(repoRoot, l.ID), "brief.md")
-	if err := os.WriteFile(briefPath, []byte(briefText), 0644); err != nil {
-		return Output{}, 1, fmt.Errorf("write brief.md: %w", err)
-	}
-	absBriefPath, err := filepath.Abs(briefPath)
-	if err != nil {
-		return Output{}, 1, fmt.Errorf("resolve abs brief path: %w", err)
+	promptText := constructPrompt(userPrompt, l.ID, l.Turn, l.Allow, absResultPath, l.Checks)
+	promptPath := filepath.Join(lane.LaneDir(repoRoot, l.ID), "prompt.md")
+	if err := os.WriteFile(promptPath, []byte(promptText), 0644); err != nil {
+		return Output{}, 1, fmt.Errorf("write prompt.md: %w", err)
 	}
 
 	// 6. Pane management
@@ -242,8 +327,8 @@ func Dispatch(ctx context.Context, opts Options, runner HerdrRunner) (Output, in
 		}
 	}
 
-	promptText := fmt.Sprintf("Read and follow %s", absBriefPath)
-	if err := sendPrompt(ctx, runner, l.PaneID, promptText, absBriefPath); err != nil {
+	marker := fmt.Sprintf("lucind-lane: %s turn: %d", l.ID, l.Turn)
+	if err := sendPrompt(ctx, runner, l.PaneID, promptText, marker); err != nil {
 		return Output{}, 1, err
 	}
 
@@ -269,7 +354,7 @@ func Dispatch(ctx context.Context, opts Options, runner HerdrRunner) (Output, in
 // sendPrompt submits the prompt and has herdr confirm that agy started a turn
 // (working) or is blocked. When herdr reports an error (for example
 // agent_prompt_stalled) it does not resend blindly: it reads the pane and
-// resends once only if the brief path is absent, otherwise it treats the
+// resends once only if the marker line is absent, otherwise it treats the
 // prompt as delivered.
 func sendPrompt(ctx context.Context, runner HerdrRunner, paneID, text, marker string) error {
 	args := []string{

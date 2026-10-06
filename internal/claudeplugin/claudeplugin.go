@@ -14,30 +14,45 @@ func SkillDir(home string) string {
 	return filepath.Join(home, ".claude", "skills", "lucind")
 }
 
-// Install installs the Claude skill into ~/.claude/skills/lucind.
+// Install installs the Claude skill into ~/.claude/skills/lucind using VariantManual.
 func Install() (string, error) {
+	return InstallVariant(VariantManual)
+}
+
+// InstallVariant installs the Claude skill with the specified variant into ~/.claude/skills/lucind.
+func InstallVariant(v Variant) (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("resolve user home directory: %w", err)
 	}
-	return InstallHome(home)
+	return InstallHomeVariant(home, v)
 }
 
-// InstallHome installs the Claude skill into <home>/.claude/skills/lucind.
+// InstallHome installs the Claude skill into <home>/.claude/skills/lucind using VariantManual.
 func InstallHome(home string) (string, error) {
+	return InstallHomeVariant(home, VariantManual)
+}
+
+// InstallHomeVariant installs the Claude skill with the specified variant into <home>/.claude/skills/lucind.
+func InstallHomeVariant(home string, v Variant) (string, error) {
 	dir := SkillDir(home)
-	if err := installTo(dir); err != nil {
+	if err := installTo(dir, v); err != nil {
 		return "", err
 	}
 	return dir, nil
 }
 
-// InstallDir installs the Claude skill into targetDir.
+// InstallDir installs the Claude skill into targetDir using VariantManual.
 func InstallDir(targetDir string) error {
-	return installTo(targetDir)
+	return InstallDirVariant(targetDir, VariantManual)
 }
 
-func installTo(targetDir string) error {
+// InstallDirVariant installs the Claude skill with the specified variant into targetDir.
+func InstallDirVariant(targetDir string, v Variant) error {
+	return installTo(targetDir, v)
+}
+
+func installTo(targetDir string, v Variant) error {
 	targetDir = filepath.Clean(targetDir)
 
 	// Only targetDir itself is replaced when it is a symlink (the old Makefile linked it into
@@ -78,6 +93,13 @@ func installTo(targetDir string) error {
 		data, err := fs.ReadFile(sub, p)
 		if err != nil {
 			return fmt.Errorf("read embedded %s: %w", p, err)
+		}
+		if filepath.Base(p) == "SKILL.md" {
+			rendered, err := RenderSkill(data, v)
+			if err != nil {
+				return fmt.Errorf("render %s: %w", p, err)
+			}
+			data = rendered
 		}
 		if err := os.MkdirAll(filepath.Dir(destPath), 0o755); err != nil {
 			return fmt.Errorf("create directory %s: %w", filepath.Dir(destPath), err)

@@ -53,18 +53,22 @@ func TestInstall_HooksUseAbsoluteBinary(t *testing.T) {
 			Matcher string
 			Hooks   []struct{ Type, Command string }
 		}
-		Stop []struct{ Type, Command string }
+		PreInvocation []struct{ Type, Command string }
+		Stop          []struct{ Type, Command string }
 	}
 	if err := json.Unmarshal(data, &hooks); err != nil {
 		t.Fatalf("hooks.json does not parse: %v\n%s", err, data)
 	}
 	g, ok := hooks["lucind-hooks"]
-	if !ok || len(g.PreToolUse) != 1 || len(g.Stop) != 1 {
+	if !ok || len(g.PreToolUse) != 1 || len(g.PreInvocation) != 1 || len(g.Stop) != 1 {
 		t.Fatalf("unexpected hooks shape: %s", data)
 	}
 	quoted := `'/opt/lu cind/it'\''s/lucind-ai'`
 	if got := g.PreToolUse[0].Hooks[0].Command; got != quoted+" hook pre-tool-use" || g.PreToolUse[0].Matcher != "*" || g.PreToolUse[0].Hooks[0].Type != "command" {
 		t.Errorf("pre-tool-use command = %q", got)
+	}
+	if got := g.PreInvocation[0].Command; got != quoted+" hook pre-invocation" || g.PreInvocation[0].Type != "command" {
+		t.Errorf("pre-invocation command = %q", got)
 	}
 	if got := g.Stop[0].Command; got != quoted+" hook stop" || g.Stop[0].Type != "command" {
 		t.Errorf("stop command = %q", got)
@@ -151,6 +155,18 @@ func TestSetup_RegistersViaAgyPluginInstall(t *testing.T) {
 	}
 	if _, err := os.Stat(obsolete); !os.IsNotExist(err) {
 		t.Errorf("obsolete unloaded copy not removed: %v", err)
+	}
+}
+
+func TestSetup_NoImportedPluginsPlainText(t *testing.T) {
+	agy := &fakeAgy{list: "No imported plugins.\n", install: goodInstall}
+	dir, err := Setup(context.Background(), Options{StagingRoot: t.TempDir(), Bin: "/a/lucind-ai", Agy: agy})
+	if err != nil {
+		t.Fatalf("Setup: %v", err)
+	}
+	want := [][]string{{"plugin", "list"}, {"plugin", "install", dir}}
+	if !reflect.DeepEqual(agy.calls, want) {
+		t.Errorf("agy calls = %v, want %v", agy.calls, want)
 	}
 }
 

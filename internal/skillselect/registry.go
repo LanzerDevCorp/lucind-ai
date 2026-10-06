@@ -166,4 +166,3 @@ func ResolvePaths(skills []Skill) []Skill {
 	}
 	return resolved
 }
-

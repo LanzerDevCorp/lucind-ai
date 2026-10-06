@@ -119,7 +119,7 @@ type Envelope struct {
 	Questions       []Question       `json:"questions,omitempty"`
 	Deviations      []Deviation      `json:"deviations,omitempty"`
 	Findings        []Finding        `json:"findings,omitempty"`
-	SkillsLoaded    []string         `json:"skills_loaded,omitempty"`
+	SkillsLoaded    []string         `json:"skills_loaded,omitempty"` // obsolete, ignored by lucind-ai; kept so older envelopes validate
 	SessionID       string           `json:"session_id,omitempty"`
 	Interaction     *Interaction     `json:"interaction,omitempty"`
 }

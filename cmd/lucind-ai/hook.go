@@ -15,7 +15,7 @@ import (
 // 0, and the lane (LUCIND_LANE) decides whether it enforces anything.
 func hookDispatch(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		_, _ = fmt.Fprintln(stderr, "lucind-ai: hook: subcommand required (pre-tool-use|stop)")
+		_, _ = fmt.Fprintln(stderr, "lucind-ai: hook: subcommand required (pre-tool-use|pre-invocation|stop)")
 		_, _ = fmt.Fprintln(stdout, "{}")
 		return 0
 	}
@@ -24,6 +24,8 @@ func hookDispatch(ctx context.Context, args []string, stdin io.Reader, stdout, s
 	switch args[0] {
 	case "pre-tool-use":
 		handler = agyhook.PreToolUse
+	case "pre-invocation":
+		handler = agyhook.PreInvocation
 	case "stop":
 		handler = agyhook.Stop
 	default:

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -265,19 +266,48 @@ func TestClient_Non2xxStatus(t *testing.T) {
 	}
 }
 
-func TestKeyFromEnv(t *testing.T) {
-	orig := os.Getenv("TYPESAFE_API_KEY")
-	defer func() {
-		_ = os.Setenv("TYPESAFE_API_KEY", orig)
-	}()
+func TestResolveKey(t *testing.T) {
+	t.Run("env takes precedence over file", func(t *testing.T) {
+		tempXDG := t.TempDir()
+		t.Setenv("XDG_CONFIG_HOME", tempXDG)
+		lucindDir := filepath.Join(tempXDG, "lucind")
+		if err := os.MkdirAll(lucindDir, 0700); err != nil {
+			t.Fatalf("mkdir failed: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(lucindDir, "env"), []byte("TYPESAFE_API_KEY=file-key-123\n"), 0600); err != nil {
+			t.Fatalf("write env file failed: %v", err)
+		}
 
-	_ = os.Setenv("TYPESAFE_API_KEY", "env-test-key-999")
-	if got := skillselect.KeyFromEnv(); got != "env-test-key-999" {
-		t.Errorf("KeyFromEnv() = %q, want 'env-test-key-999'", got)
-	}
+		t.Setenv("TYPESAFE_API_KEY", "env-key-999")
+		if got := skillselect.ResolveKey(); got != "env-key-999" {
+			t.Errorf("ResolveKey() = %q, want 'env-key-999' (env takes precedence)", got)
+		}
+	})
 
-	_ = os.Unsetenv("TYPESAFE_API_KEY")
-	if got := skillselect.KeyFromEnv(); got != "" {
-		t.Errorf("KeyFromEnv() = %q, want empty string", got)
-	}
+	t.Run("file used when env unset", func(t *testing.T) {
+		tempXDG := t.TempDir()
+		t.Setenv("XDG_CONFIG_HOME", tempXDG)
+		lucindDir := filepath.Join(tempXDG, "lucind")
+		if err := os.MkdirAll(lucindDir, 0700); err != nil {
+			t.Fatalf("mkdir failed: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(lucindDir, "env"), []byte("TYPESAFE_API_KEY=file-key-456\n"), 0600); err != nil {
+			t.Fatalf("write env file failed: %v", err)
+		}
+
+		t.Setenv("TYPESAFE_API_KEY", "")
+		if got := skillselect.ResolveKey(); got != "file-key-456" {
+			t.Errorf("ResolveKey() = %q, want 'file-key-456'", got)
+		}
+	})
+
+	t.Run("empty string when both unset", func(t *testing.T) {
+		tempXDG := t.TempDir()
+		t.Setenv("XDG_CONFIG_HOME", tempXDG)
+		t.Setenv("TYPESAFE_API_KEY", "")
+
+		if got := skillselect.ResolveKey(); got != "" {
+			t.Errorf("ResolveKey() = %q, want empty string", got)
+		}
+	})
 }
