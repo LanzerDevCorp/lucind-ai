@@ -62,6 +62,18 @@ What exists is in [`product.md`](product.md).
   answers 401 or 403, the skill says to correct `~/.config/lucind/env` or use the new
   `lucind-ai install --reset-key` (terminal only, empty answer keeps the current key, warns when the environment
   variable overrides the file).
+- **Main conversation binding** (`feature/main-conversation-binding`): replaces the Stop hook's
+  transcript parsing (`feature/lane-stop-main-conversation`) with a binding lucind-ai owns. A new
+  `PreInvocation` hook (`lucind-ai hook pre-invocation`) writes the first conversation id of each
+  turn once to `<laneDir>/main-turn-<turn>` (`O_CREATE|O_EXCL`, race-free, `lane.json` untouched).
+  Stop compares its conversation id with that marker: equal is main, different is a worker (ignored
+  without nudging or consuming retries), no marker falls back to `fullyIdle` alone. The
+  `conversations/` cache and all transcript reads are gone. Measured on two real lanes (100 hook
+  events): `PreInvocation` fires for workers too, the payload has no parent id or prompt text, the
+  first event after dispatch is the main conversation, `ANTIGRAVITY_CONVERSATION_ID` equals the
+  hook's own id, and herdr exposes nothing per conversation. Accepted risk: a worker of the
+  previous turn still emitting `PreInvocation` before the new main conversation would be bound by
+  mistake; not measured.
 - **Superseded:** the multi-provider herdr work (`herdr-agent-factory`, `herdr-interactive-agents`)
   predates the agy-only contract; its interactive-pane and Stop-hook ideas survive in it.
 
@@ -73,20 +85,7 @@ What exists is in [`product.md`](product.md).
    orchestrator has to clean it. How often it matters is still unmeasured: agy only did it because
    the brief asked. Keep measuring on real tasks before adding anything.
 2. **Stale agy trust entries after a crash** in `~/.gemini/antigravity-cli/settings.json`.
-3. **Stops from other conversations** (fixed in `feature/lane-stop-main-conversation`). The Stop hook
-   now inspects `transcriptPath` step 0: main conversations contain `Read and follow .../.lucind/lanes/<id>/brief.md`
-   with source `USER_EXPLICIT` (or empty), while worker conversations contain `SYSTEM`/`SYSTEM_MESSAGE`
-   with `sender=`. Role classifications are cached in `<laneDir>/conversations/<id>`. Worker Stops
-   are ignored without nudging or consuming retries. Main conversation Stops with `fullyIdle=false` are
-   ignored while worker subagents run; only main Stops with `fullyIdle=true` decide done/retry/failed.
-   Continuation turns across differing main conversation IDs are resolved independently via the current
-   turn's brief marker.
-   **Owner review: this is a poor solution, replace it.** Classifying conversations by parsing step 0
-   of agy's private transcript format couples lucind-ai to undocumented internals (`source`, `type`,
-   the exact dispatch prompt wording) and breaks silently if any of them change. Look for a
-   supported signal instead: a parent/child id in the Stop payload, an agy hook or API that marks
-   subagents, or lucind-ai owning the main conversation id at dispatch time.
-4. **Make agy load skills first and pass them to workers.** Step 1 (send the prompt directly) is
+3. **Make agy load skills first and pass them to workers.** Step 1 (send the prompt directly) is
    done and measured, see the result below; what is left is worker propagation and the
    `skills_loaded` field. History of the problem, owner
    observation: agy does not follow the brief literally. Dispatch sends `Read and follow <brief.md>`,
@@ -114,9 +113,9 @@ What exists is in [`product.md`](product.md).
    - If worker propagation fails when a lane does launch workers, force it with a hook (for example
      a PreToolUse that blocks writes until every listed `SKILL.md` was read in that conversation).
    - Measure the main and worker conversations from the transcripts on a lane that launches workers.
-5. **RTK support.** Install RTK as part of the lucind-ai setup (today it is wired by hand in the
+4. **RTK support.** Install RTK as part of the lucind-ai setup (today it is wired by hand in the
    global Claude config: `@RTK.md` include plus the `rtk hook claude` PreToolUse hook).
-6. **Research gentle-ai reviews in depth.** Understand how receipt-driven development (RDD) works
+5. **Research gentle-ai reviews in depth.** Understand how receipt-driven development (RDD) works
    end to end: review lifecycle, receipts and lineage, consent, correction, and how it interacts
    with lucind-ai lanes and `accept`.
 

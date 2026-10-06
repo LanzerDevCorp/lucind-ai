@@ -56,17 +56,24 @@ does in the next turn would be bound by mistake. Not measured; documented as acc
 
 ## Tasks
 
-- [ ] **T1 — Binding and Stop classification.** `PreInvocation` handler, `hook pre-invocation` subcommand,
+- [x] **T1 — Binding and Stop classification.** `PreInvocation` handler, `hook pre-invocation` subcommand,
   plugin template entry, Stop rewrite, tests. Route: delegated lane (writer trigger: 2+ non-trivial files),
   `claude-sonnet-5-5-medium`.
-- [ ] **T2 — Docs.** `docs/ROADMAP.md` (move item 3 to Done, record the measurement) and `docs/product.md`.
+- [x] **T2 — Docs.** `docs/ROADMAP.md` (move item 3 to Done, record the measurement) and `docs/product.md`.
   Route: same lane, separate commit.
 
 ## Progress and evidence
 
-- Branch created; document and mirror written. No source changes yet.
+- Lane `20261006-004451-1151` (one lane for T1 and T2): done, accepted with attestations for
+  `golangci-lint run`, `CGO_ENABLED=0 go build ./...` and `go test ./... -race -count=1`.
+- RED seen by the writer: `undefined: PreInvocation` (hook tests), `unexpected hooks shape` (plugin template),
+  unknown subcommand (`hook pre-invocation`). GREEN after implementation.
+- Parent review: diff matches the design; `Turn` is incremented and saved before the prompt is sent
+  (`internal/dispatch/dispatch.go:254` vs `:278`), so the first `PreInvocation` of a continuation binds the new turn.
+- `rg 'transcriptPath|classifyConversation' internal/agyhook` (non-test): no matches.
+- Not verified end to end: a real lane with workers using the rebuilt binary and plugin (needs `make install`).
 - Review tier: pending (`gentle-ai review assess` after the work-unit commit).
 
 ## Next step
 
-Dispatch the lane for T1 and T2.
+Commit T1 and T2, then run one real lane that launches workers to confirm the binding in `hook.log`.

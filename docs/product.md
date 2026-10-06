@@ -36,7 +36,7 @@ Claude --accept--> receipt.json (accepted | rejected)
 | `accept --lane <id>` | Write `receipt.json`. Accepts only if the result is valid, every file changed since base tree matches `--allow`, and valid attestations match the final tree for all lane checks (otherwise running any missing checks); requires no attestation when zero checks were specified. |
 | `attest run -- <cmd>` / `attest verify --command <cmd>` | Run a command and sign `{command, exit code, tree hash}`; verify a matching passing attestation. See [`attestation.md`](attestation.md). |
 | `check [--out <path>]` | Run `lucind-checks.sh` (deprecated; scrubbed env, timeout, process-group kill). |
-| `hook pre-tool-use\|stop` | Handlers called by the agy plugin. Pass-through without `LUCIND_LANE`. |
+| `hook pre-tool-use\|pre-invocation\|stop` | Handlers called by the agy plugin. Pass-through without `LUCIND_LANE`. |
 | `plugin install [--dir <staging root>]` | Render the embedded agy plugin into a staging dir (`$XDG_DATA_HOME/lucind-ai/agy-plugin/lucind`) and register it with `agy plugin install` (lands in `~/.gemini/config/plugins/lucind/`; requires `agy` on PATH). A plugin merely dropped into `~/.gemini/antigravity-cli/plugins/` validates but is never loaded, so the obsolete copy there is removed. |
 | `install` | Flagless installer for Claude skill (auto/manual variant matching key setup), `lucind` agy plugin, and `lucind-roles` agy plugin. |
 | `--version` | Exact build (`git describe`). |
@@ -65,9 +65,14 @@ Embedded in the binary, installed globally by `plugin install`.
 - **PreToolUse**: denies writes outside the lane's globs (except the current turn's result
   file), protects all other `.lucind/**` paths, and denies reading the HMAC key or writing the
   attestations directory.
-- **Stop**: validates the current turn's result file; if missing or invalid it re-enters agy with
-  the schema error (max 2 times), then marks the lane `failed`. Logs the raw Stop payload in
-  `hook.log`.
+- **PreInvocation**: binds the main conversation of the current turn. The first conversation id
+  seen after a turn starts is written once to `<laneDir>/main-turn-<turn>` (`O_CREATE|O_EXCL`, no
+  `lane.json` write); later ones are ignored. It always prints `{}` and never injects steps.
+- **Stop**: ignores Stops from conversations other than the bound main one (workers), and while
+  the main one is not fully idle. With no marker for the turn it falls back to `fullyIdle` alone.
+  For the deciding Stop it validates the current turn's result file; if missing or invalid it
+  re-enters agy with the schema error (max 2 times), then marks the lane `failed`. Logs the raw
+  Stop payload in `hook.log`. The agy transcript is never read.
 - **Rule + skill** (`lucind-lane`, `lucind-result`): describe the result contract and
   `lucind-ai attest run`.
 
