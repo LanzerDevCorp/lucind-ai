@@ -62,3 +62,21 @@ func TestHookPreToolUse_InLaneDeniesOutsideAllow(t *testing.T) {
 		t.Fatalf("code=%d out=%q", code, out)
 	}
 }
+
+func TestHookPreInvocation_NoLaneReturnsEmpty(t *testing.T) {
+	if err := os.Unsetenv("LUCIND_LANE"); err != nil {
+		t.Fatalf("unsetenv LUCIND_LANE: %v", err)
+	}
+	code, out, stderr := runHook(t, []string{"pre-invocation"}, `{"conversationId":"main-1","workspacePaths":["/tmp"]}`)
+	if code != 0 || out != `{}` || stderr != "" {
+		t.Fatalf("code=%d out=%q stderr=%q", code, out, stderr)
+	}
+}
+
+func TestHookPreInvocation_InvalidInputFailsOpen(t *testing.T) {
+	t.Setenv("LUCIND_LANE", "20260101-120000-abcd")
+	code, out, _ := runHook(t, []string{"pre-invocation"}, `{not json`)
+	if code != 0 || out != `{}` {
+		t.Fatalf("code=%d out=%q", code, out)
+	}
+}
