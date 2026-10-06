@@ -54,13 +54,21 @@ Out: accept's check runner (`sh -c`), attestation format, CLI flags or output, u
 
 ## Tasks
 
-- [ ] **T1 — `internal/repo` module, callers migrated, accept seam.** Route: delegated lane (writer
+- [x] **T1 — `internal/repo` module, callers migrated, accept seam.** Route: delegated lane (writer
   trigger: 2+ non-trivial files across seven packages). Model: claude-sonnet-5-5-medium. RDD: off (clone-local).
+  Evidence: lane `20261006-053112-6615` (1 turn) accepted with attested `golangci-lint run`,
+  `CGO_ENABLED=0 go build ./...`, `go test ./... -race -count=1`, `test -z "$(gofmt -l internal cmd)"`;
+  parent spot check: no `"git"` outside `internal/repo`. Test edits were mechanical only
+  (`attest.TreeHash`/`RepoCommonDir` → `repo.*`, a local `repo` variable renamed to `repoPath`).
+  Commit `2c8d6ff`.
 
 ## Progress
 
 - 2026-10-05: feature document created; T1 dispatched.
+- Review notes: `cwdToplevel` (CLI) now converts a relative toplevel to absolute instead of erroring,
+  matching the former `attest.RepoToplevel`; `ChangedFiles` keeps the `git diff base..final:` message.
 
 ## Next step
 
-Review the lane diff against the acceptance criteria, accept, commit.
+Feature complete. Merge order into `dev`: `feature/lane-result-scope`, then `feature/repo-module`
+(stacked). Merge is the user's decision.
