@@ -12,11 +12,36 @@ import (
 
 	"github.com/LanzerDevCorp/lucind-ai/internal/attest"
 	"github.com/LanzerDevCorp/lucind-ai/internal/lane"
+	"github.com/LanzerDevCorp/lucind-ai/internal/repo"
 )
+
+// Trees is the seam between the accept verdict logic and the repository.
+type Trees interface {
+	// TreeHash returns the tree hash of the working tree at repoRoot.
+	TreeHash(ctx context.Context, repoRoot string) (string, error)
+	// ChangedFiles lists the paths that differ between the trees base and final.
+	ChangedFiles(ctx context.Context, repoRoot, base, final string) ([]string, error)
+}
+
+// gitTrees is the production Trees backed by internal/repo.
+type gitTrees struct{}
+
+func (gitTrees) TreeHash(ctx context.Context, repoRoot string) (string, error) {
+	return repo.TreeHash(ctx, repoRoot)
+}
+
+func (gitTrees) ChangedFiles(ctx context.Context, repoRoot, base, final string) ([]string, error) {
+	return repo.ChangedFiles(ctx, repoRoot, base, final)
+}
 
 // Accept verifies a lane and writes the acceptance receipt.
 // It returns verdict ("accepted" or "rejected"), the written receipt, reasons (if rejected), and any system error.
 func Accept(ctx context.Context, repoRoot, laneID string) (string, lane.Receipt, []string, error) {
+	return acceptWithTrees(ctx, repoRoot, laneID, gitTrees{})
+}
+
+// acceptWithTrees is Accept with the repository access injected through trees.
+func acceptWithTrees(ctx context.Context, repoRoot, laneID string, trees Trees) (string, lane.Receipt, []string, error) {
 	if repoRoot == "" {
 		repoRoot = "."
 	}
@@ -47,24 +72,16 @@ func Accept(ctx context.Context, repoRoot, laneID string) (string, lane.Receipt,
 	}
 
 	// 3. final_tree = tree hash now. changed_files = diff base_tree..final_tree
-	finalTree, err := attest.TreeHash(ctx, repoRoot)
+	finalTree, err := trees.TreeHash(ctx, repoRoot)
 	if err != nil {
 		return "", lane.Receipt{}, nil, fmt.Errorf("compute final tree hash: %w", err)
 	}
 
 	changedFiles := []string{}
 	if l.BaseTree != finalTree {
-		cmd := exec.CommandContext(ctx, "git", "-C", repoRoot, "diff", "--name-only", l.BaseTree, finalTree)
-		out, err := cmd.CombinedOutput()
+		changedFiles, err = trees.ChangedFiles(ctx, repoRoot, l.BaseTree, finalTree)
 		if err != nil {
-			return "", lane.Receipt{}, nil, fmt.Errorf("git diff %s..%s: %w: %s", l.BaseTree, finalTree, err, strings.TrimSpace(string(out)))
-		}
-		lines := strings.Split(strings.TrimSpace(string(out)), "\n")
-		for _, line := range lines {
-			line = strings.TrimSpace(line)
-			if line != "" {
-				changedFiles = append(changedFiles, line)
-			}
+			return "", lane.Receipt{}, nil, err
 		}
 	}
 

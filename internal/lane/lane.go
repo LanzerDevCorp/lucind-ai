@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/LanzerDevCorp/lucind-ai/internal/attest"
+	"github.com/LanzerDevCorp/lucind-ai/internal/repo"
 	"github.com/LanzerDevCorp/lucind-ai/internal/result"
 )
 
@@ -235,19 +235,19 @@ func AtomicWriteJSON(destPath string, v any) error {
 	return nil
 }
 
-// Create finds the git toplevel for cwd, computes base tree hash using attest.TreeHash,
+// Create finds the git toplevel for cwd, computes base tree hash using repo.TreeHash,
 // generates a lane id, initializes a Lane with Version: 1, Status: "running", timestamps,
 // saves to .lucind/lanes/<id>/lane.json, and returns the Lane.
 func Create(ctx context.Context, cwd string, allow []string, model string, checks ...string) (Lane, error) {
 	if cwd == "" {
 		cwd = "."
 	}
-	root, err := attest.RepoToplevel(ctx, cwd)
+	root, err := repo.Toplevel(ctx, cwd)
 	if err != nil {
 		return Lane{}, fmt.Errorf("resolve repo toplevel for %s: %w", cwd, err)
 	}
 
-	baseTree, err := attest.TreeHash(ctx, root)
+	baseTree, err := repo.TreeHash(ctx, root)
 	if err != nil {
 		return Lane{}, fmt.Errorf("compute base tree hash for %s: %w", root, err)
 	}

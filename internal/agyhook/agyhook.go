@@ -22,6 +22,7 @@ import (
 
 	"github.com/LanzerDevCorp/lucind-ai/internal/attest"
 	"github.com/LanzerDevCorp/lucind-ai/internal/lane"
+	"github.com/LanzerDevCorp/lucind-ai/internal/repo"
 )
 
 // MaxRetries is how many times Stop re-enters the agent loop for a missing
@@ -102,7 +103,7 @@ func laneRoot(ctx context.Context, p payload) (string, error) {
 	if len(p.WorkspacePaths) == 0 || p.WorkspacePaths[0] == "" {
 		return "", errors.New("payload has no workspacePaths")
 	}
-	root, err := attest.RepoToplevel(ctx, p.WorkspacePaths[0])
+	root, err := repo.Toplevel(ctx, p.WorkspacePaths[0])
 	if err != nil {
 		return "", err
 	}

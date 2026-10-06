@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/LanzerDevCorp/lucind-ai/internal/attest"
 	"github.com/LanzerDevCorp/lucind-ai/internal/executor"
 	"github.com/LanzerDevCorp/lucind-ai/internal/lane"
+	"github.com/LanzerDevCorp/lucind-ai/internal/repo"
 )
 
 // Options holds parameters for dispatching a lane.
@@ -179,7 +179,7 @@ func Dispatch(ctx context.Context, opts Options, runner HerdrRunner) (Output, in
 		runner = DefaultHerdrRunner{}
 	}
 
-	repoRoot, err := attest.RepoToplevel(ctx, cwd)
+	repoRoot, err := repo.Toplevel(ctx, cwd)
 	if err != nil {
 		return Output{}, 1, fmt.Errorf("resolve repo root: %w", err)
 	}
