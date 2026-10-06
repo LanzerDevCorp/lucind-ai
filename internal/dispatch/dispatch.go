@@ -199,7 +199,7 @@ func Dispatch(ctx context.Context, opts Options, runner HerdrRunner) (Output, in
 		if err != nil {
 			return Output{}, 1, fmt.Errorf("load lane %s: %w", opts.LaneID, err)
 		}
-		if loadedLane.Status == lane.StatusAccepted || loadedLane.Status == lane.StatusRejected {
+		if !loadedLane.CanContinue() {
 			return Output{}, 1, fmt.Errorf("cannot continue lane %s with status %s", opts.LaneID, loadedLane.Status)
 		}
 	}
@@ -230,29 +230,8 @@ func Dispatch(ctx context.Context, opts Options, runner HerdrRunner) (Output, in
 	// 6. Lane creation or continuation
 	var l lane.Lane
 	if isContinuation {
-		if loadedLane.Turn == 0 {
-			laneDir := lane.LaneDir(repoRoot, opts.LaneID)
-			resultFile := filepath.Join(laneDir, "result.json")
-			prevFile := filepath.Join(laneDir, "result.prev.json")
-			if err := os.Rename(resultFile, prevFile); err != nil && !errors.Is(err, os.ErrNotExist) {
-				return Output{}, 1, fmt.Errorf("rename previous result: %w", err)
-			}
-			loadedLane.Turn = 1
-		} else {
-			loadedLane.Turn++
-		}
-		loadedLane.Status = lane.StatusRunning
-		loadedLane.Retries = 0
-		loadedLane.Continues = 0
-		loadedLane.LastStopAt = nil
-		if len(opts.Checks) > 0 {
-			loadedLane.Checks = opts.Checks
-		}
-		if len(opts.Allow) > 0 {
-			loadedLane.Allow = opts.Allow
-		}
-		if err := loadedLane.Save(repoRoot); err != nil {
-			return Output{}, 1, fmt.Errorf("save lane %s: %w", opts.LaneID, err)
+		if err := loadedLane.BeginTurn(repoRoot, opts.Allow, opts.Checks); err != nil {
+			return Output{}, 1, fmt.Errorf("begin continuation turn %s: %w", opts.LaneID, err)
 		}
 		l = loadedLane
 	} else {

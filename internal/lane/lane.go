@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/LanzerDevCorp/lucind-ai/internal/attest"
-	"github.com/LanzerDevCorp/lucind-ai/internal/result"
 )
 
 // Lane represents a managed execution lane.
@@ -323,28 +322,10 @@ func LoadReceipt(root, id string) (Receipt, error) {
 }
 
 // MarkStopped marks a stopped lane as done or failed based on current turn result validation.
-// It loads the lane from root, validates the current turn's result file using result.Read,
-// updates lane status and UpdatedAt timestamp, saves the lane, and returns the final status.
 func MarkStopped(root, id string) (Status, error) {
 	lane, err := Load(root, id)
 	if err != nil {
 		return Status(""), err
 	}
-
-	laneDir := LaneDir(root, id)
-	env, err := result.Read(os.DirFS(laneDir), ResultFileName(lane.Turn))
-
-	finalStatus := StatusDone
-	if err != nil || env.Status != "done" {
-		finalStatus = StatusFailed
-	}
-
-	lane.Status = finalStatus
-	lane.UpdatedAt = time.Now().UTC()
-
-	if err := Save(root, lane); err != nil {
-		return Status(""), fmt.Errorf("save lane: %w", err)
-	}
-
-	return finalStatus, nil
+	return lane.MarkStopped(root)
 }

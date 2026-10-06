@@ -22,15 +22,14 @@ import (
 
 	"github.com/LanzerDevCorp/lucind-ai/internal/attest"
 	"github.com/LanzerDevCorp/lucind-ai/internal/lane"
-	"github.com/LanzerDevCorp/lucind-ai/internal/result"
 )
 
 // MaxRetries is how many times Stop re-enters the agent loop for a missing
 // or schema-invalid result.json before the lane is marked failed.
 const (
-	MaxRetries        = 2
-	RetryQuietWindow  = 60 * time.Second
-	MaxTotalContinues = 10
+	MaxRetries        = lane.MaxRetries
+	RetryQuietWindow  = lane.RetryQuietWindow
+	MaxTotalContinues = lane.MaxTotalContinues
 )
 
 var now = time.Now
@@ -339,56 +338,25 @@ func Stop(ctx context.Context, laneID string, stdin []byte) []byte {
 	}
 
 	resultPath := lane.ResultFilePath(root, l)
-	_, readErr := result.Read(os.DirFS(lane.LaneDir(root, laneID)), lane.ResultFileName(l.Turn))
-	invalid := readErr != nil
-
-	if invalid {
-		if l.LastStopAt != nil && now().Sub(*l.LastStopAt) >= RetryQuietWindow {
-			dur := now().Sub(*l.LastStopAt)
-			l.Retries = 0
-			logf(root, laneID, "stop: retry budget reset after %v without a counted stop", dur)
-		}
-
-		if l.Retries < MaxRetries && l.Continues < MaxTotalContinues {
-			l.Retries++
-			l.Continues++
-			stopTime := now().UTC()
-			l.LastStopAt = &stopTime
-			l.UpdatedAt = now().UTC()
-			if err := l.Save(root); err != nil {
-				logf(root, laneID, "stop: save retries: %v", err)
-				return end()
-			}
-			msg := readErr.Error()
-			if len(msg) > 1024 {
-				msg = strings.ToValidUTF8(msg[:1024], "")
-			}
-			if errors.Is(readErr, fs.ErrNotExist) {
-				msg = "the file does not exist"
-			}
-			logf(root, laneID, "stop: retry %d/%d: %s", l.Retries, MaxRetries, msg)
-			return cont(fmt.Sprintf("The result envelope at %s is missing or invalid: %s. Write a valid envelope that satisfies the result schema (see the lucind-result skill) to that exact path before stopping.", resultPath, msg))
-		}
-
-		status, err := lane.MarkStopped(root, laneID)
-		if err != nil {
-			logf(root, laneID, "stop: mark stopped: %v", err)
-			return end()
-		}
-		limit := "retries"
-		if l.Continues >= MaxTotalContinues {
-			limit = "total continues"
-		}
-		logf(root, laneID, "stop: lane marked %s (%s, retries=%d)", status, limit, l.Retries)
-		return end()
-	}
-
-	// Valid result (!invalid)
-	status, err := lane.MarkStopped(root, laneID)
+	dec, err := l.RecordStop(root, now())
 	if err != nil {
-		logf(root, laneID, "stop: mark stopped: %v", err)
+		logf(root, laneID, "stop: record stop: %v", err)
 		return end()
 	}
-	logf(root, laneID, "stop: lane marked %s (retries=%d)", status, l.Retries)
+
+	if dec.QuietWindowReset {
+		logf(root, laneID, "stop: retry budget reset after %v without a counted stop", dec.QuietWindowDur)
+	}
+
+	if dec.Action == lane.StopActionContinue {
+		logf(root, laneID, "stop: retry %d/%d: %s", dec.Retries, MaxRetries, dec.Reason)
+		return cont(fmt.Sprintf("The result envelope at %s is missing or invalid: %s. Write a valid envelope that satisfies the result schema (see the lucind-result skill) to that exact path before stopping.", resultPath, dec.Reason))
+	}
+
+	if dec.LimitExhausted != "" {
+		logf(root, laneID, "stop: lane marked %s (%s, retries=%d)", dec.Status, dec.LimitExhausted, dec.Retries)
+	} else {
+		logf(root, laneID, "stop: lane marked %s (retries=%d)", dec.Status, dec.Retries)
+	}
 	return end()
 }
