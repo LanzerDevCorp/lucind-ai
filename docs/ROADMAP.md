@@ -86,8 +86,8 @@ What exists is in [`product.md`](product.md).
    the brief asked. Keep measuring on real tasks before adding anything.
 2. **Stale agy trust entries after a crash** in `~/.gemini/antigravity-cli/settings.json`.
 3. **Make agy load skills first and pass them to workers.** Step 1 (send the prompt directly) is
-   done and measured, see the result below; what is left is worker propagation and the
-   `skills_loaded` field. History of the problem, owner
+   done and measured, see the result below. Worker propagation was measured too, and the
+   `skills_loaded` field is obsolete (see the end of this item). History of the problem, owner
    observation: agy does not follow the brief literally. Dispatch sends `Read and follow <brief.md>`,
    and agy does not read the `## Skills to load before work` files before starting, even with the
    section right after the title. Evaluate sending the brief content itself as the prompt (instead
@@ -105,14 +105,20 @@ What exists is in [`product.md`](product.md).
    envelope): the main conversation opened the lane rule and `lucind-result`, then every listed
    `SKILL.md` (5 of 5 with Jev) with `view_file` before reading any source file and before its first
    edit. Jev ran with `TYPESAFE_API_KEY` taken from `.env` by the caller: the binary only reads the
-   environment and does not load `.env` itself. Still open:
-   - Worker propagation is unmeasured: neither probe launched a worker subagent (one conversation
-     only), so the "does not pass the skills to workers" failure was not exercised.
-   - `skills_loaded` still came back `null` although the skills were really read (agy listed them
-     in `done_criteria` instead), so the worker contract must require that field.
-   - If worker propagation fails when a lane does launch workers, force it with a hook (for example
-     a PreToolUse that blocks writes until every listed `SKILL.md` was read in that conversation).
-   - Measure the main and worker conversations from the transcripts on a lane that launches workers.
+   environment and does not load `.env` itself. Later findings:
+   - **Worker propagation, measured** (three lanes that launched two workers each, models
+     `gemini-3.8-flash-medium`, `claude-sonnet-5-5-low` and `gemini-3.8-flash-low`, a one-line canary
+     skill, read from the agy transcripts): the main conversation read the `SKILL.md` in 3 of 3 lanes,
+     no worker opened it (0 of 6), but the main wrote the rule text into each worker's
+     `invoke_subagent` prompt and 6 of 6 worker files followed it. So skills reach workers as copied
+     content, not as paths. Open: the canary is one line, and a long skill may be summarized or lose
+     rules when copied; repeat with a real long skill before trusting it.
+   - **`skills_loaded` is obsolete.** It came back `null` in every lane although the skills were really
+     read, so it is not evidence. lucind-ai never reads it; the schema still accepts it so older
+     envelopes validate. Measure skill loading from the transcripts, not from the envelope.
+   - Only if long skills lose rules in workers: force it with a hook (for example a PreToolUse that
+     blocks writes until every listed `SKILL.md` was read in that conversation). agy has no per-agent
+     hook scoping, so such a hook would also apply to the main conversation.
 4. **RTK support.** Install RTK as part of the lucind-ai setup (today it is wired by hand in the
    global Claude config: `@RTK.md` include plus the `rtk hook claude` PreToolUse hook).
 5. **Research gentle-ai reviews in depth.** Understand how receipt-driven development (RDD) works
