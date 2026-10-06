@@ -51,13 +51,21 @@ other subcommands' behavior, `openspec/**` archives.
 
 ## Tasks
 
-- [ ] **T1 — Dispatch outcome policy, CLI cleanup, delete `check`.** Route: delegated lane (writer
+- [x] **T1 — Dispatch outcome policy, CLI cleanup, delete `check`.** Route: delegated lane (writer
   trigger: 2+ non-trivial files). Model: gemini-3.8-flash-high. RDD: off (clone-local).
+  Evidence: lane `20261006-053850-ec5e` (1 turn) accepted with attested `golangci-lint run`,
+  `CGO_ENABLED=0 go build ./...`, `go test ./... -race -count=1`, gofmt check. Deleted tests:
+  `internal/check/check_test.go`, five `TestCheck*` in `cli_test.go`, `internal/dispatch/model_test.go`
+  (coverage confirmed and extended in `internal/executor/model_test.go`). Other test edits mechanical
+  (`Wait` without runner, `waitRun` signature, `Brief` → `Prompt`). Commit `abd8cb4`.
 
 ## Progress
 
 - 2026-10-05: feature document created; T1 dispatched.
+- Review: the lane collapsed the `skillselect.Input{Brief: ...}` literal onto one line and added
+  `// skillselect.Input` comments in `skills_test.go` only to pass a `\bBrief\b` rg check that wrongly
+  matched that unrelated field. Parent reverted both before accept; the rg check was the defect.
 
 ## Next step
 
-Review the lane diff against the acceptance criteria, accept, commit.
+Feature complete. Merge into `dev` is the user's decision. Remaining review candidate: 5 (`install.Run`).
