@@ -71,9 +71,12 @@ does in the next turn would be bound by mistake. Not measured; documented as acc
 - Parent review: diff matches the design; `Turn` is incremented and saved before the prompt is sent
   (`internal/dispatch/dispatch.go:254` vs `:278`), so the first `PreInvocation` of a continuation binds the new turn.
 - `rg 'transcriptPath|classifyConversation' internal/agyhook` (non-test): no matches.
-- Not verified end to end: a real lane with workers using the rebuilt binary and plugin (needs `make install`).
+- End to end, real lane `20261006-004952-c10a` (`gemini-3.8-flash-low`, binary `d87fbfc`, 2 workers): `hook.log`
+  shows `pre-invocation: bound main conversation e376142c` for turn 1, two `stop: ignored worker conversation`
+  lines, two `main conversation not fully idle` lines, then `lane marked done (retries=0)`. `main-turn-1` holds the
+  main id and no `conversations/` directory exists. Not covered: a continuation turn with a previous-turn worker alive.
 - Review tier: pending (`gentle-ai review assess` after the work-unit commit).
 
 ## Next step
 
-Commit T1 and T2, then run one real lane that launches workers to confirm the binding in `hook.log`.
+Merge decision pending (push and PR are the owner's). Optional: measure a continuation turn with a previous-turn worker alive.
