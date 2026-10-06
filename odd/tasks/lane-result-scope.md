@@ -51,13 +51,20 @@ Out: git seam (candidate 3), CLI, schema or file name changes, user-visible beha
 
 ## Tasks
 
-- [ ] **T1 — Current result accessor and scope rule in `lane`, callers migrated.** Route: delegated
+- [x] **T1 — Current result accessor and scope rule in `lane`, callers migrated.** Route: delegated
   lane (writer trigger: 2+ non-trivial files across four packages). RDD: off (clone-local).
+  Evidence: lane `20261006-051018-ef26` (gemini-3.8-flash-high, 1 turn) accepted with attested
+  `golangci-lint run`, `CGO_ENABLED=0 go build ./...`, `go test ./... -race -count=1` on the final
+  tree; both rg checks printed nothing; no existing test assertion edited. Commit `c4ac84b`.
 
 ## Progress
 
 - 2026-10-05: feature document created; T1 dispatched.
+- Parent polish before accept (inline, mechanical): doc comments on `ResultOutcome`, `CurrentResult`,
+  `IsStatePath`, `InScope`; corrected the legacy path in the `result` package doc to
+  `.lucind/lanes/<id>/result.json`; `gofmt -w` on `lane_test.go` and `lifecycle_test.go` (the latter
+  was left unformatted by `feature/lane-lifecycle`).
 
 ## Next step
 
-Review the lane diff against the acceptance criteria, accept, commit.
+Feature complete. Merge into `dev` is the user's decision. Follow-up: candidate 3 (git seam).
