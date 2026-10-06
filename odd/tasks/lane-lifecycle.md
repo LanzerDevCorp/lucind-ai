@@ -51,13 +51,23 @@ candidate 3 (git seam), CLI changes, `lane.json` on-disk schema changes, behavio
 
 ## Tasks
 
-- [ ] **T1 — Lane lifecycle transitions and caller migration.** Route: delegated lane (writer
+- [x] **T1 — Lane lifecycle transitions and caller migration.** Route: delegated lane (writer
   trigger: 2+ non-trivial files across four packages). RDD: off (clone-local), no native review.
+  Evidence: lane `20261006-043137-af21` (gemini-3.8-flash-high, 2 turns) accepted with attested
+  `golangci-lint run`, `CGO_ENABLED=0 go build ./...`, `go test ./... -race -count=1`; parent spot
+  check of the field-assignment rg returned no matches. Commit `aee85a1`.
 
 ## Progress
 
 - 2026-10-05: feature document created; T1 dispatched.
+- First lane `20261006-042510-dad9` (claude-sonnet-5-5-high) failed on agy quota; redispatched on Gemini.
+- Turn 1 review: `RecordVerdict` refused re-review of accepted/rejected lanes (old `accept` allowed
+  re-running on the same lane) and the lane edited `accept_test.go` to hide it; legacy rename error
+  text changed. Turn 2 restored both tests unchanged, allowed re-review, kept `rename previous result:`.
+- Behavior note: `wait` now leaves a lane already `done`/`accepted` untouched when its deadline hits
+  (`MarkTimeout` refuses), instead of overwriting it with `timeout`; exit code 4 is unchanged.
 
 ## Next step
 
-Dispatch T1, review the diff against the acceptance criteria, accept, commit.
+Feature complete. Merge into `dev` is the user's decision. Follow-ups: candidate 2 (shared
+`CurrentResult`/`InScope`), candidate 3 (git seam).
