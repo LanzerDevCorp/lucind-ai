@@ -48,7 +48,7 @@ func waitLoop(ctx context.Context, repoRoot, laneID, cwd string, timeout time.Du
 	for {
 		l, err := lane.Load(repoRoot, laneID)
 		if err != nil {
-			return Output{}, 1, fmt.Errorf("load lane %s: %w", laneID, err)
+			return Output{}, ExitError, fmt.Errorf("load lane %s: %w", laneID, err)
 		}
 
 		absResultPath, _ := filepath.Abs(lane.ResultFilePath(repoRoot, l))
@@ -71,18 +71,18 @@ func waitLoop(ctx context.Context, repoRoot, laneID, cwd string, timeout time.Du
 		if l.Status == lane.StatusDone {
 			_, outcome, _ := l.CurrentResult(repoRoot)
 			if outcome == lane.ResultOutcomeDone {
-				return makeOut(string(lane.StatusDone)), 0, nil
+				return makeOut(string(lane.StatusDone)), ExitDone, nil
 			}
-			return makeOut(string(lane.StatusFailed)), 3, nil
+			return makeOut(string(lane.StatusFailed)), ExitFailed, nil
 		}
 		if l.Status == lane.StatusFailed {
 			_, outcome, _ := l.CurrentResult(repoRoot)
 			if outcome == lane.ResultOutcomeDone {
 				_, _ = lane.MarkStopped(repoRoot, laneID)
-				return makeOut(string(lane.StatusDone)), 0, nil
+				return makeOut(string(lane.StatusDone)), ExitDone, nil
 			}
 			if outcome == lane.ResultOutcomeNotDone {
-				return makeOut(string(lane.StatusFailed)), 3, nil
+				return makeOut(string(lane.StatusFailed)), ExitFailed, nil
 			}
 
 			// Trade-off: a genuine failure is reported up to exhaustionGrace later.
@@ -93,33 +93,33 @@ func waitLoop(ctx context.Context, repoRoot, laneID, cwd string, timeout time.Du
 			select {
 			case <-ctx.Done():
 				_ = l.MarkTimeout(repoRoot)
-				return makeOut(string(lane.StatusTimeout)), 4, nil
+				return makeOut(string(lane.StatusTimeout)), ExitTimeout, nil
 			default:
 			}
 
 			if time.Now().After(deadline) && !graceDeadline.Before(deadline) {
 				_ = l.MarkTimeout(repoRoot)
-				return makeOut(string(lane.StatusTimeout)), 4, nil
+				return makeOut(string(lane.StatusTimeout)), ExitTimeout, nil
 			}
 
 			if !time.Now().Before(graceDeadline) {
-				return makeOut(string(lane.StatusFailed)), 3, nil
+				return makeOut(string(lane.StatusFailed)), ExitFailed, nil
 			}
 		}
 		if l.Status == lane.StatusTimeout {
-			return makeOut(string(lane.StatusTimeout)), 4, nil
+			return makeOut(string(lane.StatusTimeout)), ExitTimeout, nil
 		}
 
 		select {
 		case <-ctx.Done():
 			_ = l.MarkTimeout(repoRoot)
-			return makeOut(string(lane.StatusTimeout)), 4, nil
+			return makeOut(string(lane.StatusTimeout)), ExitTimeout, nil
 		default:
 		}
 
 		if time.Now().After(deadline) {
 			_ = l.MarkTimeout(repoRoot)
-			return makeOut(string(lane.StatusTimeout)), 4, nil
+			return makeOut(string(lane.StatusTimeout)), ExitTimeout, nil
 		}
 
 		sleepFunc(pollInterval)
@@ -127,22 +127,22 @@ func waitLoop(ctx context.Context, repoRoot, laneID, cwd string, timeout time.Du
 }
 
 // Wait polls lane status until done, failed, or timeout.
-func Wait(ctx context.Context, repoRoot, laneID string, timeout time.Duration, runner HerdrRunner) (Output, int, error) {
+func Wait(ctx context.Context, repoRoot, laneID string, timeout time.Duration) (Output, int, error) {
 	if os.Getenv("HERDR_ENV") != "1" {
-		return Output{}, 1, errors.New("herdr is the only supported runtime: HERDR_ENV must be set to 1")
+		return Output{}, ExitError, errors.New("herdr is the only supported runtime: HERDR_ENV must be set to 1")
 	}
 
 	if repoRoot == "" {
 		root, err := repo.Toplevel(ctx, ".")
 		if err != nil {
-			return Output{}, 1, fmt.Errorf("resolve repo root: %w", err)
+			return Output{}, ExitError, fmt.Errorf("resolve repo root: %w", err)
 		}
 		repoRoot = root
 	}
 
 	l, err := lane.Load(repoRoot, laneID)
 	if err != nil {
-		return Output{}, 1, fmt.Errorf("load lane %s: %w", laneID, err)
+		return Output{}, ExitError, fmt.Errorf("load lane %s: %w", laneID, err)
 	}
 
 	return waitLoop(ctx, repoRoot, laneID, l.Cwd, timeout)

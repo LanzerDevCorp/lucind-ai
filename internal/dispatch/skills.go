@@ -14,14 +14,6 @@ import (
 	"github.com/LanzerDevCorp/lucind-ai/internal/skillselect"
 )
 
-const (
-	ExitDone                  = 0
-	ExitError                 = 1
-	ExitFailed                = 3
-	ExitTimeout               = 4
-	ExitAutoSkillsUnavailable = 5
-)
-
 // ErrAutoSkillsUnavailable is the sentinel error returned when automatic skill selection fails.
 var ErrAutoSkillsUnavailable = errors.New("auto-skills unavailable")
 

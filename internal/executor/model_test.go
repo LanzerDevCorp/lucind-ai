@@ -103,4 +103,16 @@ func TestResolveModel(t *testing.T) {
 			t.Fatal("ResolveModel(\"\") with invalid env error = nil, want error")
 		}
 	})
+
+	t.Run("all known models resolve", func(t *testing.T) {
+		for _, m := range executor.KnownModels() {
+			got, err := executor.ResolveModel(m)
+			if err != nil {
+				t.Errorf("ResolveModel(%q) unexpected error: %v", m, err)
+			}
+			if got != m {
+				t.Errorf("ResolveModel(%q) = %q, want %q", m, got, m)
+			}
+		}
+	})
 }

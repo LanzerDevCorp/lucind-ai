@@ -16,7 +16,7 @@ import (
 
 func TestWait_HerdrEnvMissing(t *testing.T) {
 	t.Setenv("HERDR_ENV", "")
-	_, _, err := dispatch.Wait(context.Background(), "", "20261003-120000-abcd", time.Second, nil)
+	_, _, err := dispatch.Wait(context.Background(), "", "20261003-120000-abcd", time.Second)
 	if err == nil {
 		t.Fatal("expected error when HERDR_ENV is missing, got nil")
 	}
@@ -51,8 +51,7 @@ func TestWait_Done(t *testing.T) {
 	}, 1*time.Millisecond)
 	defer dispatch.ResetSleepForTesting()
 
-	runner := newFakeHerdrRunner()
-	out, exitCode, err := dispatch.Wait(context.Background(), repoDir, l.ID, 5*time.Second, runner)
+	out, exitCode, err := dispatch.Wait(context.Background(), repoDir, l.ID, 5*time.Second)
 	if err != nil {
 		t.Fatalf("unexpected Wait error: %v", err)
 	}
@@ -133,8 +132,7 @@ func TestWait_Failed(t *testing.T) {
 	}, 1*time.Millisecond)
 	defer dispatch.ResetSleepForTesting()
 
-	runner := newFakeHerdrRunner()
-	out, exitCode, err := dispatch.Wait(context.Background(), repoDir, l.ID, 5*time.Second, runner)
+	out, exitCode, err := dispatch.Wait(context.Background(), repoDir, l.ID, 5*time.Second)
 	if err != nil {
 		t.Fatalf("unexpected Wait error: %v", err)
 	}
@@ -175,7 +173,7 @@ func TestWait_Timeout(t *testing.T) {
 	defer dispatch.ResetSleepForTesting()
 
 	runner := newFakeHerdrRunner()
-	out, exitCode, err := dispatch.Wait(ctx, repoDir, l.ID, 1*time.Hour, runner)
+	out, exitCode, err := dispatch.Wait(ctx, repoDir, l.ID, 1*time.Hour)
 	if err != nil {
 		t.Fatalf("unexpected Wait error: %v", err)
 	}
@@ -224,7 +222,7 @@ func TestDispatch_BlockingWait_TimeoutNeverClosesPanes(t *testing.T) {
 
 	opts := dispatch.Options{
 		Cwd:     repoDir,
-		Brief:   "Test timeout",
+		Prompt:  "Test timeout",
 		Detach:  false,
 		Timeout: 10 * time.Minute,
 	}
@@ -269,8 +267,7 @@ func TestWait_Failed_ValidDoneEnvelope(t *testing.T) {
 	dispatch.SetExhaustionGraceForTesting(20 * time.Millisecond)
 	defer dispatch.ResetExhaustionGraceForTesting()
 
-	runner := newFakeHerdrRunner()
-	out, exitCode, err := dispatch.Wait(context.Background(), repoDir, l.ID, 5*time.Second, runner)
+	out, exitCode, err := dispatch.Wait(context.Background(), repoDir, l.ID, 5*time.Second)
 	if err != nil {
 		t.Fatalf("unexpected Wait error: %v", err)
 	}
@@ -319,8 +316,7 @@ func TestWait_Failed_ValidNonDoneEnvelope(t *testing.T) {
 	}, 1*time.Millisecond)
 	defer dispatch.ResetSleepForTesting()
 
-	runner := newFakeHerdrRunner()
-	out, exitCode, err := dispatch.Wait(context.Background(), repoDir, l.ID, 5*time.Second, runner)
+	out, exitCode, err := dispatch.Wait(context.Background(), repoDir, l.ID, 5*time.Second)
 	if err != nil {
 		t.Fatalf("unexpected Wait error: %v", err)
 	}
@@ -365,8 +361,7 @@ func TestWait_Failed_NoEnvelope_EnvelopeAppears(t *testing.T) {
 	}, 1*time.Millisecond)
 	defer dispatch.ResetSleepForTesting()
 
-	runner := newFakeHerdrRunner()
-	out, exitCode, err := dispatch.Wait(context.Background(), repoDir, l.ID, 5*time.Second, runner)
+	out, exitCode, err := dispatch.Wait(context.Background(), repoDir, l.ID, 5*time.Second)
 	if err != nil {
 		t.Fatalf("unexpected Wait error: %v", err)
 	}
@@ -417,8 +412,7 @@ func TestWait_Failed_NoEnvelope_GraceExpires(t *testing.T) {
 	}, 1*time.Millisecond)
 	defer dispatch.ResetSleepForTesting()
 
-	runner := newFakeHerdrRunner()
-	out, exitCode, err := dispatch.Wait(context.Background(), repoDir, l.ID, 5*time.Second, runner)
+	out, exitCode, err := dispatch.Wait(context.Background(), repoDir, l.ID, 5*time.Second)
 	if err != nil {
 		t.Fatalf("unexpected Wait error: %v", err)
 	}
@@ -459,8 +453,7 @@ func TestWait_Failed_NoEnvelope_DeadlineCapsGrace(t *testing.T) {
 	}, 1*time.Millisecond)
 	defer dispatch.ResetSleepForTesting()
 
-	runner := newFakeHerdrRunner()
-	out, exitCode, err := dispatch.Wait(context.Background(), repoDir, l.ID, 5*time.Millisecond, runner)
+	out, exitCode, err := dispatch.Wait(context.Background(), repoDir, l.ID, 5*time.Millisecond)
 	if err != nil {
 		t.Fatalf("unexpected Wait error: %v", err)
 	}
@@ -499,8 +492,7 @@ func TestWait_Done_Turn2_MissingTurnResult_ReportsFailed(t *testing.T) {
 	// Only turn 1 result is written; turn 2 result is missing
 	writeTurnResultEnvelope(t, repoDir, l.ID, 1, "done")
 
-	runner := newFakeHerdrRunner()
-	out, exitCode, err := dispatch.Wait(context.Background(), repoDir, l.ID, 5*time.Second, runner)
+	out, exitCode, err := dispatch.Wait(context.Background(), repoDir, l.ID, 5*time.Second)
 	if err != nil {
 		t.Fatalf("unexpected Wait error: %v", err)
 	}
@@ -533,8 +525,7 @@ func TestWait_Done_Turn2_ValidDoneEnvelope(t *testing.T) {
 
 	writeTurnResultEnvelope(t, repoDir, l.ID, 2, "done")
 
-	runner := newFakeHerdrRunner()
-	out, exitCode, err := dispatch.Wait(context.Background(), repoDir, l.ID, 5*time.Second, runner)
+	out, exitCode, err := dispatch.Wait(context.Background(), repoDir, l.ID, 5*time.Second)
 	if err != nil {
 		t.Fatalf("unexpected Wait error: %v", err)
 	}
@@ -578,8 +569,7 @@ func TestWait_Failed_Turn2_OnlyTurn1Envelope_ReportsFailed(t *testing.T) {
 	}, 1*time.Millisecond)
 	defer dispatch.ResetSleepForTesting()
 
-	runner := newFakeHerdrRunner()
-	out, exitCode, err := dispatch.Wait(context.Background(), repoDir, l.ID, 5*time.Second, runner)
+	out, exitCode, err := dispatch.Wait(context.Background(), repoDir, l.ID, 5*time.Second)
 	if err != nil {
 		t.Fatalf("unexpected Wait error: %v", err)
 	}
@@ -615,8 +605,7 @@ func TestWait_Failed_Turn2_ValidDoneEnvelope_Recovers(t *testing.T) {
 	dispatch.SetExhaustionGraceForTesting(10 * time.Millisecond)
 	defer dispatch.ResetExhaustionGraceForTesting()
 
-	runner := newFakeHerdrRunner()
-	out, exitCode, err := dispatch.Wait(context.Background(), repoDir, l.ID, 5*time.Second, runner)
+	out, exitCode, err := dispatch.Wait(context.Background(), repoDir, l.ID, 5*time.Second)
 	if err != nil {
 		t.Fatalf("unexpected Wait error: %v", err)
 	}

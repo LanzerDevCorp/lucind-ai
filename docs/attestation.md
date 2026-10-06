@@ -68,7 +68,7 @@ The attestation mechanism's threat model is **accidental, not adversarial**:
   If found, `accept` reuses it, recording the attestation path in the receipt evidence (`attestation`), and skips running that check.
 - **Missing attestation execution**: If no valid attestation exists for a check (missing, non-zero exit code, MAC mismatch, or differing tree hash), `accept` runs `sh -c <check>` directly in the repository root and logs combined output to `.lucind/lanes/<id>/check-<idx>.log` (where `<idx>` is the 0-based check index). The log path is recorded in receipt evidence (`check_log`). If any executed check returns a non-zero exit code, acceptance is rejected.
 - **Zero-checks case**: When no checks are configured on the lane, `accept` requires no attestation and validates only the result envelope and allowed globs.
-- **Deprecated check subcommand**: The standalone `lucind-ai check` command that ran `lucind-checks.sh` is deprecated; verification is configured per lane using `--check`.
+- **Removed check subcommand**: The standalone `lucind-ai check` command that ran `lucind-checks.sh` was removed; verification is configured per lane using `--check`.
 
 ## Working Tree Hashing and Ignored Files
 
