@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/LanzerDevCorp/lucind-ai/internal/attest"
+	"github.com/LanzerDevCorp/lucind-ai/internal/repo"
 )
 
 const attestUsage = "usage: lucind-ai attest run -- <command> [args...]\n       lucind-ai attest verify --command \"<exact command string>\""
@@ -86,12 +87,12 @@ func attestVerifyDispatch(ctx context.Context, args []string, stdout, stderr io.
 		return 1
 	}
 
-	toplevel, err := attest.RepoToplevel(ctx, wd)
+	toplevel, err := repo.Toplevel(ctx, wd)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "lucind-ai: resolve repository toplevel: %v\n", err)
 		return 1
 	}
-	commonDir, err := attest.RepoCommonDir(ctx, wd)
+	commonDir, err := repo.CommonDir(ctx, wd)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "lucind-ai: resolve repository common dir: %v\n", err)
 		return 1

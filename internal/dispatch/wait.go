@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/LanzerDevCorp/lucind-ai/internal/attest"
 	"github.com/LanzerDevCorp/lucind-ai/internal/lane"
+	"github.com/LanzerDevCorp/lucind-ai/internal/repo"
 )
 
 var pollInterval = 1 * time.Second
@@ -133,7 +133,7 @@ func Wait(ctx context.Context, repoRoot, laneID string, timeout time.Duration, r
 	}
 
 	if repoRoot == "" {
-		root, err := attest.RepoToplevel(ctx, ".")
+		root, err := repo.Toplevel(ctx, ".")
 		if err != nil {
 			return Output{}, 1, fmt.Errorf("resolve repo root: %w", err)
 		}

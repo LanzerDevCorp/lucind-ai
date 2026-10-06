@@ -12,7 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/LanzerDevCorp/lucind-ai/internal/attest"
+	"github.com/LanzerDevCorp/lucind-ai/internal/repo"
 	"github.com/LanzerDevCorp/lucind-ai/internal/skillselect"
 )
 
@@ -103,7 +103,7 @@ func runSkillsSelect(ctx context.Context, args []string, stdout, stderr io.Write
 		if targetCwd == "" {
 			targetCwd = "."
 		}
-		repoRoot, err := attest.RepoToplevel(ctx, targetCwd)
+		repoRoot, err := repo.Toplevel(ctx, targetCwd)
 		if err != nil {
 			_, _ = fmt.Fprintf(stderr, "lucind-ai: %v\n", err)
 			return 1

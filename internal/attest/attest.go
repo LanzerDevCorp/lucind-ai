@@ -19,6 +19,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/LanzerDevCorp/lucind-ai/internal/repo"
 )
 
 // Reason constants for attest verify failure.
@@ -171,49 +173,6 @@ func checkKeyLength(data []byte) ([]byte, error) {
 	return data, nil
 }
 
-// RepoToplevel returns the absolute git repository top-level directory for dir.
-func RepoToplevel(ctx context.Context, dir string) (string, error) {
-	cmd := exec.CommandContext(ctx, "git", "-C", dir, "rev-parse", "--show-toplevel")
-	out, err := cmd.Output()
-	if err != nil {
-		return "", fmt.Errorf("git rev-parse --show-toplevel: %w", err)
-	}
-	toplevel := strings.TrimRight(string(out), "\r\n")
-	if !filepath.IsAbs(toplevel) {
-		abs, err := filepath.Abs(toplevel)
-		if err != nil {
-			return "", fmt.Errorf("resolve repo toplevel path %q: %w", toplevel, err)
-		}
-		toplevel = abs
-	}
-	return filepath.Clean(toplevel), nil
-}
-
-// RepoCommonDir returns the absolute git common directory for dir.
-// For a primary repository, this is the .git directory.
-// For a linked worktree, this is the main repository's .git directory.
-func RepoCommonDir(ctx context.Context, dir string) (string, error) {
-	cmd := exec.CommandContext(ctx, "git", "-C", dir, "rev-parse", "--git-common-dir")
-	out, err := cmd.Output()
-	if err != nil {
-		return "", fmt.Errorf("git rev-parse --git-common-dir: %w", err)
-	}
-	commonDir := strings.TrimRight(string(out), "\r\n")
-	if !filepath.IsAbs(commonDir) {
-		absDir, err := filepath.Abs(dir)
-		if err != nil {
-			return "", fmt.Errorf("resolve dir path %q: %w", dir, err)
-		}
-		// git resolves the relative path against the real directory, not a symlinked alias.
-		realDir, err := filepath.EvalSymlinks(absDir)
-		if err != nil {
-			return "", fmt.Errorf("resolve symlinks for %q: %w", absDir, err)
-		}
-		commonDir = filepath.Join(realDir, commonDir)
-	}
-	return filepath.Clean(commonDir), nil
-}
-
 // RepoID returns the sha256 hex string of the absolute repository git common directory path.
 func RepoID(commonDir string) string {
 	sum := sha256.Sum256([]byte(filepath.Clean(commonDir)))
@@ -235,7 +194,7 @@ func FindValidAttestation(ctx context.Context, repoRoot, command, expectedTreeHa
 	}
 	var wantRepoID string
 	if logDir == "" {
-		commonDir, err := RepoCommonDir(ctx, repoRoot)
+		commonDir, err := repo.CommonDir(ctx, repoRoot)
 		if err != nil {
 			return Entry{}, "", false, fmt.Errorf("resolve repo common dir: %w", err)
 		}
@@ -274,45 +233,6 @@ func FindValidAttestation(ctx context.Context, repoRoot, command, expectedTreeHa
 func HasValidAttestation(ctx context.Context, repoRoot, command, expectedTreeHash string, key []byte, logDir string) (bool, error) {
 	_, _, found, err := FindValidAttestation(ctx, repoRoot, command, expectedTreeHash, key, logDir)
 	return found, err
-}
-
-// TreeHash computes a git tree hash of the current working tree including uncommitted
-// and untracked, non-ignored files, without touching the real git index.
-func TreeHash(ctx context.Context, repoRoot string) (string, error) {
-	tmpFile, err := os.CreateTemp("", "lucind-attest-index-*")
-	if err != nil {
-		return "", fmt.Errorf("create temp index: %w", err)
-	}
-	tmpIndexPath := tmpFile.Name()
-	_ = tmpFile.Close()
-	_ = os.Remove(tmpIndexPath)
-	defer func() { _ = os.Remove(tmpIndexPath) }()
-
-	env := append(os.Environ(), "GIT_INDEX_FILE="+tmpIndexPath)
-
-	// Seed temporary index with git read-tree HEAD if HEAD exists
-	checkHead := exec.CommandContext(ctx, "git", "-C", repoRoot, "rev-parse", "--verify", "HEAD")
-	if err := checkHead.Run(); err == nil {
-		cmdRead := exec.CommandContext(ctx, "git", "-C", repoRoot, "read-tree", "HEAD")
-		cmdRead.Env = env
-		if out, err := cmdRead.CombinedOutput(); err != nil {
-			return "", fmt.Errorf("git read-tree HEAD: %w: %s", err, strings.TrimSpace(string(out)))
-		}
-	}
-
-	cmdAdd := exec.CommandContext(ctx, "git", "-C", repoRoot, "add", "-A")
-	cmdAdd.Env = env
-	if out, err := cmdAdd.CombinedOutput(); err != nil {
-		return "", fmt.Errorf("git add -A: %w: %s", err, strings.TrimSpace(string(out)))
-	}
-
-	cmdWrite := exec.CommandContext(ctx, "git", "-C", repoRoot, "write-tree")
-	cmdWrite.Env = env
-	out, err := cmdWrite.CombinedOutput()
-	if err != nil {
-		return "", fmt.Errorf("git write-tree: %w: %s", err, strings.TrimSpace(string(out)))
-	}
-	return strings.TrimSpace(string(out)), nil
 }
 
 // ResolveStateDir resolves the directory for attestation logs for repoID:
@@ -474,7 +394,7 @@ func ReadEntries(dir string) ([]Entry, error) {
 // ReasonTestsFailed ("tests failed"), ReasonBadMAC ("bad mac").
 // Other non-verification errors (e.g. git failure) return "", err.
 func Verify(ctx context.Context, repoRoot, command string, key []byte, logDir string) (string, error) {
-	currentTreeHash, err := TreeHash(ctx, repoRoot)
+	currentTreeHash, err := repo.TreeHash(ctx, repoRoot)
 	if err != nil {
 		return "", fmt.Errorf("tree hash: %w", err)
 	}
@@ -538,11 +458,11 @@ func RunAndRecord(ctx context.Context, dir string, argv []string, commandString 
 		return Entry{}, errors.New("command is required")
 	}
 
-	toplevel, err := RepoToplevel(ctx, dir)
+	toplevel, err := repo.Toplevel(ctx, dir)
 	if err != nil {
 		return Entry{}, fmt.Errorf("resolve repository toplevel: %w", err)
 	}
-	commonDir, err := RepoCommonDir(ctx, dir)
+	commonDir, err := repo.CommonDir(ctx, dir)
 	if err != nil {
 		return Entry{}, fmt.Errorf("resolve repository common dir: %w", err)
 	}
@@ -582,7 +502,7 @@ func RunAndRecord(ctx context.Context, dir string, argv []string, commandString 
 		}
 	}
 
-	treeHash, err := TreeHash(ctx, toplevel)
+	treeHash, err := repo.TreeHash(ctx, toplevel)
 	if err != nil {
 		return Entry{}, fmt.Errorf("compute tree hash: %w", err)
 	}

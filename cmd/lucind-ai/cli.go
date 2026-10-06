@@ -17,9 +17,9 @@ import (
 	"time"
 
 	"github.com/LanzerDevCorp/lucind-ai/internal/accept"
-	"github.com/LanzerDevCorp/lucind-ai/internal/attest"
 	"github.com/LanzerDevCorp/lucind-ai/internal/check"
 	"github.com/LanzerDevCorp/lucind-ai/internal/dispatch"
+	"github.com/LanzerDevCorp/lucind-ai/internal/repo"
 )
 
 const usage = "usage: lucind-ai dispatch --cwd <dir> [--allow <glob>]... --prompt <file|-> [--auto-skills] [--check <cmd>]... [--model M] [--timeout D] [--detach] [--lane <id>] [--min-quota F]\n" +
@@ -109,7 +109,7 @@ func runCheck(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 		return 1
 	}
 
-	root, err := gitShowToplevel(ctx)
+	root, err := cwdToplevel(ctx)
 	if err != nil {
 		if wd, wdErr := os.Getwd(); wdErr == nil {
 			root = wd
@@ -174,27 +174,23 @@ func formatMechanicalLog(commitSHA string, exitCode int, duration time.Duration,
 }
 
 func resolveCommitSHA(ctx context.Context, dir string) string {
-	cmd := exec.CommandContext(ctx, "git", "rev-parse", "HEAD")
-	cmd.Dir = dir
-	out, err := cmd.Output()
+	sha, err := repo.HeadSHA(ctx, dir)
 	if err != nil {
 		return "unknown"
 	}
-	return strings.TrimSpace(string(out))
+	return sha
 }
 
-func gitShowToplevel(ctx context.Context) (string, error) {
-	cmd := exec.CommandContext(ctx, "git", "rev-parse", "--show-toplevel")
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("git rev-parse --show-toplevel: %w: %s", err, strings.TrimSpace(stderr.String()))
-	}
-
-	root := strings.TrimRight(stdout.String(), "\r\n")
-	if !filepath.IsAbs(root) {
-		return "", fmt.Errorf("git rev-parse --show-toplevel returned a non-absolute path: %q", root)
+// cwdToplevel returns the repository top-level of the process working directory.
+// A git failure keeps git's stderr in the message.
+func cwdToplevel(ctx context.Context) (string, error) {
+	root, err := repo.Toplevel(ctx, ".")
+	if err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			return "", fmt.Errorf("git rev-parse --show-toplevel: %w: %s", exitErr, strings.TrimSpace(string(exitErr.Stderr)))
+		}
+		return "", err
 	}
 	return root, nil
 }
@@ -225,7 +221,7 @@ func runAccept(ctx context.Context, args []string, stdout, stderr io.Writer) int
 		return 1
 	}
 
-	root, err := gitShowToplevel(ctx)
+	root, err := cwdToplevel(ctx)
 	if err != nil {
 		if wd, wdErr := os.Getwd(); wdErr == nil {
 			root = wd
@@ -531,7 +527,7 @@ func runWait(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	repoRoot, err := attest.RepoToplevel(ctx, *cwd)
+	repoRoot, err := repo.Toplevel(ctx, *cwd)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "lucind-ai: wait: resolve repo root: %v\n", err)
 		return 1

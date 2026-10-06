@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/LanzerDevCorp/lucind-ai/internal/attest"
+	"github.com/LanzerDevCorp/lucind-ai/internal/repo"
 )
 
 func TestKeyCreationAndLoading(t *testing.T) {
@@ -139,7 +140,7 @@ func TestTreeHash(t *testing.T) {
 		t.Fatalf("read index: %v", err)
 	}
 
-	hash1, err := attest.TreeHash(ctx, repoDir)
+	hash1, err := repo.TreeHash(ctx, repoDir)
 	if err != nil {
 		t.Fatalf("TreeHash failed: %v", err)
 	}
@@ -157,7 +158,7 @@ func TestTreeHash(t *testing.T) {
 	}
 
 	// Running TreeHash again without changes yields identical hash
-	hash2, err := attest.TreeHash(ctx, repoDir)
+	hash2, err := repo.TreeHash(ctx, repoDir)
 	if err != nil {
 		t.Fatalf("TreeHash second run failed: %v", err)
 	}
@@ -170,7 +171,7 @@ func TestTreeHash(t *testing.T) {
 	if err := os.WriteFile(untrackedFile, []byte("untracked content\n"), 0644); err != nil {
 		t.Fatalf("write untracked: %v", err)
 	}
-	hashUntracked, err := attest.TreeHash(ctx, repoDir)
+	hashUntracked, err := repo.TreeHash(ctx, repoDir)
 	if err != nil {
 		t.Fatalf("TreeHash failed with untracked file: %v", err)
 	}
@@ -182,7 +183,7 @@ func TestTreeHash(t *testing.T) {
 	if err := os.Remove(untrackedFile); err != nil {
 		t.Fatalf("remove untracked: %v", err)
 	}
-	hashBack, err := attest.TreeHash(ctx, repoDir)
+	hashBack, err := repo.TreeHash(ctx, repoDir)
 	if err != nil {
 		t.Fatalf("TreeHash failed after remove untracked: %v", err)
 	}
@@ -194,7 +195,7 @@ func TestTreeHash(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(repoDir, "initial.txt"), []byte("modified\n"), 0644); err != nil {
 		t.Fatalf("modify tracked: %v", err)
 	}
-	hashMod, err := attest.TreeHash(ctx, repoDir)
+	hashMod, err := repo.TreeHash(ctx, repoDir)
 	if err != nil {
 		t.Fatalf("TreeHash failed with modified tracked file: %v", err)
 	}
@@ -296,7 +297,7 @@ func TestVerifyLogic(t *testing.T) {
 	repoDir := t.TempDir()
 	initGitRepo(t, repoDir)
 
-	treeHash, err := attest.TreeHash(ctx, repoDir)
+	treeHash, err := repo.TreeHash(ctx, repoDir)
 	if err != nil {
 		t.Fatalf("TreeHash failed: %v", err)
 	}
@@ -541,15 +542,15 @@ func TestRepoID_WorktreeConsistency(t *testing.T) {
 	otherDir := t.TempDir()
 	initGitRepo(t, otherDir)
 
-	commonPrimary, err := attest.RepoCommonDir(ctx, primaryDir)
+	commonPrimary, err := repo.CommonDir(ctx, primaryDir)
 	if err != nil {
 		t.Fatalf("RepoCommonDir(primary) error: %v", err)
 	}
-	commonWorktree, err := attest.RepoCommonDir(ctx, worktreeDir)
+	commonWorktree, err := repo.CommonDir(ctx, worktreeDir)
 	if err != nil {
 		t.Fatalf("RepoCommonDir(worktree) error: %v", err)
 	}
-	commonOther, err := attest.RepoCommonDir(ctx, otherDir)
+	commonOther, err := repo.CommonDir(ctx, otherDir)
 	if err != nil {
 		t.Fatalf("RepoCommonDir(other) error: %v", err)
 	}
@@ -571,7 +572,7 @@ func TestHasValidAttestation(t *testing.T) {
 	repoDir := t.TempDir()
 	initGitRepo(t, repoDir)
 
-	treeHash, err := attest.TreeHash(ctx, repoDir)
+	treeHash, err := repo.TreeHash(ctx, repoDir)
 	if err != nil {
 		t.Fatalf("TreeHash failed: %v", err)
 	}
@@ -668,7 +669,7 @@ func TestFindValidAttestation(t *testing.T) {
 	repoDir := t.TempDir()
 	initGitRepo(t, repoDir)
 
-	treeHash, err := attest.TreeHash(ctx, repoDir)
+	treeHash, err := repo.TreeHash(ctx, repoDir)
 	if err != nil {
 		t.Fatalf("TreeHash failed: %v", err)
 	}
@@ -774,7 +775,7 @@ func TestFindValidAttestation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	commonDir, err := attest.RepoCommonDir(ctx, repoDir)
+	commonDir, err := repo.CommonDir(ctx, repoDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -841,11 +842,11 @@ func TestRepoCommonDir_ResolvesSymlinkedDir(t *testing.T) {
 	if err := os.Symlink(real, link); err != nil {
 		t.Fatal(err)
 	}
-	viaReal, err := attest.RepoCommonDir(ctx, real)
+	viaReal, err := repo.CommonDir(ctx, real)
 	if err != nil {
 		t.Fatal(err)
 	}
-	viaLink, err := attest.RepoCommonDir(ctx, link)
+	viaLink, err := repo.CommonDir(ctx, link)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -858,9 +859,9 @@ func TestHasValidAttestation_RejectsForeignRepoID(t *testing.T) {
 	ctx := context.Background()
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	repo := t.TempDir()
-	initGitRepo(t, repo)
-	commonDir, err := attest.RepoCommonDir(ctx, repo)
+	repoPath := t.TempDir()
+	initGitRepo(t, repoPath)
+	commonDir, err := repo.CommonDir(ctx, repoPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -880,7 +881,7 @@ func TestHasValidAttestation_RejectsForeignRepoID(t *testing.T) {
 	if _, err := attest.WriteEntry(logDir, e); err != nil {
 		t.Fatal(err)
 	}
-	ok, err := attest.HasValidAttestation(ctx, repo, "sh lucind-checks.sh", "abc", key, "")
+	ok, err := attest.HasValidAttestation(ctx, repoPath, "sh lucind-checks.sh", "abc", key, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -919,7 +920,7 @@ func TestRunAndRecord(t *testing.T) {
 	if !attest.VerifyMAC(entry0, key) {
 		t.Fatalf("expected entry0 MAC to verify")
 	}
-	wantTreeHash, err := attest.TreeHash(ctx, repoDir)
+	wantTreeHash, err := repo.TreeHash(ctx, repoDir)
 	if err != nil {
 		t.Fatalf("TreeHash failed: %v", err)
 	}

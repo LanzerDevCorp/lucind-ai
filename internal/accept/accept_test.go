@@ -15,6 +15,7 @@ import (
 	"github.com/LanzerDevCorp/lucind-ai/internal/accept"
 	"github.com/LanzerDevCorp/lucind-ai/internal/attest"
 	"github.com/LanzerDevCorp/lucind-ai/internal/lane"
+	"github.com/LanzerDevCorp/lucind-ai/internal/repo"
 )
 
 func initGitRepo(t *testing.T, dir string) {
@@ -515,7 +516,7 @@ func TestAccept_AttestationReuse(t *testing.T) {
 	}
 
 	// Compute tree hash and write valid attestation for lane.CheckCommand(checkCmd)
-	finalTree, err := attest.TreeHash(ctx, repoDir)
+	finalTree, err := repo.TreeHash(ctx, repoDir)
 	if err != nil {
 		t.Fatalf("tree hash: %v", err)
 	}
@@ -625,7 +626,7 @@ func TestRun_CliHelper(t *testing.T) {
 
 func writeCheckAttestation(t *testing.T, repoDir, command, treeHash string) string {
 	t.Helper()
-	commonDir, err := attest.RepoCommonDir(context.Background(), repoDir)
+	commonDir, err := repo.CommonDir(context.Background(), repoDir)
 	if err != nil {
 		t.Fatalf("repo common dir: %v", err)
 	}
@@ -722,7 +723,7 @@ func TestAccept_OneCheckValidAttestationAccepted(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	finalTree, err := attest.TreeHash(ctx, repoDir)
+	finalTree, err := repo.TreeHash(ctx, repoDir)
 	if err != nil {
 		t.Fatalf("tree hash: %v", err)
 	}
@@ -873,7 +874,7 @@ func TestAccept_TwoChecksOneAttestedRunsOnlyMissing(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	finalTree, err := attest.TreeHash(ctx, repoDir)
+	finalTree, err := repo.TreeHash(ctx, repoDir)
 	if err != nil {
 		t.Fatalf("tree hash: %v", err)
 	}
@@ -944,7 +945,7 @@ func TestAccept_ReceiptEvidencePerCheck(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	finalTree, err := attest.TreeHash(ctx, repoDir)
+	finalTree, err := repo.TreeHash(ctx, repoDir)
 	if err != nil {
 		t.Fatalf("tree hash: %v", err)
 	}
