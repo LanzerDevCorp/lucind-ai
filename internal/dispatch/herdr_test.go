@@ -317,3 +317,119 @@ func TestClosePane_Errors(t *testing.T) {
 		t.Errorf("unexpected error format: %v", err)
 	}
 }
+
+func TestCheckAgentLiveness(t *testing.T) {
+	tests := []struct {
+		name     string
+		runner   dispatch.HerdrRunner
+		paneID   string
+		expected dispatch.AgentLiveness
+	}{
+		{
+			name:     "nil runner",
+			runner:   nil,
+			paneID:   "w1:p1",
+			expected: dispatch.AgentLivenessUnknown,
+		},
+		{
+			name:     "empty paneID",
+			runner:   newFakeHerdrRunner(),
+			paneID:   "",
+			expected: dispatch.AgentLivenessUnknown,
+		},
+		{
+			name: "pane_not_found error output",
+			runner: func() dispatch.HerdrRunner {
+				r := newFakeHerdrRunner()
+				r.handlers["pane get"] = func(args []string) ([]byte, error) {
+					return []byte(`{"error": {"code": "pane_not_found", "message": "pane not found"}}`), errors.New("exit status 1")
+				}
+				return r
+			}(),
+			paneID:   "w1:p1",
+			expected: dispatch.AgentLivenessGone,
+		},
+		{
+			name: "pane_not_found error output zero exit",
+			runner: func() dispatch.HerdrRunner {
+				r := newFakeHerdrRunner()
+				r.handlers["pane get"] = func(args []string) ([]byte, error) {
+					return []byte(`{"error": {"code": "pane_not_found"}}`), nil
+				}
+				return r
+			}(),
+			paneID:   "w1:p1",
+			expected: dispatch.AgentLivenessGone,
+		},
+		{
+			name: "pane without agent",
+			runner: func() dispatch.HerdrRunner {
+				r := newFakeHerdrRunner()
+				r.handlers["pane get"] = func(args []string) ([]byte, error) {
+					return []byte(`{"result": {"pane": {"pane_id": "w1:p1", "cwd": "/repo"}}}`), nil
+				}
+				return r
+			}(),
+			paneID:   "w1:p1",
+			expected: dispatch.AgentLivenessGone,
+		},
+		{
+			name: "pane with empty agent string",
+			runner: func() dispatch.HerdrRunner {
+				r := newFakeHerdrRunner()
+				r.handlers["pane get"] = func(args []string) ([]byte, error) {
+					return []byte(`{"result": {"pane": {"pane_id": "w1:p1", "cwd": "/repo", "agent": ""}}}`), nil
+				}
+				return r
+			}(),
+			paneID:   "w1:p1",
+			expected: dispatch.AgentLivenessGone,
+		},
+		{
+			name: "pane with agent agy",
+			runner: func() dispatch.HerdrRunner {
+				r := newFakeHerdrRunner()
+				r.handlers["pane get"] = func(args []string) ([]byte, error) {
+					return []byte(`{"result": {"pane": {"pane_id": "w1:p1", "cwd": "/repo", "agent": "agy"}}}`), nil
+				}
+				return r
+			}(),
+			paneID:   "w1:p1",
+			expected: dispatch.AgentLivenessAlive,
+		},
+		{
+			name: "generic error",
+			runner: func() dispatch.HerdrRunner {
+				r := newFakeHerdrRunner()
+				r.handlers["pane get"] = func(args []string) ([]byte, error) {
+					return []byte(`{"error": {"code": "internal_error", "message": "something broke"}}`), errors.New("exit status 1")
+				}
+				return r
+			}(),
+			paneID:   "w1:p1",
+			expected: dispatch.AgentLivenessUnknown,
+		},
+		{
+			name: "garbage output",
+			runner: func() dispatch.HerdrRunner {
+				r := newFakeHerdrRunner()
+				r.handlers["pane get"] = func(args []string) ([]byte, error) {
+					return []byte("fatal: connection refused\n"), errors.New("exit status 1")
+				}
+				return r
+			}(),
+			paneID:   "w1:p1",
+			expected: dispatch.AgentLivenessUnknown,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := dispatch.CheckAgentLiveness(context.Background(), tc.runner, tc.paneID)
+			if got != tc.expected {
+				t.Errorf("CheckAgentLiveness() = %q, want %q", got, tc.expected)
+			}
+		})
+	}
+}
+

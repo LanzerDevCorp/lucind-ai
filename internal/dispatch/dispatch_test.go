@@ -63,7 +63,7 @@ func setupFakeRunnerForNewLane(t *testing.T, newPaneID string) *fakeHerdrRunner 
 		return []byte(fmt.Sprintf(`{"result": {"pane": {"pane_id": %q}}}`, newPaneID)), nil
 	}
 	runner.handlers["pane get"] = func(args []string) ([]byte, error) {
-		return []byte(fmt.Sprintf(`{"result": {"pane": {"pane_id": %q, "cwd": %q}}}`, newPaneID, lastSplitCwd)), nil
+		return []byte(fmt.Sprintf(`{"result": {"pane": {"pane_id": %q, "cwd": %q, "agent": "agy"}}}`, newPaneID, lastSplitCwd)), nil
 	}
 	runner.handlers["pane close"] = func(args []string) ([]byte, error) {
 		return []byte(`{"result": {"closed": true}}`), nil

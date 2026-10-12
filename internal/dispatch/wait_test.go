@@ -2,6 +2,7 @@ package dispatch_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -638,3 +639,269 @@ func TestWait_Failed_Turn2_ValidDoneEnvelope_Recovers(t *testing.T) {
 		t.Errorf("reloaded.Status = %q, want %q", reloaded.Status, lane.StatusDone)
 	}
 }
+
+func TestWait_Running_PaneGone_NoEnvelope_ReportsFailed(t *testing.T) {
+	t.Setenv("HERDR_ENV", "1")
+	repoDir := t.TempDir()
+	initGitRepo(t, repoDir)
+
+	l, err := lane.Create(context.Background(), repoDir, []string{"**"}, "gemini-3.8-flash-high")
+	if err != nil {
+		t.Fatalf("lane.Create failed: %v", err)
+	}
+	l.PaneID = "w1:pGoneNoEnv"
+	l.Status = lane.StatusRunning
+	if err := l.Save(repoDir); err != nil {
+		t.Fatalf("lane.Save failed: %v", err)
+	}
+
+	dispatch.SetLivenessIntervalForTesting(0)
+	defer dispatch.ResetLivenessIntervalForTesting()
+
+	dispatch.SetSleepForTesting(func(d time.Duration) {}, 1*time.Millisecond)
+	defer dispatch.ResetSleepForTesting()
+
+	runner := newFakeHerdrRunner()
+	runner.handlers["pane get"] = func(args []string) ([]byte, error) {
+		return []byte(`{"error": {"code": "pane_not_found"}}`), errors.New("exit status 1")
+	}
+
+	out, exitCode, err := dispatch.Wait(context.Background(), repoDir, l.ID, 5*time.Second, runner)
+	if err != nil {
+		t.Fatalf("unexpected Wait error: %v", err)
+	}
+	if exitCode != 3 {
+		t.Errorf("exitCode = %d, want 3", exitCode)
+	}
+	if out.Status != "failed" {
+		t.Errorf("out.Status = %q, want \"failed\"", out.Status)
+	}
+	if out.Reason != "agent_gone" {
+		t.Errorf("out.Reason = %q, want \"agent_gone\"", out.Reason)
+	}
+
+	reloaded, err := lane.Load(repoDir, l.ID)
+	if err != nil {
+		t.Fatalf("lane.Load failed: %v", err)
+	}
+	if reloaded.Status != lane.StatusFailed {
+		t.Errorf("reloaded.Status = %q, want %q", reloaded.Status, lane.StatusFailed)
+	}
+}
+
+func TestWait_Running_PaneGone_ValidDoneEnvelope_ReportsDone(t *testing.T) {
+	t.Setenv("HERDR_ENV", "1")
+	repoDir := t.TempDir()
+	initGitRepo(t, repoDir)
+
+	l, err := lane.Create(context.Background(), repoDir, []string{"**"}, "gemini-3.8-flash-high")
+	if err != nil {
+		t.Fatalf("lane.Create failed: %v", err)
+	}
+	l.PaneID = "w1:pGoneDoneEnv"
+	l.Status = lane.StatusRunning
+	if err := l.Save(repoDir); err != nil {
+		t.Fatalf("lane.Save failed: %v", err)
+	}
+
+	writeResultEnvelope(t, repoDir, l.ID, "done")
+
+	dispatch.SetLivenessIntervalForTesting(0)
+	defer dispatch.ResetLivenessIntervalForTesting()
+
+	dispatch.SetSleepForTesting(func(d time.Duration) {}, 1*time.Millisecond)
+	defer dispatch.ResetSleepForTesting()
+
+	runner := newFakeHerdrRunner()
+	runner.handlers["pane get"] = func(args []string) ([]byte, error) {
+		return []byte(`{"error": {"code": "pane_not_found"}}`), errors.New("exit status 1")
+	}
+
+	out, exitCode, err := dispatch.Wait(context.Background(), repoDir, l.ID, 5*time.Second, runner)
+	if err != nil {
+		t.Fatalf("unexpected Wait error: %v", err)
+	}
+	if exitCode != 0 {
+		t.Errorf("exitCode = %d, want 0", exitCode)
+	}
+	if out.Status != "done" {
+		t.Errorf("out.Status = %q, want \"done\"", out.Status)
+	}
+	if out.Reason != "agent_gone" {
+		t.Errorf("out.Reason = %q, want \"agent_gone\"", out.Reason)
+	}
+
+	reloaded, err := lane.Load(repoDir, l.ID)
+	if err != nil {
+		t.Fatalf("lane.Load failed: %v", err)
+	}
+	if reloaded.Status != lane.StatusDone {
+		t.Errorf("reloaded.Status = %q, want %q", reloaded.Status, lane.StatusDone)
+	}
+}
+
+func TestWait_Running_PaneGoneOnceThenAlive_DoesNotEndWait(t *testing.T) {
+	t.Setenv("HERDR_ENV", "1")
+	repoDir := t.TempDir()
+	initGitRepo(t, repoDir)
+
+	l, err := lane.Create(context.Background(), repoDir, []string{"**"}, "gemini-3.8-flash-high")
+	if err != nil {
+		t.Fatalf("lane.Create failed: %v", err)
+	}
+	l.PaneID = "w1:pGoneOnceThenAlive"
+	l.Status = lane.StatusRunning
+	if err := l.Save(repoDir); err != nil {
+		t.Fatalf("lane.Save failed: %v", err)
+	}
+
+	dispatch.SetLivenessIntervalForTesting(0)
+	defer dispatch.ResetLivenessIntervalForTesting()
+
+	var getCallCount int32
+	runner := newFakeHerdrRunner()
+	runner.handlers["pane get"] = func(args []string) ([]byte, error) {
+		count := atomic.AddInt32(&getCallCount, 1)
+		switch count {
+		case 1:
+			return []byte(`{"error": {"code": "pane_not_found"}}`), errors.New("exit 1")
+		case 2:
+			return []byte(`{"result": {"pane": {"pane_id": "w1:pGoneOnceThenAlive", "cwd": "/repo", "agent": "agy"}}}`), nil
+		default:
+			return []byte(`{"result": {"pane": {"pane_id": "w1:pGoneOnceThenAlive", "cwd": "/repo", "agent": "agy"}}}`), nil
+		}
+	}
+
+	var pollCount int32
+	dispatch.SetSleepForTesting(func(d time.Duration) {
+		count := atomic.AddInt32(&pollCount, 1)
+		if count >= 3 {
+			writeResultEnvelope(t, repoDir, l.ID, "done")
+			current, _ := lane.Load(repoDir, l.ID)
+			current.Status = lane.StatusDone
+			_ = current.Save(repoDir)
+		}
+	}, 1*time.Millisecond)
+	defer dispatch.ResetSleepForTesting()
+
+	out, exitCode, err := dispatch.Wait(context.Background(), repoDir, l.ID, 5*time.Second, runner)
+	if err != nil {
+		t.Fatalf("unexpected Wait error: %v", err)
+	}
+	if exitCode != 0 {
+		t.Errorf("exitCode = %d, want 0", exitCode)
+	}
+	if out.Status != "done" {
+		t.Errorf("out.Status = %q, want \"done\"", out.Status)
+	}
+	if out.Reason != "" {
+		t.Errorf("out.Reason = %q, want empty (not agent_gone)", out.Reason)
+	}
+	if atomic.LoadInt32(&getCallCount) < 2 {
+		t.Errorf("getCallCount = %d, want >= 2", getCallCount)
+	}
+}
+
+func TestWait_Running_UnknownLiveness_ReachesTimeout(t *testing.T) {
+	t.Setenv("HERDR_ENV", "1")
+	repoDir := t.TempDir()
+	initGitRepo(t, repoDir)
+
+	l, err := lane.Create(context.Background(), repoDir, []string{"**"}, "gemini-3.8-flash-high")
+	if err != nil {
+		t.Fatalf("lane.Create failed: %v", err)
+	}
+	l.PaneID = "w1:pUnknownLiveness"
+	l.Status = lane.StatusRunning
+	if err := l.Save(repoDir); err != nil {
+		t.Fatalf("lane.Save failed: %v", err)
+	}
+
+	dispatch.SetLivenessIntervalForTesting(0)
+	defer dispatch.ResetLivenessIntervalForTesting()
+
+	var getCallCount int32
+	runner := newFakeHerdrRunner()
+	runner.handlers["pane get"] = func(args []string) ([]byte, error) {
+		atomic.AddInt32(&getCallCount, 1)
+		return []byte("internal herdr error"), errors.New("exit 1")
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	var pollCount int32
+	dispatch.SetSleepForTesting(func(d time.Duration) {
+		count := atomic.AddInt32(&pollCount, 1)
+		if count >= 3 {
+			cancel()
+		}
+	}, 1*time.Millisecond)
+	defer dispatch.ResetSleepForTesting()
+
+	out, exitCode, err := dispatch.Wait(ctx, repoDir, l.ID, 1*time.Hour, runner)
+	if err != nil {
+		t.Fatalf("unexpected Wait error: %v", err)
+	}
+	if exitCode != 4 {
+		t.Errorf("exitCode = %d, want 4 for timeout", exitCode)
+	}
+	if out.Status != "timeout" {
+		t.Errorf("out.Status = %q, want \"timeout\"", out.Status)
+	}
+	if out.Reason != "" {
+		t.Errorf("out.Reason = %q, want empty (unknown must never set agent_gone)", out.Reason)
+	}
+	if atomic.LoadInt32(&getCallCount) < 2 {
+		t.Errorf("getCallCount = %d, want >= 2", getCallCount)
+	}
+}
+
+func TestWait_Failed_NoEnvelope_PaneGone_ReturnsFailedImmediately(t *testing.T) {
+	t.Setenv("HERDR_ENV", "1")
+	repoDir := t.TempDir()
+	initGitRepo(t, repoDir)
+
+	l, err := lane.Create(context.Background(), repoDir, []string{"**"}, "gemini-3.8-flash-high")
+	if err != nil {
+		t.Fatalf("lane.Create failed: %v", err)
+	}
+	l.PaneID = "w1:pFailedGone"
+	l.Status = lane.StatusFailed
+	if err := l.Save(repoDir); err != nil {
+		t.Fatalf("lane.Save failed: %v", err)
+	}
+
+	dispatch.SetExhaustionGraceForTesting(10 * time.Minute)
+	defer dispatch.ResetExhaustionGraceForTesting()
+
+	dispatch.SetLivenessIntervalForTesting(0)
+	defer dispatch.ResetLivenessIntervalForTesting()
+
+	var pollCount int32
+	dispatch.SetSleepForTesting(func(d time.Duration) {
+		atomic.AddInt32(&pollCount, 1)
+	}, 1*time.Millisecond)
+	defer dispatch.ResetSleepForTesting()
+
+	runner := newFakeHerdrRunner()
+	runner.handlers["pane get"] = func(args []string) ([]byte, error) {
+		return []byte(`{"error": {"code": "pane_not_found"}}`), errors.New("exit 1")
+	}
+
+	out, exitCode, err := dispatch.Wait(context.Background(), repoDir, l.ID, 5*time.Second, runner)
+	if err != nil {
+		t.Fatalf("unexpected Wait error: %v", err)
+	}
+	if exitCode != 3 {
+		t.Errorf("exitCode = %d, want 3", exitCode)
+	}
+	if out.Status != "failed" {
+		t.Errorf("out.Status = %q, want \"failed\"", out.Status)
+	}
+	if out.Reason != "agent_gone" {
+		t.Errorf("out.Reason = %q, want \"agent_gone\"", out.Reason)
+	}
+	if pollCount > 5 {
+		t.Errorf("pollCount = %d, want <= 5 (returned immediately)", pollCount)
+	}
+}
+

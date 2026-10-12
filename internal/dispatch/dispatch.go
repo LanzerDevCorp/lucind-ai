@@ -38,6 +38,7 @@ type Output struct {
 	Cwd        string `json:"cwd"`
 	Status     string `json:"status"`
 	ResultPath string `json:"result_path"`
+	Reason     string `json:"reason,omitempty"`
 }
 
 type quotaEnsurer func(ctx context.Context, minQuota float64) error
@@ -348,7 +349,7 @@ func Dispatch(ctx context.Context, opts Options, runner HerdrRunner) (Output, in
 	if timeout <= 0 {
 		timeout = 60 * time.Minute
 	}
-	return waitLoop(ctx, repoRoot, l.ID, cwd, timeout)
+	return waitLoop(ctx, repoRoot, l.ID, cwd, timeout, runner)
 }
 
 // sendPrompt submits the prompt and has herdr confirm that agy started a turn

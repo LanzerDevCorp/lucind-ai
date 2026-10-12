@@ -169,3 +169,56 @@ func ClosePane(ctx context.Context, runner HerdrRunner, paneID string) error {
 	}
 	return nil
 }
+
+// AgentLiveness indicates whether the agent running in a pane is alive, gone, or unknown.
+type AgentLiveness string
+
+const (
+	AgentLivenessAlive   AgentLiveness = "alive"
+	AgentLivenessGone    AgentLiveness = "gone"
+	AgentLivenessUnknown AgentLiveness = "unknown"
+)
+
+type paneGetLivenessResponse struct {
+	Result *struct {
+		Pane *struct {
+			Agent string `json:"agent"`
+		} `json:"pane"`
+	} `json:"result"`
+	Error *struct {
+		Code string `json:"code"`
+	} `json:"error"`
+}
+
+// CheckAgentLiveness queries herdr for pane status and classifies agent liveness.
+func CheckAgentLiveness(ctx context.Context, runner HerdrRunner, paneID string) AgentLiveness {
+	if runner == nil || paneID == "" {
+		return AgentLivenessUnknown
+	}
+
+	out, err := runner.Run(ctx, "pane", "get", paneID)
+
+	var resp paneGetLivenessResponse
+	if jerr := json.Unmarshal(out, &resp); jerr != nil {
+		return AgentLivenessUnknown
+	}
+
+	if resp.Error != nil && resp.Error.Code == "pane_not_found" {
+		return AgentLivenessGone
+	}
+
+	if err != nil || resp.Error != nil {
+		return AgentLivenessUnknown
+	}
+
+	if resp.Result == nil || resp.Result.Pane == nil {
+		return AgentLivenessUnknown
+	}
+
+	if resp.Result.Pane.Agent == "" {
+		return AgentLivenessGone
+	}
+
+	return AgentLivenessAlive
+}
+

@@ -39,12 +39,27 @@ func ResetExhaustionGraceForTesting() {
 	exhaustionGrace = 10 * time.Minute
 }
 
-func waitLoop(ctx context.Context, repoRoot, laneID, cwd string, timeout time.Duration) (Output, int, error) {
+var livenessInterval = 30 * time.Second
+
+// SetLivenessIntervalForTesting allows tests to control the liveness check interval.
+func SetLivenessIntervalForTesting(d time.Duration) {
+	livenessInterval = d
+}
+
+// ResetLivenessIntervalForTesting restores production liveness check interval.
+func ResetLivenessIntervalForTesting() {
+	livenessInterval = 30 * time.Second
+}
+
+func waitLoop(ctx context.Context, repoRoot, laneID, cwd string, timeout time.Duration, runner HerdrRunner) (Output, int, error) {
 	if timeout <= 0 {
 		timeout = 60 * time.Minute
 	}
 	deadline := time.Now().Add(timeout)
 	var graceDeadline time.Time
+
+	var consecutiveGone int
+	lastLivenessCheck := time.Now()
 
 	for {
 		l, err := lane.Load(repoRoot, laneID)
@@ -69,6 +84,25 @@ func waitLoop(ctx context.Context, repoRoot, laneID, cwd string, timeout time.Du
 			}
 		}
 
+		checkLiveness := func() bool {
+			if l.PaneID == "" {
+				return false
+			}
+			if livenessInterval <= 0 || time.Since(lastLivenessCheck) >= livenessInterval {
+				lastLivenessCheck = time.Now()
+				liv := CheckAgentLiveness(ctx, runner, l.PaneID)
+				if liv == AgentLivenessGone {
+					consecutiveGone++
+					if consecutiveGone >= 2 {
+						return true
+					}
+				} else {
+					consecutiveGone = 0
+				}
+			}
+			return false
+		}
+
 		if l.Status == lane.StatusDone {
 			env, err := result.Read(os.DirFS(lane.LaneDir(repoRoot, laneID)), lane.ResultFileName(l.Turn))
 			if err == nil && env.Status == "done" {
@@ -84,6 +118,12 @@ func waitLoop(ctx context.Context, repoRoot, laneID, cwd string, timeout time.Du
 					return makeOut(string(lane.StatusDone)), 0, nil
 				}
 				return makeOut(string(lane.StatusFailed)), 3, nil
+			}
+
+			if checkLiveness() {
+				out := makeOut(string(lane.StatusFailed))
+				out.Reason = "agent_gone"
+				return out, 3, nil
 			}
 
 			// Trade-off: a genuine failure is reported up to exhaustionGrace later.
@@ -112,6 +152,21 @@ func waitLoop(ctx context.Context, repoRoot, laneID, cwd string, timeout time.Du
 		if l.Status == lane.StatusTimeout {
 			return makeOut(string(lane.StatusTimeout)), 4, nil
 		}
+		if l.Status == lane.StatusRunning && l.PaneID != "" {
+			if checkLiveness() {
+				st, _ := lane.MarkStopped(repoRoot, laneID)
+				statusStr := string(st)
+				if statusStr == "" {
+					statusStr = string(lane.StatusFailed)
+				}
+				out := makeOut(statusStr)
+				out.Reason = "agent_gone"
+				if st == lane.StatusDone {
+					return out, 0, nil
+				}
+				return out, 3, nil
+			}
+		}
 
 		select {
 		case <-ctx.Done():
@@ -137,6 +192,10 @@ func Wait(ctx context.Context, repoRoot, laneID string, timeout time.Duration, r
 		return Output{}, 1, errors.New("herdr is the only supported runtime: HERDR_ENV must be set to 1")
 	}
 
+	if runner == nil {
+		runner = DefaultHerdrRunner{}
+	}
+
 	if repoRoot == "" {
 		root, err := attest.RepoToplevel(ctx, ".")
 		if err != nil {
@@ -150,5 +209,5 @@ func Wait(ctx context.Context, repoRoot, laneID string, timeout time.Duration, r
 		return Output{}, 1, fmt.Errorf("load lane %s: %w", laneID, err)
 	}
 
-	return waitLoop(ctx, repoRoot, laneID, l.Cwd, timeout)
+	return waitLoop(ctx, repoRoot, laneID, l.Cwd, timeout, runner)
 }

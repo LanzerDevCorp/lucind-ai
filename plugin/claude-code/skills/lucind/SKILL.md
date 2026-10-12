@@ -53,7 +53,9 @@ lucind-ai accept --lane <id>     # run from the lane's repo
 - Blocks until agy's Stop hook marks the lane `done`/`failed`; prints one JSON object
   `{lane, pane_id, cwd, status, result_path}` (`result_path` printed by `dispatch` and `wait` is
   the current turn's result file, `.lucind/lanes/<id>/result-<turn>.json`). Exit codes: 0 done,
-  1 error, 3 failed, 4 timeout, 5 auto-skills unavailable.
+  1 error, 3 failed, 4 timeout, 5 auto-skills unavailable. wait also checks the lane's pane every
+  30s, and if the pane or the agy agent is gone twice in a row it finishes the lane from the
+  envelope with `reason: "agent_gone"`.
 <!-- lucind:variant auto -->
 - When dispatch exits 5, no lane exists. Resolve the skills by hand with the procedure below, put
   the `## Skills to load before work` section in the prompt and dispatch again (keeping or dropping
