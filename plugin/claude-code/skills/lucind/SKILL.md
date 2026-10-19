@@ -5,10 +5,16 @@ description: Orchestrate Antigravity (agy) from Claude through herdr, with lucin
 
 # lucind — Claude orchestrates, agy executes, lucind-ai enforces
 
-Split of work: Claude owns criteria (plan, architecture, when to parallelize, merges, conflicts,
-review, model choice). agy does the heavy lifting (implementation, exploration, e2e, visual
-checks). `lucind-ai` only enforces what needs no judgment: the result contract, allowed paths,
-and test attestation.
+lucind-ai is an extension of gentle-ai, not a replacement. gentle-ai owns the contract for WHEN to
+launch a subagent and HOW to work (delegation triggers, Risk line, verification gate, prompt
+sections). This skill is the alternative way to RUN a subagent: an agy pane in herdr, plus
+`lucind-ai` enforcing what needs no judgment (result contract, allowed paths, test attestation).
+
+Which executor and model run each role (`explorer`, `writer`, `verifier`) is the user's **work
+mode**, kept in `~/.config/lucind/modes.json`. Ask it with `lucind-ai route <role> --cwd "$PWD"`
+(`native <model>` or `lane <model>`) and obey it; `native` means gentle-ai's own Agent/Task tool,
+this skill only applies to `lane`. Modes and their commands: `lucind-ai mode list|show|use|clear`.
+Never switch the mode on your own.
 
 Load the `herdr` skill too; this skill assumes its pane/agent commands.
 
@@ -176,11 +182,13 @@ what is described here (no explanatory prose), so put prose under a following he
   copy, docs) default to English regardless of conversation language. If another language is
   explicitly requested for an artifact, use a neutral/professional register unless a specific tone
   or regional variant is requested.
-- `## Size heuristic`: about 400 authored changed lines per task (additions plus deletions) is a
-  planning heuristic only, not an acceptance criterion, hard cap, or automatic stop. If the
-  correct, clear solution naturally exceeds it, say why and continue. Never delete spaces, blank
-  lines or comments to save lines, omit tests, minify, add gratuitous abstractions, or split
-  artificially to fit it.
+- `## Size limit`: tell the worker the task must stay within about 400 authored changed lines
+  (additions plus deletions) and that it must not exceed it; if the work needs more, it stops
+  and says so in the envelope. Never delete spaces, blank lines or comments to save lines, omit
+  tests, minify, or add gratuitous abstractions to fit. **Never tell the worker the limit is
+  soft, advisory or a heuristic**: a worker that knows it is optional ignores it. gentle-ai
+  treats the 400 lines as a planning heuristic for you, the orchestrator, so when a worker
+  reports it needs more, you decide: re-slice the task or accept and dispatch the rest.
 - `## Remote scope`: only when remote work is authorized. State the exact destination, operation
   and credential/session; delegation cannot expand it. Omit otherwise, and agy stays local.
 - `## Key Learnings` as the closing instruction: after writing its normal result envelope, agy
@@ -214,7 +222,9 @@ Example of the skills section:
 
 ## Models
 
-`--model` > `LUCIND_AGY_MODEL` > `gemini-3.8-flash-medium`. You choose the model per dispatch.
+`--model` > `--role <role>` (model of the active work mode) > `LUCIND_AGY_MODEL` >
+`gemini-3.8-flash-medium`. Prefer `--role`: the user defines the model per role in the work mode.
+`--role` is rejected when the mode runs that role natively.
 `--model` takes the full key from `agy models`; the effort is the last segment of the key.
 
 | Family | Efforts | Use for |

@@ -79,7 +79,7 @@ func writeChecksScript(t *testing.T, repoDir string, exitCode int, output string
 func TestUsageAndHelp(t *testing.T) {
 	ctx := context.Background()
 
-	wantUsage := `usage: lucind-ai dispatch --cwd <dir> [--allow <glob>]... --prompt <file|-> [--auto-skills] [--check <cmd>]... [--model M] [--timeout D] [--detach] [--lane <id>] [--min-quota F]
+	wantUsage := `usage: lucind-ai dispatch --cwd <dir> [--allow <glob>]... --prompt <file|-> [--auto-skills] [--check <cmd>]... [--model M] [--role <role>] [--timeout D] [--detach] [--lane <id>] [--min-quota F]
        lucind-ai wait <lane> [--cwd <dir>] [--timeout D]
        lucind-ai check [--out <path>]   (deprecated)
        lucind-ai accept --lane <id>
@@ -88,6 +88,8 @@ func TestUsageAndHelp(t *testing.T) {
        lucind-ai hook pre-tool-use|stop   (agy plugin handlers; stdin JSON)
        lucind-ai skills select --prompt <file|-> [--allow <glob>]... [--cwd <dir>] [--registry <path>] [--threshold <float>]
        lucind-ai plugin install [--dir <staging root>]   (registers via agy plugin install)
+       lucind-ai mode list|show|use|clear
+       lucind-ai route <role> [--cwd <dir>] [--json]
        lucind-ai install
        lucind-ai --version`
 
@@ -445,7 +447,7 @@ func TestAcceptSubcommand(t *testing.T) {
 
 func TestDispatchHelp(t *testing.T) {
 	ctx := context.Background()
-	wantUsageLine := "usage: lucind-ai dispatch --cwd <dir> [--allow <glob>]... --prompt <file|-> [--auto-skills] [--check <cmd>]... [--model M] [--timeout D] [--detach] [--lane <id>] [--min-quota F]"
+	wantUsageLine := "usage: lucind-ai dispatch --cwd <dir> [--allow <glob>]... --prompt <file|-> [--auto-skills] [--check <cmd>]... [--model M] [--role <role>] [--timeout D] [--detach] [--lane <id>] [--min-quota F]"
 	for _, flag := range []string{"--help", "-help", "-h", "help"} {
 		t.Run("flag_"+flag, func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
@@ -457,7 +459,7 @@ func TestDispatchHelp(t *testing.T) {
 			if !strings.Contains(out, wantUsageLine) {
 				t.Errorf("stdout missing usage line; got %q", out)
 			}
-			for _, expectedFlag := range []string{"-cwd", "-allow", "-check", "-prompt", "-model", "-timeout", "-detach", "-lane", "-min-quota", "-auto-skills"} {
+			for _, expectedFlag := range []string{"-cwd", "-allow", "-check", "-prompt", "-model", "-role", "-timeout", "-detach", "-lane", "-min-quota", "-auto-skills"} {
 				if !strings.Contains(out, expectedFlag) {
 					t.Errorf("stdout missing flag %q; got %q", expectedFlag, out)
 				}
@@ -491,7 +493,7 @@ func TestWaitHelp(t *testing.T) {
 
 func TestDispatchMissingRequiredFlags(t *testing.T) {
 	ctx := context.Background()
-	wantUsageLine := "usage: lucind-ai dispatch --cwd <dir> [--allow <glob>]... --prompt <file|-> [--auto-skills] [--check <cmd>]... [--model M] [--timeout D] [--detach] [--lane <id>] [--min-quota F]"
+	wantUsageLine := "usage: lucind-ai dispatch --cwd <dir> [--allow <glob>]... --prompt <file|-> [--auto-skills] [--check <cmd>]... [--model M] [--role <role>] [--timeout D] [--detach] [--lane <id>] [--min-quota F]"
 
 	tests := []struct {
 		name    string
@@ -1182,3 +1184,21 @@ func TestDispatch_AutoSkillsUnavailable_HTTP401_KeyNeverAppears(t *testing.T) {
 		t.Errorf("stderr missing redacted reason, got: %s", stderrStr)
 	}
 }
+
+func TestPluginRunDispatchAndUsage(t *testing.T) {
+	ctx := context.Background()
+
+	if !strings.Contains(usage, "lucind-ai plugin install [--dir <staging root>]") {
+		t.Errorf("usage constant missing plugin install: %s", usage)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := run(ctx, []string{"plugin", "invalid"}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("run(plugin invalid) code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "usage: lucind-ai plugin install") {
+		t.Errorf("stderr = %q, want plugin install usage", stderr.String())
+	}
+}
+

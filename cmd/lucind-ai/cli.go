@@ -20,9 +20,10 @@ import (
 	"github.com/LanzerDevCorp/lucind-ai/internal/attest"
 	"github.com/LanzerDevCorp/lucind-ai/internal/check"
 	"github.com/LanzerDevCorp/lucind-ai/internal/dispatch"
+	"github.com/LanzerDevCorp/lucind-ai/internal/modes"
 )
 
-const usage = "usage: lucind-ai dispatch --cwd <dir> [--allow <glob>]... --prompt <file|-> [--auto-skills] [--check <cmd>]... [--model M] [--timeout D] [--detach] [--lane <id>] [--min-quota F]\n" +
+const usage = "usage: lucind-ai dispatch --cwd <dir> [--allow <glob>]... --prompt <file|-> [--auto-skills] [--check <cmd>]... [--model M] [--role <role>] [--timeout D] [--detach] [--lane <id>] [--min-quota F]\n" +
 	"       lucind-ai wait <lane> [--cwd <dir>] [--timeout D]\n" +
 	"       lucind-ai check [--out <path>]   (deprecated)\n" +
 	"       lucind-ai accept --lane <id>\n" +
@@ -31,11 +32,13 @@ const usage = "usage: lucind-ai dispatch --cwd <dir> [--allow <glob>]... --promp
 	"       lucind-ai hook pre-tool-use|stop   (agy plugin handlers; stdin JSON)\n" +
 	"       lucind-ai skills select --prompt <file|-> [--allow <glob>]... [--cwd <dir>] [--registry <path>] [--threshold <float>]\n" +
 	"       lucind-ai plugin install [--dir <staging root>]   (registers via agy plugin install)\n" +
+	"       lucind-ai mode list|show|use|clear\n" +
+	"       lucind-ai route <role> [--cwd <dir>] [--json]\n" +
 	"       lucind-ai install\n" +
 	"       lucind-ai --version"
 
 const (
-	dispatchUsage = "usage: lucind-ai dispatch --cwd <dir> [--allow <glob>]... --prompt <file|-> [--auto-skills] [--check <cmd>]... [--model M] [--timeout D] [--detach] [--lane <id>] [--min-quota F]"
+	dispatchUsage = "usage: lucind-ai dispatch --cwd <dir> [--allow <glob>]... --prompt <file|-> [--auto-skills] [--check <cmd>]... [--model M] [--role <role>] [--timeout D] [--detach] [--lane <id>] [--min-quota F]"
 	waitUsage     = "usage: lucind-ai wait <lane> [--cwd <dir>] [--timeout D]"
 )
 
@@ -82,6 +85,10 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return skillsDispatch(ctx, args[1:], stdout, stderr)
 	case "plugin":
 		return pluginDispatch(ctx, args[1:], stdout, stderr)
+	case "mode":
+		return modeDispatch(ctx, args[1:], stdout, stderr)
+	case "route":
+		return routeDispatch(ctx, args[1:], stdout, stderr)
 	case "install":
 		return runInstall(ctx, args[1:], stdout, stderr)
 	default:
@@ -305,6 +312,7 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 	fs.Var(&checks, "check", "verification command to run and attest (repeatable)")
 	promptPath := fs.String("prompt", "", "path to prompt file or '-' for stdin (required)")
 	model := fs.String("model", "", "model override")
+	role := fs.String("role", "", "role to take model from active work mode")
 	timeoutStr := fs.String("timeout", "60m", "timeout duration")
 	detach := fs.Bool("detach", false, "detach and return immediately without waiting")
 	laneID := fs.String("lane", "", "lane identifier for continuation")
@@ -372,6 +380,32 @@ func runDispatch(ctx context.Context, args []string, stdout, stderr io.Writer) i
 		fs.Usage()
 		_, _ = fmt.Fprint(stderr, usageBuf.String())
 		return 1
+	}
+
+	roleSet := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "role" {
+			roleSet = true
+		}
+	})
+
+	if roleSet {
+		cfg, _, ok := loadModesConfig(stderr, "dispatch")
+		if !ok {
+			return 1
+		}
+		route, err := cfg.Resolve(*cwd, *role)
+		if err != nil {
+			_, _ = fmt.Fprintf(stderr, "lucind-ai: dispatch: %v\n", err)
+			return 1
+		}
+		if *model == "" {
+			if route.Executor != modes.ExecutorLane {
+				_, _ = fmt.Fprintf(stderr, "lucind-ai: dispatch: role %q is %s in mode %q; launch it natively with model %s instead of a lane\n", *role, route.Executor, route.Mode, route.Model)
+				return 1
+			}
+			*model = route.Model
+		}
 	}
 
 	var promptContent string

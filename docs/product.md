@@ -1,8 +1,11 @@
 # lucind-ai: product
 
-A small Go binary that enforces a **deterministic contract** on code-changing lanes run by
-Antigravity (`agy`) through [herdr](https://github.com/ogulcancelik/herdr). Claude orchestrates,
-agy implements, lucind-ai checks only what needs no judgment.
+A small Go binary that extends [gentle-ai](https://github.com/Gentleman-Programming/gentle-ai):
+gentle-ai owns when to launch a subagent and how to work; lucind-ai is an alternative way to run
+subagents in Antigravity (`agy`) panes through [herdr](https://github.com/ogulcancelik/herdr), and
+it enforces a **deterministic contract** on code-changing lanes (result envelope, allowed paths,
+test attestations). Which executor and model run each role is a user-defined **work mode**
+(see "Work modes"); a role can also run natively in Claude Code.
 
 How Claude uses it: [`plugin/claude-code/skills/lucind/SKILL.md`](../plugin/claude-code/skills/lucind/SKILL.md).
 
@@ -15,8 +18,9 @@ lucind-ai owns only what is reproducible without judgment:
 - allowed-path enforcement
 - pass/fail lane checks
 
-Everything else belongs to Claude: when to parallelize, merging, conflict resolution, retries,
-review, model choice, branches and worktrees.
+Everything else belongs to the orchestrator under gentle-ai's contract: when to delegate, when to
+parallelize, merging, conflict resolution, retries, review, the Risk line and the independent
+verifier, branches and worktrees. Model choice per role lives in the work mode.
 
 ## Flow
 
@@ -31,7 +35,7 @@ Claude --accept--> receipt.json (accepted | rejected)
 
 | Command | What it does |
 |---|---|
-| `dispatch --cwd <dir> --allow <glob>... --prompt <file\|-> [--auto-skills] [--check <cmd>]... [--model M] [--timeout D] [--detach] [--lane <id>] [--min-quota F]` | Create a lane, record the base tree, open an agy pane, send the prompt directly. Blocks until the lane is `done`/`failed`/`timeout`, or returns immediately with `--detach`. `--lane <id>` continues a lane in the same pane. |
+| `dispatch --cwd <dir> --allow <glob>... --prompt <file\|-> [--auto-skills] [--check <cmd>]... [--model M] [--role <role>] [--timeout D] [--detach] [--lane <id>] [--min-quota F]` | Create a lane, record the base tree, open an agy pane, send the prompt directly. Blocks until the lane is `done`/`failed`/`timeout`, or returns immediately with `--detach`. `--lane <id>` continues a lane in the same pane. |
 | `wait <lane> [--cwd <dir>] [--timeout D]` | Block on a detached lane and validate its result. |
 | `accept --lane <id>` | Write `receipt.json`. Accepts only if the result is valid, every file changed since base tree matches `--allow`, and valid attestations match the final tree for all lane checks (otherwise running any missing checks); requires no attestation when zero checks were specified. |
 | `attest run -- <cmd>` / `attest verify --command <cmd>` | Run a command and sign `{command, exit code, tree hash}`; verify a matching passing attestation. See [`attestation.md`](attestation.md). |
@@ -39,11 +43,45 @@ Claude --accept--> receipt.json (accepted | rejected)
 | `hook pre-tool-use\|pre-invocation\|stop` | Handlers called by the agy plugin. Pass-through without `LUCIND_LANE`. |
 | `plugin install [--dir <staging root>]` | Render the embedded agy plugin into a staging dir (`$XDG_DATA_HOME/lucind-ai/agy-plugin/lucind`) and register it with `agy plugin install` (lands in `~/.gemini/config/plugins/lucind/`; requires `agy` on PATH). A plugin merely dropped into `~/.gemini/antigravity-cli/plugins/` validates but is never loaded, so the obsolete copy there is removed. |
 | `install` | Flagless installer for Claude skill (auto/manual variant matching key setup), `lucind` agy plugin, and `lucind-roles` agy plugin. |
+| `mode list|show|use|clear` | Inspect and set active mode globally or per project. |
+| `route <role> [--cwd <dir>] [--json]` | Resolve executor and model for a role in the effective active mode. |
 | `--version` | Exact build (`git describe`). |
 
 `dispatch`/`wait` print one JSON object. Exit codes: 0 done, 1 error, 3 failed, 4 timeout, 5 auto-skills unavailable.
 The pane is never closed or killed by lucind-ai. Requires `HERDR_ENV=1`.
-Model precedence: `--model` > `LUCIND_AGY_MODEL` > default `gemini-3.8-flash-medium`. `--model` takes the full key from `agy models`, so the effort is part of the key (`claude-opus-4-6-thinking`).
+Model precedence: `--model` > `--role` mode > `LUCIND_AGY_MODEL` > default `gemini-3.8-flash-medium`. `--model` takes the full key from `agy models`, so the effort is part of the key (`claude-opus-4-6-thinking`). `--model` together with `--role` is allowed and `--model` wins; the role is still validated (unknown role is an error) but its executor is not checked in that case.
+
+## Work modes
+
+Work modes map roles (`explorer`, `writer`, `verifier`) to an executor (`native`, `lane`) and a model.
+
+The global configuration file is located at `~/.config/lucind/modes.json` (or `$XDG_CONFIG_HOME/lucind/modes.json`).
+
+Precedence: **project override** (`<cwd>/.lucind/mode`) > **global active** (`active` field in `modes.json`).
+
+### Configuration shape
+
+```json
+{
+  "active": "standard",
+  "modes": {
+    "standard": {
+      "explorer": { "executor": "native", "model": "haiku-5.5" },
+      "writer": { "executor": "lane", "model": "sonnet-5.5" },
+      "verifier": { "executor": "native", "model": "haiku-5.5" }
+    }
+  }
+}
+```
+
+### Commands
+
+- `lucind-ai mode list`: print available mode names sorted, prefixed with `* ` for the effective active mode and two spaces for others.
+- `lucind-ai mode show [--cwd <dir>]`: print the effective mode (`(project override)` or `(global)`) followed by each role definition (`<role>: <executor> <model>`).
+- `lucind-ai mode use <name> [--project] [--cwd <dir>]`: set active mode globally in `modes.json`, or per-project in `<cwd>/.lucind/mode` with `--project`.
+- `lucind-ai mode clear [--cwd <dir>]`: remove project override `<cwd>/.lucind/mode` (succeeds silently if absent).
+- `lucind-ai route <role> [--cwd <dir>] [--json]`: print `<executor> <model>` for `<role>`, or JSON object `{"mode":..,"role":..,"executor":..,"model":..}` with `--json`.
+- `lucind-ai dispatch --role <role>`: resolve the model from the effective active work mode when `--model` is omitted. Rejects roles whose executor is not `lane` (exit 1).
 
 ## Lane state
 
