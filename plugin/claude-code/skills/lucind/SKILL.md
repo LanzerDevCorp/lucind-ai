@@ -5,10 +5,16 @@ description: Orchestrate Antigravity (agy) from Claude through herdr, with lucin
 
 # lucind — Claude orchestrates, agy executes, lucind-ai enforces
 
-Split of work: Claude owns criteria (plan, architecture, when to parallelize, merges, conflicts,
-review, model choice). agy does the heavy lifting (implementation, exploration, e2e, visual
-checks). `lucind-ai` only enforces what needs no judgment: the result contract, allowed paths,
-and test attestation.
+lucind-ai is an extension of gentle-ai, not a replacement. gentle-ai owns the contract for WHEN to
+launch a subagent and HOW to work (delegation triggers, Risk line, verification gate, prompt
+sections). This skill is the alternative way to RUN a subagent: an agy pane in herdr, plus
+`lucind-ai` enforcing what needs no judgment (result contract, allowed paths, test attestation).
+
+Which executor and model run each role (`explorer`, `writer`, `verifier`) is the user's **work
+mode**, kept in `~/.config/lucind/modes.json`. Ask it with `lucind-ai route <role> --cwd "$PWD"`
+(`native <model>` or `lane <model>`) and obey it; `native` means gentle-ai's own Agent/Task tool,
+this skill only applies to `lane`. Modes and their commands: `lucind-ai mode list|show|use|clear`.
+Never switch the mode on your own.
 
 Load the `herdr` skill too; this skill assumes its pane/agent commands.
 
@@ -216,7 +222,9 @@ Example of the skills section:
 
 ## Models
 
-`--model` > `LUCIND_AGY_MODEL` > `gemini-3.8-flash-medium`. You choose the model per dispatch.
+`--model` > `--role <role>` (model of the active work mode) > `LUCIND_AGY_MODEL` >
+`gemini-3.8-flash-medium`. Prefer `--role`: the user defines the model per role in the work mode.
+`--role` is rejected when the mode runs that role natively.
 `--model` takes the full key from `agy models`; the effort is the last segment of the key.
 
 | Family | Efforts | Use for |

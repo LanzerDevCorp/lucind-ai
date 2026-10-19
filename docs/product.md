@@ -1,8 +1,11 @@
 # lucind-ai: product
 
-A small Go binary that enforces a **deterministic contract** on code-changing lanes run by
-Antigravity (`agy`) through [herdr](https://github.com/ogulcancelik/herdr). Claude orchestrates,
-agy implements, lucind-ai checks only what needs no judgment.
+A small Go binary that extends [gentle-ai](https://github.com/Gentleman-Programming/gentle-ai):
+gentle-ai owns when to launch a subagent and how to work; lucind-ai is an alternative way to run
+subagents in Antigravity (`agy`) panes through [herdr](https://github.com/ogulcancelik/herdr), and
+it enforces a **deterministic contract** on code-changing lanes (result envelope, allowed paths,
+test attestations). Which executor and model run each role is a user-defined **work mode**
+(see "Work modes"); a role can also run natively in Claude Code.
 
 How Claude uses it: [`plugin/claude-code/skills/lucind/SKILL.md`](../plugin/claude-code/skills/lucind/SKILL.md).
 
@@ -15,8 +18,9 @@ lucind-ai owns only what is reproducible without judgment:
 - allowed-path enforcement
 - pass/fail lane checks
 
-Everything else belongs to Claude: when to parallelize, merging, conflict resolution, retries,
-review, model choice, branches and worktrees.
+Everything else belongs to the orchestrator under gentle-ai's contract: when to delegate, when to
+parallelize, merging, conflict resolution, retries, review, the Risk line and the independent
+verifier, branches and worktrees. Model choice per role lives in the work mode.
 
 ## Flow
 
