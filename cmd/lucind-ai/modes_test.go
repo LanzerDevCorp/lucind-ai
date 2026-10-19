@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/LanzerDevCorp/lucind-ai/internal/dispatch"
 )
 
 func setupTestModesConfig(t *testing.T) (string, string) {
@@ -218,4 +220,248 @@ func TestMode_MissingConfig(t *testing.T) {
 	if !strings.Contains(stderr, "modes.json") || !strings.Contains(stderr, "active") {
 		t.Errorf("stderr = %q, want minimal example config", stderr)
 	}
+}
+
+func createDispatchFixture(t *testing.T) (string, string) {
+	t.Helper()
+	dir := t.TempDir()
+	promptPath := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptPath, []byte("test prompt\n"), 0o644); err != nil {
+		t.Fatalf("write prompt: %v", err)
+	}
+	return dir, promptPath
+}
+
+func TestDispatch_Role(t *testing.T) {
+	ctx := context.Background()
+	repoDir, promptPath := createDispatchFixture(t)
+
+	// 1. Role resolves to a lane model and reaches Options.Model
+	t.Run("resolves_lane_model", func(t *testing.T) {
+		setupTestModesConfig(t)
+		origDispatchRun := dispatchRun
+		defer func() { dispatchRun = origDispatchRun }()
+		called := false
+		var capturedOpts dispatch.Options
+		dispatchRun = func(_ context.Context, opts dispatch.Options, _ dispatch.HerdrRunner) (dispatch.Output, int, error) {
+			called = true
+			capturedOpts = opts
+			return dispatch.Output{}, 0, nil
+		}
+
+		_, stderr, code := runCLI(ctx, "dispatch", "--cwd", repoDir, "--allow", "src/**", "--prompt", promptPath, "--role", "writer")
+		if code != 0 {
+			t.Fatalf("exit code = %d, want 0; stderr = %s", code, stderr)
+		}
+		if !called {
+			t.Fatal("expected dispatchRun to be called")
+		}
+		if capturedOpts.Model != "sonnet-5.5" {
+			t.Errorf("captured Model = %q, want %q", capturedOpts.Model, "sonnet-5.5")
+		}
+	})
+
+	// 2. --model wins over --role
+	t.Run("model_wins_over_role", func(t *testing.T) {
+		setupTestModesConfig(t)
+		origDispatchRun := dispatchRun
+		defer func() { dispatchRun = origDispatchRun }()
+		called := false
+		var capturedOpts dispatch.Options
+		dispatchRun = func(_ context.Context, opts dispatch.Options, _ dispatch.HerdrRunner) (dispatch.Output, int, error) {
+			called = true
+			capturedOpts = opts
+			return dispatch.Output{}, 0, nil
+		}
+
+		_, stderr, code := runCLI(ctx, "dispatch", "--cwd", repoDir, "--allow", "src/**", "--prompt", promptPath, "--role", "writer", "--model", "custom-model")
+		if code != 0 {
+			t.Fatalf("exit code = %d, want 0; stderr = %s", code, stderr)
+		}
+		if !called {
+			t.Fatal("expected dispatchRun to be called")
+		}
+		if capturedOpts.Model != "custom-model" {
+			t.Errorf("captured Model = %q, want %q", capturedOpts.Model, "custom-model")
+		}
+
+		// Also check that a native role with --model is allowed and executor is not checked
+		called = false
+		_, stderr, code = runCLI(ctx, "dispatch", "--cwd", repoDir, "--allow", "src/**", "--prompt", promptPath, "--role", "explorer", "--model", "custom-model-2")
+		if code != 0 {
+			t.Fatalf("exit code = %d, want 0; stderr = %s", code, stderr)
+		}
+		if !called {
+			t.Fatal("expected dispatchRun to be called for native role when --model is set")
+		}
+		if capturedOpts.Model != "custom-model-2" {
+			t.Errorf("captured Model = %q, want %q", capturedOpts.Model, "custom-model-2")
+		}
+	})
+
+	// 3. Project override changes the model
+	t.Run("project_override", func(t *testing.T) {
+		configDir, _ := setupTestModesConfig(t)
+		customJSON := `{
+  "active": "standard",
+  "modes": {
+    "standard": {
+      "writer": {"executor": "lane", "model": "sonnet-5.5"}
+    },
+    "custom": {
+      "writer": {"executor": "lane", "model": "opus-4.5"}
+    }
+  }
+}`
+		if err := os.WriteFile(filepath.Join(configDir, "lucind", "modes.json"), []byte(customJSON), 0o600); err != nil {
+			t.Fatalf("write custom modes.json: %v", err)
+		}
+
+		overrideDir, overridePrompt := createDispatchFixture(t)
+		lucindDir := filepath.Join(overrideDir, ".lucind")
+		if err := os.MkdirAll(lucindDir, 0o755); err != nil {
+			t.Fatalf("mkdir .lucind: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(lucindDir, "mode"), []byte("custom\n"), 0o644); err != nil {
+			t.Fatalf("write override: %v", err)
+		}
+
+		origDispatchRun := dispatchRun
+		defer func() { dispatchRun = origDispatchRun }()
+		called := false
+		var capturedOpts dispatch.Options
+		dispatchRun = func(_ context.Context, opts dispatch.Options, _ dispatch.HerdrRunner) (dispatch.Output, int, error) {
+			called = true
+			capturedOpts = opts
+			return dispatch.Output{}, 0, nil
+		}
+
+		_, stderr, code := runCLI(ctx, "dispatch", "--cwd", overrideDir, "--allow", "src/**", "--prompt", overridePrompt, "--role", "writer")
+		if code != 0 {
+			t.Fatalf("exit code = %d, want 0; stderr = %s", code, stderr)
+		}
+		if !called {
+			t.Fatal("expected dispatchRun to be called")
+		}
+		if capturedOpts.Model != "opus-4.5" {
+			t.Errorf("captured Model = %q, want %q", capturedOpts.Model, "opus-4.5")
+		}
+	})
+
+	// 4. Native executor rejected without calling dispatchRun
+	t.Run("native_executor_rejected", func(t *testing.T) {
+		setupTestModesConfig(t)
+		origDispatchRun := dispatchRun
+		defer func() { dispatchRun = origDispatchRun }()
+		called := false
+		dispatchRun = func(_ context.Context, _ dispatch.Options, _ dispatch.HerdrRunner) (dispatch.Output, int, error) {
+			called = true
+			return dispatch.Output{}, 0, nil
+		}
+
+		_, stderr, code := runCLI(ctx, "dispatch", "--cwd", repoDir, "--allow", "src/**", "--prompt", promptPath, "--role", "explorer")
+		if code != 1 {
+			t.Fatalf("exit code = %d, want 1", code)
+		}
+		if called {
+			t.Fatal("dispatchRun must not be called when executor is native")
+		}
+		wantMsg := `lucind-ai: dispatch: role "explorer" is native in mode "standard"; launch it natively with model sonnet-5.5 instead of a lane`
+		if !strings.Contains(stderr, wantMsg) {
+			t.Errorf("stderr = %q, want it to contain %q", stderr, wantMsg)
+		}
+	})
+
+	// 5. Unknown role
+	t.Run("unknown_role", func(t *testing.T) {
+		setupTestModesConfig(t)
+		origDispatchRun := dispatchRun
+		defer func() { dispatchRun = origDispatchRun }()
+		called := false
+		dispatchRun = func(_ context.Context, _ dispatch.Options, _ dispatch.HerdrRunner) (dispatch.Output, int, error) {
+			called = true
+			return dispatch.Output{}, 0, nil
+		}
+
+		_, stderr, code := runCLI(ctx, "dispatch", "--cwd", repoDir, "--allow", "src/**", "--prompt", promptPath, "--role", "nonexistent")
+		if code != 1 {
+			t.Fatalf("exit code = %d, want 1", code)
+		}
+		if called {
+			t.Fatal("dispatchRun must not be called for unknown role")
+		}
+		if !strings.Contains(stderr, "unknown role") || !strings.Contains(stderr, "nonexistent") {
+			t.Errorf("stderr = %q, want unknown role error", stderr)
+		}
+
+		// Also verify unknown role with --model still fails and does not call dispatchRun
+		called = false
+		_, stderr, code = runCLI(ctx, "dispatch", "--cwd", repoDir, "--allow", "src/**", "--prompt", promptPath, "--role", "nonexistent", "--model", "custom-model")
+		if code != 1 {
+			t.Fatalf("exit code = %d, want 1", code)
+		}
+		if called {
+			t.Fatal("dispatchRun must not be called for unknown role even with --model")
+		}
+		if !strings.Contains(stderr, "unknown role") || !strings.Contains(stderr, "nonexistent") {
+			t.Errorf("stderr = %q, want unknown role error", stderr)
+		}
+	})
+
+	// 6. Missing config
+	t.Run("missing_config", func(t *testing.T) {
+		emptyHome := t.TempDir()
+		t.Setenv("XDG_CONFIG_HOME", emptyHome)
+		origDispatchRun := dispatchRun
+		defer func() { dispatchRun = origDispatchRun }()
+		called := false
+		dispatchRun = func(_ context.Context, _ dispatch.Options, _ dispatch.HerdrRunner) (dispatch.Output, int, error) {
+			called = true
+			return dispatch.Output{}, 0, nil
+		}
+
+		_, stderr, code := runCLI(ctx, "dispatch", "--cwd", repoDir, "--allow", "src/**", "--prompt", promptPath, "--role", "writer")
+		if code != 1 {
+			t.Fatalf("exit code = %d, want 1", code)
+		}
+		if called {
+			t.Fatal("dispatchRun must not be called when config is missing")
+		}
+		expectedPath := filepath.Join(emptyHome, "lucind", "modes.json")
+		if !strings.Contains(stderr, expectedPath) {
+			t.Errorf("stderr = %q, want path %q", stderr, expectedPath)
+		}
+		if !strings.Contains(stderr, "modes.json") || !strings.Contains(stderr, "active") {
+			t.Errorf("stderr = %q, want minimal configuration example", stderr)
+		}
+	})
+
+	// 7. Dispatch without --role still passes --model and leaves Options.Model empty when omitted
+	t.Run("dispatch_without_role", func(t *testing.T) {
+		origDispatchRun := dispatchRun
+		defer func() { dispatchRun = origDispatchRun }()
+		var capturedOpts dispatch.Options
+		dispatchRun = func(_ context.Context, opts dispatch.Options, _ dispatch.HerdrRunner) (dispatch.Output, int, error) {
+			capturedOpts = opts
+			return dispatch.Output{}, 0, nil
+		}
+
+		// With --model
+		_, stderr, code := runCLI(ctx, "dispatch", "--cwd", repoDir, "--allow", "src/**", "--prompt", promptPath, "--model", "explicit-model")
+		if code != 0 {
+			t.Fatalf("exit code = %d, want 0; stderr = %s", code, stderr)
+		}
+		if capturedOpts.Model != "explicit-model" {
+			t.Errorf("captured Model = %q, want %q", capturedOpts.Model, "explicit-model")
+		}
+
+		// Without --model
+		_, stderr, code = runCLI(ctx, "dispatch", "--cwd", repoDir, "--allow", "src/**", "--prompt", promptPath)
+		if code != 0 {
+			t.Fatalf("exit code = %d, want 0; stderr = %s", code, stderr)
+		}
+		if capturedOpts.Model != "" {
+			t.Errorf("captured Model = %q, want empty string", capturedOpts.Model)
+		}
+	})
 }

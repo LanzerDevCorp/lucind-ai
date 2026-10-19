@@ -31,7 +31,7 @@ Claude --accept--> receipt.json (accepted | rejected)
 
 | Command | What it does |
 |---|---|
-| `dispatch --cwd <dir> --allow <glob>... --prompt <file\|-> [--auto-skills] [--check <cmd>]... [--model M] [--timeout D] [--detach] [--lane <id>] [--min-quota F]` | Create a lane, record the base tree, open an agy pane, send the prompt directly. Blocks until the lane is `done`/`failed`/`timeout`, or returns immediately with `--detach`. `--lane <id>` continues a lane in the same pane. |
+| `dispatch --cwd <dir> --allow <glob>... --prompt <file\|-> [--auto-skills] [--check <cmd>]... [--model M] [--role <role>] [--timeout D] [--detach] [--lane <id>] [--min-quota F]` | Create a lane, record the base tree, open an agy pane, send the prompt directly. Blocks until the lane is `done`/`failed`/`timeout`, or returns immediately with `--detach`. `--lane <id>` continues a lane in the same pane. |
 | `wait <lane> [--cwd <dir>] [--timeout D]` | Block on a detached lane and validate its result. |
 | `accept --lane <id>` | Write `receipt.json`. Accepts only if the result is valid, every file changed since base tree matches `--allow`, and valid attestations match the final tree for all lane checks (otherwise running any missing checks); requires no attestation when zero checks were specified. |
 | `attest run -- <cmd>` / `attest verify --command <cmd>` | Run a command and sign `{command, exit code, tree hash}`; verify a matching passing attestation. See [`attestation.md`](attestation.md). |
@@ -45,7 +45,7 @@ Claude --accept--> receipt.json (accepted | rejected)
 
 `dispatch`/`wait` print one JSON object. Exit codes: 0 done, 1 error, 3 failed, 4 timeout, 5 auto-skills unavailable.
 The pane is never closed or killed by lucind-ai. Requires `HERDR_ENV=1`.
-Model precedence: `--model` > `LUCIND_AGY_MODEL` > default `gemini-3.8-flash-medium`. `--model` takes the full key from `agy models`, so the effort is part of the key (`claude-opus-4-6-thinking`).
+Model precedence: `--model` > `--role` mode > `LUCIND_AGY_MODEL` > default `gemini-3.8-flash-medium`. `--model` takes the full key from `agy models`, so the effort is part of the key (`claude-opus-4-6-thinking`). `--model` together with `--role` is allowed and `--model` wins; the role is still validated (unknown role is an error) but its executor is not checked in that case.
 
 ## Work modes
 
@@ -77,6 +77,7 @@ Precedence: **project override** (`<cwd>/.lucind/mode`) > **global active** (`ac
 - `lucind-ai mode use <name> [--project] [--cwd <dir>]`: set active mode globally in `modes.json`, or per-project in `<cwd>/.lucind/mode` with `--project`.
 - `lucind-ai mode clear [--cwd <dir>]`: remove project override `<cwd>/.lucind/mode` (succeeds silently if absent).
 - `lucind-ai route <role> [--cwd <dir>] [--json]`: print `<executor> <model>` for `<role>`, or JSON object `{"mode":..,"role":..,"executor":..,"model":..}` with `--json`.
+- `lucind-ai dispatch --role <role>`: resolve the model from the effective active work mode when `--model` is omitted. Rejects roles whose executor is not `lane` (exit 1).
 
 ## Lane state
 
