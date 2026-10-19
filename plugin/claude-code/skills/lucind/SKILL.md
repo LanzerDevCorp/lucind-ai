@@ -221,11 +221,11 @@ Example of the skills section:
 |---|---|---|
 | `gemini-3.8-flash` (also `3.7`, `3.6`) | `low` `medium` `high` | Default. Exploration, validation, routine edits. |
 | `gemini-3.1-pro` | `low` `high` | Harder reasoning at Gemini cost. |
-| `claude-sonnet-5-5` | `low` `medium` `high` | Non-trivial implementation, refactors, e2e. |
-| `claude-opus-5-5` | `low` `medium` `high` | Hardest work: tricky design, subtle bugs. |
+| `claude-sonnet-4-6` | none (key as is) | Non-trivial implementation, refactors, e2e. |
+| `claude-opus-4-6-thinking` | none (key as is) | Hardest work: tricky design, subtle bugs. |
 | `gpt-oss-120b` | `medium` | Alternative second opinion. |
 
-Example: `--model claude-opus-5-5-high`. Raise the effort before the model: `low` for mechanical
+Example: `--model claude-opus-4-6-thinking`. Raise the effort before the model: `low` for mechanical
 work, `high` when the task needs reasoning. Run `agy models` if a key is rejected.
 
 ## Quota

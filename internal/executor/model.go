@@ -7,7 +7,7 @@ import (
 
 const defaultModel = "gemini-3.8-flash-medium"
 
-// knownModels mirrors the output of `agy models` as of 2026-10-03.
+// knownModels mirrors the output of `agy models` as of 2026-10-19.
 // It is static and must be updated by hand when agy changes its model list.
 var knownModels = []string{
 	"gemini-3.8-flash-high",
@@ -21,12 +21,8 @@ var knownModels = []string{
 	"gemini-3.6-flash-low",
 	"gemini-3.1-pro-high",
 	"gemini-3.1-pro-low",
-	"claude-opus-5-5-low",
-	"claude-opus-5-5-medium",
-	"claude-opus-5-5-high",
-	"claude-sonnet-5-5-low",
-	"claude-sonnet-5-5-medium",
-	"claude-sonnet-5-5-high",
+	"claude-opus-4-6-thinking",
+	"claude-sonnet-4-6",
 	"gpt-oss-120b-medium",
 }
 
