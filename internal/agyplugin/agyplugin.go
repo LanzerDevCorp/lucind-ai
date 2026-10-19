@@ -218,14 +218,12 @@ func agyErr(op string, out []byte, err error) error {
 }
 
 func setupPlugin(ctx context.Context, agy Agy, name, dir string, checkOutput func(string) error) error {
-	out, err := agy.Run(ctx, "plugin", "list")
+	out, err := agy.Run(ctx, "plugin", "list", "--json")
 	if err != nil {
 		return agyErr("plugin list", out, err)
 	}
-	var listed struct {
-		Imports []struct {
-			Name string `json:"name"`
-		} `json:"imports"`
+	var listed []struct {
+		Name string `json:"name"`
 	}
 	clean := strings.TrimSpace(ansi.ReplaceAllString(string(out), ""))
 	// agy prints plain text instead of JSON when nothing is imported.
@@ -234,7 +232,7 @@ func setupPlugin(ctx context.Context, agy Agy, name, dir string, checkOutput fun
 			return fmt.Errorf("parse agy plugin list output: %w\n%s", err, out)
 		}
 	}
-	for _, imp := range listed.Imports {
+	for _, imp := range listed {
 		if imp.Name == name {
 			if out, err := agy.Run(ctx, "plugin", "uninstall", name); err != nil {
 				return agyErr("plugin uninstall", out, err)

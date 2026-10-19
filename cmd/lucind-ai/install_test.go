@@ -37,7 +37,7 @@ func (f *fakeInstallAgy) Run(_ context.Context, args ...string) ([]byte, error) 
 		}
 	}
 	if len(args) > 1 && args[1] == "list" {
-		return []byte(`{"imports":[]}`), nil
+		return []byte(`[]`), nil
 	}
 	if len(args) > 2 && strings.HasSuffix(args[2], "lucind-roles") {
 		return []byte("[ok] lucind-roles\n  agents : 1 processed\n"), nil

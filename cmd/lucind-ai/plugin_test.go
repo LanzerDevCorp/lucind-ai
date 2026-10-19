@@ -14,7 +14,7 @@ type fakePluginAgy struct{ calls [][]string }
 func (f *fakePluginAgy) Run(_ context.Context, args ...string) ([]byte, error) {
 	f.calls = append(f.calls, args)
 	if args[1] == "list" {
-		return []byte(`{"imports":[]}`), nil
+		return []byte(`[]`), nil
 	}
 	return []byte("[ok] lucind\n  hooks : 1 processed\n"), nil
 }

@@ -138,7 +138,7 @@ func TestSetup_RegistersViaAgyPluginInstall(t *testing.T) {
 	if err := os.MkdirAll(obsolete, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	agy := &fakeAgy{list: `{"imports":[{"name":"other"}]}`, install: goodInstall}
+	agy := &fakeAgy{list: `[{"name":"other"}]`, install: goodInstall}
 	dir, err := Setup(context.Background(), Options{StagingRoot: staging, Bin: "/a/lucind-ai", Agy: agy, ObsoleteDir: obsolete})
 	if err != nil {
 		t.Fatalf("Setup: %v", err)
@@ -149,7 +149,7 @@ func TestSetup_RegistersViaAgyPluginInstall(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, "hooks.json")); err != nil {
 		t.Errorf("staging not rendered: %v", err)
 	}
-	want := [][]string{{"plugin", "list"}, {"plugin", "install", dir}}
+	want := [][]string{{"plugin", "list", "--json"}, {"plugin", "install", dir}}
 	if !reflect.DeepEqual(agy.calls, want) {
 		t.Errorf("agy calls = %v, want %v", agy.calls, want)
 	}
@@ -164,19 +164,19 @@ func TestSetup_NoImportedPluginsPlainText(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
-	want := [][]string{{"plugin", "list"}, {"plugin", "install", dir}}
+	want := [][]string{{"plugin", "list", "--json"}, {"plugin", "install", dir}}
 	if !reflect.DeepEqual(agy.calls, want) {
 		t.Errorf("agy calls = %v, want %v", agy.calls, want)
 	}
 }
 
 func TestSetup_UninstallsExistingImportFirst(t *testing.T) {
-	agy := &fakeAgy{list: `{"imports":[{"name":"lucind"},{"name":"x"}]}`, install: goodInstall}
+	agy := &fakeAgy{list: `[{"name":"lucind"},{"name":"x"}]`, install: goodInstall}
 	dir, err := Setup(context.Background(), Options{StagingRoot: t.TempDir(), Bin: "/a/lucind-ai", Agy: agy})
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := [][]string{{"plugin", "list"}, {"plugin", "uninstall", "lucind"}, {"plugin", "install", dir}}
+	want := [][]string{{"plugin", "list", "--json"}, {"plugin", "uninstall", "lucind"}, {"plugin", "install", dir}}
 	if !reflect.DeepEqual(agy.calls, want) {
 		t.Errorf("agy calls = %v, want %v", agy.calls, want)
 	}
@@ -298,7 +298,7 @@ func TestCheckRolesInstallOutput(t *testing.T) {
 func TestSetupRoles_RegistersViaAgyPluginInstall(t *testing.T) {
 	staging := t.TempDir()
 	goodRolesInstall := "\x1b[32m[ok]\x1b[0m lucind-roles\n  \u2714 agents      : 1 processed\n"
-	agy := &fakeAgy{list: `{"imports":[{"name":"lucind"}]}`, install: goodRolesInstall}
+	agy := &fakeAgy{list: `[{"name":"lucind"}]`, install: goodRolesInstall}
 	dir, err := SetupRoles(context.Background(), Options{StagingRoot: staging, Agy: agy})
 	if err != nil {
 		t.Fatalf("SetupRoles: %v", err)
@@ -309,7 +309,7 @@ func TestSetupRoles_RegistersViaAgyPluginInstall(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, "agents", "worker.md")); err != nil {
 		t.Errorf("staging not rendered: %v", err)
 	}
-	want := [][]string{{"plugin", "list"}, {"plugin", "install", dir}}
+	want := [][]string{{"plugin", "list", "--json"}, {"plugin", "install", dir}}
 	if !reflect.DeepEqual(agy.calls, want) {
 		t.Errorf("agy calls = %v, want %v", agy.calls, want)
 	}
@@ -318,12 +318,12 @@ func TestSetupRoles_RegistersViaAgyPluginInstall(t *testing.T) {
 func TestSetupRoles_UninstallsExistingImportFirst(t *testing.T) {
 	staging := t.TempDir()
 	goodRolesInstall := "\x1b[32m[ok]\x1b[0m lucind-roles\n  \u2714 agents      : 1 processed\n"
-	agy := &fakeAgy{list: `{"imports":[{"name":"lucind-roles"},{"name":"other"}]}`, install: goodRolesInstall}
+	agy := &fakeAgy{list: `[{"name":"lucind-roles"},{"name":"other"}]`, install: goodRolesInstall}
 	dir, err := SetupRoles(context.Background(), Options{StagingRoot: staging, Agy: agy})
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := [][]string{{"plugin", "list"}, {"plugin", "uninstall", RolesName}, {"plugin", "install", dir}}
+	want := [][]string{{"plugin", "list", "--json"}, {"plugin", "uninstall", RolesName}, {"plugin", "install", dir}}
 	if !reflect.DeepEqual(agy.calls, want) {
 		t.Errorf("agy calls = %v, want %v", agy.calls, want)
 	}
