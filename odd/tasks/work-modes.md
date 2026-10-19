@@ -15,7 +15,7 @@ Objective: lucind-ai becomes an extension of gentle-ai; a central config of "wor
 ## Tasks
 - T1 (S2,S3,S4,S5) `internal/modes`: parse/validate/resolve, project override, persist active. Route: lane. Status: done (lane 20261019-192242-2124, accepted, 83.9% coverage).
 - T2 (S4,S5) CLI `mode use|show|list` and `route <role>` in cmd/lucind-ai. Route: lane. Status: done (lane 20261019-193253-8f6d, accepted).
-- T3 (S6) `dispatch --role`. Route: lane. Status: pending.
+- T3 (S6) `dispatch --role`. Route: lane. Status: done (lane 20261019-195228-2eaf, accepted).
 - T4 (S1,S7,S8,S9) dispatch block, SKILL.md, docs/product.md, retire "replace gentle-ai" narrative. Route: lane. Status: pending.
 
 ## Log
