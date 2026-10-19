@@ -31,6 +31,8 @@ const usage = "usage: lucind-ai dispatch --cwd <dir> [--allow <glob>]... --promp
 	"       lucind-ai hook pre-tool-use|stop   (agy plugin handlers; stdin JSON)\n" +
 	"       lucind-ai skills select --prompt <file|-> [--allow <glob>]... [--cwd <dir>] [--registry <path>] [--threshold <float>]\n" +
 	"       lucind-ai plugin install [--dir <staging root>]   (registers via agy plugin install)\n" +
+	"       lucind-ai mode list|show|use|clear\n" +
+	"       lucind-ai route <role> [--cwd <dir>] [--json]\n" +
 	"       lucind-ai install\n" +
 	"       lucind-ai --version"
 
@@ -82,6 +84,10 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return skillsDispatch(ctx, args[1:], stdout, stderr)
 	case "plugin":
 		return pluginDispatch(ctx, args[1:], stdout, stderr)
+	case "mode":
+		return modeDispatch(ctx, args[1:], stdout, stderr)
+	case "route":
+		return routeDispatch(ctx, args[1:], stdout, stderr)
 	case "install":
 		return runInstall(ctx, args[1:], stdout, stderr)
 	default:

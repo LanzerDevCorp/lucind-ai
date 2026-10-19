@@ -39,11 +39,44 @@ Claude --accept--> receipt.json (accepted | rejected)
 | `hook pre-tool-use\|pre-invocation\|stop` | Handlers called by the agy plugin. Pass-through without `LUCIND_LANE`. |
 | `plugin install [--dir <staging root>]` | Render the embedded agy plugin into a staging dir (`$XDG_DATA_HOME/lucind-ai/agy-plugin/lucind`) and register it with `agy plugin install` (lands in `~/.gemini/config/plugins/lucind/`; requires `agy` on PATH). A plugin merely dropped into `~/.gemini/antigravity-cli/plugins/` validates but is never loaded, so the obsolete copy there is removed. |
 | `install` | Flagless installer for Claude skill (auto/manual variant matching key setup), `lucind` agy plugin, and `lucind-roles` agy plugin. |
+| `mode list|show|use|clear` | Inspect and set active mode globally or per project. |
+| `route <role> [--cwd <dir>] [--json]` | Resolve executor and model for a role in the effective active mode. |
 | `--version` | Exact build (`git describe`). |
 
 `dispatch`/`wait` print one JSON object. Exit codes: 0 done, 1 error, 3 failed, 4 timeout, 5 auto-skills unavailable.
 The pane is never closed or killed by lucind-ai. Requires `HERDR_ENV=1`.
 Model precedence: `--model` > `LUCIND_AGY_MODEL` > default `gemini-3.8-flash-medium`. `--model` takes the full key from `agy models`, so the effort is part of the key (`claude-opus-4-6-thinking`).
+
+## Work modes
+
+Work modes map roles (`explorer`, `writer`, `verifier`) to an executor (`native`, `lane`) and a model.
+
+The global configuration file is located at `~/.config/lucind/modes.json` (or `$XDG_CONFIG_HOME/lucind/modes.json`).
+
+Precedence: **project override** (`<cwd>/.lucind/mode`) > **global active** (`active` field in `modes.json`).
+
+### Configuration shape
+
+```json
+{
+  "active": "standard",
+  "modes": {
+    "standard": {
+      "explorer": { "executor": "native", "model": "haiku-5.5" },
+      "writer": { "executor": "lane", "model": "sonnet-5.5" },
+      "verifier": { "executor": "native", "model": "haiku-5.5" }
+    }
+  }
+}
+```
+
+### Commands
+
+- `lucind-ai mode list`: print available mode names sorted, prefixed with `* ` for the effective active mode and two spaces for others.
+- `lucind-ai mode show [--cwd <dir>]`: print the effective mode (`(project override)` or `(global)`) followed by each role definition (`<role>: <executor> <model>`).
+- `lucind-ai mode use <name> [--project] [--cwd <dir>]`: set active mode globally in `modes.json`, or per-project in `<cwd>/.lucind/mode` with `--project`.
+- `lucind-ai mode clear [--cwd <dir>]`: remove project override `<cwd>/.lucind/mode` (succeeds silently if absent).
+- `lucind-ai route <role> [--cwd <dir>] [--json]`: print `<executor> <model>` for `<role>`, or JSON object `{"mode":..,"role":..,"executor":..,"model":..}` with `--json`.
 
 ## Lane state
 

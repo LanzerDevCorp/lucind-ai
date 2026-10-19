@@ -88,6 +88,8 @@ func TestUsageAndHelp(t *testing.T) {
        lucind-ai hook pre-tool-use|stop   (agy plugin handlers; stdin JSON)
        lucind-ai skills select --prompt <file|-> [--allow <glob>]... [--cwd <dir>] [--registry <path>] [--threshold <float>]
        lucind-ai plugin install [--dir <staging root>]   (registers via agy plugin install)
+       lucind-ai mode list|show|use|clear
+       lucind-ai route <role> [--cwd <dir>] [--json]
        lucind-ai install
        lucind-ai --version`
 
@@ -1182,3 +1184,21 @@ func TestDispatch_AutoSkillsUnavailable_HTTP401_KeyNeverAppears(t *testing.T) {
 		t.Errorf("stderr missing redacted reason, got: %s", stderrStr)
 	}
 }
+
+func TestPluginRunDispatchAndUsage(t *testing.T) {
+	ctx := context.Background()
+
+	if !strings.Contains(usage, "lucind-ai plugin install [--dir <staging root>]") {
+		t.Errorf("usage constant missing plugin install: %s", usage)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := run(ctx, []string{"plugin", "invalid"}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("run(plugin invalid) code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "usage: lucind-ai plugin install") {
+		t.Errorf("stderr = %q, want plugin install usage", stderr.String())
+	}
+}
+
